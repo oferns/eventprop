@@ -10,7 +10,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <PackageReference Include="TUnit" Version="0.13.*" />
+    <PackageReference Include="TUnit" Version="1.45.*" />
   </ItemGroup>
 
   <ItemGroup>
