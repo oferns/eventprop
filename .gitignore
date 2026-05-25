@@ -50,24 +50,19 @@ ScaffoldingReadMe.txt
 # JetBrains Rider
 *.sln.iml
 
-# MSTest test results
-TestResults/*
-*[Tt]est[Rr]esult*/
-
-# Coverlet code coverage
-coverage*.json
-coverage*.xml
-coverage*.info
+# Test results and coverage output
+TestResults/
+coverage-report/
+*.coverage
+*.cobertura.xml
+*.trx
+*.html
 
 # Build artifacts (MSBuild)
 **/*.dll
 !**/*.Designer.dll
 **/*.pdb
 !**/*.Designer.pdb
-
-# Build output for specific projects
-bin/
-obj/
 
 # User-specific files
 *.user
