@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>CW.EventProp.Tests</RootNamespace>
+    <AssemblyName>CW.EventProp.Tests</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>

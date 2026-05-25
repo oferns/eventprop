@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>CW.EventProp</RootNamespace>
+    <AssemblyName>CW.EventProp</AssemblyName>
   </PropertyGroup>
 
 </Project>
