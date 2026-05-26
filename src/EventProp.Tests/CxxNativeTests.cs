@@ -225,15 +225,18 @@ public class CxxNativeTests
         double[] maximaValues = [1.5, 0.0];
         double[] maximaErrors = [0.1, 0.0];
 
-        // C++ via P/Invoke
-        var cppGradient = new double[nPre * nPost];
-        Array.Fill(cppGradient, 0.0);
-        CxxNative.BackwardMaxima(inputTimes, inputSources, maximaTimes, maximaValues, maximaErrors, w, nPre, nPost, 0.02, 0.005, cppGradient);
+        var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
+        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
 
-        // Just verify C++ runs without crashing and produces non-trivial results
-        double sum = 0.0;
-        for (int i = 0; i < cppGradient.Length; i++) sum += Math.Abs(cppGradient[i]);
-        await Assert.That(sum).IsGreaterThan(0.0);
+        EventPropMath.BackwardMaxima(inputTimes, inputSources,
+            maximaTimes, maximaValues, maximaErrors,
+            w, nPost, 0.02, 0.005, csGradient);
+        CxxNative.BackwardMaxima(inputTimes, inputSources,
+            maximaTimes, maximaValues, maximaErrors,
+            w, nPre, nPost, 0.02, 0.005, cppGradient);
+
+        for (int i = 0; i < csGradient.Length; i++)
+            await Assert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
     }
 
     [Test]

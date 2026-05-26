@@ -454,11 +454,11 @@ public static class EventPropMath
                 for (int nrn = 0; nrn < nPost; nrn++)
                     gradient[spikeSource * nPost + nrn] += -tauSyn * lambdaI[nrn];
 
-                // Compute outbound signal: sum_nrn(w[nrn, source] * (lambda_v[nrn] - lambda_i[nrn]))
+                // Compute outbound signal: sum_nrn(w[source, nrn] * (lambda_v[nrn] - lambda_i[nrn]))
                 double outboundSignal = 0.0;
                 for (int nrn = 0; nrn < nPost; nrn++)
                 {
-                    double wVal = w[nrn * nPre + spikeSource]; // column-major access: w[nrn, source]
+                    double wVal = w[spikeSource * nPost + nrn]; // row-major access: w[source, nrn]
                     outboundSignal += wVal * (lambdaV[nrn] - lambdaI[nrn]);
                 }
 
