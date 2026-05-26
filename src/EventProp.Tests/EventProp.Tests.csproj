@@ -21,4 +21,9 @@
     <Using Include="TUnit" />
   </ItemGroup>
 
+  <!-- Copy native C++ library to output directory -->
+  <Target Name="CopyNativeLib" BeforeTargets="Build">
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)../cpp/libeventprop_c_api.dylib" DestinationFolder="$(OutDir)" Condition="Exists('$(MSBuildThisFileDirectory)../cpp/libeventprop_c_api.dylib')" />
+  </Target>
+
 </Project>

@@ -5,22 +5,34 @@ namespace CW.EventProp;
 /// </summary>
 public static class SpanAlgorithms
 {
-    /// <summary>Element-wise exponential: returns new span with exp(x[i]).</summary>
+    /// <summary>Element-wise exponential: returns new array with exp(x[i]).</summary>
     public static double[] Exp(ReadOnlySpan<double> input)
     {
         var result = new double[input.Length];
-        for (int i = 0; i < input.Length; i++)
-            result[i] = Math.Exp(input[i]);
+        Exp(input, result.AsSpan());
         return result;
     }
 
-    /// <summary>Element-wise exp(x[i] / scalar): returns new span.</summary>
+    /// <summary>Element-wise exponential: writes exp(x[i]) to output span (zero-allocation).</summary>
+    public static void Exp(ReadOnlySpan<double> input, Span<double> output)
+    {
+        for (int i = 0; i < input.Length; i++)
+            output[i] = Math.Exp(input[i]);
+    }
+
+    /// <summary>Element-wise exp(x[i] / scalar): returns new array.</summary>
     public static double[] ExpDivScalar(ReadOnlySpan<double> input, double scalar)
     {
         var result = new double[input.Length];
-        for (int i = 0; i < input.Length; i++)
-            result[i] = Math.Exp(input[i] / scalar);
+        ExpDivScalar(input, scalar, result.AsSpan());
         return result;
+    }
+
+    /// <summary>Element-wise exp(x[i] / scalar): writes to output span (zero-allocation).</summary>
+    public static void ExpDivScalar(ReadOnlySpan<double> input, double scalar, Span<double> output)
+    {
+        for (int i = 0; i < input.Length; i++)
+            output[i] = Math.Exp(input[i] / scalar);
     }
 
     /// <summary>Element-wise exponential in-place.</summary>
@@ -30,13 +42,19 @@ public static class SpanAlgorithms
             span[i] = Math.Exp(span[i]);
     }
 
-    /// <summary>Element-wise division by scalar.</summary>
+    /// <summary>Element-wise division by scalar: returns new array.</summary>
     public static double[] DivideScalar(ReadOnlySpan<double> input, double scalar)
     {
         var result = new double[input.Length];
-        for (int i = 0; i < input.Length; i++)
-            result[i] = input[i] / scalar;
+        DivideScalar(input, scalar, result.AsSpan());
         return result;
+    }
+
+    /// <summary>Element-wise division by scalar: writes to output span (zero-allocation).</summary>
+    public static void DivideScalar(ReadOnlySpan<double> input, double scalar, Span<double> output)
+    {
+        for (int i = 0; i < input.Length; i++)
+            output[i] = input[i] / scalar;
     }
 
     /// <summary>Element-wise multiplication of two spans, stored in output.</summary>
@@ -85,13 +103,19 @@ public static class SpanAlgorithms
         return sum;
     }
 
-    /// <summary>Compute exp(-x / tau) for all elements.</summary>
+    /// <summary>Compute exp(-x / tau) for all elements: returns new array.</summary>
     public static double[] ExpNegDivTau(ReadOnlySpan<double> input, double tau)
     {
         var result = new double[input.Length];
-        for (int i = 0; i < input.Length; i++)
-            result[i] = Math.Exp(-input[i] / tau);
+        ExpNegDivTau(input, tau, result.AsSpan());
         return result;
+    }
+
+    /// <summary>Compute exp(-x / tau) for all elements: writes to output span (zero-allocation).</summary>
+    public static void ExpNegDivTau(ReadOnlySpan<double> input, double tau, Span<double> output)
+    {
+        for (int i = 0; i < input.Length; i++)
+            output[i] = Math.Exp(-input[i] / tau);
     }
 
     /// <summary>Element-wise subtraction: dest = a - b.</summary>

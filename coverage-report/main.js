@@ -290,13 +290,17 @@ var assemblies = [
   {
     "name": "CW.EventProp",
     "classes": [
-      { "name": "CW.EventProp.EventPropMath", "rp": "CW.EventProp_EventPropMath.html", "cl": 18, "ucl": 44, "cal": 62, "tl": 131, "cb": 4, "tb": 24, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
-      { "name": "CW.EventProp.MatrixView", "rp": "CW.EventProp_MatrixView.html", "cl": 0, "ucl": 23, "cal": 23, "tl": 53, "cb": 0, "tb": 6, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
-      { "name": "CW.EventProp.MaximaData", "rp": "CW.EventProp_MaximaData.html", "cl": 0, "ucl": 10, "cal": 10, "tl": 26, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
-      { "name": "CW.EventProp.ScratchBuffers", "rp": "CW.EventProp_ScratchBuffers.html", "cl": 0, "ucl": 60, "cal": 60, "tl": 114, "cb": 0, "tb": 18, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
-      { "name": "CW.EventProp.SpanAlgorithms", "rp": "CW.EventProp_SpanAlgorithms.html", "cl": 6, "ucl": 66, "cal": 72, "tl": 124, "cb": 2, "tb": 30, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
-      { "name": "CW.EventProp.SpikesData", "rp": "CW.EventProp_SpikesData.html", "cl": 0, "ucl": 10, "cal": 10, "tl": 24, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
-      { "name": "CW.EventProp.StridedSpan", "rp": "CW.EventProp_StridedSpan.html", "cl": 0, "ucl": 7, "cal": 7, "tl": 23, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
+      { "name": "CW.EventProp.CxxNative", "rp": "CW.EventProp_CxxNative.html", "cl": 19, "ucl": 0, "cal": 19, "tl": 109, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
+      { "name": "CW.EventProp.EventPropMath", "rp": "CW.EventProp_EventPropMath.html", "cl": 480, "ucl": 3, "cal": 483, "tl": 684, "cb": 280, "tb": 312, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
+      { "name": "CW.EventProp.EventPropMath.MergedSpike", "rp": "CW.EventProp_MergedSpike.html", "cl": 6, "ucl": 0, "cal": 6, "tl": 684, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
+      { "name": "CW.EventProp.EventPropMath.SpikeEntry", "rp": "CW.EventProp_SpikeEntry.html", "cl": 26, "ucl": 0, "cal": 26, "tl": 684, "cb": 6, "tb": 6, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
+      { "name": "CW.EventProp.MatrixView", "rp": "CW.EventProp_MatrixView.html", "cl": 20, "ucl": 0, "cal": 20, "tl": 49, "cb": 4, "tb": 4, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
+      { "name": "CW.EventProp.MaximaData", "rp": "CW.EventProp_MaximaData.html", "cl": 10, "ucl": 0, "cal": 10, "tl": 26, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
+      { "name": "CW.EventProp.ScratchBuffers", "rp": "CW.EventProp_ScratchBuffers.html", "cl": 126, "ucl": 0, "cal": 126, "tl": 176, "cb": 46, "tb": 46, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
+      { "name": "CW.EventProp.SpanAlgorithms", "rp": "CW.EventProp_SpanAlgorithms.html", "cl": 84, "ucl": 0, "cal": 84, "tl": 148, "cb": 30, "tb": 30, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
+      { "name": "CW.EventProp.SpikesData", "rp": "CW.EventProp_SpikesData.html", "cl": 17, "ucl": 0, "cal": 17, "tl": 32, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
+      { "name": "CW.EventProp.StridedSpan", "rp": "CW.EventProp_StridedSpan.html", "cl": 7, "ucl": 0, "cal": 7, "tl": 23, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
+      { "name": "CW.EventProp.Toms748", "rp": "CW.EventProp_Toms748.html", "cl": 88, "ucl": 0, "cal": 88, "tl": 132, "cb": 67, "tb": 72, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
     ]},
 ];
 
@@ -311,15 +315,69 @@ var riskHotspotMetrics = [
 
 var riskHotspots = [
   {
-    "assembly": "CW.EventProp", "class": "CW.EventProp.EventPropMath", "reportPath": "CW.EventProp_EventPropMath.html", "methodName": "ComputeMaxima(System.ReadOnlySpan\u003Cdouble\u003E, System.ReadOnlySpan\u003Cdouble\u003E, System.ReadOnlySpan\u003Cint\u003E, int, double, double)", "methodShortName": "ComputeMaxima(...)", "fileIndex": 0, "line": 64,
+    "assembly": "CW.EventProp", "class": "CW.EventProp.EventPropMath", "reportPath": "CW.EventProp_EventPropMath.html", "methodName": "ComputeSpikes(System.ReadOnlySpan\u003Cdouble\u003E, System.ReadOnlySpan\u003Cdouble\u003E, System.ReadOnlySpan\u003Cint\u003E, int, double, double, double, CW.EventProp.ScratchBuffers)", "methodShortName": "ComputeSpikes(...)", "fileIndex": 0, "line": 136,
     "metrics": [
-      { "value": 420, "exceeded": true },
+      { "value": 46, "exceeded": true },
+      { "value": 46, "exceeded": true },
+    ]},
+  {
+    "assembly": "CW.EventProp", "class": "CW.EventProp.EventPropMath", "reportPath": "CW.EventProp_EventPropMath.html", "methodName": "ComputeSpikes(System.ReadOnlySpan\u003Cdouble\u003E, System.ReadOnlySpan\u003Cdouble\u003E, System.ReadOnlySpan\u003Cint\u003E, int, double, double, double, CW.EventProp.ScratchBuffers)", "methodShortName": "ComputeSpikes(...)", "fileIndex": 0, "line": 146,
+    "metrics": [
+      { "value": 46, "exceeded": true },
+      { "value": 46, "exceeded": true },
+    ]},
+  {
+    "assembly": "CW.EventProp", "class": "CW.EventProp.Toms748", "reportPath": "CW.EventProp_Toms748.html", "methodName": "Solve(System.Func\u003Cdouble, double\u003E, double, double, double)", "methodShortName": "Solve(...)", "fileIndex": 0, "line": 22,
+    "metrics": [
+      { "value": 38, "exceeded": true },
+      { "value": 38, "exceeded": true },
+    ]},
+  {
+    "assembly": "CW.EventProp", "class": "CW.EventProp.EventPropMath", "reportPath": "CW.EventProp_EventPropMath.html", "methodName": "ComputeTmax(int, int, System.ReadOnlySpan\u003Cdouble\u003E, int, double[], int, double[], double[], int, int, double, double, double, double)", "methodShortName": "ComputeTmax(...)", "fileIndex": 0, "line": 327,
+    "metrics": [
+      { "value": 26, "exceeded": false },
+      { "value": 26, "exceeded": true },
+    ]},
+  {
+    "assembly": "CW.EventProp", "class": "CW.EventProp.EventPropMath", "reportPath": "CW.EventProp_EventPropMath.html", "methodName": "ComputeTmax(int, int, System.ReadOnlySpan\u003Cdouble\u003E, int, double[], int, double[], double[], int, int, double, double, double, double)", "methodShortName": "ComputeTmax(...)", "fileIndex": 0, "line": 337,
+    "metrics": [
+      { "value": 26, "exceeded": false },
+      { "value": 26, "exceeded": true },
+    ]},
+  {
+    "assembly": "CW.EventProp", "class": "CW.EventProp.EventPropMath", "reportPath": "CW.EventProp_EventPropMath.html", "methodName": "ComputeTmax(int, int, System.ReadOnlySpan\u003Cdouble\u003E, int, double[], int, double[], double[], int, int, double, double, double, double)", "methodShortName": "ComputeTmax(...)", "fileIndex": 0, "line": 577,
+    "metrics": [
+      { "value": 26, "exceeded": false },
+      { "value": 26, "exceeded": true },
+    ]},
+  {
+    "assembly": "CW.EventProp", "class": "CW.EventProp.EventPropMath", "reportPath": "CW.EventProp_EventPropMath.html", "methodName": "BackwardSpikes(System.ReadOnlySpan\u003Cdouble\u003E, System.ReadOnlySpan\u003Cdouble\u003E, System.ReadOnlySpan\u003Cint\u003E, CW.EventProp.SpikesData, int, double, double, double, System.Span\u003Cdouble\u003E, CW.EventProp.ScratchBuffers)", "methodShortName": "BackwardSpikes(...)", "fileIndex": 0, "line": 373,
+    "metrics": [
+      { "value": 24, "exceeded": false },
+      { "value": 24, "exceeded": true },
+    ]},
+  {
+    "assembly": "CW.EventProp", "class": "CW.EventProp.ScratchBuffers", "reportPath": "CW.EventProp_ScratchBuffers.html", "methodName": "EnsureCapacity(int, int, int)", "methodShortName": "EnsureCapacity(...)", "fileIndex": 0, "line": 70,
+    "metrics": [
+      { "value": 22, "exceeded": false },
+      { "value": 22, "exceeded": true },
+    ]},
+  {
+    "assembly": "CW.EventProp", "class": "CW.EventProp.EventPropMath", "reportPath": "CW.EventProp_EventPropMath.html", "methodName": "ComputeMaxima(System.ReadOnlySpan\u003Cdouble\u003E, System.ReadOnlySpan\u003Cdouble\u003E, System.ReadOnlySpan\u003Cint\u003E, int, double, double)", "methodShortName": "ComputeMaxima(...)", "fileIndex": 0, "line": 68,
+    "metrics": [
+      { "value": 20, "exceeded": false },
       { "value": 20, "exceeded": true },
     ]},
   {
-    "assembly": "CW.EventProp", "class": "CW.EventProp.ScratchBuffers", "reportPath": "CW.EventProp_ScratchBuffers.html", "methodName": "EnsureCapacity(int, int, int)", "methodShortName": "EnsureCapacity(...)", "fileIndex": 0, "line": 52,
+    "assembly": "CW.EventProp", "class": "CW.EventProp.EventPropMath", "reportPath": "CW.EventProp_EventPropMath.html", "methodName": "ComputeMaxima(System.ReadOnlySpan\u003Cdouble\u003E, System.ReadOnlySpan\u003Cdouble\u003E, System.ReadOnlySpan\u003Cint\u003E, int, double, double, CW.EventProp.ScratchBuffers)", "methodShortName": "ComputeMaxima(...)", "fileIndex": 0, "line": 70,
     "metrics": [
-      { "value": 342, "exceeded": true },
+      { "value": 20, "exceeded": false },
+      { "value": 20, "exceeded": true },
+    ]},
+  {
+    "assembly": "CW.EventProp", "class": "CW.EventProp.ScratchBuffers", "reportPath": "CW.EventProp_ScratchBuffers.html", "methodName": "EnsureCapacity(int, int, int)", "methodShortName": "EnsureCapacity(...)", "fileIndex": 0, "line": 58,
+    "metrics": [
+      { "value": 18, "exceeded": false },
       { "value": 18, "exceeded": true },
     ]},
 ];

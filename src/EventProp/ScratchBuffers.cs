@@ -30,6 +30,24 @@ public sealed class ScratchBuffers : IDisposable
     /// <summary>Pre-allocated buffer for spike errors in backward pass.</summary>
     public double[] SpikeErrors { get; private set; } = Array.Empty<double>();
 
+    /// <summary>Pre-allocated flat buffer for lambda_i jump magnitudes (one per post-spike).</summary>
+    public double[] LambdaIJumpsMagnitude { get; private set; } = Array.Empty<double>();
+
+    /// <summary>Pre-allocated flat buffer for lambda_i jump time offsets (one per post-spike).</summary>
+    public double[] LambdaIJumpsTimeOffset { get; private set; } = Array.Empty<double>();
+
+    /// <summary>Pre-allocated per-neuron start index into lambda_i jumps flat arrays.</summary>
+    public int[] LambdaIJumpsStart { get; private set; } = Array.Empty<int>();
+
+    /// <summary>Pre-allocated per-neuron end index into lambda_i jumps flat arrays.</summary>
+    public int[] LambdaIJumpsEnd { get; private set; } = Array.Empty<int>();
+
+    /// <summary>Pre-allocated buffer for exp(-t/tau_mem) values (one per input spike).</summary>
+    public double[] ExpInputMem { get; private set; } = Array.Empty<double>();
+
+    /// <summary>Pre-allocated buffer for exp(-t/tau_syn) values (one per input spike).</summary>
+    public double[] ExpInputSyn { get; private set; } = Array.Empty<double>();
+
     /// <summary>Pre-allocated buffer for post-spike times (max per neuron).</summary>
     public double[] PostSpikeTimes { get; private set; } = Array.Empty<double>();
 
@@ -75,13 +93,49 @@ public sealed class ScratchBuffers : IDisposable
         if (SpikeErrors.Length < nSpikes)
             SpikeErrors = new double[nSpikes];
 
+        // Lambda_i jumps: one per post-spike, plus per-neuron start/end indices
+        if (LambdaIJumpsMagnitude.Length < nSpikes)
+        {
+            LambdaIJumpsMagnitude = new double[nSpikes];
+            LambdaIJumpsTimeOffset = new double[nSpikes];
+        }
+        if (LambdaIJumpsStart.Length < nNeurons + 1)
+        {
+            LambdaIJumpsStart = new int[nNeurons + 1];
+            LambdaIJumpsEnd = new int[nNeurons + 1];
+        }
+
+        // Exp buffers: one value per input spike
+        if (ExpInputMem.Length < nSpikes)
+        {
+            ExpInputMem = new double[nSpikes];
+            ExpInputSyn = new double[nSpikes];
+        }
+
         // Post-spike buffers: estimate max spikes per neuron
         int estimatedPerNeuron = Math.Max(nSpikes / nNeurons + 1, 4);
+        GrowPostSpikeBuffers(nNeurons, estimatedPerNeuron);
+    }
+
+    /// <summary>
+    /// Initialize post-spike buffers for a specific configuration.
+    /// Used when caller knows exact dimensions (e.g. tests).
+    /// </summary>
+    public void InitPostSpikeBuffers(int nNeurons, int maxSpikesPerNeuron)
+    {
+        GrowPostSpikeBuffers(nNeurons, maxSpikesPerNeuron);
+    }
+
+    internal void GrowPostSpikeBuffers(int nNeurons, int estimatedPerNeuron)
+    {
         if (PostSpikeTimes.Length < estimatedPerNeuron * nNeurons)
         {
             MaxSpikesPerNeuron = estimatedPerNeuron;
             PostSpikeTimes = new double[estimatedPerNeuron * nNeurons];
             PostSpikeCurrents = new double[estimatedPerNeuron * nNeurons];
+        }
+        if (SpikeCountPerNeuron.Length < nNeurons)
+        {
             SpikeCountPerNeuron = new int[nNeurons];
             SpikeOffsetPerNeuron = new int[nNeurons + 1];
         }
@@ -94,6 +148,12 @@ public sealed class ScratchBuffers : IDisposable
         LambdaV.AsSpan().Clear();
         LambdaI.AsSpan().Clear();
         SpikeErrors.AsSpan().Clear();
+        PostSpikeTimes.AsSpan().Clear();
+        PostSpikeCurrents.AsSpan().Clear();
+        VoltageTrace.AsSpan().Clear();
+        LambdaITrace.AsSpan().Clear();
+        LambdaIJumpsMagnitude.AsSpan().Clear();
+        LambdaIJumpsTimeOffset.AsSpan().Clear();
     }
 
     public void Dispose()
@@ -106,6 +166,8 @@ public sealed class ScratchBuffers : IDisposable
         VoltageTrace = Array.Empty<double>();
         LambdaITrace = Array.Empty<double>();
         SpikeErrors = Array.Empty<double>();
+        ExpInputMem = Array.Empty<double>();
+        ExpInputSyn = Array.Empty<double>();
         PostSpikeTimes = Array.Empty<double>();
         PostSpikeCurrents = Array.Empty<double>();
         SpikeCountPerNeuron = Array.Empty<int>();

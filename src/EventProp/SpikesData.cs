@@ -16,7 +16,15 @@ public sealed class SpikesData
         Times = times;
         Sources = sources;
         Errors = new double[times.Length];
-        Currents = Array.Empty<double>();
+        Currents = new double[times.Length];
+    }
+
+    public SpikesData(double[] times, int[] sources, double[] currents)
+    {
+        Times = times;
+        Sources = sources;
+        Errors = new double[times.Length];
+        Currents = currents;
     }
 
     public void SetError(int spikeIdx, double error) => Errors[spikeIdx] = error;

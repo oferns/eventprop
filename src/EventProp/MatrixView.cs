@@ -42,11 +42,7 @@ public ref struct MatrixView
     }
 
     /// <summary>Reset all values to zero.</summary>
-    public void Zero()
-    {
-        for (int i = 0; i < Data.Length; i++)
-            Data[i] = 0.0;
-    }
+    public void Zero() => Data.Clear();
 
     /// <summary>Create a zero matrix.</summary>
     public static MatrixView Zero(int rows, int cols) => new(new double[rows * cols], rows, cols);

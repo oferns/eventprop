@@ -1,6 +1,6 @@
 using CW.EventProp;
 
-namespace EventProp.Tests;
+namespace CW.EventProp.Tests;
 
 public class ComputeSumsTests
 {
@@ -15,8 +15,11 @@ public class ComputeSumsTests
 
         var sum0 = new double[(times.Length + 1) * nPost];
         var sum1 = new double[(times.Length + 1) * nPost];
+        var expInputMem = new double[times.Length];
+        var expInputSyn = new double[times.Length];
 
-        EventPropMath.ComputeSums(w, times, sources, 0.02, 0.005, sum0, sum1, nPost);
+        EventPropMath.ComputeSums(w, times, sources, 0.02, 0.005, sum0, sum1, nPost,
+            expInputMem.AsSpan(), expInputSyn.AsSpan());
 
         for (int i = 0; i < sum0.Length; i++)
             await Assert.That(sum0[i]).IsEqualTo(0.0);
@@ -36,10 +39,11 @@ public class ComputeSumsTests
 
         var sum0 = new double[(times.Length + 1) * nPost];
         var sum1 = new double[(times.Length + 1) * nPost];
+        var expInputMem = new double[times.Length];
+        var expInputSyn = new double[times.Length];
 
-        EventPropMath.ComputeSums(w, times, sources, 0.02, 0.005, sum0, sum1, nPost);
-
-        // Row 0 should be all zeros
+        EventPropMath.ComputeSums(w, times, sources, 0.02, 0.005, sum0, sum1, nPost,
+            expInputMem.AsSpan(), expInputSyn.AsSpan());
         for (int j = 0; j < nPost; j++)
         {
             await Assert.That(sum0[j]).IsEqualTo(0.0);
@@ -70,10 +74,11 @@ public class ComputeSumsTests
 
         var sum0 = new double[(times.Length + 1) * nPost];
         var sum1 = new double[(times.Length + 1) * nPost];
+        var expInputMem = new double[times.Length];
+        var expInputSyn = new double[times.Length];
 
-        EventPropMath.ComputeSums(w, times, sources, 0.02, 0.005, sum0, sum1, nPost);
-
-        // Row 0: all zeros
+        EventPropMath.ComputeSums(w, times, sources, 0.02, 0.005, sum0, sum1, nPost,
+            expInputMem.AsSpan(), expInputSyn.AsSpan());
         for (int j = 0; j < nPost; j++)
         {
             await Assert.That(sum0[j]).IsEqualTo(0.0);
@@ -121,9 +126,12 @@ public class ComputeSumsTests
 
         var sum0 = new double[(nSpikes + 1) * nPost];
         var sum1 = new double[(nSpikes + 1) * nPost];
+        var expInputMem = new double[nSpikes];
+        var expInputSyn = new double[nSpikes];
 
         // Should not throw
-        EventPropMath.ComputeSums(w, times, sources, 0.02, 0.005, sum0, sum1, nPost);
+        EventPropMath.ComputeSums(w, times, sources, 0.02, 0.005, sum0, sum1, nPost,
+            expInputMem.AsSpan(), expInputSyn.AsSpan());
 
         // Verify last row is non-zero (accumulated many spikes)
         double lastRowSum = 0.0;
@@ -131,5 +139,64 @@ public class ComputeSumsTests
             lastRowSum += sum0[nSpikes * nPost + j];
 
         await Assert.That(lastRowSum).IsGreaterThan(0.0);
+    }
+
+    [Test]
+    public async Task ComputeSums_NegativeWeights_ReturnsNegativeAccumulation()
+    {
+        int nPost = 2;
+        // Negative (inhibitory) weights
+        double[] w = [-0.5, -0.5, -0.5, -0.5];
+
+        double[] times = [0.01, 0.02];
+        int[] sources = [0, 1];
+
+        var sum0 = new double[(times.Length + 1) * nPost];
+        var sum1 = new double[(times.Length + 1) * nPost];
+        var expInputMem = new double[times.Length];
+        var expInputSyn = new double[times.Length];
+
+        EventPropMath.ComputeSums(w, times, sources, 0.02, 0.005, sum0, sum1, nPost,
+            expInputMem.AsSpan(), expInputSyn.AsSpan());
+        for (int i = nPost; i < sum0.Length; i++)
+        {
+            await Assert.That(sum0[i]).IsLessThan(0.0);
+            await Assert.That(sum1[i]).IsLessThan(0.0);
+        }
+    }
+
+    [Test]
+    public async Task ComputeSums_SameSourceMultipleSpikes_AccumulatesCorrectly()
+    {
+        int nPost = 2;
+        double[] w = [1.0, 1.0, 0.5, 0.5]; // neuron 0 has weight 1.0, neuron 1 has 0.5
+
+        // Two spikes from the SAME source neuron at different times
+        double[] times = [0.01, 0.02];
+        int[] sources = [0, 0];
+
+        var sum0 = new double[(times.Length + 1) * nPost];
+        var sum1 = new double[(times.Length + 1) * nPost];
+        var expInputMem = new double[times.Length];
+        var expInputSyn = new double[times.Length];
+
+        EventPropMath.ComputeSums(w, times, sources, 0.02, 0.005, sum0, sum1, nPost,
+            expInputMem.AsSpan(), expInputSyn.AsSpan());
+        double expSyn1 = Math.Exp(0.01 / 0.005);
+        double expMem1 = Math.Exp(0.01 / 0.02);
+        for (int j = 0; j < nPost; j++)
+        {
+            await Assert.That(sum0[nPost + j]).IsEqualTo(expSyn1).Within(1e-12);
+            await Assert.That(sum1[nPost + j]).IsEqualTo(expMem1).Within(1e-12);
+        }
+
+        // Row 2: after second spike from neuron 0 at t=0.02 — should accumulate
+        double expSyn2 = Math.Exp(0.02 / 0.005);
+        double expMem2 = Math.Exp(0.02 / 0.02);
+        for (int j = 0; j < nPost; j++)
+        {
+            await Assert.That(sum0[2 * nPost + j]).IsEqualTo(expSyn1 + expSyn2).Within(1e-12);
+            await Assert.That(sum1[2 * nPost + j]).IsEqualTo(expMem1 + expMem2).Within(1e-12);
+        }
     }
 }
