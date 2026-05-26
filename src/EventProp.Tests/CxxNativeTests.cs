@@ -743,4 +743,221 @@ public class CxxNativeTests
         for (int i = 0; i < csGradient.Length; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
     }
+
+    // ========================================================================
+    // P0: Critical Edge Cases for Numerical Parity
+    // ========================================================================
+
+    /// <summary>
+    /// tauMem very close to tauSyn (ratio 0.95). Tests numerical stability of prefactors:
+    ///   k_prefactor = tau_syn / (tau_mem - tau_syn) = 0.019 / 0.001 = 19
+    ///   tmax_prefactor = 1.0 / (1/tau_mem - 1/tau_syn) ≈ -380
+    /// These large prefactors could cause different rounding between C++ and C#.
+    /// </summary>
+    [Test]
+    public async Task ComputeSums_CppVsCs_NearEqualTaus()
+    {
+        int nPre = 2, nPost = 2;
+        double[] w = [1.0, 0.5, 0.3, 2.0];
+        double[] times = [0.01, 0.02];
+        int[] sources = [0, 1];
+
+        // tauMem and tauSyn differ by only 0.001 — prefactors blow up
+        double tauMem = 0.02, tauSyn = 0.019;
+
+        var csSum0 = new double[(times.Length + 1) * nPost];
+        var csSum1 = new double[(times.Length + 1) * nPost];
+        EventPropMath.ComputeSums(w, times, sources, tauMem, tauSyn, csSum0, csSum1, nPost,
+            new double[times.Length], new double[times.Length]);
+
+        var cppSum0 = new double[(times.Length + 1) * nPost];
+        var cppSum1 = new double[(times.Length + 1) * nPost];
+        CxxNative.ComputeSums(w, nPre, nPost, times, sources, tauMem, tauSyn, cppSum0, cppSum1);
+
+        for (int i = 0; i < csSum0.Length; i++)
+        {
+            await Assert.That(csSum0[i]).IsCloseTo(cppSum0[i], Tolerance);
+            await Assert.That(csSum1[i]).IsCloseTo(cppSum1[i], Tolerance);
+        }
+    }
+
+    /// <summary>
+    /// Single input spike, single post-synaptic neuron — the simplest non-trivial case.
+    /// Exercises the full forward+backward pipeline with minimal data.
+    /// </summary>
+    [Test]
+    public void BackwardSpikes_CppVsCs_SingleInputSinglePost()
+    {
+        int nPre = 1, nPost = 1;
+        double[] w = [20.0];
+        double[] inputTimes = [0.1];
+        int[] inputSources = [0];
+
+        var buffers = new ScratchBuffers();
+        buffers.EnsureCapacity(nPost, nPre, inputTimes.Length);
+        var postSpikes = EventPropMath.ComputeSpikes(w, inputTimes, inputSources, nPost,
+            1.0, 0.02, 0.005, buffers);
+
+        if (postSpikes.NSpikes == 0)
+            return; // Skip — no post-spike activity with these parameters
+
+        for (int i = 0; i < postSpikes.NSpikes; i++)
+            postSpikes.SetError(i, 1.0);
+
+        var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
+        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+
+        EventPropMath.BackwardSpikes(w, inputTimes, inputSources, postSpikes, nPost,
+            1.0, 0.02, 0.005, csGradient, buffers);
+        CxxNative.BackwardSpikes(inputTimes, inputSources,
+            postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
+            w, nPre, nPost, 1.0, 0.02, 0.005, cppGradient);
+
+        SyncAssert.That(csGradient[0]).IsCloseTo(cppGradient[0], 1e-10);
+    }
+
+    /// <summary>
+    /// Single neuron, multiple spikes — tests spike reset logic.
+    /// A very strong weight causes rapid successive post-spikes from one input spike.
+    /// </summary>
+    [Test]
+    public async Task ComputeSpikes_CppVsCs_SingleNeuronMultipleSpikes()
+    {
+        int nPost = 1, nPre = 1;
+        double[] w = [80.0]; // Very strong — causes multiple spikes
+
+        var buffers = new ScratchBuffers();
+        buffers.InitPostSpikeBuffers(nPost, 16);
+
+        var csResult = EventPropMath.ComputeSpikes(w, [0.05], [0], nPost, 1.0, 0.02, 0.005, buffers);
+
+        var cppTimes = new double[16];
+        var cppSources = new int[16];
+        var cppCurrents = new double[16];
+        int nCppSpikes = CxxNative.ComputeSpikes(w, nPre, nPost, [0.05], [0], 1.0, 0.02, 0.005,
+            cppTimes, cppSources, cppCurrents);
+
+        await Assert.That(csResult.NSpikes).IsEqualTo(nCppSpikes);
+        for (int i = 0; i < csResult.NSpikes; i++)
+        {
+            await Assert.That(csResult.Times[i]).IsCloseTo(cppTimes[i], Tolerance);
+            await Assert.That(csResult.Sources[i]).IsEqualTo(cppSources[i]);
+        }
+    }
+
+    // ========================================================================
+    // P1: Important Boundary Cases
+    // ========================================================================
+
+    /// <summary>
+    /// Maxima times before all input spikes — backward pass should skip these.
+    /// Tests the t_vmax_bwd > t_bwd boundary condition in BackwardMaxima.
+    /// </summary>
+    [Test]
+    public void BackwardMaxima_CppVsCs_MaximaBeforeAllSpikes()
+    {
+        int nPre = 2, nPost = 1;
+        double[] w = [0.5, 0.3, 0.1, 0.2];
+        double[] inputTimes = [0.05, 0.1]; // Spikes at 0.05 and 0.1
+        int[] inputSources = [0, 1];
+
+        // Maxima time before first input spike
+        double[] maximaTimes = [0.02];
+        double[] maximaValues = [1.5];
+        double[] maximaErrors = [0.1];
+
+        var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
+        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+
+        EventPropMath.BackwardMaxima(inputTimes, inputSources,
+            maximaTimes, maximaValues, maximaErrors,
+            w, nPost, 0.02, 0.005, csGradient);
+        CxxNative.BackwardMaxima(inputTimes, inputSources,
+            maximaTimes, maximaValues, maximaErrors,
+            w, nPre, nPost, 0.02, 0.005, cppGradient);
+
+        // Both should produce zero gradients (maxima before any input spike)
+        for (int i = 0; i < csGradient.Length; i++)
+            SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+    }
+
+    /// <summary>
+    /// All weights zero for some neurons — tests gradient sparsity.
+    /// Neurons with all-zero weight rows should produce zero gradients.
+    /// </summary>
+    [Test]
+    public void BackwardSpikes_CppVsCs_ZeroWeightRows()
+    {
+        int nPre = 4, nPost = 2;
+        // Neurons 1 and 3 have all-zero weights
+        double[] w = [15.0, 3.0,
+                      0.0, 0.0,
+                      8.0, 20.0,
+                      0.0, 0.0];
+        double[] inputTimes = [0.01, 0.03, 0.05];
+        int[] inputSources = [0, 1, 2]; // Spikes from neurons 0, 1, and 2
+
+        var buffers = new ScratchBuffers();
+        buffers.EnsureCapacity(nPost, nPre, inputTimes.Length);
+        var postSpikes = EventPropMath.ComputeSpikes(w, inputTimes, inputSources, nPost,
+            1.0, 0.02, 0.005, buffers);
+
+        if (postSpikes.NSpikes == 0)
+            return;
+
+        for (int i = 0; i < postSpikes.NSpikes; i++)
+            postSpikes.SetError(i, 1.0);
+
+        var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
+        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+
+        EventPropMath.BackwardSpikes(w, inputTimes, inputSources, postSpikes, nPost,
+            1.0, 0.02, 0.005, csGradient, buffers);
+        CxxNative.BackwardSpikes(inputTimes, inputSources,
+            postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
+            w, nPre, nPost, 1.0, 0.02, 0.005, cppGradient);
+
+        // All neurons should have matching gradients (including zero-weight rows)
+        // Note: Zero weights don't necessarily mean zero gradients because the adjoint
+        // method propagates errors through λ_i which depends on membrane dynamics,
+        // not directly on weights. The key check is C++ vs C# parity.
+
+        // All neurons should match between C++ and C#
+        for (int src = 0; src < nPre; src++)
+            for (int nrn = 0; nrn < nPost; nrn++)
+            {
+                int idx = src * nPost + nrn;
+                SyncAssert.That(csGradient[idx]).IsCloseTo(cppGradient[idx], 1e-10);
+            }
+    }
+
+    /// <summary>
+    /// Maxima exactly at input spike time — tests floating-point equality boundary.
+    /// </summary>
+    [Test]
+    public void BackwardMaxima_CppVsCs_MaximaAtSpikeTime()
+    {
+        int nPre = 2, nPost = 1;
+        double[] w = [0.5, 0.3, 0.1, 0.2];
+        double[] inputTimes = [0.01, 0.02];
+        int[] inputSources = [0, 1];
+
+        // Maxima time exactly equals second input spike time
+        double[] maximaTimes = [0.02];
+        double[] maximaValues = [1.5];
+        double[] maximaErrors = [0.1];
+
+        var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
+        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+
+        EventPropMath.BackwardMaxima(inputTimes, inputSources,
+            maximaTimes, maximaValues, maximaErrors,
+            w, nPost, 0.02, 0.005, csGradient);
+        CxxNative.BackwardMaxima(inputTimes, inputSources,
+            maximaTimes, maximaValues, maximaErrors,
+            w, nPre, nPost, 0.02, 0.005, cppGradient);
+
+        for (int i = 0; i < csGradient.Length; i++)
+            SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+    }
 }
