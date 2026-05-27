@@ -46,12 +46,20 @@ public static class EventPropMath
 
             int rowOut = i + 1;
             int rowIn = i;
+            int srcOffset = src * nPost;
 
-            for (int j = 0; j < nPost; j++)
-            {
-                sum0[rowOut * nPost + j] = sum0[rowIn * nPost + j] + expSyn * w[src * nPost + j];
-                sum1[rowOut * nPost + j] = sum1[rowIn * nPost + j] + expMem * w[src * nPost + j];
-            }
+            // SIMD-accelerated FMA row update: dest[j] = prev[j] + scalar * wRow[j]
+            SimdAlgorithms.FmaRow(
+                sum0.Slice(rowOut * nPost, nPost),
+                sum0.Slice(rowIn * nPost, nPost),
+                w.Slice(srcOffset, nPost),
+                expSyn);
+
+            SimdAlgorithms.FmaRow(
+                sum1.Slice(rowOut * nPost, nPost),
+                sum1.Slice(rowIn * nPost, nPost),
+                w.Slice(srcOffset, nPost),
+                expMem);
         }
     }
 
@@ -432,8 +440,8 @@ public static class EventPropMath
 
             // Propagate λ_v backward through membrane decay
             double dt = previousT - tBwd;
-            for (int nrn = 0; nrn < nPost; nrn++)
-                lambdaV[nrn] *= Math.Exp(-dt / tauMem);
+            double decayFactor = Math.Exp(-dt / tauMem);
+            SimdAlgorithms.ScaleInPlace(lambdaV.AsSpan(0, nPost), decayFactor);
 
             if (isInput)
             {
