@@ -4,15 +4,15 @@ using CW.EventProp.Tests.SyncAssertions;
 namespace CW.EventProp.Tests;
 
 /// <summary>
-/// Tests that compare the C# implementation against the native C++ library via P/Invoke.
+/// Tests that compare the C# implementation against the native C library via P/Invoke.
 /// These serve as ground-truth verification of numerical accuracy.
 /// </summary>
-public class CxxNativeTests
+public class NativeVsManagedTests
 {
     private const double Tolerance = 1e-10;
 
     [Test]
-    public async Task ComputeSums_CppVsCs_AreIdentical()
+    public async Task ComputeSums_NativeVsManaged_AreIdentical()
     {
         int nPre = 3, nPost = 2;
         double[] w = [0.5, 0.3, 0.1, 0.2, 0.8, 0.4];
@@ -26,19 +26,19 @@ public class CxxNativeTests
             new double[times.Length], new double[times.Length]);
 
         // C++ via P/Invoke
-        var cppSum0 = new double[(times.Length + 1) * nPost];
-        var cppSum1 = new double[(times.Length + 1) * nPost];
-        CxxNative.ComputeSums(w, nPre, nPost, times, sources, 0.02, 0.005, cppSum0, cppSum1);
+        var nativeSum0 = new double[(times.Length + 1) * nPost];
+        var nativeSum1 = new double[(times.Length + 1) * nPost];
+        NativeApi.ComputeSums(w, nPre, nPost, times, sources, 0.02, 0.005, nativeSum0, nativeSum1);
 
         for (int i = 0; i < csSum0.Length; i++)
         {
-            await Assert.That(csSum0[i]).IsCloseTo(cppSum0[i], Tolerance);
-            await Assert.That(csSum1[i]).IsCloseTo(cppSum1[i], Tolerance);
+            await Assert.That(csSum0[i]).IsCloseTo(nativeSum0[i], Tolerance);
+            await Assert.That(csSum1[i]).IsCloseTo(nativeSum1[i], Tolerance);
         }
     }
 
     [Test]
-    public async Task ComputeSums_CppVsCs_EmptyInput()
+    public async Task ComputeSums_NativeVsManaged_EmptyInput()
     {
         int nPost = 3;
         double[] w = [1, 0.5, 0.3, 0.2, 1, 0.4];
@@ -50,19 +50,19 @@ public class CxxNativeTests
         EventPropMath.ComputeSums(w, times, sources, 0.02, 0.005, csSum0, csSum1, nPost,
             Array.Empty<double>(), Array.Empty<double>());
 
-        var cppSum0 = new double[(times.Length + 1) * nPost];
-        var cppSum1 = new double[(times.Length + 1) * nPost];
-        CxxNative.ComputeSums(w, w.Length / nPost, nPost, times, sources, 0.02, 0.005, cppSum0, cppSum1);
+        var nativeSum0 = new double[(times.Length + 1) * nPost];
+        var nativeSum1 = new double[(times.Length + 1) * nPost];
+        NativeApi.ComputeSums(w, w.Length / nPost, nPost, times, sources, 0.02, 0.005, nativeSum0, nativeSum1);
 
         for (int i = 0; i < csSum0.Length; i++)
         {
-            await Assert.That(csSum0[i]).IsCloseTo(cppSum0[i], Tolerance);
-            await Assert.That(csSum1[i]).IsCloseTo(cppSum1[i], Tolerance);
+            await Assert.That(csSum0[i]).IsCloseTo(nativeSum0[i], Tolerance);
+            await Assert.That(csSum1[i]).IsCloseTo(nativeSum1[i], Tolerance);
         }
     }
 
     [Test]
-    public async Task ComputeSpikes_CppVsCs_SameOutput()
+    public async Task ComputeSpikes_NativeVsManaged_SameOutput()
     {
         int nPost = 1, nPre = 1;
         double[] w = [20.0];
@@ -74,22 +74,22 @@ public class CxxNativeTests
         var csResult = EventPropMath.ComputeSpikes(w, [0.01], [0], nPost, 1.0, 0.02, 0.005, buffers);
 
         // C++ via P/Invoke
-        var cppTimes = new double[10];
-        var cppSources = new int[10];
-        var cppCurrents = new double[10];
-        int nCppSpikes = CxxNative.ComputeSpikes(w, nPre, nPost, [0.01], [0], 1.0, 0.02, 0.005, cppTimes, cppSources, cppCurrents);
+        var nativeTimes = new double[10];
+        var nativeSources = new int[10];
+        var nativeCurrents = new double[10];
+        int nNativeSpikes = NativeApi.ComputeSpikes(w, nPre, nPost, [0.01], [0], 1.0, 0.02, 0.005, nativeTimes, nativeSources, nativeCurrents);
 
-        await Assert.That(csResult.NSpikes).IsEqualTo(nCppSpikes);
+        await Assert.That(csResult.NSpikes).IsEqualTo(nNativeSpikes);
         for (int i = 0; i < csResult.NSpikes; i++)
         {
-            await Assert.That(csResult.Times[i]).IsCloseTo(cppTimes[i], Tolerance);
-            await Assert.That(csResult.Sources[i]).IsEqualTo(cppSources[i]);
-            await Assert.That(csResult.Currents[i]).IsCloseTo(cppCurrents[i], Tolerance);
+            await Assert.That(csResult.Times[i]).IsCloseTo(nativeTimes[i], Tolerance);
+            await Assert.That(csResult.Sources[i]).IsEqualTo(nativeSources[i]);
+            await Assert.That(csResult.Currents[i]).IsCloseTo(nativeCurrents[i], Tolerance);
         }
     }
 
     [Test]
-    public async Task ComputeSpikes_CppVsCs_MultipleNeurons()
+    public async Task ComputeSpikes_NativeVsManaged_MultipleNeurons()
     {
         int nPost = 3, nPre = 2;
         double[] w = [20.0, 0.01, 0.01, 0.01, 0.01, 20.0];
@@ -101,22 +101,22 @@ public class CxxNativeTests
 
         var csResult = EventPropMath.ComputeSpikes(w, times, sources, nPost, 1.0, 0.02, 0.005, buffers);
 
-        var cppTimes = new double[100];
-        var cppSources = new int[100];
-        var cppCurrents = new double[100];
-        int nCppSpikes = CxxNative.ComputeSpikes(w, nPre, nPost, times, sources, 1.0, 0.02, 0.005, cppTimes, cppSources, cppCurrents);
+        var nativeTimes = new double[100];
+        var nativeSources = new int[100];
+        var nativeCurrents = new double[100];
+        int nNativeSpikes = NativeApi.ComputeSpikes(w, nPre, nPost, times, sources, 1.0, 0.02, 0.005, nativeTimes, nativeSources, nativeCurrents);
 
         // Both C++ and C# now use the while-loop pattern, finding 5 spikes each.
-        await Assert.That(csResult.NSpikes).IsEqualTo(nCppSpikes);
+        await Assert.That(csResult.NSpikes).IsEqualTo(nNativeSpikes);
         for (int i = 0; i < csResult.NSpikes; i++)
         {
-            await Assert.That(csResult.Times[i]).IsCloseTo(cppTimes[i], Tolerance);
-            await Assert.That(csResult.Sources[i]).IsEqualTo(cppSources[i]);
+            await Assert.That(csResult.Times[i]).IsCloseTo(nativeTimes[i], Tolerance);
+            await Assert.That(csResult.Sources[i]).IsEqualTo(nativeSources[i]);
         }
     }
 
     [Test]
-    public async Task ComputeSpikes_CppVsCs_NoOutput()
+    public async Task ComputeSpikes_NativeVsManaged_NoOutput()
     {
         int nPost = 1, nPre = 1;
         double[] w = [0.01]; // Too weak to spike
@@ -126,17 +126,17 @@ public class CxxNativeTests
 
         var csResult = EventPropMath.ComputeSpikes(w, [0.01], [0], nPost, 1.0, 0.02, 0.005, buffers);
 
-        var cppTimes = new double[10];
-        var cppSources = new int[10];
-        var cppCurrents = new double[10];
-        int nCppSpikes = CxxNative.ComputeSpikes(w, nPre, nPost, [0.01], [0], 1.0, 0.02, 0.005, cppTimes, cppSources, cppCurrents);
+        var nativeTimes = new double[10];
+        var nativeSources = new int[10];
+        var nativeCurrents = new double[10];
+        int nNativeSpikes = NativeApi.ComputeSpikes(w, nPre, nPost, [0.01], [0], 1.0, 0.02, 0.005, nativeTimes, nativeSources, nativeCurrents);
 
         await Assert.That(csResult.NSpikes).IsEqualTo(0);
-        await Assert.That(nCppSpikes).IsEqualTo(0);
+        await Assert.That(nNativeSpikes).IsEqualTo(0);
     }
 
     [Test]
-    public async Task ComputeMaxima_CppVsCs_AreIdentical()
+    public async Task ComputeMaxima_NativeVsManaged_AreIdentical()
     {
         int nPost = 3, nPre = 3;
         double[] w = [1, 0.5, 0.3, 0.2, 1, 0.4, 0.1, 0.6, 1];
@@ -147,24 +147,24 @@ public class CxxNativeTests
         var csMaxima = EventPropMath.ComputeMaxima(w, times, sources, nPost, 0.02, 0.005, new ScratchBuffers());
 
         // C++ via P/Invoke
-        var cppTimes = new double[nPost];
-        var cppValues = new double[nPost];
-        CxxNative.ComputeMaxima(w, nPre, nPost, times, sources, 0.02, 0.005, cppTimes, cppValues);
+        var nativeTimes = new double[nPost];
+        var nativeValues = new double[nPost];
+        NativeApi.ComputeMaxima(w, nPre, nPost, times, sources, 0.02, 0.005, nativeTimes, nativeValues);
 
         for (int i = 0; i < nPost; i++)
         {
             if (double.IsNaN(csMaxima.Times[i]))
-                await Assert.That(cppTimes[i]).IsNaN();
+                await Assert.That(nativeTimes[i]).IsNaN();
             else
             {
-                await Assert.That(csMaxima.Times[i]).IsCloseTo(cppTimes[i], Tolerance);
-                await Assert.That(csMaxima.Values[i]).IsCloseTo(cppValues[i], Tolerance);
+                await Assert.That(csMaxima.Times[i]).IsCloseTo(nativeTimes[i], Tolerance);
+                await Assert.That(csMaxima.Values[i]).IsCloseTo(nativeValues[i], Tolerance);
             }
         }
     }
 
     [Test]
-    public async Task ComputeMaxima_CppVsCs_MultipleSpikeInput()
+    public async Task ComputeMaxima_NativeVsManaged_MultipleSpikeInput()
     {
         int nPost = 2, nPre = 2;
         double[] w = [0.5, 0.5, 0.5, 0.5];
@@ -173,19 +173,19 @@ public class CxxNativeTests
 
         var csMaxima = EventPropMath.ComputeMaxima(w, times, sources, nPost, 0.02, 0.005, new ScratchBuffers());
 
-        var cppTimes = new double[nPost];
-        var cppValues = new double[nPost];
-        CxxNative.ComputeMaxima(w, nPre, nPost, times, sources, 0.02, 0.005, cppTimes, cppValues);
+        var nativeTimes = new double[nPost];
+        var nativeValues = new double[nPost];
+        NativeApi.ComputeMaxima(w, nPre, nPost, times, sources, 0.02, 0.005, nativeTimes, nativeValues);
 
         for (int i = 0; i < nPost; i++)
         {
-            await Assert.That(csMaxima.Times[i]).IsCloseTo(cppTimes[i], Tolerance);
-            await Assert.That(csMaxima.Values[i]).IsCloseTo(cppValues[i], Tolerance);
+            await Assert.That(csMaxima.Times[i]).IsCloseTo(nativeTimes[i], Tolerance);
+            await Assert.That(csMaxima.Values[i]).IsCloseTo(nativeValues[i], Tolerance);
         }
     }
 
     [Test]
-    public async Task ComputeMaxima_CppVsCs_LargeNetwork()
+    public async Task ComputeMaxima_NativeVsManaged_LargeNetwork()
     {
         int nPre = 50, nPost = 20;
         double[] w = new double[nPre * nPost];
@@ -202,19 +202,19 @@ public class CxxNativeTests
 
         var csMaxima = EventPropMath.ComputeMaxima(w, times, sources, nPost, 0.02, 0.005, new ScratchBuffers());
 
-        var cppTimes = new double[nPost];
-        var cppValues = new double[nPost];
-        CxxNative.ComputeMaxima(w, nPre, nPost, times, sources, 0.02, 0.005, cppTimes, cppValues);
+        var nativeTimes = new double[nPost];
+        var nativeValues = new double[nPost];
+        NativeApi.ComputeMaxima(w, nPre, nPost, times, sources, 0.02, 0.005, nativeTimes, nativeValues);
 
         for (int i = 0; i < nPost; i++)
         {
-            await Assert.That(csMaxima.Times[i]).IsCloseTo(cppTimes[i], Tolerance);
-            await Assert.That(csMaxima.Values[i]).IsCloseTo(cppValues[i], Tolerance);
+            await Assert.That(csMaxima.Times[i]).IsCloseTo(nativeTimes[i], Tolerance);
+            await Assert.That(csMaxima.Values[i]).IsCloseTo(nativeValues[i], Tolerance);
         }
     }
 
     [Test]
-    public async Task BackwardMaxima_CppVsCs_GradientMatch()
+    public async Task BackwardMaxima_NativeVsManaged_GradientMatch()
     {
         int nPre = 3, nPost = 2;
         double[] w = [0.5, 0.3, 0.1, 0.2, 0.8, 0.4];
@@ -226,21 +226,21 @@ public class CxxNativeTests
         double[] maximaErrors = [0.1, 0.0];
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
             w, nPost, 0.02, 0.005, csGradient);
-        CxxNative.BackwardMaxima(inputTimes, inputSources,
+        NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient);
 
         for (int i = 0; i < csGradient.Length; i++)
-            await Assert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+            await Assert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
     }
 
     [Test]
-    public async Task ComputeSpikes_CppVsCs_AccumulationCase()
+    public async Task ComputeSpikes_NativeVsManaged_AccumulationCase()
     {
         // Test the accumulation case: two inputs, output fires after second input
         int nPost = 1, nPre = 2;
@@ -253,16 +253,16 @@ public class CxxNativeTests
 
         var csResult = EventPropMath.ComputeSpikes(w, times, sources, nPost, 1.0, 0.02, 0.005, buffers);
 
-        var cppTimes = new double[10];
-        var cppSources = new int[10];
-        var cppCurrents = new double[10];
-        int nCppSpikes = CxxNative.ComputeSpikes(w, nPre, nPost, times, sources, 1.0, 0.02, 0.005, cppTimes, cppSources, cppCurrents);
+        var nativeTimes = new double[10];
+        var nativeSources = new int[10];
+        var nativeCurrents = new double[10];
+        int nNativeSpikes = NativeApi.ComputeSpikes(w, nPre, nPost, times, sources, 1.0, 0.02, 0.005, nativeTimes, nativeSources, nativeCurrents);
 
-        await Assert.That(csResult.NSpikes).IsEqualTo(nCppSpikes);
+        await Assert.That(csResult.NSpikes).IsEqualTo(nNativeSpikes);
         for (int i = 0; i < csResult.NSpikes; i++)
         {
-            await Assert.That(csResult.Times[i]).IsCloseTo(cppTimes[i], Tolerance);
-            await Assert.That(csResult.Sources[i]).IsEqualTo(cppSources[i]);
+            await Assert.That(csResult.Times[i]).IsCloseTo(nativeTimes[i], Tolerance);
+            await Assert.That(csResult.Sources[i]).IsEqualTo(nativeSources[i]);
         }
     }
 
@@ -274,7 +274,7 @@ public class CxxNativeTests
     /// non-trivial gradients while the C++ stub returns zeros (documented limitation).
     /// </summary>
     [Test]
-    public void BackwardSpikes_CppVsCs_ApiContract()
+    public void BackwardSpikes_NativeVsManaged_ApiContract()
     {
         int nPre = 2, nPost = 1;
         double tauMem = 0.02, tauSyn = 0.005;
@@ -304,24 +304,24 @@ public class CxxNativeTests
             1.0, tauMem, tauSyn, csGradient, buffers);
 
         // C++ via P/Invoke — full implementation (was stub, now ported from C#)
-        var cppGradient = new double[nPre * nPost];
-        Array.Fill(cppGradient, 0.0);
-        CxxNative.BackwardSpikes(inputTimes, inputSources,
+        var nativeGradient = new double[nPre * nPost];
+        Array.Fill(nativeGradient, 0.0);
+        NativeApi.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, tauMem, tauSyn, cppGradient);
+            w, nPre, nPost, 1.0, tauMem, tauSyn, nativeGradient);
 
         // Both should produce non-trivial gradients when post-spike error is set
-        double csSum = 0.0, cppSum = 0.0;
+        double csSum = 0.0, nativeSum = 0.0;
         for (int i = 0; i < csGradient.Length; i++)
             csSum += Math.Abs(csGradient[i]);
-        for (int i = 0; i < cppGradient.Length; i++)
-            cppSum += Math.Abs(cppGradient[i]);
+        for (int i = 0; i < nativeGradient.Length; i++)
+            nativeSum += Math.Abs(nativeGradient[i]);
         SyncAssert.That(csSum).IsGreaterThan(0.0);
-        SyncAssert.That(cppSum).IsGreaterThan(0.0);
+        SyncAssert.That(nativeSum).IsGreaterThan(0.0);
 
         // C++ and C# should produce matching gradients within tolerance
         for (int i = 0; i < csGradient.Length; i++)
-            SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+            SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
     }
 
     // ========================================================================
@@ -330,7 +330,7 @@ public class CxxNativeTests
     /// Test Case 2: Multiple input spikes, single post-spike.
     /// </summary>
     [Test]
-    public void BackwardSpikes_CppVsCs_MultipleInputs_SinglePost()
+    public void BackwardSpikes_NativeVsManaged_MultipleInputs_SinglePost()
     {
         int nPre = 3, nPost = 1;
         double[] w = [20.0, 5.0, 0.0];
@@ -346,23 +346,23 @@ public class CxxNativeTests
             postSpikes.SetError(i, 1.0);
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardSpikes(w, inputTimes, inputSources, postSpikes, nPost,
             1.0, 0.02, 0.005, csGradient, buffers);
-        CxxNative.BackwardSpikes(inputTimes, inputSources,
+        NativeApi.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
 
         for (int i = 0; i < csGradient.Length; i++)
-            SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+            SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
     }
 
     /// <summary>
     /// Test Case 3: Single input spike, multiple post-spikes.
     /// </summary>
     [Test]
-    public void BackwardSpikes_CppVsCs_SingleInput_MultiplePosts()
+    public void BackwardSpikes_NativeVsManaged_SingleInput_MultiplePosts()
     {
         int nPre = 2, nPost = 3;
         double[] w = [20.0, 0.0, 5.0, 0.0, 15.0, 0.0];
@@ -378,23 +378,23 @@ public class CxxNativeTests
             postSpikes.SetError(i, 1.0);
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardSpikes(w, inputTimes, inputSources, postSpikes, nPost,
             1.0, 0.02, 0.005, csGradient, buffers);
-        CxxNative.BackwardSpikes(inputTimes, inputSources,
+        NativeApi.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
 
         for (int i = 0; i < csGradient.Length; i++)
-            SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+            SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
     }
 
     /// <summary>
     /// Test Case 4: Multiple input spikes, multiple post-spikes (full network).
     /// </summary>
     [Test]
-    public void BackwardSpikes_CppVsCs_MultipleInputs_MultiplePosts()
+    public void BackwardSpikes_NativeVsManaged_MultipleInputs_MultiplePosts()
     {
         int nPre = 5, nPost = 3;
         double[] w = [20.0, 5.0, 10.0, 8.0, 3.0,
@@ -412,23 +412,23 @@ public class CxxNativeTests
             postSpikes.SetError(i, 1.0);
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardSpikes(w, inputTimes, inputSources, postSpikes, nPost,
             1.0, 0.02, 0.005, csGradient, buffers);
-        CxxNative.BackwardSpikes(inputTimes, inputSources,
+        NativeApi.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
 
         for (int i = 0; i < csGradient.Length; i++)
-            SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+            SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
     }
 
     /// <summary>
     /// Test Case 5: Asymmetric network (nPre != nPost).
     /// </summary>
     [Test]
-    public void BackwardSpikes_CppVsCs_AsymmetricNetwork()
+    public void BackwardSpikes_NativeVsManaged_AsymmetricNetwork()
     {
         int nPre = 4, nPost = 2;
         double[] w = [15.0, 3.0, 8.0, 20.0,
@@ -445,23 +445,23 @@ public class CxxNativeTests
             postSpikes.SetError(i, 1.0);
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardSpikes(w, inputTimes, inputSources, postSpikes, nPost,
             1.0, 0.02, 0.005, csGradient, buffers);
-        CxxNative.BackwardSpikes(inputTimes, inputSources,
+        NativeApi.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
 
         for (int i = 0; i < csGradient.Length; i++)
-            SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+            SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
     }
 
     /// <summary>
     /// Test Case 6: Zero error on all post-spikes → zero gradients.
     /// </summary>
     [Test]
-    public void BackwardSpikes_CppVsCs_ZeroErrors()
+    public void BackwardSpikes_NativeVsManaged_ZeroErrors()
     {
         int nPre = 3, nPost = 2;
         double[] w = [0.5, 0.3, 0.1, 0.2, 0.8, 0.4];
@@ -472,23 +472,23 @@ public class CxxNativeTests
         // Errors are already zero (default)
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardSpikes(w, inputTimes, inputSources, postSpikes, nPost,
             1.0, 0.02, 0.005, csGradient, new ScratchBuffers());
-        CxxNative.BackwardSpikes(inputTimes, inputSources,
+        NativeApi.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
 
         for (int i = 0; i < csGradient.Length; i++)
-            SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+            SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
     }
 
     /// <summary>
     /// Test Case 7: Single non-zero post-spike error (sparse error).
     /// </summary>
     [Test]
-    public void BackwardSpikes_CppVsCs_SparseError()
+    public void BackwardSpikes_NativeVsManaged_SparseError()
     {
         int nPre = 2, nPost = 3;
         double[] w = [20.0, 5.0, 8.0, 15.0, 3.0, 12.0];
@@ -506,16 +506,16 @@ public class CxxNativeTests
             postSpikes.SetError(i, i == 0 ? 1.0 : 0.0);
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardSpikes(w, inputTimes, inputSources, postSpikes, nPost,
             1.0, 0.02, 0.005, csGradient, buffers);
-        CxxNative.BackwardSpikes(inputTimes, inputSources,
+        NativeApi.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
 
         for (int i = 0; i < csGradient.Length; i++)
-            SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+            SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
     }
 
     // ========================================================================
@@ -527,7 +527,7 @@ public class CxxNativeTests
     /// Note: C++ implementation assumes n_maxima == n_post.
     /// </summary>
     [Test]
-    public void BackwardMaxima_CppVsCs_SingleSpikeSingleMaxima()
+    public void BackwardMaxima_NativeVsManaged_SingleSpikeSingleMaxima()
     {
         int nPre = 2, nPost = 1;
         double[] w = [0.5, 0.3, 0.1, 0.2];
@@ -540,24 +540,24 @@ public class CxxNativeTests
         double[] maximaErrors = [0.1];
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
             w, nPost, 0.02, 0.005, csGradient);
-        CxxNative.BackwardMaxima(inputTimes, inputSources,
+        NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient);
 
         for (int i = 0; i < csGradient.Length; i++)
-            SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+            SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
     }
 
     /// <summary>
     /// Test Case 2: Multiple inputs, single maxima.
     /// </summary>
     [Test]
-    public void BackwardMaxima_CppVsCs_MultipleInputsSingleMaxima()
+    public void BackwardMaxima_NativeVsManaged_MultipleInputsSingleMaxima()
     {
         int nPre = 3, nPost = 1;
         double[] w = [0.5, 0.3, 0.1, 0.2, 0.8, 0.4];
@@ -569,24 +569,24 @@ public class CxxNativeTests
         double[] maximaErrors = [0.1];
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
             w, nPost, 0.02, 0.005, csGradient);
-        CxxNative.BackwardMaxima(inputTimes, inputSources,
+        NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient);
 
         for (int i = 0; i < csGradient.Length; i++)
-            SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+            SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
     }
 
     /// <summary>
     /// Test Case 3: Multiple inputs, multiple maxima (all valid).
     /// </summary>
     [Test]
-    public void BackwardMaxima_CppVsCs_MultipleInputsMultipleMaxima()
+    public void BackwardMaxima_NativeVsManaged_MultipleInputsMultipleMaxima()
     {
         int nPre = 3, nPost = 2;
         double[] w = [0.5, 0.3, 0.1, 0.2, 0.8, 0.4];
@@ -599,17 +599,17 @@ public class CxxNativeTests
         double[] maximaErrors = [0.1, -0.2];
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
             w, nPost, 0.02, 0.005, csGradient);
-        CxxNative.BackwardMaxima(inputTimes, inputSources,
+        NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient);
 
         for (int i = 0; i < csGradient.Length; i++)
-            SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+            SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
     }
 
     /// <summary>
@@ -617,7 +617,7 @@ public class CxxNativeTests
     /// Note: C++ implementation processes maxima with negative t_vmax_bwd (doesn't skip).
     /// </summary>
     [Test]
-    public void BackwardMaxima_CppVsCs_MaximaAfterLastSpike()
+    public void BackwardMaxima_NativeVsManaged_MaximaAfterLastSpike()
     {
         int nPre = 2, nPost = 1;
         double[] w = [0.5, 0.3, 0.1, 0.2];
@@ -629,24 +629,24 @@ public class CxxNativeTests
         double[] maximaErrors = [0.1];
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
             w, nPost, 0.02, 0.005, csGradient);
-        CxxNative.BackwardMaxima(inputTimes, inputSources,
+        NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient);
 
         for (int i = 0; i < csGradient.Length; i++)
-            SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+            SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
     }
 
     /// <summary>
     /// Test Case 5: All maxima NaN → zero gradients.
     /// </summary>
     [Test]
-    public void BackwardMaxima_CppVsCs_AllNaNMaxima()
+    public void BackwardMaxima_NativeVsManaged_AllNaNMaxima()
     {
         int nPre = 2, nPost = 1;
         double[] w = [0.5, 0.3, 0.1, 0.2];
@@ -658,24 +658,24 @@ public class CxxNativeTests
         double[] maximaErrors = [0.0];
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
             w, nPost, 0.02, 0.005, csGradient);
-        CxxNative.BackwardMaxima(inputTimes, inputSources,
+        NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient);
 
         for (int i = 0; i < csGradient.Length; i++)
-            SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+            SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
     }
 
     /// <summary>
     /// Test Case 6: Large network with random maxima.
     /// </summary>
     [Test]
-    public void BackwardMaxima_CppVsCs_LargeNetwork()
+    public void BackwardMaxima_NativeVsManaged_LargeNetwork()
     {
         int nPre = 50, nPost = 20;
         double[] w = new double[nPre * nPost];
@@ -702,24 +702,24 @@ public class CxxNativeTests
         }
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
             w, nPost, 0.02, 0.005, csGradient);
-        CxxNative.BackwardMaxima(inputTimes, inputSources,
+        NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient);
 
         for (int i = 0; i < csGradient.Length; i++)
-            SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+            SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
     }
 
     /// <summary>
     /// Test Case 7: Different tau values (edge case).
     /// </summary>
     [Test]
-    public void BackwardMaxima_CppVsCs_DifferentTaus()
+    public void BackwardMaxima_NativeVsManaged_DifferentTaus()
     {
         int nPre = 2, nPost = 1;
         double[] w = [0.5, 0.3, 0.1, 0.2];
@@ -731,17 +731,17 @@ public class CxxNativeTests
         double[] maximaErrors = [0.1];
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
             w, nPost, 0.01, 0.003, csGradient);
-        CxxNative.BackwardMaxima(inputTimes, inputSources,
+        NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.01, 0.003, cppGradient);
+            w, nPre, nPost, 0.01, 0.003, nativeGradient);
 
         for (int i = 0; i < csGradient.Length; i++)
-            SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+            SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
     }
 
     // ========================================================================
@@ -755,7 +755,7 @@ public class CxxNativeTests
     /// These large prefactors could cause different rounding between C++ and C#.
     /// </summary>
     [Test]
-    public async Task ComputeSums_CppVsCs_NearEqualTaus()
+    public async Task ComputeSums_NativeVsManaged_NearEqualTaus()
     {
         int nPre = 2, nPost = 2;
         double[] w = [1.0, 0.5, 0.3, 2.0];
@@ -770,14 +770,14 @@ public class CxxNativeTests
         EventPropMath.ComputeSums(w, times, sources, tauMem, tauSyn, csSum0, csSum1, nPost,
             new double[times.Length], new double[times.Length]);
 
-        var cppSum0 = new double[(times.Length + 1) * nPost];
-        var cppSum1 = new double[(times.Length + 1) * nPost];
-        CxxNative.ComputeSums(w, nPre, nPost, times, sources, tauMem, tauSyn, cppSum0, cppSum1);
+        var nativeSum0 = new double[(times.Length + 1) * nPost];
+        var nativeSum1 = new double[(times.Length + 1) * nPost];
+        NativeApi.ComputeSums(w, nPre, nPost, times, sources, tauMem, tauSyn, nativeSum0, nativeSum1);
 
         for (int i = 0; i < csSum0.Length; i++)
         {
-            await Assert.That(csSum0[i]).IsCloseTo(cppSum0[i], Tolerance);
-            await Assert.That(csSum1[i]).IsCloseTo(cppSum1[i], Tolerance);
+            await Assert.That(csSum0[i]).IsCloseTo(nativeSum0[i], Tolerance);
+            await Assert.That(csSum1[i]).IsCloseTo(nativeSum1[i], Tolerance);
         }
     }
 
@@ -786,7 +786,7 @@ public class CxxNativeTests
     /// Exercises the full forward+backward pipeline with minimal data.
     /// </summary>
     [Test]
-    public void BackwardSpikes_CppVsCs_SingleInputSinglePost()
+    public void BackwardSpikes_NativeVsManaged_SingleInputSinglePost()
     {
         int nPre = 1, nPost = 1;
         double[] w = [20.0];
@@ -805,15 +805,15 @@ public class CxxNativeTests
             postSpikes.SetError(i, 1.0);
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardSpikes(w, inputTimes, inputSources, postSpikes, nPost,
             1.0, 0.02, 0.005, csGradient, buffers);
-        CxxNative.BackwardSpikes(inputTimes, inputSources,
+        NativeApi.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
 
-        SyncAssert.That(csGradient[0]).IsCloseTo(cppGradient[0], 1e-10);
+        SyncAssert.That(csGradient[0]).IsCloseTo(nativeGradient[0], 1e-10);
     }
 
     /// <summary>
@@ -821,7 +821,7 @@ public class CxxNativeTests
     /// A very strong weight causes rapid successive post-spikes from one input spike.
     /// </summary>
     [Test]
-    public async Task ComputeSpikes_CppVsCs_SingleNeuronMultipleSpikes()
+    public async Task ComputeSpikes_NativeVsManaged_SingleNeuronMultipleSpikes()
     {
         int nPost = 1, nPre = 1;
         double[] w = [80.0]; // Very strong — causes multiple spikes
@@ -831,17 +831,17 @@ public class CxxNativeTests
 
         var csResult = EventPropMath.ComputeSpikes(w, [0.05], [0], nPost, 1.0, 0.02, 0.005, buffers);
 
-        var cppTimes = new double[16];
-        var cppSources = new int[16];
-        var cppCurrents = new double[16];
-        int nCppSpikes = CxxNative.ComputeSpikes(w, nPre, nPost, [0.05], [0], 1.0, 0.02, 0.005,
-            cppTimes, cppSources, cppCurrents);
+        var nativeTimes = new double[16];
+        var nativeSources = new int[16];
+        var nativeCurrents = new double[16];
+        int nNativeSpikes = NativeApi.ComputeSpikes(w, nPre, nPost, [0.05], [0], 1.0, 0.02, 0.005,
+            nativeTimes, nativeSources, nativeCurrents);
 
-        await Assert.That(csResult.NSpikes).IsEqualTo(nCppSpikes);
+        await Assert.That(csResult.NSpikes).IsEqualTo(nNativeSpikes);
         for (int i = 0; i < csResult.NSpikes; i++)
         {
-            await Assert.That(csResult.Times[i]).IsCloseTo(cppTimes[i], Tolerance);
-            await Assert.That(csResult.Sources[i]).IsEqualTo(cppSources[i]);
+            await Assert.That(csResult.Times[i]).IsCloseTo(nativeTimes[i], Tolerance);
+            await Assert.That(csResult.Sources[i]).IsEqualTo(nativeSources[i]);
         }
     }
 
@@ -854,7 +854,7 @@ public class CxxNativeTests
     /// Tests the t_vmax_bwd > t_bwd boundary condition in BackwardMaxima.
     /// </summary>
     [Test]
-    public void BackwardMaxima_CppVsCs_MaximaBeforeAllSpikes()
+    public void BackwardMaxima_NativeVsManaged_MaximaBeforeAllSpikes()
     {
         int nPre = 2, nPost = 1;
         double[] w = [0.5, 0.3, 0.1, 0.2];
@@ -867,18 +867,18 @@ public class CxxNativeTests
         double[] maximaErrors = [0.1];
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
             w, nPost, 0.02, 0.005, csGradient);
-        CxxNative.BackwardMaxima(inputTimes, inputSources,
+        NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient);
 
         // Both should produce zero gradients (maxima before any input spike)
         for (int i = 0; i < csGradient.Length; i++)
-            SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+            SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
     }
 
     /// <summary>
@@ -886,7 +886,7 @@ public class CxxNativeTests
     /// Neurons with all-zero weight rows should produce zero gradients.
     /// </summary>
     [Test]
-    public void BackwardSpikes_CppVsCs_ZeroWeightRows()
+    public void BackwardSpikes_NativeVsManaged_ZeroWeightRows()
     {
         int nPre = 4, nPost = 2;
         // Neurons 1 and 3 have all-zero weights
@@ -909,13 +909,13 @@ public class CxxNativeTests
             postSpikes.SetError(i, 1.0);
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardSpikes(w, inputTimes, inputSources, postSpikes, nPost,
             1.0, 0.02, 0.005, csGradient, buffers);
-        CxxNative.BackwardSpikes(inputTimes, inputSources,
+        NativeApi.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
 
         // All neurons should have matching gradients (including zero-weight rows)
         // Note: Zero weights don't necessarily mean zero gradients because the adjoint
@@ -927,7 +927,7 @@ public class CxxNativeTests
             for (int nrn = 0; nrn < nPost; nrn++)
             {
                 int idx = src * nPost + nrn;
-                SyncAssert.That(csGradient[idx]).IsCloseTo(cppGradient[idx], 1e-10);
+                SyncAssert.That(csGradient[idx]).IsCloseTo(nativeGradient[idx], 1e-10);
             }
     }
 
@@ -935,7 +935,7 @@ public class CxxNativeTests
     /// Maxima exactly at input spike time — tests floating-point equality boundary.
     /// </summary>
     [Test]
-    public void BackwardMaxima_CppVsCs_MaximaAtSpikeTime()
+    public void BackwardMaxima_NativeVsManaged_MaximaAtSpikeTime()
     {
         int nPre = 2, nPost = 1;
         double[] w = [0.5, 0.3, 0.1, 0.2];
@@ -948,17 +948,17 @@ public class CxxNativeTests
         double[] maximaErrors = [0.1];
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
             w, nPost, 0.02, 0.005, csGradient);
-        CxxNative.BackwardMaxima(inputTimes, inputSources,
+        NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient);
 
         for (int i = 0; i < csGradient.Length; i++)
-            SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+            SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
     }
 
     // ========================================================================
@@ -970,7 +970,7 @@ public class CxxNativeTests
     /// Tests the base case of sum computation with one spike.
     /// </summary>
     [Test]
-    public async Task ComputeSums_CppVsCs_SingleInputSpike()
+    public async Task ComputeSums_NativeVsManaged_SingleInputSpike()
     {
         int nPre = 1, nPost = 2;
         double[] w = [0.5, 0.3];
@@ -982,14 +982,14 @@ public class CxxNativeTests
         EventPropMath.ComputeSums(w, times, sources, 0.02, 0.005, csSum0, csSum1, nPost,
             new double[times.Length], new double[times.Length]);
 
-        var cppSum0 = new double[(times.Length + 1) * nPost];
-        var cppSum1 = new double[(times.Length + 1) * nPost];
-        CxxNative.ComputeSums(w, nPre, nPost, times, sources, 0.02, 0.005, cppSum0, cppSum1);
+        var nativeSum0 = new double[(times.Length + 1) * nPost];
+        var nativeSum1 = new double[(times.Length + 1) * nPost];
+        NativeApi.ComputeSums(w, nPre, nPost, times, sources, 0.02, 0.005, nativeSum0, nativeSum1);
 
         for (int i = 0; i < csSum0.Length; i++)
         {
-            await Assert.That(csSum0[i]).IsCloseTo(cppSum0[i], Tolerance);
-            await Assert.That(csSum1[i]).IsCloseTo(cppSum1[i], Tolerance);
+            await Assert.That(csSum0[i]).IsCloseTo(nativeSum0[i], Tolerance);
+            await Assert.That(csSum1[i]).IsCloseTo(nativeSum1[i], Tolerance);
         }
     }
 
@@ -998,7 +998,7 @@ public class CxxNativeTests
     /// Tests the early-return path when there are no post-spike errors to propagate.
     /// </summary>
     [Test]
-    public void BackwardSpikes_CppVsCs_NoPostSpikes()
+    public void BackwardSpikes_NativeVsManaged_NoPostSpikes()
     {
         int nPre = 3, nPost = 2;
         double[] w = [0.5, 0.3, 0.1, 0.2, 0.8, 0.4];
@@ -1015,19 +1015,19 @@ public class CxxNativeTests
 
         // No post-spikes expected — gradients should be all zeros
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardSpikes(weakW, inputTimes, inputSources, postSpikes, nPost,
             1.0, 0.02, 0.005, csGradient, buffers);
-        CxxNative.BackwardSpikes(inputTimes, inputSources,
+        NativeApi.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            weakW, nPre, nPost, 1.0, 0.02, 0.005, cppGradient);
+            weakW, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
 
         // Both should produce zero gradients (no post-spike activity)
         for (int i = 0; i < csGradient.Length; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(0.0, 1e-14);
-        for (int i = 0; i < cppGradient.Length; i++)
-            SyncAssert.That(cppGradient[i]).IsCloseTo(0.0, 1e-14);
+        for (int i = 0; i < nativeGradient.Length; i++)
+            SyncAssert.That(nativeGradient[i]).IsCloseTo(0.0, 1e-14);
     }
 
     /// <summary>
@@ -1036,7 +1036,7 @@ public class CxxNativeTests
     /// and produces all-zero gradients.
     /// </summary>
     [Test]
-    public void BackwardMaxima_CppVsCs_NoValidMaxima()
+    public void BackwardMaxima_NativeVsManaged_NoValidMaxima()
     {
         int nPre = 2, nPost = 1;
         double[] w = [0.5, 0.3, 0.1, 0.2];
@@ -1049,18 +1049,18 @@ public class CxxNativeTests
         double[] maximaErrors = [0.1];
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
             w, nPost, 0.02, 0.005, csGradient);
-        CxxNative.BackwardMaxima(inputTimes, inputSources,
+        NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient);
 
         // Both should produce zero gradients (maxima before any input spike)
         for (int i = 0; i < csGradient.Length; i++)
-            SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+            SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
     }
 
     /// <summary>
@@ -1069,7 +1069,7 @@ public class CxxNativeTests
     /// Gradients should remain zero (nothing to update).
     /// </summary>
     [Test]
-    public void BackwardSpikes_CppVsCs_NoInputSpikes()
+    public void BackwardSpikes_NativeVsManaged_NoInputSpikes()
     {
         int nPre = 2, nPost = 1;
         double[] w = [0.5, 0.3, 0.1, 0.2];
@@ -1084,7 +1084,7 @@ public class CxxNativeTests
         double[] postErrors = [1.0];
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         // C# backward pass with empty input spikes
         var csPostSpikes = new SpikesData(postTimes, postSources, postCurrents);
@@ -1093,20 +1093,20 @@ public class CxxNativeTests
             1.0, 0.02, 0.005, csGradient, buffers);
 
         // C++ backward pass with empty input spikes
-        CxxNative.BackwardSpikes(inputTimes, inputSources,
+        NativeApi.BackwardSpikes(inputTimes, inputSources,
             postTimes, postSources, postCurrents, postErrors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
 
         // Both should produce zero gradients (no input spikes to propagate through)
         for (int i = 0; i < csGradient.Length; i++)
-            SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+            SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
     }
 
     /// <summary>
     /// Large tau values — tests numerical stability with extreme time constants.
     /// </summary>
     [Test]
-    public async Task ComputeSums_CppVsCs_LargeTauValues()
+    public async Task ComputeSums_NativeVsManaged_LargeTauValues()
     {
         int nPre = 2, nPost = 1;
         double[] w = [0.5];
@@ -1121,14 +1121,14 @@ public class CxxNativeTests
         EventPropMath.ComputeSums(w, times, sources, tauMem, tauSyn, csSum0, csSum1, nPost,
             new double[times.Length], new double[times.Length]);
 
-        var cppSum0 = new double[(times.Length + 1) * nPost];
-        var cppSum1 = new double[(times.Length + 1) * nPost];
-        CxxNative.ComputeSums(w, nPre, nPost, times, sources, tauMem, tauSyn, cppSum0, cppSum1);
+        var nativeSum0 = new double[(times.Length + 1) * nPost];
+        var nativeSum1 = new double[(times.Length + 1) * nPost];
+        NativeApi.ComputeSums(w, nPre, nPost, times, sources, tauMem, tauSyn, nativeSum0, nativeSum1);
 
         for (int i = 0; i < csSum0.Length; i++)
         {
-            await Assert.That(csSum0[i]).IsCloseTo(cppSum0[i], Tolerance);
-            await Assert.That(csSum1[i]).IsCloseTo(cppSum1[i], Tolerance);
+            await Assert.That(csSum0[i]).IsCloseTo(nativeSum0[i], Tolerance);
+            await Assert.That(csSum1[i]).IsCloseTo(nativeSum1[i], Tolerance);
         }
     }
 
@@ -1136,7 +1136,7 @@ public class CxxNativeTests
     /// Very small tau values — tests numerical stability with fast dynamics.
     /// </summary>
     [Test]
-    public async Task ComputeSums_CppVsCs_SmallTauValues()
+    public async Task ComputeSums_NativeVsManaged_SmallTauValues()
     {
         int nPre = 2, nPost = 1;
         double[] w = [0.5];
@@ -1151,14 +1151,14 @@ public class CxxNativeTests
         EventPropMath.ComputeSums(w, times, sources, tauMem, tauSyn, csSum0, csSum1, nPost,
             new double[times.Length], new double[times.Length]);
 
-        var cppSum0 = new double[(times.Length + 1) * nPost];
-        var cppSum1 = new double[(times.Length + 1) * nPost];
-        CxxNative.ComputeSums(w, nPre, nPost, times, sources, tauMem, tauSyn, cppSum0, cppSum1);
+        var nativeSum0 = new double[(times.Length + 1) * nPost];
+        var nativeSum1 = new double[(times.Length + 1) * nPost];
+        NativeApi.ComputeSums(w, nPre, nPost, times, sources, tauMem, tauSyn, nativeSum0, nativeSum1);
 
         for (int i = 0; i < csSum0.Length; i++)
         {
-            await Assert.That(csSum0[i]).IsCloseTo(cppSum0[i], Tolerance);
-            await Assert.That(csSum1[i]).IsCloseTo(cppSum1[i], Tolerance);
+            await Assert.That(csSum0[i]).IsCloseTo(nativeSum0[i], Tolerance);
+            await Assert.That(csSum1[i]).IsCloseTo(nativeSum1[i], Tolerance);
         }
     }
 
@@ -1166,7 +1166,7 @@ public class CxxNativeTests
     /// BackwardSpikes with very large weight values — tests numerical stability.
     /// </summary>
     [Test]
-    public void BackwardSpikes_CppVsCs_LargeWeights()
+    public void BackwardSpikes_NativeVsManaged_LargeWeights()
     {
         int nPre = 2, nPost = 1;
         double[] w = [50.0];
@@ -1184,15 +1184,15 @@ public class CxxNativeTests
             postSpikes.SetError(i, 1.0);
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardSpikes(w, [0.05], [0], postSpikes, nPost,
             1.0, 0.02, 0.005, csGradient, buffers);
-        CxxNative.BackwardSpikes([0.05], [0],
+        NativeApi.BackwardSpikes([0.05], [0],
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
 
-        SyncAssert.That(csGradient[0]).IsCloseTo(cppGradient[0], 1e-10);
+        SyncAssert.That(csGradient[0]).IsCloseTo(nativeGradient[0], 1e-10);
     }
 
     /// <summary>
@@ -1200,7 +1200,7 @@ public class CxxNativeTests
     /// Tests that each neuron's gradient is computed independently and correctly.
     /// </summary>
     [Test]
-    public void BackwardMaxima_CppVsCs_MultipleValidAcrossNeurons()
+    public void BackwardMaxima_NativeVsManaged_MultipleValidAcrossNeurons()
     {
         int nPre = 2, nPost = 3;
         double[] w = [0.5, 0.3,
@@ -1215,16 +1215,16 @@ public class CxxNativeTests
         double[] maximaErrors = [0.1, -0.2, 0.3];
 
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
-        var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var nativeGradient = new double[nPre * nPost]; Array.Fill(nativeGradient, 0.0);
 
         EventPropMath.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
             w, nPost, 0.02, 0.005, csGradient);
-        CxxNative.BackwardMaxima(inputTimes, inputSources,
+        NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient);
 
         for (int i = 0; i < csGradient.Length; i++)
-            SyncAssert.That(csGradient[i]).IsCloseTo(cppGradient[i], 1e-10);
+            SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
     }
 }

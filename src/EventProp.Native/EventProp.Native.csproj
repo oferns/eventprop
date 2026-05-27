@@ -9,7 +9,7 @@
 
   <!-- Copy native library to output directory -->
   <ItemGroup>
-    <NativeLibrary Include="..\cpp\build\libeventprop_c_api.dylib" Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <NativeLibrary Include="..\EventProp.C\libeventprop_c_api.dylib" Condition="$([MSBuild]::IsOSPlatform('OSX'))">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </NativeLibrary>
   </ItemGroup>

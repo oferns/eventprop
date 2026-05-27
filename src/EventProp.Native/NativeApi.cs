@@ -3,11 +3,10 @@ using System.Runtime.InteropServices;
 namespace CW.EventProp;
 
 /// <summary>
-/// P/Invoke bindings for the original EventProp C++ library via our thin C wrapper.
-/// The native library (libeventprop_c_api.dylib) is built from the original
-/// eventprop_cpp.cpp with pybind11 removed, wrapped in extern "C" flat-array functions.
+/// P/Invoke bindings for the EventProp native C library (libeventprop_c_api).
+/// Pure C implementation — no external dependencies, zero-allocation hot paths.
 /// </summary>
-public static class CxxNative
+public static class NativeApi
 {
     private const string LibName = "eventprop_c_api";
 
@@ -21,7 +20,7 @@ public static class CxxNative
         double tauMem, double tauSyn,
         double[] sum0Out, double[] sum1Out);
 
-    /// <summary>Call compute_sums via native C++ library.</summary>
+    /// <summary>Call compute_sums via native C library.</summary>
     public static void ComputeSums(
         double[] w, int nPre, int nPost,
         double[] times, int[] sources,
@@ -41,7 +40,7 @@ public static class CxxNative
         double vTh, double tauMem, double tauSyn,
         double[] outTimes, int[] outSources, double[] outCurrents);
 
-    /// <summary>Call compute_spikes via native C++ library. Returns number of output spikes.</summary>
+    /// <summary>Call compute_spikes via native C library. Returns number of output spikes.</summary>
     public static int ComputeSpikes(
         double[] w, int nPre, int nPost,
         double[] times, int[] sources,
@@ -61,7 +60,7 @@ public static class CxxNative
         double tauMem, double tauSyn,
         double[] maximaTimesOut, double[] maximaValuesOut);
 
-    /// <summary>Call compute_maxima via native C++ library.</summary>
+    /// <summary>Call compute_maxima via native C library.</summary>
     public static void ComputeMaxima(
         double[] w, int nPre, int nPost,
         double[] times, int[] sources,
@@ -83,7 +82,7 @@ public static class CxxNative
         double vTh, double tauMem, double tauSyn,
         double[] gradient);
 
-    /// <summary>Call backward (Spikes loss) via native C++ library.</summary>
+    /// <summary>Call backward (Spikes loss) via native C library.</summary>
     public static void BackwardSpikes(
         double[] inputTimes, int[] inputSources,
         double[] postTimes, int[] postSources, double[] postCurrents,
@@ -110,7 +109,7 @@ public static class CxxNative
         double tauMem, double tauSyn,
         double[] gradient);
 
-    /// <summary>Call backward (Maxima loss) via native C++ library.</summary>
+    /// <summary>Call backward (Maxima loss) via native C library.</summary>
     public static void BackwardMaxima(
         double[] inputTimes, int[] inputSources,
         double[] maximaTimes, double[] maximaValues, double[] maximaErrors,

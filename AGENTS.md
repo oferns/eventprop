@@ -32,10 +32,15 @@ eventprop.net/
 
 ```bash
 # Run tests
-cd src/EventProp.Tests && dotnet run -- --report-trx
+cd src/EventProp.Tests && dotnet run --
 
-# Run with coverage
-cd src/EventProp.Tests && dotnet run -- --coverage --coverage-output-format=cobertura
+# Run with coverage (output → bin/Debug/net10.0/TestResults/coverage.cobertura.xml)
+dotnet run --project src/EventProp.Tests -- --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
+
+# Generate HTML coverage report
+export PATH="$PATH:$HOME/.dotnet/tools"
+reportgenerator -reports:src/EventProp.Tests/bin/Debug/net10.0/TestResults/*.cobertura.xml \
+  -targetdir:coverage-report -reporttypes:Html
 
 # Generate HTML coverage report
 export PATH="$PATH:$HOME/.dotnet/tools"
