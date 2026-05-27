@@ -84,6 +84,20 @@ void eventprop_compute_maxima(const double* w, int n_pre, int n_post,
                               double tau_mem, double tau_syn,
                               double* maxima_times, double* maxima_values);
 
+/**
+ * Backward pass for maxima-based loss.
+ *
+ * Propagates error signals from membrane potential maxima backward through the
+ * input spike timeline. Gradient is accumulated in-place (caller zero-initializes).
+ */
+void eventprop_backward_maxima(const double* input_times, const int32_t* input_sources,
+                               int n_input_spikes,
+                               const double* maxima_times, const double* maxima_values,
+                               const double* maxima_errors, int n_maxima,
+                               const double* w, int n_pre, int n_post,
+                               double tau_mem, double tau_syn,
+                               double* gradient);
+
 #ifdef __cplusplus
 }
 #endif

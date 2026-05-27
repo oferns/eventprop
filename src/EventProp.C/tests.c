@@ -31,8 +31,11 @@ static void gen_data(int n_pre, int n_post, int n_spikes,
 {
     for (int i = 0; i < n_pre * n_post; i++)
         w[i] = 5.0 + sin((double)i * 0.1);
+    /* Spread spikes over [0.01, 0.1] so maxima are near input times.
+     * This keeps exp(-dt/tau_syn) from underflowing in BackwardMaxima. */
+    double t_end = fmin(0.1, (double)n_spikes / 50.0);
     for (int i = 0; i < n_spikes; i++)
-        times[i] = (i + 1.0) / (n_spikes + 1.0);
+        times[i] = 0.01 + (i + 1.0) / (n_spikes + 1.0) * (t_end - 0.01);
     for (int i = 0; i < n_spikes; i++)
         sources[i] = i % n_pre;
 }
@@ -199,6 +202,121 @@ static void test_compute_maxima(void)
     TEST_END;
 }
 
+static void test_backward_maxima(void)
+{
+    TEST("BackwardMaxima Tiny (10×5, 20 spikes)");
+    int n_pre = 10, n_post = 5, n_spikes = 20;
+    double w[10*5], times[20]; int32_t sources[20];
+    gen_data(n_pre, n_post, n_spikes, w, times, sources);
+
+    /* Forward: compute maxima */
+    double* max_times = malloc(n_post * sizeof(double));
+    double* max_values = malloc(n_post * sizeof(double));
+    eventprop_compute_maxima(w, n_pre, n_post,
+                              times, sources, n_spikes,
+                              0.02, 0.005, max_times, max_values);
+
+    /* Set up errors (all 1.0) */
+    double* max_errors = malloc(n_post * sizeof(double));
+    for (int i = 0; i < n_post; i++) max_errors[i] = 1.0;
+
+    /* Backward pass */
+    double* grad = calloc(n_pre * n_post, sizeof(double));
+    eventprop_backward_maxima(times, sources, n_spikes,
+                               max_times, max_values, max_errors, n_post,
+                               w, n_pre, n_post,
+                               0.02, 0.005, grad);
+
+    /* No NaN/Inf in gradients */
+    for (int i = 0; i < n_pre * n_post; i++) {
+        ASSERT(!isnan(grad[i]), "grad NaN");
+        ASSERT(!isinf(grad[i]), "grad Inf");
+    }
+
+    /* At least some gradient should be non-zero */
+    double grad_sum = 0.0;
+    for (int i = 0; i < n_pre * n_post; i++) grad_sum += fabs(grad[i]);
+    ASSERT(grad_sum > 1e-12, "all gradients zero");
+
+    free(max_times); free(max_values); free(max_errors); free(grad);
+    TEST_END;
+}
+
+static void test_backward_maxima_zero_weights(void)
+{
+    TEST("BackwardMaxima ZeroWeights → ZeroGradients");
+    int n_pre = 10, n_post = 5, n_spikes = 20;
+    double w[10*5], times[20]; int32_t sources[20];
+    memset(w, 0, sizeof(w)); /* all-zero weights */
+    for (int i = 0; i < n_spikes; i++) {
+        times[i] = (i + 1.0) / (n_spikes + 1.0);
+        sources[i] = i % n_pre;
+    }
+
+    double* max_times = malloc(n_post * sizeof(double));
+    double* max_values = malloc(n_post * sizeof(double));
+    eventprop_compute_maxima(w, n_pre, n_post,
+                              times, sources, n_spikes,
+                              0.02, 0.005, max_times, max_values);
+
+    /* With zero weights all maxima should be NaN or -Inf */
+    double* max_errors = malloc(n_post * sizeof(double));
+    for (int i = 0; i < n_post; i++) max_errors[i] = 1.0;
+
+    double* grad = calloc(n_pre * n_post, sizeof(double));
+    eventprop_backward_maxima(times, sources, n_spikes,
+                               max_times, max_values, max_errors, n_post,
+                               w, n_pre, n_post,
+                               0.02, 0.005, grad);
+
+    /* All gradients should be zero (NaN maxima are skipped) */
+    for (int i = 0; i < n_pre * n_post; i++) {
+        ASSERT_NEAR(grad[i], 0.0, EPSILON);
+    }
+
+    free(max_times); free(max_values); free(max_errors); free(grad);
+    TEST_END;
+}
+
+static void test_backward_maxima_linear_scale(void)
+{
+    TEST("BackwardMaxima GradientScalesLinearly");
+    int n_pre = 10, n_post = 5, n_spikes = 20;
+    double w[10*5], times[20]; int32_t sources[20];
+    gen_data(n_pre, n_post, n_spikes, w, times, sources);
+
+    /* Forward: compute maxima */
+    double* max_times = malloc(n_post * sizeof(double));
+    double* max_values = malloc(n_post * sizeof(double));
+    eventprop_compute_maxima(w, n_pre, n_post,
+                              times, sources, n_spikes,
+                              0.02, 0.005, max_times, max_values);
+
+    /* Backward with errors=1.0 */
+    double* max_errors = malloc(n_post * sizeof(double));
+    for (int i = 0; i < n_post; i++) max_errors[i] = 1.0;
+    double* grad1 = calloc(n_pre * n_post, sizeof(double));
+    eventprop_backward_maxima(times, sources, n_spikes,
+                               max_times, max_values, max_errors, n_post,
+                               w, n_pre, n_post, 0.02, 0.005, grad1);
+
+    /* Backward with errors=2.0 */
+    for (int i = 0; i < n_post; i++) max_errors[i] = 2.0;
+    double* grad2 = calloc(n_pre * n_post, sizeof(double));
+    eventprop_backward_maxima(times, sources, n_spikes,
+                               max_times, max_values, max_errors, n_post,
+                               w, n_pre, n_post, 0.02, 0.005, grad2);
+
+    /* grad2 should be exactly 2× grad1 */
+    for (int i = 0; i < n_pre * n_post; i++) {
+        ASSERT_NEAR(grad2[i], 2.0 * grad1[i], EPSILON);
+    }
+
+    free(max_times); free(max_values); free(max_errors);
+    free(grad1); free(grad2);
+    TEST_END;
+}
+
 /* ── Main ─────────────────────────────────────────────────────────── */
 
 int main(void)
@@ -211,6 +329,9 @@ int main(void)
     test_compute_spikes_medium();
     test_backward_spikes();
     test_compute_maxima();
+    test_backward_maxima();
+    test_backward_maxima_zero_weights();
+    test_backward_maxima_linear_scale();
 
     printf("\n=================================\n");
     printf("Results: %d/%d passed, %d failed\n", tests_passed, tests_run, tests_failed);

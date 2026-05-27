@@ -419,3 +419,43 @@ void eventprop_compute_maxima(const double* w, int n_pre, int n_post,
 
     free(sum0); free(sum1);
 }
+
+/* ── BackwardMaxima: adjoint method with maxima-based loss ─────────── */
+
+void eventprop_backward_maxima(const double* input_times, const int32_t* input_sources,
+                               int n_input_spikes,
+                               const double* maxima_times, const double* maxima_values,
+                               const double* maxima_errors, int n_maxima,
+                               const double* w, int n_pre, int n_post,
+                               double tau_mem, double tau_syn,
+                               double* gradient)
+{
+    (void)w; /* Not used — gradient depends on maximaTimes and errors only */
+
+    if (n_input_spikes == 0 || n_maxima == 0)
+        return;
+
+    double largest_time = input_times[n_input_spikes - 1];
+    double k_bwd_prefactor = tau_mem / (tau_mem - tau_syn);
+
+    /* Sweep backward through input spikes */
+    for (int spike_idx = n_input_spikes - 1; spike_idx >= 0; spike_idx--) {
+        double t_bwd = largest_time - input_times[spike_idx];
+
+        for (int max_idx = 0; max_idx < n_maxima; max_idx++) {
+            if (isnan(maxima_times[max_idx]))
+                continue;
+
+            double t_vmax_bwd = largest_time - maxima_times[max_idx];
+            if (t_vmax_bwd > t_bwd)
+                continue;
+
+            double lambda_v = -exp(-(t_bwd - t_vmax_bwd) / tau_mem) * maxima_errors[max_idx] / tau_mem;
+            double k_bwd_val = k_bwd_prefactor * (exp(-t_bwd / tau_mem) - exp(-t_bwd / tau_syn));
+            double lambda_i = -k_bwd_val * maxima_errors[max_idx] / tau_mem;
+
+            int source_nrn = input_sources[spike_idx];
+            gradient[source_nrn * n_post + max_idx] -= tau_syn * lambda_i;
+        }
+    }
+}
