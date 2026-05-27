@@ -1,0 +1,6 @@
+# Build artifacts
+test_runner*
+*.o
+
+# Debug symbols (macOS)
+*.dSYM/

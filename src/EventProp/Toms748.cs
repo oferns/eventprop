@@ -79,8 +79,9 @@ public static class Toms748
                         double mVal = 0.5 * (b - a);
                         bool smallStep = Math.Abs(s - b) < mVal;
 
-                        // Stagnation check: if previous step was bisection, force bisection
-                        bool prevWasBisect = iter == 0 || Math.Abs(d - mVal) < tolerance * 100;
+                        // Stagnation check: if the step size is comparable to bisection,
+                        // prefer bisection for guaranteed convergence.
+                        bool prevWasBisect = Math.Abs(d - mVal) < tolerance * 100;
 
                         if (inBracket && smallStep && !prevWasBisect)
                             useBisection = false;
@@ -125,8 +126,9 @@ public static class Toms748
             // Track step size for stagnation detection in next iteration
             d = b - prevB;
         }
-    
-    // Should never reach here if bracketing is maintained correctly
+
+    // MaxIterations exceeded — return the best estimate found so far.
+    // This should not happen for well-behaved functions with valid brackets.
     return b;
 }
 }

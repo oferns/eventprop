@@ -83,12 +83,8 @@ public sealed class ScratchBuffers : IDisposable
         if (TransposeW.Length < nPre * nNeurons)
             TransposeW = new double[nPre * nNeurons];
 
-        // Voltage trace: we don't know t_max ahead of time, allocate a reasonable default
-        if (VoltageTrace.Length < 10000)
-            VoltageTrace = new double[10000];
-
-        if (LambdaITrace.Length < 10000)
-            LambdaITrace = new double[10000];
+        // VoltageTrace and LambdaITrace are reserved for future algorithms.
+        // They are not used by the current EventProp forward/backward passes.
 
         if (SpikeErrors.Length < nSpikes)
             SpikeErrors = new double[nSpikes];

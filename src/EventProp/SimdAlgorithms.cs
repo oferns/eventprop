@@ -138,7 +138,9 @@ public static class SimdAlgorithms
     /// <summary>Horizontal sum of Vector256<double> elements.</summary>
     static double HorizontalSum(Vector256<double> v)
     {
-        // ARM64 SVE: Count=3, AVX-512: Count=4. Scalar loop is fine for 3-4 elements.
+        // Vector256<double>.Count is runtime-determined:
+        //   AVX-512: 8, AVX2/NEON: 4, ARM64 SVE: varies (hardware-dependent).
+        // Scalar loop is fine for 3-8 elements.
         double sum = 0.0;
         for (int i = 0; i < Vector256<double>.Count; i++)
             sum += v.GetElement(i);

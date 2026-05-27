@@ -140,7 +140,7 @@ public static class EventPropMath
     /// <summary>
     /// Forward pass: predict post-synaptic spike times given input spikes and weights.
     /// Uses the α-function voltage model with Toms748 root-finding for threshold crossings.
-    /// Allocation-free when scratch buffers are provided and sized appropriately.
+    /// Zero-internal-allocation when scratch buffers are provided (return arrays unavoidable).
     /// </summary>
     public static SpikesData ComputeSpikes(
         ReadOnlySpan<double> w,
@@ -365,7 +365,8 @@ public static class EventPropMath
     /// Adjoint method backward pass for spike-time-based loss.
     /// Computes weight gradients and input spike errors by propagating λ_v (membrane)
     /// and λ_i (synaptic) adjoints backward through the merged input/post-spike timeline.
-    /// Zero-allocation when scratch buffers are provided and sized appropriately.
+    /// Zero-internal-allocation when scratch buffers are provided (MergedSpike[] and error
+    /// arrays use pre-allocated ScratchBuffers; return values are in-place via gradient span).
     /// </summary>
     public static void BackwardSpikes(
         ReadOnlySpan<double> w,
@@ -516,7 +517,7 @@ public static class EventPropMath
         ReadOnlySpan<double> inputTimes,
         ReadOnlySpan<int> inputSources,
         ReadOnlySpan<double> maximaTimes,
-        ReadOnlySpan<double> maximaValues,
+        ReadOnlySpan<double> maximaValues, // Not used — gradient depends on maximaTimes and errors only
         ReadOnlySpan<double> maximaErrors,
         ReadOnlySpan<double> w,
         int nPost,

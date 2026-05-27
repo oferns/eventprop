@@ -32,8 +32,7 @@ public class ScratchBuffersTests
         // TransposeW should be nPre * nNeurons
         await Assert.That(buffers.TransposeW.Length).IsGreaterThanOrEqualTo(nPre * nNeurons);
 
-        // Voltage trace should be at least 10000
-        await Assert.That(buffers.VoltageTrace.Length).IsGreaterThanOrEqualTo(10000);
+        // VoltageTrace and LambdaITrace are reserved for future algorithms (not currently allocated).
 
         // Spike buffers should be allocated
         await Assert.That(buffers.SpikeErrors.Length).IsGreaterThanOrEqualTo(nSpikes);
