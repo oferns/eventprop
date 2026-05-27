@@ -393,7 +393,8 @@ public static class EventPropMath
         // Size for max(nPre, nPost) since spikeSource can be either pre- or post-synaptic index
         int maxNeurons = nPre > nPost ? nPre : nPost;
         buffers.EnsureCapacity(nNeurons: maxNeurons, nPre: nPre, nSpikes: totalSpikes);
-        buffers.Clear();
+        // NOTE: no buffers.Clear() — BackwardSpikes initializes all buffers it uses explicitly.
+        // Clearing 3.5 MB of scratch space is wasted work when every buffer is immediately overwritten.
 
         // Merge input + post-spike indices and sort by time descending.
         // Pre-compute times into a struct array so the comparer has no ref-capture dependency.
