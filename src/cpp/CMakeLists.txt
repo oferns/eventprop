@@ -8,6 +8,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Eigen3 REQUIRED NO_MODULE)
 
 # Optional OpenMP for parallelism
+# On macOS, Homebrew's libomp is not auto-discovered by CMake.
+if(APPLE)
+    set(CMAKE_PREFIX_PATH "/opt/homebrew/opt/libomp;/usr/local/opt/libomp" CACHE STRING "" FORCE)
+endif()
 find_package(OpenMP)
 
 add_library(eventprop_c_api SHARED eventprop_c_api.cpp)

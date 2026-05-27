@@ -10,6 +10,12 @@
 #include <thread>
 #include <vector>
 
+#ifdef __APPLE__
+#include <omp.h>
+#else
+#include <omp.h>
+#endif
+
 // ============================================================
 // Parameters (match .NET benchmarks exactly)
 // ============================================================
@@ -357,5 +363,127 @@ TRAININGLOOP_BENCH(Small,   50,   20,  100);
 TRAININGLOOP_BENCH(Medium,  200,  80,  500);
 TRAININGLOOP_BENCH(Large,   500,  200, 1000);
 TRAININGLOOP_BENCH(XL,      2000, 500, 5000);
+
+// ============================================================
+// Multi-threading comparison benchmarks
+// Runs each algorithm/size with 1 thread vs. all cores.
+// Requires OpenMP (brew install libomp on macOS).
+// ============================================================
+
+// Multi-threading comparison: 1 thread vs. all cores (EP_BENCH_THREADS from CMake)
+#ifndef EP_BENCH_THREADS
+#define EP_BENCH_THREADS 8
+#endif
+
+static void BM_ComputeSums_MultiThreaded(benchmark::State& state, const ProblemSize& sz)
+{
+    std::vector<double> w(sz.n_pre * sz.n_post);
+    std::vector<double> times(sz.n_spikes);
+    std::vector<int32_t> sources(sz.n_spikes);
+    GenerateUniformData(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
+
+    int sum_rows = sz.n_spikes + 1;
+    std::vector<double> sum0(sum_rows * sz.n_post);
+    std::vector<double> sum1(sum_rows * sz.n_post);
+
+    int n_threads = (state.thread_index() == 0) ? 1 : EP_BENCH_THREADS;
+
+    for (auto _ : state) {
+        omp_set_num_threads(n_threads);
+        std::memset(sum0.data(), 0, sum0.size() * sizeof(double));
+        std::memset(sum1.data(), 0, sum1.size() * sizeof(double));
+        eventprop_compute_sums(w.data(), sz.n_pre, sz.n_post,
+            times.data(), sources.data(), sz.n_spikes,
+            kTauMemDefault, kTauSynDefault, sum0.data(), sum1.data());
+    }
+    state.SetItemsProcessed(state.iterations() * sz.n_spikes);
+}
+
+#define MULTITHREADED_COMPUTESUMS(SizeName, NP, NPO, NS)                                        \
+    BENCHMARK_CAPTURE(BM_ComputeSums_MultiThreaded, SizeName##_threads1,                         \
+        {#SizeName, NP, NPO, NS})->UseRealTime()->Threads(1)->Name("ComputeSums/" #SizeName "/uniform/threads=1"); \
+    BENCHMARK_CAPTURE(BM_ComputeSums_MultiThreaded, SizeName##_threadsN,                         \
+        {#SizeName, NP, NPO, NS})->UseRealTime()->Threads(EP_BENCH_THREADS)->Name("ComputeSums/" #SizeName "/uniform/threads=N")
+
+MULTITHREADED_COMPUTESUMS(Small,   50,   20,  100);
+MULTITHREADED_COMPUTESUMS(Medium,  200,  80,  500);
+MULTITHREADED_COMPUTESUMS(Large,   500,  200, 1000);
+
+static void BM_ComputeSpikes_MultiThreaded(benchmark::State& state, const ProblemSize& sz)
+{
+    std::vector<double> w(sz.n_pre * sz.n_post);
+    std::vector<double> times(sz.n_spikes);
+    std::vector<int32_t> sources(sz.n_spikes);
+    GenerateUniformData(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
+
+    int max_out = sz.n_spikes * sz.n_post;
+    std::vector<double> out_times(max_out);
+    std::vector<int32_t> out_sources(max_out);
+    std::vector<double> out_currents(max_out);
+
+    int n_threads = (state.thread_index() == 0) ? 1 : EP_BENCH_THREADS;
+
+    for (auto _ : state) {
+        omp_set_num_threads(n_threads);
+        std::memset(out_times.data(), 0, out_times.size() * sizeof(double));
+        std::memset(out_sources.data(), 0, out_sources.size() * sizeof(int32_t));
+        std::memset(out_currents.data(), 0, out_currents.size() * sizeof(double));
+        eventprop_compute_spikes(w.data(), sz.n_pre, sz.n_post,
+            times.data(), sources.data(), sz.n_spikes,
+            kVThDefault, kTauMemDefault, kTauSynDefault,
+            out_times.data(), out_sources.data(), out_currents.data());
+    }
+    state.SetItemsProcessed(state.iterations() * sz.n_spikes);
+}
+
+#define MULTITHREADED_COMPUTESPIKES(SizeName, NP, NPO, NS)                                        \
+    BENCHMARK_CAPTURE(BM_ComputeSpikes_MultiThreaded, SizeName##_threads1,                        \
+        {#SizeName, NP, NPO, NS})->UseRealTime()->Threads(1)->Name("ComputeSpikes/" #SizeName "/uniform/threads=1"); \
+    BENCHMARK_CAPTURE(BM_ComputeSpikes_MultiThreaded, SizeName##_threadsN,                        \
+        {#SizeName, NP, NPO, NS})->UseRealTime()->Threads(EP_BENCH_THREADS)->Name("ComputeSpikes/" #SizeName "/uniform/threads=N")
+
+MULTITHREADED_COMPUTESPIKES(Small,   50,   20,  100);
+MULTITHREADED_COMPUTESPIKES(Medium,  200,  80,  500);
+MULTITHREADED_COMPUTESPIKES(Large,   500,  200, 1000);
+
+static void BM_BackwardSpikes_MultiThreaded(benchmark::State& state, const ProblemSize& sz)
+{
+    std::vector<double> w(sz.n_pre * sz.n_post);
+    std::vector<double> times(sz.n_spikes);
+    std::vector<int32_t> sources(sz.n_spikes);
+    GenerateUniformData(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
+
+    std::vector<double> post_times, post_currents;
+    std::vector<int32_t> post_sources_vec;
+    int n_post_spikes = RunForward(sz.n_pre, sz.n_post, sz.n_spikes,
+                                   w.data(), times.data(), sources.data(),
+                                   post_times, post_sources_vec, post_currents);
+
+    std::vector<double> post_errors(n_post_spikes, 1.0);
+    std::vector<double> grad(sz.n_pre * sz.n_post);
+
+    int n_threads = (state.thread_index() == 0) ? 1 : EP_BENCH_THREADS;
+
+    for (auto _ : state) {
+        omp_set_num_threads(n_threads);
+        std::memset(grad.data(), 0, grad.size() * sizeof(double));
+        eventprop_backward_spikes(times.data(), sources.data(), sz.n_spikes,
+            post_times.data(), post_sources_vec.data(),
+            post_currents.data(), post_errors.data(), n_post_spikes,
+            w.data(), sz.n_pre, sz.n_post,
+            kVThDefault, kTauMemDefault, kTauSynDefault, grad.data());
+    }
+    state.SetItemsProcessed(state.iterations() * sz.n_spikes);
+}
+
+#define MULTITHREADED_BACKWARDSPIKES(SizeName, NP, NPO, NS)                                       \
+    BENCHMARK_CAPTURE(BM_BackwardSpikes_MultiThreaded, SizeName##_threads1,                       \
+        {#SizeName, NP, NPO, NS})->UseRealTime()->Threads(1)->Name("BackwardSpikes/" #SizeName "/uniform/threads=1"); \
+    BENCHMARK_CAPTURE(BM_BackwardSpikes_MultiThreaded, SizeName##_threadsN,                       \
+        {#SizeName, NP, NPO, NS})->UseRealTime()->Threads(EP_BENCH_THREADS)->Name("BackwardSpikes/" #SizeName "/uniform/threads=N")
+
+MULTITHREADED_BACKWARDSPIKES(Small,   50,   20,  100);
+MULTITHREADED_BACKWARDSPIKES(Medium,  200,  80,  500);
+MULTITHREADED_BACKWARDSPIKES(Large,   500,  200, 1000);
 
 // Note: main() is provided by benchmark::benchmark_main library
