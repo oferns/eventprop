@@ -81,3 +81,6 @@ UpgradeLog*.htm
 
 # Microsoft Azure Build Agent
 azure-pipelines.yml
+
+# BenchmarkDotNet artifacts
+BenchmarkDotNet.Artifacts/
