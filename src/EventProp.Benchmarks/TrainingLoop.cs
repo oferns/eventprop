@@ -33,6 +33,15 @@ public abstract class Bench_TrainingLoop_Base : BenchBase
         Buffers = new ScratchBuffers();
         Buffers.EnsureCapacity(NPost, NPre, NSpikes);
 
+        int sumRows = NSpikes + 1;
+        Sum0Native = new double[sumRows * NPost];
+        Sum1Native = new double[sumRows * NPost];
+
+        int maxOutSpikes = NSpikes * NPost;
+        OutTimesNative = new double[maxOutSpikes];
+        OutSourcesNative = new int[maxOutSpikes];
+        OutCurrentsNative = new double[maxOutSpikes];
+
         GradManaged = new double[NPre * NPost];
         GradNative = new double[NPre * NPost];
 
