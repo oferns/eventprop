@@ -116,6 +116,16 @@ static double compute_i(double t, int n_spikes, const double* times,
     return sum0[idx * n_post + target_nrn] * exp(-t / tau_syn);
 }
 
+/* ── Merge spike comparison for qsort (descending by time) ─────────── */
+
+typedef struct { double time; int idx; int is_input; } MergedSpike;
+
+static int cmp_merged_desc(const void* a, const void* b) {
+    double ta = ((const MergedSpike*)a)->time;
+    double tb = ((const MergedSpike*)b)->time;
+    return (ta < tb) - (ta > tb);
+}
+
 /* ── Toms748 (Brent) root-finding ─────────────────────────────────── */
 
 #define TOMS748_MAX_ITER 1024
@@ -349,15 +359,13 @@ void eventprop_backward_spikes(const double* times, const int32_t* sources, int 
     if (n_post_spikes == 0) return;
 
     int total = n_spikes + n_post_spikes;
-    typedef struct { double time; int idx; int is_input; } MergedSpike;
     MergedSpike* merged = malloc(total * sizeof(MergedSpike));
 
     for (int i = 0; i < n_spikes; i++) { merged[i].time=times[i]; merged[i].idx=i; merged[i].is_input=1; }
     for (int i = 0; i < n_post_spikes; i++) { merged[n_spikes+i].time=fwd_times[i]; merged[n_spikes+i].idx=i; merged[n_spikes+i].is_input=0; }
 
-    for (int i = 0; i < total-1; i++)
-        for (int j = 0; j < total-i-1; j++)
-            if (merged[j].time < merged[j+1].time) { MergedSpike t=merged[j]; merged[j]=merged[j+1]; merged[j+1]=t; }
+    /* Sort descending by time: O(n log n) via qsort */
+    qsort(merged, total, sizeof(MergedSpike), cmp_merged_desc);
 
     double* all_errors = calloc(total, sizeof(double));
     for (int i = 0; i < n_post_spikes; i++) all_errors[n_spikes + i] = post_errors[i];
