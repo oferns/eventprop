@@ -13,6 +13,15 @@
 
   <ItemGroup>
     <ProjectReference Include="../EventProp/EventProp.csproj" />
+    <ProjectReference Include="../EventProp.CxxReference/EventProp.CxxReference.csproj" />
+  </ItemGroup>
+
+  <!-- Copy native library to output directory for P/Invoke -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <None Include="..\cpp\build\libeventprop_c_api.dylib">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>libeventprop_c_api.dylib</TargetPath>
+    </None>
   </ItemGroup>
 
 </Project>

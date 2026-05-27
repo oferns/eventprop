@@ -1,88 +1,293 @@
+using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Running;
 using CW.EventProp;
 
-// Debug: compute_spikes voltage analysis for various configurations
+BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
 
-Console.WriteLine("=== Single Spike, w=5.0 ===");
-AnalyzeSpikes([5.0], [0.01], [0], 1, 1.0, 0.02, 0.005);
-
-Console.WriteLine("\n=== Single Spike, w=10.0 ===");
-AnalyzeSpikes([10.0], [0.01], [0], 1, 1.0, 0.02, 0.005);
-
-Console.WriteLine("\n=== Single Spike, w=20.0 ===");
-AnalyzeSpikes([20.0], [0.01], [0], 1, 1.0, 0.02, 0.005);
-
-Console.WriteLine("\n=== Three Spikes, w=2.0 ===");
-AnalyzeSpikes([2.0], [0.01, 0.02, 0.03], [0, 0, 0], 1, 1.0, 0.02, 0.005);
-
-Console.WriteLine("\n=== Three Spikes, w=3.0 ===");
-AnalyzeSpikes([3.0], [0.01, 0.02, 0.03], [0, 0, 0], 1, 1.0, 0.02, 0.005);
-
-Console.WriteLine("\n=== Two Neurons, w=[5, 0.01, 0.01, 0.01, 0.01, 5] ===");
-AnalyzeSpikes([5.0, 0.01, 0.01, 0.01, 0.01, 5.0], [0.01, 0.02], [0, 1], 3, 1.0, 0.02, 0.005);
-
-Console.WriteLine("\n=== Large Network ===");
-int nPre = 50, nPost = 20;
-double[] wLarge = new double[nPre * nPost];
-for (int i = 0; i < wLarge.Length; i++) wLarge[i] = 1.0 + (i % 5) * 0.5;
-int nSpikes = 200;
-double[] tLarge = new double[nSpikes];
-int[] sLarge = new int[nSpikes];
-for (int i = 0; i < nSpikes; i++) { tLarge[i] = 0.001 * (i + 1); sLarge[i] = i % nPre; }
-AnalyzeSpikes(wLarge, tLarge, sLarge, nPost, 1.0, 0.02, 0.005);
-
-static void AnalyzeSpikes(double[] w, double[] times, int[] sources, int nPost,
-    double vTh, double tauMem, double tauSyn)
+public abstract class BenchBase
 {
-    // Compute sums first to see the values
-    var sum0 = new double[(times.Length + 1) * nPost];
-    var sum1 = new double[(times.Length + 1) * nPost];
-    EventPropMath.ComputeSums(w, times, sources, tauMem, tauSyn, sum0, sum1, nPost);
+    public int NPre { get; protected set; }
+    public int NPost { get; protected set; }
+    public int NSpikes { get; protected set; }
 
-    double kPrefactor = tauSyn / (tauMem - tauSyn);
-    double tmaxPrefactor = 1.0 / (1.0 / tauMem - 1.0 / tauSyn);
-    double tmaxSummand = Math.Log(tauSyn / tauMem);
+    protected const double TauMem = 0.02;
+    protected const double TauSyn = 0.005;
+    protected const double VTh = 1.0;
 
-    Console.WriteLine($"  kPrefactor={kPrefactor:F4}, tmaxPrefactor={tmaxPrefactor:F6}, tmaxSummand={tmaxSummand:F4}");
+    protected double[] W { get; set; } = null!;
+    protected double[] Times { get; set; } = null!;
+    protected int[] Sources { get; set; } = null!;
+    protected ScratchBuffers Buffers { get; set; } = null!;
 
-    for (int targetNrn = 0; targetNrn < nPost && targetNrn < 3; targetNrn++)
+    protected double[] Sum0Native { get; set; } = null!;
+    protected double[] Sum1Native { get; set; } = null!;
+    protected double[] OutTimesNative { get; set; } = null!;
+    protected int[] OutSourcesNative { get; set; } = null!;
+    protected double[] OutCurrentsNative { get; set; } = null!;
+
+    protected SpikesData PostSpikesManaged { get; set; } = null!;
+    protected double[] PostTimesNative { get; set; } = null!;
+    protected int[] PostSourcesNative { get; set; } = null!;
+    protected double[] PostCurrentsNative { get; set; } = null!;
+    protected double[] PostErrorsNative { get; set; } = null!;
+
+    protected double[] GradManaged { get; set; } = null!;
+    protected double[] GradNative { get; set; } = null!;
+
+    protected abstract void Configure();
+
+    [GlobalSetup]
+    public virtual void Setup()
     {
-        Console.WriteLine($"\n  Neuron {targetNrn}:");
-        for (int i = 0; i <= times.Length; i++)
+        Configure();
+        var rng = new Random(42);
+
+        W = new double[NPre * NPost];
+        for (int i = 0; i < W.Length; i++)
+            W[i] = 0.5 + rng.NextDouble() * 1.5;
+
+        Times = new double[NSpikes];
+        Sources = new int[NSpikes];
+        for (int i = 0; i < NSpikes; i++)
         {
-            double tInput = (i == times.Length) ? double.PositiveInfinity : times[i];
-            double tBefore = (i > 0) ? times[i - 1] : 0.0;
-            double sum0Elem = sum0[i * nPost + targetNrn];
-            double sum1Elem = sum1[i * nPost + targetNrn];
-
-            if (sum0Elem <= 0 || sum1Elem <= 0)
-            {
-                Console.WriteLine($"    i={i}: sum0={sum0Elem:F4}, sum1={sum1Elem:F4} → skip (zero/neg)");
-                continue;
-            }
-
-            double tmax = tmaxPrefactor * (tmaxSummand + Math.Log(sum1Elem / sum0Elem));
-            bool inBounds = tBefore <= tmax && (i == times.Length || tmax <= tInput);
-
-            double vAtTmax = kPrefactor * (sum1Elem * Math.Exp(-tmax / tauMem)
-                                          - sum0Elem * Math.Exp(-tmax / tauSyn));
-
-            Console.WriteLine($"    i={i}: tInput={tInput:F4}, tmax={tmax:F6} " +
-                $"inBounds={inBounds}, v(tmax)={vAtTmax:F4} " +
-                $"vTh={vTh}, exceeds? {vAtTmax > vTh}");
+            Times[i] = (i + 1) * 1.0 / (NSpikes + 1);
+            Sources[i] = rng.Next(NPre);
         }
+
+        Buffers = new ScratchBuffers();
+        Buffers.EnsureCapacity(NPost, NPre, NSpikes);
+
+        int sumRows = NSpikes + 1;
+        Sum0Native = new double[sumRows * NPost];
+        Sum1Native = new double[sumRows * NPost];
+
+        int maxOutSpikes = NSpikes * NPost;
+        OutTimesNative = new double[maxOutSpikes];
+        OutSourcesNative = new int[maxOutSpikes];
+        OutCurrentsNative = new double[maxOutSpikes];
+
+        var fwdResult = EventPropMath.ComputeSpikes(
+            W, Times, Sources, NPost, VTh, TauMem, TauSyn, Buffers);
+
+        int nPost = fwdResult.NSpikes;
+        PostSpikesManaged = fwdResult;
+        for (int i = 0; i < nPost; i++)
+            PostSpikesManaged.SetError(i, 1.0);
+
+        PostTimesNative = new double[nPost];
+        PostSourcesNative = new int[nPost];
+        PostCurrentsNative = new double[nPost];
+        PostErrorsNative = new double[nPost];
+        for (int i = 0; i < nPost; i++)
+        {
+            PostTimesNative[i] = fwdResult.Times[i];
+            PostSourcesNative[i] = fwdResult.Sources[i];
+            PostCurrentsNative[i] = fwdResult.Currents[i];
+            PostErrorsNative[i] = 1.0;
+        }
+
+        GradManaged = new double[NPre * NPost];
+        GradNative = new double[NPre * NPost];
+    }
+}
+
+[MemoryDiagnoser]
+public class Bench_ComputeSums_Small : BenchBase
+{
+    protected override void Configure() => (NPre, NPost, NSpikes) = (50, 20, 100);
+
+    [Benchmark(Baseline = true)]
+    public void Managed()
+    {
+        Buffers.Sum0.AsSpan(0, (NSpikes + 1) * NPost).Clear();
+        Buffers.Sum1.AsSpan(0, (NSpikes + 1) * NPost).Clear();
+        EventPropMath.ComputeSums(W, Times, Sources, TauMem, TauSyn,
+            Buffers.Sum0, Buffers.Sum1, NPost,
+            Buffers.ExpInputMem, Buffers.ExpInputSyn);
     }
 
-    // Now run compute_spikes and show results
-    var buffers = new ScratchBuffers();
-    int maxSpk = Math.Max(times.Length + 1, 4);
-    buffers.PostSpikeTimes = new double[maxSpk * nPost];
-    buffers.PostSpikeCurrents = new double[maxSpk * nPost];
-    buffers.SpikeCountPerNeuron = new int[nPost];
-    buffers.MaxSpikesPerNeuron = maxSpk;
-    var result = EventPropMath.ComputeSpikes(w, times, sources, nPost, vTh, tauMem, tauSyn, buffers);
-    Console.WriteLine($"\n  → {result.NSpikes} output spike(s)");
-    for (int i = 0; i < Math.Min(result.NSpikes, 10); i++)
+    [Benchmark]
+    public void Native()
     {
-        Console.WriteLine($"    spike[{i}]: t={result.Times[i]:F6}, src={result.Sources[i]}, i={result.Currents[i]:F4}");
+        Array.Clear(Sum0Native);
+        Array.Clear(Sum1Native);
+        CxxNative.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn,
+            Sum0Native, Sum1Native);
+    }
+}
+
+[MemoryDiagnoser]
+public class Bench_ComputeSums_Medium : BenchBase
+{
+    protected override void Configure() => (NPre, NPost, NSpikes) = (200, 80, 500);
+
+    [Benchmark(Baseline = true)]
+    public void Managed()
+    {
+        Buffers.Sum0.AsSpan(0, (NSpikes + 1) * NPost).Clear();
+        Buffers.Sum1.AsSpan(0, (NSpikes + 1) * NPost).Clear();
+        EventPropMath.ComputeSums(W, Times, Sources, TauMem, TauSyn,
+            Buffers.Sum0, Buffers.Sum1, NPost,
+            Buffers.ExpInputMem, Buffers.ExpInputSyn);
+    }
+
+    [Benchmark]
+    public void Native()
+    {
+        Array.Clear(Sum0Native);
+        Array.Clear(Sum1Native);
+        CxxNative.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn,
+            Sum0Native, Sum1Native);
+    }
+}
+
+[MemoryDiagnoser]
+public class Bench_ComputeSums_Large : BenchBase
+{
+    protected override void Configure() => (NPre, NPost, NSpikes) = (500, 200, 1000);
+
+    [Benchmark(Baseline = true)]
+    public void Managed()
+    {
+        Buffers.Sum0.AsSpan(0, (NSpikes + 1) * NPost).Clear();
+        Buffers.Sum1.AsSpan(0, (NSpikes + 1) * NPost).Clear();
+        EventPropMath.ComputeSums(W, Times, Sources, TauMem, TauSyn,
+            Buffers.Sum0, Buffers.Sum1, NPost,
+            Buffers.ExpInputMem, Buffers.ExpInputSyn);
+    }
+
+    [Benchmark]
+    public void Native()
+    {
+        Array.Clear(Sum0Native);
+        Array.Clear(Sum1Native);
+        CxxNative.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn,
+            Sum0Native, Sum1Native);
+    }
+}
+
+[MemoryDiagnoser]
+public class Bench_ComputeSpikes_Small : BenchBase
+{
+    protected override void Configure() => (NPre, NPost, NSpikes) = (50, 20, 100);
+
+    [Benchmark(Baseline = true)]
+    public SpikesData Managed()
+        => EventPropMath.ComputeSpikes(W, Times, Sources, NPost, VTh, TauMem, TauSyn, Buffers);
+
+    [Benchmark]
+    public int Native()
+    {
+        Array.Clear(OutTimesNative, 0, OutTimesNative.Length);
+        Array.Clear(OutSourcesNative, 0, OutSourcesNative.Length);
+        Array.Clear(OutCurrentsNative, 0, OutCurrentsNative.Length);
+        return CxxNative.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn,
+            OutTimesNative, OutSourcesNative, OutCurrentsNative);
+    }
+}
+
+[MemoryDiagnoser]
+public class Bench_ComputeSpikes_Medium : BenchBase
+{
+    protected override void Configure() => (NPre, NPost, NSpikes) = (200, 80, 500);
+
+    [Benchmark(Baseline = true)]
+    public SpikesData Managed()
+        => EventPropMath.ComputeSpikes(W, Times, Sources, NPost, VTh, TauMem, TauSyn, Buffers);
+
+    [Benchmark]
+    public int Native()
+    {
+        Array.Clear(OutTimesNative, 0, OutTimesNative.Length);
+        Array.Clear(OutSourcesNative, 0, OutSourcesNative.Length);
+        Array.Clear(OutCurrentsNative, 0, OutCurrentsNative.Length);
+        return CxxNative.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn,
+            OutTimesNative, OutSourcesNative, OutCurrentsNative);
+    }
+}
+
+[MemoryDiagnoser]
+public class Bench_ComputeSpikes_Large : BenchBase
+{
+    protected override void Configure() => (NPre, NPost, NSpikes) = (500, 200, 1000);
+
+    [Benchmark(Baseline = true)]
+    public SpikesData Managed()
+        => EventPropMath.ComputeSpikes(W, Times, Sources, NPost, VTh, TauMem, TauSyn, Buffers);
+
+    [Benchmark]
+    public int Native()
+    {
+        Array.Clear(OutTimesNative, 0, OutTimesNative.Length);
+        Array.Clear(OutSourcesNative, 0, OutSourcesNative.Length);
+        Array.Clear(OutCurrentsNative, 0, OutCurrentsNative.Length);
+        return CxxNative.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn,
+            OutTimesNative, OutSourcesNative, OutCurrentsNative);
+    }
+}
+
+[MemoryDiagnoser]
+public class Bench_BackwardSpikes_Small : BenchBase
+{
+    protected override void Configure() => (NPre, NPost, NSpikes) = (50, 20, 100);
+
+    [Benchmark(Baseline = true)]
+    public void Managed()
+    {
+        Array.Clear(GradManaged);
+        EventPropMath.BackwardSpikes(W, Times, Sources, PostSpikesManaged, NPost,
+            VTh, TauMem, TauSyn, GradManaged, Buffers);
+    }
+
+    [Benchmark]
+    public void Native()
+    {
+        Array.Clear(GradNative);
+        CxxNative.BackwardSpikes(Times, Sources, PostTimesNative, PostSourcesNative,
+            PostCurrentsNative, PostErrorsNative, W, NPre, NPost, VTh, TauMem, TauSyn, GradNative);
+    }
+}
+
+[MemoryDiagnoser]
+public class Bench_BackwardSpikes_Medium : BenchBase
+{
+    protected override void Configure() => (NPre, NPost, NSpikes) = (200, 80, 500);
+
+    [Benchmark(Baseline = true)]
+    public void Managed()
+    {
+        Array.Clear(GradManaged);
+        EventPropMath.BackwardSpikes(W, Times, Sources, PostSpikesManaged, NPost,
+            VTh, TauMem, TauSyn, GradManaged, Buffers);
+    }
+
+    [Benchmark]
+    public void Native()
+    {
+        Array.Clear(GradNative);
+        CxxNative.BackwardSpikes(Times, Sources, PostTimesNative, PostSourcesNative,
+            PostCurrentsNative, PostErrorsNative, W, NPre, NPost, VTh, TauMem, TauSyn, GradNative);
+    }
+}
+
+[MemoryDiagnoser]
+public class Bench_BackwardSpikes_Large : BenchBase
+{
+    protected override void Configure() => (NPre, NPost, NSpikes) = (500, 200, 1000);
+
+    [Benchmark(Baseline = true)]
+    public void Managed()
+    {
+        Array.Clear(GradManaged);
+        EventPropMath.BackwardSpikes(W, Times, Sources, PostSpikesManaged, NPost,
+            VTh, TauMem, TauSyn, GradManaged, Buffers);
+    }
+
+    [Benchmark]
+    public void Native()
+    {
+        Array.Clear(GradNative);
+        CxxNative.BackwardSpikes(Times, Sources, PostTimesNative, PostSourcesNative,
+            PostCurrentsNative, PostErrorsNative, W, NPre, NPost, VTh, TauMem, TauSyn, GradNative);
     }
 }
