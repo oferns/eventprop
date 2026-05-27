@@ -12,7 +12,6 @@ public abstract class Bench_TinyXL_Base : BenchBase
 {
     protected SpikesData? PostSpikes { get; set; }
 
-    [GlobalSetup]
     public override void Setup()
     {
         // Don't call base.Setup() — we need forward result for backward

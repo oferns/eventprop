@@ -14,7 +14,6 @@ public abstract class Bench_Pattern_Base : BenchBase
 
     protected abstract void GeneratePattern(Random rng);
 
-    [GlobalSetup]
     public override void Setup()
     {
         // Don't call base.Setup() — we need custom pattern generation

@@ -12,7 +12,6 @@ public abstract class Bench_ComputeMaxima_Base : BenchBase
 {
     protected MaximaData? MaximaResult { get; set; }
 
-    [GlobalSetup]
     public override void Setup()
     {
         // Don't call base.Setup() — we need custom spike patterns

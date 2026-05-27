@@ -15,7 +15,6 @@ public abstract class Bench_MultiThreading_Base : BenchBase
 
     protected const int ThreadCount = 8;
 
-    [GlobalSetup]
     public override void Setup()
     {
         // Don't call base.Setup() — we need forward result for backward
