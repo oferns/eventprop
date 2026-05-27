@@ -58,9 +58,14 @@ coverage-report/
 *.trx
 *.html
 
+# CMake build output
+build/
+src/cpp/build/
+
 # Build artifacts (MSBuild)
 **/*.dll
 !**/*.Designer.dll
+*.dylib
 **/*.pdb
 !**/*.Designer.pdb
 

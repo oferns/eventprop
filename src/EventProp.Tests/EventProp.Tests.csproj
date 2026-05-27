@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../EventProp/EventProp.csproj" />
+    <ProjectReference Include="../EventProp.CxxReference/EventProp.CxxReference.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -23,7 +24,7 @@
 
   <!-- Copy native C++ library to output directory -->
   <Target Name="CopyNativeLib" BeforeTargets="Build">
-    <Copy SourceFiles="$(MSBuildThisFileDirectory)../cpp/libeventprop_c_api.dylib" DestinationFolder="$(OutDir)" Condition="Exists('$(MSBuildThisFileDirectory)../cpp/libeventprop_c_api.dylib')" />
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)../cpp/build/libeventprop_c_api.dylib" DestinationFolder="$(OutDir)" Condition="Exists('$(MSBuildThisFileDirectory)../cpp/build/libeventprop_c_api.dylib')" />
   </Target>
 
 </Project>
