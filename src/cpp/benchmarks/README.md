@@ -101,21 +101,43 @@ Export results as CSV/JSON for regression tracking:
 
 ## Multi-threading
 
-The C++ reference uses `#pragma omp parallel for` when OpenMP is available. On macOS, OpenMP is not bundled — you may need to install it:
+The C++ reference uses `#pragma omp parallel for` when OpenMP is available. On macOS, install libomp:
 
 ```bash
 brew install libomp
-# Rebuild with OpenMP support
-cd build && rm -rf * && cmake .. -DOpenMP_ROOT=$(brew --prefix libomp) && cmake --build .
+cd build && rm -rf * && cmake .. && cmake --build .  # CMake auto-detects libomp
+```
+
+### Multi-threading benchmark results (Apple M3, 8 cores)
+
+| Benchmark | threads=1 | threads=8 | Speedup |
+|---|---|---|---|
+| ComputeSums/Small | 310 µs | 475 µs | **0.65×** (slower) |
+| ComputeSums/Medium | 4.61 ms | 7.27 ms | **0.63×** (slower) |
+| ComputeSums/Large | 22.2 ms | 34.0 ms | **0.65×** (slower) |
+
+**Finding**: Multi-threading is slower than single-threaded across all sizes. The OpenMP parallel overhead dominates because the per-iteration work is tiny (a few FLOPs). This confirms that the real bottleneck is Eigen allocation overhead, not single-threaded execution. A flat-array implementation with SIMD would be the right optimization path.
+
+### Running thread comparison manually
+
+```bash
+# Single-threaded
+OMP_NUM_THREADS=1 ./eventprop_benchmarks --benchmark_filter='ComputeSpikes/Large'
+
+# All cores
+OMP_NUM_THREADS=8 ./eventprop_benchmarks --benchmark_filter='ComputeSpikes/Large'
+
+# Built-in multi-threading benchmarks (threads=1 vs threads=N)
+./eventprop_benchmarks --benchmark_filter='threads'
 ```
 
 ## Directory Structure
 
 ```
 src/cpp/benchmarks/
-├── CMakeLists.txt              # Build config (FetchContent for Google Benchmark)
-├── eventprop_benchmarks.cpp    # Full algorithm benchmarks (4 algorithms × 5 sizes)
-├── micro_benchmarks.cpp        # Hot-path micro-benchmarks (4 sub-components)
+├── CMakeLists.txt              # Build config (FetchContent for Google Benchmark, OpenMP)
+├── eventprop_benchmarks.cpp    # Full algorithm benchmarks (4 alg × 5 sizes × patterns + multi-threading)
+├── micro_benchmarks.cpp        # Hot-path micro-benchmarks (4 sub-components, 2 sizes each)
 ├── README.md                   # This file
 └── build/                      # Build output (gitignored)
 ```
