@@ -332,10 +332,14 @@ static void BM_TrainingLoop(benchmark::State& state, const ProblemSize& sz)
     std::vector<double> post_errors(n_post_spikes, 1.0);
     std::vector<double> grad(sz.n_pre * sz.n_post);
 
+    // Pre-allocate output buffers (max possible spikes = n_spikes * n_post)
+    int max_out = sz.n_spikes * sz.n_post;
+    std::vector<double> fwd_times(max_out);
+    std::vector<int32_t> fwd_sources(max_out);
+    std::vector<double> fwd_currents(max_out);
+
     for (auto _ : state) {
         // Forward pass
-        std::vector<double> fwd_times, fwd_currents;
-        std::vector<int32_t> fwd_sources;
         int n_fwd = eventprop_compute_spikes(
             w.data(), sz.n_pre, sz.n_post,
             times.data(), sources.data(), sz.n_spikes,
