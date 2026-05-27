@@ -36,3 +36,22 @@ if(APPLE)
             $<TARGET_FILE_DIR:eventprop_benchmarks>
     )
 endif()
+
+# ============================================================
+# Micro-benchmarks executable
+# ============================================================
+add_executable(micro_benchmarks micro_benchmarks.cpp)
+target_include_directories(micro_benchmarks PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_link_libraries(micro_benchmarks PRIVATE
+    eventprop_c_api
+    benchmark::benchmark
+    benchmark::benchmark_main
+)
+
+if(APPLE)
+    add_custom_command(TARGET micro_benchmarks POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:eventprop_c_api>
+            $<TARGET_FILE_DIR:micro_benchmarks>
+    )
+endif()

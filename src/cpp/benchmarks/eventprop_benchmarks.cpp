@@ -1,5 +1,5 @@
-// eventprop_benchmarks.cpp — C++ benchmarks mirroring EventProp.Benchmarks (C#)
-// Compares against the same problem sizes and parameters.
+// eventprop_benchmarks.cpp — Comprehensive C++ benchmarks for EventProp algorithm
+// Mirrors the .NET BenchmarkDotNet suite with expanded coverage.
 
 #include "eventprop_c_api.h"
 #include <benchmark/benchmark.h>
@@ -7,23 +7,40 @@
 #include <cstdlib>
 #include <cstring>
 #include <random>
+#include <thread>
 #include <vector>
 
 // ============================================================
 // Parameters (match .NET benchmarks exactly)
 // ============================================================
-static constexpr double kTauMem = 0.02;
-static constexpr double kTauSyn = 0.005;
-static constexpr double kVTh    = 1.0;
+static constexpr double kTauMemDefault = 0.02;   // 20ms
+static constexpr double kTauSynDefault = 0.005;  // 5ms
+static constexpr double kVThDefault    = 1.0;
 
 // ============================================================
-// Helpers — mirror .NET BenchBase Setup() exactly
+// Problem sizes (5 tiers)
 // ============================================================
-static void GenerateData(int n_pre, int n_post, int n_spikes,
-                         double* w, double* times, int32_t* sources)
+struct ProblemSize {
+    const char* name;
+    int n_pre, n_post, n_spikes;
+};
+
+static const ProblemSize kSizes[] = {
+    {"Tiny",   10,   5,   20},
+    {"Small",  50,   20,  100},
+    {"Medium", 200,  80,  500},
+    {"Large",  500,  200, 1000},
+    {"XL",     2000, 500, 5000},
+};
+
+// ============================================================
+// Helpers — data generation
+// ============================================================
+static void GenerateUniformData(int n_pre, int n_post, int n_spikes,
+                                 double* w, double* times, int32_t* sources)
 {
-    std::mt19937 rng(42); // Same seed as .NET BenchBase
-    std::uniform_real_distribution<double> w_dist(0.5, 2.0); // 0.5 + rng.NextDouble() * 1.5
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<double> w_dist(0.5, 2.0);
 
     for (int i = 0; i < n_pre * n_post; i++)
         w[i] = w_dist(rng);
@@ -34,7 +51,68 @@ static void GenerateData(int n_pre, int n_post, int n_spikes,
     }
 }
 
-// Run forward pass to get post-spike data for backward benchmarks
+static void GeneratePoissonData(int n_pre, int n_post, int n_spikes,
+                                 double* w, double* times, int32_t* sources)
+{
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<double> w_dist(0.5, 2.0);
+
+    for (int i = 0; i < n_pre * n_post; i++)
+        w[i] = w_dist(rng);
+
+    // Poisson: exponential inter-spike intervals, ~200 Hz per neuron
+    std::exponential_distribution<double> inter_spike(1.0 / 200.0); // mean 5ms
+    int spike_idx = 0;
+    for (int nrn = 0; nrn < n_pre && spike_idx < n_spikes; nrn++) {
+        double t = 0.0;
+        while (t < 1.0 && spike_idx < n_spikes) {
+            t += inter_spike(rng);
+            times[spike_idx] = std::min(t, 0.999);
+            sources[spike_idx] = nrn;
+            spike_idx++;
+        }
+    }
+}
+
+static void GenerateBurstData(int n_pre, int n_post, int n_spikes,
+                               double* w, double* times, int32_t* sources)
+{
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<double> w_dist(0.5, 2.0);
+
+    for (int i = 0; i < n_pre * n_post; i++)
+        w[i] = w_dist(rng);
+
+    // Burst: clusters of 5 spikes at t, t+2ms, t+4ms, t+6ms, t+8ms
+    // Gap between bursts: 10ms. Distribute across neurons.
+    int spike_idx = 0;
+    for (int nrn = 0; nrn < n_pre && spike_idx < n_spikes; nrn++) {
+        double burst_start = 0.05 + nrn * 0.1; // stagger bursts
+        for (int b = 0; burst_start < 1.0 && spike_idx < n_spikes; b++) {
+            for (int s = 0; s < 5 && spike_idx < n_spikes; s++) {
+                times[spike_idx] = burst_start + s * 0.002;
+                sources[spike_idx] = nrn;
+                spike_idx++;
+            }
+            burst_start += 0.12; // 10ms gap between bursts
+        }
+    }
+}
+
+using DataGenerator = void(*)(int, int, int, double*, double*, int32_t*);
+
+static const struct {
+    const char* name;
+    DataGenerator gen;
+} kPatterns[] = {
+    {"uniform", GenerateUniformData},
+    {"poisson", GeneratePoissonData},
+    {"burst",   GenerateBurstData},
+};
+
+// ============================================================
+// Forward pass helper (for backward + training loop)
+// ============================================================
 static int RunForward(int n_pre, int n_post, int n_spikes,
                       const double* w, const double* times, const int32_t* sources,
                       std::vector<double>& out_times,
@@ -47,9 +125,8 @@ static int RunForward(int n_pre, int n_post, int n_spikes,
     out_currents.resize(max_out);
 
     int n = eventprop_compute_spikes(
-        w, n_pre, n_post,
-        times, sources, n_spikes,
-        kVTh, kTauMem, kTauSyn,
+        w, n_pre, n_post, times, sources, n_spikes,
+        kVThDefault, kTauMemDefault, kTauSynDefault,
         out_times.data(), out_sources.data(), out_currents.data());
 
     out_times.resize(n);
@@ -59,104 +136,57 @@ static int RunForward(int n_pre, int n_post, int n_spikes,
 }
 
 // ============================================================
-// Benchmark: ComputeSums — Small (50, 20, 100)
+// Benchmark: ComputeSums — all sizes × patterns
 // ============================================================
-static void BM_ComputeSums_Small(benchmark::State& state)
+static void BM_ComputeSums(benchmark::State& state, const ProblemSize& sz, DataGenerator gen)
 {
-    const int n_pre = 50, n_post = 20, n_spikes = 100;
-    std::vector<double> w(n_pre * n_post);
-    std::vector<double> times(n_spikes);
-    std::vector<int32_t> sources(n_spikes);
-    GenerateData(n_pre, n_post, n_spikes, w.data(), times.data(), sources.data());
+    std::vector<double> w(sz.n_pre * sz.n_post);
+    std::vector<double> times(sz.n_spikes);
+    std::vector<int32_t> sources(sz.n_spikes);
+    gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
 
-    int sum_rows = n_spikes + 1;
-    std::vector<double> sum0(sum_rows * n_post);
-    std::vector<double> sum1(sum_rows * n_post);
+    int sum_rows = sz.n_spikes + 1;
+    std::vector<double> sum0(sum_rows * sz.n_post);
+    std::vector<double> sum1(sum_rows * sz.n_post);
 
     for (auto _ : state) {
         std::memset(sum0.data(), 0, sum0.size() * sizeof(double));
         std::memset(sum1.data(), 0, sum1.size() * sizeof(double));
-        eventprop_compute_sums(
-            w.data(), n_pre, n_post,
-            times.data(), sources.data(), n_spikes,
-            kTauMem, kTauSyn,
-            sum0.data(), sum1.data());
+        eventprop_compute_sums(w.data(), sz.n_pre, sz.n_post,
+            times.data(), sources.data(), sz.n_spikes,
+            kTauMemDefault, kTauSynDefault, sum0.data(), sum1.data());
     }
-
-    state.SetItemsProcessed(state.iterations() * n_spikes);
+    state.SetItemsProcessed(state.iterations() * sz.n_spikes);
 }
-BENCHMARK(BM_ComputeSums_Small)->UseRealTime();
+
+#define COMPUTESUMS_BENCH(SizeName, NP, NPO, NS)                                              \
+    BENCHMARK_CAPTURE(BM_ComputeSums, SizeName##_uniform,                                     \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(                  \
+        "ComputeSums/" #SizeName "/uniform/default");                                          \
+    BENCHMARK_CAPTURE(BM_ComputeSums, SizeName##_poisson,                                     \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(                  \
+        "ComputeSums/" #SizeName "/poisson/default");                                          \
+    BENCHMARK_CAPTURE(BM_ComputeSums, SizeName##_burst,                                       \
+        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(                    \
+        "ComputeSums/" #SizeName "/burst/default")
+
+COMPUTESUMS_BENCH(Tiny,    10,   5,   20);
+COMPUTESUMS_BENCH(Small,   50,   20,  100);
+COMPUTESUMS_BENCH(Medium,  200,  80,  500);
+COMPUTESUMS_BENCH(Large,   500,  200, 1000);
+COMPUTESUMS_BENCH(XL,      2000, 500, 5000);
 
 // ============================================================
-// Benchmark: ComputeSums — Medium (200, 80, 500)
+// Benchmark: ComputeSpikes — all sizes × patterns
 // ============================================================
-static void BM_ComputeSums_Medium(benchmark::State& state)
+static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, DataGenerator gen)
 {
-    const int n_pre = 200, n_post = 80, n_spikes = 500;
-    std::vector<double> w(n_pre * n_post);
-    std::vector<double> times(n_spikes);
-    std::vector<int32_t> sources(n_spikes);
-    GenerateData(n_pre, n_post, n_spikes, w.data(), times.data(), sources.data());
+    std::vector<double> w(sz.n_pre * sz.n_post);
+    std::vector<double> times(sz.n_spikes);
+    std::vector<int32_t> sources(sz.n_spikes);
+    gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
 
-    int sum_rows = n_spikes + 1;
-    std::vector<double> sum0(sum_rows * n_post);
-    std::vector<double> sum1(sum_rows * n_post);
-
-    for (auto _ : state) {
-        std::memset(sum0.data(), 0, sum0.size() * sizeof(double));
-        std::memset(sum1.data(), 0, sum1.size() * sizeof(double));
-        eventprop_compute_sums(
-            w.data(), n_pre, n_post,
-            times.data(), sources.data(), n_spikes,
-            kTauMem, kTauSyn,
-            sum0.data(), sum1.data());
-    }
-
-    state.SetItemsProcessed(state.iterations() * n_spikes);
-}
-BENCHMARK(BM_ComputeSums_Medium)->UseRealTime();
-
-// ============================================================
-// Benchmark: ComputeSums — Large (500, 200, 1000)
-// ============================================================
-static void BM_ComputeSums_Large(benchmark::State& state)
-{
-    const int n_pre = 500, n_post = 200, n_spikes = 1000;
-    std::vector<double> w(n_pre * n_post);
-    std::vector<double> times(n_spikes);
-    std::vector<int32_t> sources(n_spikes);
-    GenerateData(n_pre, n_post, n_spikes, w.data(), times.data(), sources.data());
-
-    int sum_rows = n_spikes + 1;
-    std::vector<double> sum0(sum_rows * n_post);
-    std::vector<double> sum1(sum_rows * n_post);
-
-    for (auto _ : state) {
-        std::memset(sum0.data(), 0, sum0.size() * sizeof(double));
-        std::memset(sum1.data(), 0, sum1.size() * sizeof(double));
-        eventprop_compute_sums(
-            w.data(), n_pre, n_post,
-            times.data(), sources.data(), n_spikes,
-            kTauMem, kTauSyn,
-            sum0.data(), sum1.data());
-    }
-
-    state.SetItemsProcessed(state.iterations() * n_spikes);
-}
-BENCHMARK(BM_ComputeSums_Large)->UseRealTime();
-
-// ============================================================
-// Benchmark: ComputeSpikes — Small (50, 20, 100)
-// ============================================================
-static void BM_ComputeSpikes_Small(benchmark::State& state)
-{
-    const int n_pre = 50, n_post = 20, n_spikes = 100;
-    std::vector<double> w(n_pre * n_post);
-    std::vector<double> times(n_spikes);
-    std::vector<int32_t> sources(n_spikes);
-    GenerateData(n_pre, n_post, n_spikes, w.data(), times.data(), sources.data());
-
-    int max_out = n_spikes * n_post;
+    int max_out = sz.n_spikes * sz.n_post;
     std::vector<double> out_times(max_out);
     std::vector<int32_t> out_sources(max_out);
     std::vector<double> out_currents(max_out);
@@ -165,194 +195,167 @@ static void BM_ComputeSpikes_Small(benchmark::State& state)
         std::memset(out_times.data(), 0, out_times.size() * sizeof(double));
         std::memset(out_sources.data(), 0, out_sources.size() * sizeof(int32_t));
         std::memset(out_currents.data(), 0, out_currents.size() * sizeof(double));
-
-        eventprop_compute_spikes(
-            w.data(), n_pre, n_post,
-            times.data(), sources.data(), n_spikes,
-            kVTh, kTauMem, kTauSyn,
+        eventprop_compute_spikes(w.data(), sz.n_pre, sz.n_post,
+            times.data(), sources.data(), sz.n_spikes,
+            kVThDefault, kTauMemDefault, kTauSynDefault,
             out_times.data(), out_sources.data(), out_currents.data());
     }
-
-    state.SetItemsProcessed(state.iterations() * n_spikes);
+    state.SetItemsProcessed(state.iterations() * sz.n_spikes);
 }
-BENCHMARK(BM_ComputeSpikes_Small)->UseRealTime();
+
+#define COMPUTESPIKES_BENCH(SizeName, NP, NPO, NS)                                             \
+    BENCHMARK_CAPTURE(BM_ComputeSpikes, SizeName##_uniform,                                    \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(                   \
+        "ComputeSpikes/" #SizeName "/uniform/default");                                         \
+    BENCHMARK_CAPTURE(BM_ComputeSpikes, SizeName##_poisson,                                    \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(                   \
+        "ComputeSpikes/" #SizeName "/poisson/default");                                         \
+    BENCHMARK_CAPTURE(BM_ComputeSpikes, SizeName##_burst,                                      \
+        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(                     \
+        "ComputeSpikes/" #SizeName "/burst/default")
+
+COMPUTESPIKES_BENCH(Tiny,    10,   5,   20);
+COMPUTESPIKES_BENCH(Small,   50,   20,  100);
+COMPUTESPIKES_BENCH(Medium,  200,  80,  500);
+COMPUTESPIKES_BENCH(Large,   500,  200, 1000);
+COMPUTESPIKES_BENCH(XL,      2000, 500, 5000);
 
 // ============================================================
-// Benchmark: ComputeSpikes — Medium (200, 80, 500)
+// Benchmark: BackwardSpikes — all sizes × patterns
 // ============================================================
-static void BM_ComputeSpikes_Medium(benchmark::State& state)
+static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, DataGenerator gen)
 {
-    const int n_pre = 200, n_post = 80, n_spikes = 500;
-    std::vector<double> w(n_pre * n_post);
-    std::vector<double> times(n_spikes);
-    std::vector<int32_t> sources(n_spikes);
-    GenerateData(n_pre, n_post, n_spikes, w.data(), times.data(), sources.data());
+    std::vector<double> w(sz.n_pre * sz.n_post);
+    std::vector<double> times(sz.n_spikes);
+    std::vector<int32_t> sources(sz.n_spikes);
+    gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
 
-    int max_out = n_spikes * n_post;
-    std::vector<double> out_times(max_out);
-    std::vector<int32_t> out_sources(max_out);
-    std::vector<double> out_currents(max_out);
-
-    for (auto _ : state) {
-        std::memset(out_times.data(), 0, out_times.size() * sizeof(double));
-        std::memset(out_sources.data(), 0, out_sources.size() * sizeof(int32_t));
-        std::memset(out_currents.data(), 0, out_currents.size() * sizeof(double));
-
-        eventprop_compute_spikes(
-            w.data(), n_pre, n_post,
-            times.data(), sources.data(), n_spikes,
-            kVTh, kTauMem, kTauSyn,
-            out_times.data(), out_sources.data(), out_currents.data());
-    }
-
-    state.SetItemsProcessed(state.iterations() * n_spikes);
-}
-BENCHMARK(BM_ComputeSpikes_Medium)->UseRealTime();
-
-// ============================================================
-// Benchmark: ComputeSpikes — Large (500, 200, 1000)
-// ============================================================
-static void BM_ComputeSpikes_Large(benchmark::State& state)
-{
-    const int n_pre = 500, n_post = 200, n_spikes = 1000;
-    std::vector<double> w(n_pre * n_post);
-    std::vector<double> times(n_spikes);
-    std::vector<int32_t> sources(n_spikes);
-    GenerateData(n_pre, n_post, n_spikes, w.data(), times.data(), sources.data());
-
-    int max_out = n_spikes * n_post;
-    std::vector<double> out_times(max_out);
-    std::vector<int32_t> out_sources(max_out);
-    std::vector<double> out_currents(max_out);
-
-    for (auto _ : state) {
-        std::memset(out_times.data(), 0, out_times.size() * sizeof(double));
-        std::memset(out_sources.data(), 0, out_sources.size() * sizeof(int32_t));
-        std::memset(out_currents.data(), 0, out_currents.size() * sizeof(double));
-
-        eventprop_compute_spikes(
-            w.data(), n_pre, n_post,
-            times.data(), sources.data(), n_spikes,
-            kVTh, kTauMem, kTauSyn,
-            out_times.data(), out_sources.data(), out_currents.data());
-    }
-
-    state.SetItemsProcessed(state.iterations() * n_spikes);
-}
-BENCHMARK(BM_ComputeSpikes_Large)->UseRealTime();
-
-// ============================================================
-// Benchmark: BackwardSpikes — Small (50, 20, 100)
-// ============================================================
-static void BM_BackwardSpikes_Small(benchmark::State& state)
-{
-    const int n_pre = 50, n_post = 20, n_spikes = 100;
-    std::vector<double> w(n_pre * n_post);
-    std::vector<double> times(n_spikes);
-    std::vector<int32_t> sources(n_spikes);
-    GenerateData(n_pre, n_post, n_spikes, w.data(), times.data(), sources.data());
-
-    // Pre-compute forward pass once
     std::vector<double> post_times, post_currents;
     std::vector<int32_t> post_sources_vec;
-    int n_post_spikes = RunForward(n_pre, n_post, n_spikes, w.data(), times.data(), sources.data(),
+    int n_post_spikes = RunForward(sz.n_pre, sz.n_post, sz.n_spikes,
+                                   w.data(), times.data(), sources.data(),
                                    post_times, post_sources_vec, post_currents);
 
-    // Post errors (all 1.0, matching .NET BenchBase)
     std::vector<double> post_errors(n_post_spikes, 1.0);
-
-    // Gradient buffer (caller zero-initializes)
-    std::vector<double> grad(n_pre * n_post);
+    std::vector<double> grad(sz.n_pre * sz.n_post);
 
     for (auto _ : state) {
         std::memset(grad.data(), 0, grad.size() * sizeof(double));
-        eventprop_backward_spikes(
-            times.data(), sources.data(), n_spikes,
+        eventprop_backward_spikes(times.data(), sources.data(), sz.n_spikes,
             post_times.data(), post_sources_vec.data(),
             post_currents.data(), post_errors.data(), n_post_spikes,
-            w.data(), n_pre, n_post,
-            kVTh, kTauMem, kTauSyn,
-            grad.data());
+            w.data(), sz.n_pre, sz.n_post,
+            kVThDefault, kTauMemDefault, kTauSynDefault, grad.data());
     }
-
-    state.SetItemsProcessed(state.iterations() * n_spikes);
+    state.SetItemsProcessed(state.iterations() * sz.n_spikes);
 }
-BENCHMARK(BM_BackwardSpikes_Small)->UseRealTime();
+
+#define BACKWARDSPIKES_BENCH(SizeName, NP, NPO, NS)                                            \
+    BENCHMARK_CAPTURE(BM_BackwardSpikes, SizeName##_uniform,                                   \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(                   \
+        "BackwardSpikes/" #SizeName "/uniform/default");                                        \
+    BENCHMARK_CAPTURE(BM_BackwardSpikes, SizeName##_poisson,                                   \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(                   \
+        "BackwardSpikes/" #SizeName "/poisson/default");                                        \
+    BENCHMARK_CAPTURE(BM_BackwardSpikes, SizeName##_burst,                                     \
+        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(                     \
+        "BackwardSpikes/" #SizeName "/burst/default")
+
+BACKWARDSPIKES_BENCH(Tiny,    10,   5,   20);
+BACKWARDSPIKES_BENCH(Small,   50,   20,  100);
+BACKWARDSPIKES_BENCH(Medium,  200,  80,  500);
+BACKWARDSPIKES_BENCH(Large,   500,  200, 1000);
+BACKWARDSPIKES_BENCH(XL,      2000, 500, 5000);
 
 // ============================================================
-// Benchmark: BackwardSpikes — Medium (200, 80, 500)
+// Benchmark: ComputeMaxima — all sizes × patterns (NEW)
 // ============================================================
-static void BM_BackwardSpikes_Medium(benchmark::State& state)
+static void BM_ComputeMaxima(benchmark::State& state, const ProblemSize& sz, DataGenerator gen)
 {
-    const int n_pre = 200, n_post = 80, n_spikes = 500;
-    std::vector<double> w(n_pre * n_post);
-    std::vector<double> times(n_spikes);
-    std::vector<int32_t> sources(n_spikes);
-    GenerateData(n_pre, n_post, n_spikes, w.data(), times.data(), sources.data());
+    std::vector<double> w(sz.n_pre * sz.n_post);
+    std::vector<double> times(sz.n_spikes);
+    std::vector<int32_t> sources(sz.n_spikes);
+    gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
 
-    // Pre-compute forward pass once
-    std::vector<double> post_times, post_currents;
-    std::vector<int32_t> post_sources_vec;
-    int n_post_spikes = RunForward(n_pre, n_post, n_spikes, w.data(), times.data(), sources.data(),
-                                   post_times, post_sources_vec, post_currents);
-
-    // Post errors (all 1.0, matching .NET BenchBase)
-    std::vector<double> post_errors(n_post_spikes, 1.0);
-
-    // Gradient buffer (caller zero-initializes)
-    std::vector<double> grad(n_pre * n_post);
+    std::vector<double> maxima_times(sz.n_post);
+    std::vector<double> maxima_values(sz.n_post);
 
     for (auto _ : state) {
-        std::memset(grad.data(), 0, grad.size() * sizeof(double));
-        eventprop_backward_spikes(
-            times.data(), sources.data(), n_spikes,
-            post_times.data(), post_sources_vec.data(),
-            post_currents.data(), post_errors.data(), n_post_spikes,
-            w.data(), n_pre, n_post,
-            kVTh, kTauMem, kTauSyn,
-            grad.data());
+        eventprop_compute_maxima(w.data(), sz.n_pre, sz.n_post,
+            times.data(), sources.data(), sz.n_spikes,
+            kTauMemDefault, kTauSynDefault,
+            maxima_times.data(), maxima_values.data());
     }
-
-    state.SetItemsProcessed(state.iterations() * n_spikes);
+    state.SetItemsProcessed(state.iterations() * sz.n_spikes);
 }
-BENCHMARK(BM_BackwardSpikes_Medium)->UseRealTime();
+
+#define COMPUTEMAXIMA_BENCH(SizeName, NP, NPO, NS)                                               \
+    BENCHMARK_CAPTURE(BM_ComputeMaxima, SizeName##_uniform,                                      \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(                     \
+        "ComputeMaxima/" #SizeName "/uniform/default");                                           \
+    BENCHMARK_CAPTURE(BM_ComputeMaxima, SizeName##_poisson,                                      \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(                     \
+        "ComputeMaxima/" #SizeName "/poisson/default");                                           \
+    BENCHMARK_CAPTURE(BM_ComputeMaxima, SizeName##_burst,                                        \
+        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(                       \
+        "ComputeMaxima/" #SizeName "/burst/default")
+
+COMPUTEMAXIMA_BENCH(Tiny,    10,   5,   20);
+COMPUTEMAXIMA_BENCH(Small,   50,   20,  100);
+COMPUTEMAXIMA_BENCH(Medium,  200,  80,  500);
+COMPUTEMAXIMA_BENCH(Large,   500,  200, 1000);
+COMPUTEMAXIMA_BENCH(XL,      2000, 500, 5000);
 
 // ============================================================
-// Benchmark: BackwardSpikes — Large (500, 200, 1000)
+// Benchmark: Training loop — forward + backward (all sizes)
 // ============================================================
-static void BM_BackwardSpikes_Large(benchmark::State& state)
+static void BM_TrainingLoop(benchmark::State& state, const ProblemSize& sz)
 {
-    const int n_pre = 500, n_post = 200, n_spikes = 1000;
-    std::vector<double> w(n_pre * n_post);
-    std::vector<double> times(n_spikes);
-    std::vector<int32_t> sources(n_spikes);
-    GenerateData(n_pre, n_post, n_spikes, w.data(), times.data(), sources.data());
+    std::vector<double> w(sz.n_pre * sz.n_post);
+    std::vector<double> times(sz.n_spikes);
+    std::vector<int32_t> sources(sz.n_spikes);
+    GenerateUniformData(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
 
-    // Pre-compute forward pass once
+    // Pre-compute forward pass
     std::vector<double> post_times, post_currents;
     std::vector<int32_t> post_sources_vec;
-    int n_post_spikes = RunForward(n_pre, n_post, n_spikes, w.data(), times.data(), sources.data(),
+    int n_post_spikes = RunForward(sz.n_pre, sz.n_post, sz.n_spikes,
+                                   w.data(), times.data(), sources.data(),
                                    post_times, post_sources_vec, post_currents);
 
-    // Post errors (all 1.0, matching .NET BenchBase)
     std::vector<double> post_errors(n_post_spikes, 1.0);
-
-    // Gradient buffer (caller zero-initializes)
-    std::vector<double> grad(n_pre * n_post);
+    std::vector<double> grad(sz.n_pre * sz.n_post);
 
     for (auto _ : state) {
-        std::memset(grad.data(), 0, grad.size() * sizeof(double));
-        eventprop_backward_spikes(
-            times.data(), sources.data(), n_spikes,
-            post_times.data(), post_sources_vec.data(),
-            post_currents.data(), post_errors.data(), n_post_spikes,
-            w.data(), n_pre, n_post,
-            kVTh, kTauMem, kTauSyn,
-            grad.data());
-    }
+        // Forward pass
+        std::vector<double> fwd_times, fwd_currents;
+        std::vector<int32_t> fwd_sources;
+        int n_fwd = eventprop_compute_spikes(
+            w.data(), sz.n_pre, sz.n_post,
+            times.data(), sources.data(), sz.n_spikes,
+            kVThDefault, kTauMemDefault, kTauSynDefault,
+            fwd_times.data(), fwd_sources.data(), fwd_currents.data());
 
-    state.SetItemsProcessed(state.iterations() * n_spikes);
+        // Backward pass
+        std::memset(grad.data(), 0, grad.size() * sizeof(double));
+        eventprop_backward_spikes(times.data(), sources.data(), sz.n_spikes,
+            fwd_times.data(), fwd_sources.data(),
+            fwd_currents.data(), post_errors.data(), n_fwd,
+            w.data(), sz.n_pre, sz.n_post,
+            kVThDefault, kTauMemDefault, kTauSynDefault, grad.data());
+    }
+    state.SetItemsProcessed(state.iterations() * sz.n_spikes);
 }
-BENCHMARK(BM_BackwardSpikes_Large)->UseRealTime();
+
+#define TRAININGLOOP_BENCH(SizeName, NP, NPO, NS)                                                \
+    BENCHMARK_CAPTURE(BM_TrainingLoop, SizeName,                                                 \
+        {#SizeName, NP, NPO, NS})->UseRealTime()->Name(                                          \
+        "TrainingLoop/" #SizeName "/uniform/default")
+
+TRAININGLOOP_BENCH(Tiny,    10,   5,   20);
+TRAININGLOOP_BENCH(Small,   50,   20,  100);
+TRAININGLOOP_BENCH(Medium,  200,  80,  500);
+TRAININGLOOP_BENCH(Large,   500,  200, 1000);
+TRAININGLOOP_BENCH(XL,      2000, 500, 5000);
 
 // Note: main() is provided by benchmark::benchmark_main library
