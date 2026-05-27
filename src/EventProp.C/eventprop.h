@@ -30,15 +30,9 @@ typedef struct {
     double* fwd_currents;    /* max_out — post-synaptic synaptic currents at spike times */
 } EventPropScratch;
 
-typedef struct {
-    double* times;   /* n_post — membrane potential maxima per neuron */
-    double* values;  /* n_post — maximum membrane potential value per neuron */
-} EventPropMaxima;
-
 /* ── Buffer initialization (sets pointers, does NOT allocate memory) ──────── */
 
 void eventprop_scratch_init(EventPropScratch* buf, int n_pre, int n_post, int n_spikes);
-void eventprop_maxima_init(EventPropMaxima* maxima, int n_post);
 
 /* ── Core algorithms ─────────────────────────────────────────────────────── */
 
@@ -87,7 +81,8 @@ void eventprop_backward_spikes(const double* times, const int32_t* sources, int 
  */
 void eventprop_compute_maxima(const double* w, int n_pre, int n_post,
                               const double* times, const int32_t* sources, int n_spikes,
-                              double tau_mem, double tau_syn, EventPropMaxima* maxima);
+                              double tau_mem, double tau_syn,
+                              double* maxima_times, double* maxima_values);
 
 #ifdef __cplusplus
 }

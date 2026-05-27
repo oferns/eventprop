@@ -16,10 +16,7 @@ void eventprop_scratch_init(EventPropScratch* buf, int n_pre, int n_post, int n_
     buf->fwd_times = NULL; buf->fwd_sources = NULL; buf->fwd_currents = NULL;
 }
 
-void eventprop_maxima_init(EventPropMaxima* maxima, int n_post)
-{
-    (void)n_post; maxima->times = NULL; maxima->values = NULL;
-}
+
 
 /* ── ComputeSums: cumulative exponential-weighted sums ─────────────── */
 
@@ -382,7 +379,8 @@ void eventprop_backward_spikes(const double* times, const int32_t* sources, int 
 
 void eventprop_compute_maxima(const double* w, int n_pre, int n_post,
                               const double* times, const int32_t* sources, int n_spikes,
-                              double tau_mem, double tau_syn, EventPropMaxima* maxima)
+                              double tau_mem, double tau_syn,
+                              double* maxima_times, double* maxima_values)
 {
     int n_sums = (n_spikes + 1) * n_post;
     double* sum0 = calloc(n_sums, sizeof(double));
@@ -393,7 +391,7 @@ void eventprop_compute_maxima(const double* w, int n_pre, int n_post,
     double tmax_pref = 1.0 / (1.0/tau_mem - 1.0/tau_syn);
     double tmax_sum = log(tau_syn / tau_mem);
 
-    for (int i = 0; i < n_post; i++) { maxima->times[i] = NAN; maxima->values[i] = -INFINITY; }
+    for (int i = 0; i < n_post; i++) { maxima_times[i] = NAN; maxima_values[i] = -INFINITY; }
 
     for (int target_nrn = 0; target_nrn < n_post; target_nrn++) {
         for (int i = 0; i <= n_spikes; i++) {
@@ -406,15 +404,15 @@ void eventprop_compute_maxima(const double* w, int n_pre, int n_post,
 
             if (!isinf(tmax) && t_before <= tmax && (i == n_spikes || tmax <= t_input)) {
                 double vmax = k_pref * (s1 * exp(-tmax/tau_mem) - s0 * exp(-tmax/tau_syn));
-                if (vmax > maxima->values[target_nrn]) {
-                    maxima->values[target_nrn] = vmax; maxima->times[target_nrn] = tmax;
+                if (vmax > maxima_values[target_nrn]) {
+                    maxima_values[target_nrn] = vmax; maxima_times[target_nrn] = tmax;
                 }
             }
 
             double v_at_input = k_pref * (s1 * exp(-t_input/tau_mem) - s0 * exp(-t_input/tau_syn));
-            if (v_at_input > maxima->values[target_nrn]) {
-                maxima->values[target_nrn] = v_at_input;
-                maxima->times[target_nrn] = t_input == INFINITY ? t_before : t_input;
+            if (v_at_input > maxima_values[target_nrn]) {
+                maxima_values[target_nrn] = v_at_input;
+                maxima_times[target_nrn] = t_input == INFINITY ? t_before : t_input;
             }
         }
     }

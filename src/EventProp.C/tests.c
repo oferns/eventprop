@@ -185,18 +185,14 @@ static void test_compute_maxima(void)
 
     double* max_times = malloc(n_post * sizeof(double));
     double* max_values = malloc(n_post * sizeof(double));
-    EventPropMaxima maxima;
-    eventprop_maxima_init(&maxima, n_post);
-    maxima.times = max_times;
-    maxima.values = max_values;
 
     eventprop_compute_maxima(w, n_pre, n_post,
                               times, sources, n_spikes,
-                              0.02, 0.005, &maxima);
+                              0.02, 0.005, max_times, max_values);
 
     /* No NaN in times/values pairs */
     for (int i = 0; i < n_post; i++) {
-        ASSERT(!isnan(maxima.times[i]) || isnan(maxima.values[i]), "times/values mismatch");
+        ASSERT(!isnan(max_times[i]) || isnan(max_values[i]), "times/values mismatch");
     }
 
     free(max_times); free(max_values);
