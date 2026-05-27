@@ -55,7 +55,7 @@ public abstract class Bench_ComputeMaxima_Base : BenchBase
         double[] maximaTimesOut = new double[NPost];
         double[] maximaValuesOut = new double[NPost];
 
-        CxxNative.ComputeMaxima(W, NPre, NPost, Times, Sources, TauMem, TauSyn,
+        NativeApi.ComputeMaxima(W, NPre, NPost, Times, Sources, TauMem, TauSyn,
             maximaTimesOut, maximaValuesOut);
     }
 }

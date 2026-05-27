@@ -88,7 +88,7 @@ public class Bench_ComputeSums_Tiny : BenchBase
     {
         Array.Clear(Sum0Native);
         Array.Clear(Sum1Native);
-        CxxNative.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn,
+        NativeApi.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn,
             Sum0Native, Sum1Native);
     }
 }
@@ -112,7 +112,7 @@ public class Bench_ComputeSums_XL : BenchBase
     {
         Array.Clear(Sum0Native);
         Array.Clear(Sum1Native);
-        CxxNative.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn,
+        NativeApi.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn,
             Sum0Native, Sum1Native);
     }
 }
@@ -134,7 +134,7 @@ public class Bench_ComputeSpikes_Tiny : BenchBase
         Array.Clear(OutTimesNative, 0, OutTimesNative.Length);
         Array.Clear(OutSourcesNative, 0, OutSourcesNative.Length);
         Array.Clear(OutCurrentsNative, 0, OutCurrentsNative.Length);
-        return CxxNative.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn,
+        return NativeApi.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn,
             OutTimesNative, OutSourcesNative, OutCurrentsNative);
     }
 }
@@ -153,7 +153,7 @@ public class Bench_ComputeSpikes_XL : BenchBase
         Array.Clear(OutTimesNative, 0, OutTimesNative.Length);
         Array.Clear(OutSourcesNative, 0, OutSourcesNative.Length);
         Array.Clear(OutCurrentsNative, 0, OutCurrentsNative.Length);
-        return CxxNative.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn,
+        return NativeApi.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn,
             OutTimesNative, OutSourcesNative, OutCurrentsNative);
     }
 }
@@ -176,7 +176,7 @@ public class Bench_BackwardSpikes_Tiny : Bench_TinyXL_Base
     public void Native()
     {
         Array.Clear(GradNative);
-        CxxNative.BackwardSpikes(Times, Sources, PostTimesNative, PostSourcesNative,
+        NativeApi.BackwardSpikes(Times, Sources, PostTimesNative, PostSourcesNative,
             PostCurrentsNative, PostErrorsNative, W, NPre, NPost, VTh, TauMem, TauSyn, GradNative);
     }
 }
@@ -196,7 +196,7 @@ public class Bench_BackwardSpikes_XL : Bench_TinyXL_Base
     public void Native()
     {
         Array.Clear(GradNative);
-        CxxNative.BackwardSpikes(Times, Sources, PostTimesNative, PostSourcesNative,
+        NativeApi.BackwardSpikes(Times, Sources, PostTimesNative, PostSourcesNative,
             PostCurrentsNative, PostErrorsNative, W, NPre, NPost, VTh, TauMem, TauSyn, GradNative);
     }
 }

@@ -78,7 +78,7 @@ public abstract class Bench_Pattern_Base : BenchBase
     {
         Array.Clear(Sum0Native);
         Array.Clear(Sum1Native);
-        CxxNative.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn,
+        NativeApi.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn,
             Sum0Native, Sum1Native);
     }
 
@@ -92,7 +92,7 @@ public abstract class Bench_Pattern_Base : BenchBase
         Array.Clear(OutTimesNative, 0, OutTimesNative.Length);
         Array.Clear(OutSourcesNative, 0, OutSourcesNative.Length);
         Array.Clear(OutCurrentsNative, 0, OutCurrentsNative.Length);
-        return CxxNative.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn,
+        return NativeApi.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn,
             OutTimesNative, OutSourcesNative, OutCurrentsNative);
     }
 
@@ -107,7 +107,7 @@ public abstract class Bench_Pattern_Base : BenchBase
     public void BackwardSpikes_Native()
     {
         Array.Clear(GradNative);
-        CxxNative.BackwardSpikes(Times, Sources, PostTimesNative, PostSourcesNative,
+        NativeApi.BackwardSpikes(Times, Sources, PostTimesNative, PostSourcesNative,
             PostCurrentsNative, PostErrorsNative, W, NPre, NPost, VTh, TauMem, TauSyn, GradNative);
     }
 }

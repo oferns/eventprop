@@ -198,9 +198,7 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
     std::vector<double> out_currents(max_out);
 
     for (auto _ : state) {
-        std::memset(out_times.data(), 0, out_times.size() * sizeof(double));
-        std::memset(out_sources.data(), 0, out_sources.size() * sizeof(int32_t));
-        std::memset(out_currents.data(), 0, out_currents.size() * sizeof(double));
+        // NOTE: no memset on output buffers — compute_spikes overwrites them completely
         eventprop_compute_spikes(w.data(), sz.n_pre, sz.n_post,
             times.data(), sources.data(), sz.n_spikes,
             kVThDefault, kTauMemDefault, kTauSynDefault,
@@ -429,9 +427,7 @@ static void BM_ComputeSpikes_MultiThreaded(benchmark::State& state, const Proble
 
     for (auto _ : state) {
         omp_set_num_threads(n_threads);
-        std::memset(out_times.data(), 0, out_times.size() * sizeof(double));
-        std::memset(out_sources.data(), 0, out_sources.size() * sizeof(int32_t));
-        std::memset(out_currents.data(), 0, out_currents.size() * sizeof(double));
+        // NOTE: no memset on output buffers — compute_spikes overwrites them completely
         eventprop_compute_spikes(w.data(), sz.n_pre, sz.n_post,
             times.data(), sources.data(), sz.n_spikes,
             kVThDefault, kTauMemDefault, kTauSynDefault,
