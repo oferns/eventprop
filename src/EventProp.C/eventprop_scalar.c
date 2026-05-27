@@ -29,8 +29,8 @@ void eventprop_compute_sums(const double* w, int n_pre, int n_post,
     double* exp_syn = (double*)malloc(n_spikes * sizeof(double));
 
     for (int i = 0; i < n_spikes; i++) {
-        exp_mem[i] = exp(-times[i] / tau_mem);
-        exp_syn[i] = exp(-times[i] / tau_syn);
+        exp_mem[i] = exp(times[i] / tau_mem);
+        exp_syn[i] = exp(times[i] / tau_syn);
     }
 
     for (int i = 0; i < n_spikes; i++) {
@@ -118,8 +118,8 @@ static double compute_i(double t, int n_spikes, const double* times,
 
 /* ── Toms748 (Brent) root-finding ─────────────────────────────────── */
 
-#define TOMS748_MAX_ITER 100
-#define TOMS748_TOL 1e-12
+#define TOMS748_MAX_ITER 1024
+#define TOMS748_TOL 1e-14
 
 typedef double (*root_fn_t)(void*, double);
 
@@ -137,31 +137,66 @@ static double root_fn(void* ctx_ptr, double t) {
                      c->k_prefactor, c->tau_mem, c->tau_syn, c->v_th) - c->v_th;
 }
 
+/* Exact port of .NET Toms748.Solve — Brent's method with IQI */
 static double toms748_solve(void* ctx, root_fn_t fn, double a, double b) {
     double fa = fn(ctx, a), fb = fn(ctx, b);
-    if (fa * fb > 0) return a;
 
-    double c = a, fc = fa, d = 0, e = 0;
-    for (int iter = 0; iter < TOMS748_MAX_ITER; iter++) {
-        if (fb * fc > 0) { c = a; fc = fa; d = e = b - a; }
-        if (fabs(fc) < fabs(fb)) { double t=t;a=b;b=c;c=t; t=fa;fa=fb;fb=fc;fc=t; }
+    /* Ensure a < b (swap if needed) */
+    if (a > b) { double tmp=a; a=b; b=tmp; tmp=fa; fa=fb; fb=tmp; }
 
-        double tol = 2.0 * TOMS748_TOL * fabs(b) + TOMS748_TOL / 2.0;
-        double m = (c - b) / 2.0;
-        if (fabs(m) <= tol || fb == 0.0) return b;
+    double c = a, fc = fa, d = 0.0;
+    int iter = 0;
+    while (++iter <= TOMS748_MAX_ITER) {
+        double m = 0.5 * (b - a);
+        if (fabs(m) <= TOMS748_TOL || fb == 0.0)
+            return b;
 
-        if (fabs(e) >= tol && fabs(fa) > fabs(fb)) {
-            double s = fb / fa, p, q;
-            if (a == c) { p = 2.0 * m * s; q = 1.0 - s; }
-            else { double r = fb / fc; p = s*(2.0*m*q*(q-r)-(b-a)*(r-1.0)); q=(q-1.0)*(r-1.0)*(s-1.0); }
-            if (p > 0) q = -q; p = fabs(p);
-            if (2.0 * p < fmin(3.0*m*q - fabs(tol*q), fabs(e*q))) { d = p/q; e = d; }
-            else { d = m; e = m; }
-        } else { d = m; e = m; }
+        double s = 0.0;
+        int useBisection = 1;
 
-        a = b; fa = fb;
-        if (fabs(d) > tol) b += d; else b += (m > 0 ? tol : -tol);
+        /* Try IQI through (a,fa), (b,fb), (c,fc) */
+        if (fabs(fc) > fabs(fb) && c != a && c != b) {
+            double qba = (fb - fa) / (b - a);
+            double qcb = (fc - fb) / (c - b);
+            double qcbba = (qcb - qba) / (c - a);
+
+            if (fabs(qcbba) > 1e-300) {
+                double denom = qba + qcb;
+                if (fabs(denom) > 1e-300) {
+                    s = b - fb / (qba + qcb * (b - a) * qcbba / denom);
+
+                    int inBracket = (s > a && s < b);
+                    double mVal = 0.5 * (b - a);
+                    int smallStep = fabs(s - b) < mVal;
+                    int prevWasBisect = fabs(d - mVal) < TOMS748_TOL * 100;
+
+                    if (inBracket && smallStep && !prevWasBisect)
+                        useBisection = 0;
+                }
+            }
+        }
+
+        if (useBisection) {
+            s = a + m;
+        }
+
+        double prevB = b;
+        b = s;
         fb = fn(ctx, b);
+
+        if (fabs(fb) <= TOMS748_TOL || fabs(b - prevB) <= TOMS748_TOL * fmax(1.0, fabs(prevB)))
+            return b;
+
+        /* Update bracketing interval: maintain f(a)*f(b) < 0 */
+        if (fa * fb < 0.0) {
+            c = prevB; fc = fn(ctx, prevB);
+        } else if (fb * fc < 0.0) {
+            a = prevB; fa = fn(ctx, prevB);
+        } else {
+            a = prevB; fa = fn(ctx, prevB);
+        }
+
+        d = b - prevB;
     }
     return b;
 }
@@ -328,6 +363,7 @@ void eventprop_backward_spikes(const double* times, const int32_t* sources, int 
     for (int i = 0; i < n_post_spikes; i++) all_errors[n_spikes + i] = post_errors[i];
 
     double* lambda_v = calloc(n_post, sizeof(double));
+    double* lambda_i = malloc(n_post * sizeof(double));
     int max_jumps = n_post_spikes;
     double* jump_time = malloc(max_jumps * sizeof(double));
     double* jump_mag = malloc(max_jumps * sizeof(double));
@@ -347,16 +383,20 @@ void eventprop_backward_spikes(const double* times, const int32_t* sources, int 
         for (int nrn = 0; nrn < n_post; nrn++) lambda_v[nrn] *= exp(-dt / tau_mem);
 
         if (is_input) {
-            double lambda_i = 0.0;
-            for (int j = 0, end = jump_end[spike_source]; j < end; j++)
-                lambda_i += jump_mag[j] * k_bwd * (exp(-(t_bwd-jump_time[j])/tau_mem) - exp(-(t_bwd-jump_time[j])/tau_syn));
+            memset(lambda_i, 0, n_post * sizeof(double));
+            int start = 0, end = jump_end[spike_source];
+            for (int j = start; j < end; j++) {
+                double jumpTimeOffset = jump_time[j];
+                double jumpMag = jump_mag[j];
+                lambda_i[spike_source] += jumpMag * k_bwd * (exp(-(t_bwd - jumpTimeOffset) / tau_mem) - exp(-(t_bwd - jumpTimeOffset) / tau_syn));
+            }
 
             for (int nrn = 0; nrn < n_post; nrn++)
-                grad[spike_source * n_post + nrn] += -tau_syn * lambda_i;
+                grad[spike_source * n_post + nrn] += -tau_syn * lambda_i[nrn];
 
             double outbound = 0.0;
             for (int nrn = 0; nrn < n_post; nrn++)
-                outbound += w[spike_source * n_post + nrn] * (lambda_v[nrn] - lambda_i);
+                outbound += w[spike_source * n_post + nrn] * (lambda_v[nrn] - lambda_i[nrn]);
             all_errors[spike_idx] += outbound;
         } else {
             double current = fwd_currents[spike_idx];
@@ -372,7 +412,7 @@ void eventprop_backward_spikes(const double* times, const int32_t* sources, int 
         previous_t = t_bwd;
     }
 
-    free(merged); free(all_errors); free(lambda_v); free(jump_time); free(jump_mag); free(jump_end);
+    free(merged); free(all_errors); free(lambda_v); free(lambda_i); free(jump_time); free(jump_mag); free(jump_end);
 }
 
 /* ── ComputeMaxima: membrane potential maxima per neuron ───────────── */
