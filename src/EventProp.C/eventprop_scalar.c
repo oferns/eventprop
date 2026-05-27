@@ -119,11 +119,18 @@ static double compute_i(double t, int n_spikes, const double* times,
 /* ── Merge spike comparison for qsort (descending by time) ─────────── */
 
 typedef struct { double time; int idx; int is_input; } MergedSpike;
+typedef struct { double time; int source; double current; } SpikeEntry;
 
 static int cmp_merged_desc(const void* a, const void* b) {
     double ta = ((const MergedSpike*)a)->time;
     double tb = ((const MergedSpike*)b)->time;
     return (ta < tb) - (ta > tb);
+}
+
+static int cmp_spike_asc(const void* a, const void* b) {
+    double ta = ((const SpikeEntry*)a)->time;
+    double tb = ((const SpikeEntry*)b)->time;
+    return (ta > tb) - (ta < tb);
 }
 
 /* ── Toms748 (Brent) root-finding ─────────────────────────────────── */
@@ -320,7 +327,6 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
 
     if (total == 0) { free(sum0); free(sum1); free(post_times); free(post_currents); free(spike_counts); return 0; }
 
-    typedef struct { double time; int source; double current; } SpikeEntry;
     SpikeEntry* entries = malloc(total * sizeof(SpikeEntry));
     int idx = 0;
     for (int n = 0; n < n_post; n++) {
@@ -333,9 +339,7 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
         }
     }
 
-    for (int i = 0; i < total - 1; i++)
-        for (int j = 0; j < total - i - 1; j++)
-            if (entries[j].time > entries[j+1].time) { SpikeEntry t=entries[j]; entries[j]=entries[j+1]; entries[j+1]=t; }
+    qsort(entries, total, sizeof(SpikeEntry), cmp_spike_asc);
 
     for (int i = 0; i < total; i++) {
         out_times[i] = entries[i].time;
