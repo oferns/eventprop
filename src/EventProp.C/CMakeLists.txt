@@ -32,3 +32,8 @@ target_include_directories(eventprop_c_api PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # Install
 install(TARGETS eventprop_c_api LIBRARY DESTINATION lib)
 install(FILES eventprop.h DESTINATION include)
+
+# Unit tests
+add_executable(test_runner tests.c)
+target_link_libraries(test_runner PRIVATE eventprop_c_api m)
+add_test(NAME EventPropCTests COMMAND test_runner)

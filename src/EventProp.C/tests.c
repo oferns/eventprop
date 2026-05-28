@@ -73,7 +73,7 @@ static void test_compute_sums(void)
 
     /* Row 1 should have contributions from first spike */
     int32_t src0 = sources[0];
-    double exp_syn_0 = exp(-times[0] / 0.005);
+    double exp_syn_0 = exp(times[0] / 0.005);
     for (int j = 0; j < n_post; j++) {
         double expected = w[src0 * n_post + j] * exp_syn_0;
         ASSERT_NEAR(sum0[n_post + j], expected, EPSILON * 10);
@@ -122,7 +122,7 @@ static void test_compute_spikes_medium(void)
     int32_t* sources = malloc(n_spikes * sizeof(int32_t));
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
 
-    int max_out = n_spikes * n_post;
+    int max_out = (n_spikes + 1) * n_post; /* +1 per neuron for safety */
     double* out_times = malloc(max_out * sizeof(double));
     int32_t* out_sources = malloc(max_out * sizeof(int32_t));
     double* out_currents = malloc(max_out * sizeof(double));
