@@ -16,6 +16,8 @@ EventProp is an event-based backpropagation method that computes **exact gradien
 
 ## Quick Start
 
+### Low-level API (EventPropMath)
+
 ```csharp
 using CW.EventProp;
 
@@ -48,6 +50,46 @@ EventPropMath.Backward(
 // Apply gradients to weights (e.g., via Adam optimizer)
 ```
 
+### High-level API (Layer classes)
+
+```csharp
+using CW.EventProp;
+
+// Create a layer with parameterized configuration
+var layer = new LIFLayer(
+    parameters: new LIFLayerParameters(
+        tauMem: 0.02, tauSyn: 0.005, vTh: 1.0
+    ),
+    nPre: inputNeurons,
+    nPost: outputNeurons,
+    initializer: new DiagonalInitializer(scale: 0.5)
+);
+
+// Forward pass — returns output spike times
+var outputSpikes = layer.Forward(inputTimes, inputSources);
+
+// Backward pass — computes gradients in-place
+layer.Backward(postTimes, postSources, postErrors);
+
+// Access gradients and update weights
+var gradient = layer.Gradient;
+for (int i = 0; i < weights.Length; i++)
+    weights[i] -= learningRate * gradient[i];
+
+// Chain layers for multi-layer networks
+var chain = layer1.Chain(layer2);
+chain.Forward(inputTimes, inputSources);  // propagates through both
+```
+
+## Native Bindings
+
+The project includes two P/Invoke binding layers for calling native code:
+
+- **`EventProp.Native`** — Binds to the pure C library (`libeventprop_c_api`) via `LibraryImport` + `[UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]`
+- **`EventProp.Cpp.Native`** — Binds to the C++ wrapper (`libeventprop_cpp_wrapper`) with Eigen/Boost support
+
+Both use modern .NET 10 source-generated P/Invoke (no `DllImport`).
+
 ## Project Structure
 
 ```
@@ -55,11 +97,20 @@ src/
 ├── EventProp/              # Core library
 │   ├── SpikesData.cs       # Spike event container
 │   ├── MaximaData.cs       # Membrane potential maxima
+│   ├── ScratchBuffers.cs   # Reusable pre-allocated buffers
 │   ├── MatrixView.cs       # Zero-copy row-major matrix ref struct
 │   ├── StridedSpan.cs      # Strided column access (no allocation)
-│   ├── ScratchBuffers.cs   # Reusable pre-allocated buffers
 │   ├── SpanAlgorithms.cs   # Element-wise math helpers
-│   └── EventPropMath.cs    # Core algorithm implementations
+│   ├── SimdAlgorithms.cs   # SIMD-optimized algorithms (AVX2/AVX-512)
+│   ├── EventPropMath.cs    # Core algorithm implementations
+│   ├── Layer.cs            # Abstract layer + chain composition
+│   ├── LIFLayer.cs         # Leaky Integrate-and-Fire layer
+│   ├── LILayer.cs          # Integrate-and-Fire layer
+│   ├── WeightInitializer.cs# Diagonal weight initialization
+│   └── BatchVectors.cs     # Per-batch state vectors
+├── EventProp.Native/       # P/Invoke bindings (C library)
+├── EventProp.Cpp.Native/   # P/Invoke bindings (C++ wrapper)
+├── EventProp.Benchmarks/   # BenchmarkDotNet benchmarks
 └── EventProp.Tests/        # TUnit tests
 ```
 

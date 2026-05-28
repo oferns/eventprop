@@ -12,9 +12,21 @@ eventprop.net/
 ├── EventProp.sln               # Traditional solution (CLI compatibility)
 ├── src/
 │   ├── EventProp/              # Core library project
-│   │   └── *.cs                # Algorithm implementations
+│   │   ├── SpikesData.cs       # Spike event container
+│   │   ├── MaximaData.cs       # Membrane potential maxima
+│   │   ├── ScratchBuffers.cs   # Reusable pre-allocated buffers
+│   │   ├── EventPropMath.cs    # Core algorithm implementations
+│   │   ├── Layer.cs            # Abstract layer + chain composition
+│   │   ├── LIFLayer.cs         # Leaky Integrate-and-Fire layer
+│   │   ├── LILayer.cs          # Integrate-and-Fire layer
+│   │   ├── WeightInitializer.cs# Diagonal weight initialization
+│   │   └── BatchVectors.cs     # Per-batch state vectors
+│   ├── EventProp.Native/       # P/Invoke bindings (C library)
+│   │   └── NativeApi.cs        # LibraryImport + UnmanagedCallConv
+│   ├── EventProp.Cpp.Native/   # P/Invoke bindings (C++ wrapper)
+│   │   └── NativeCppApi.cs     # LibraryImport + UnmanagedCallConv
+│   ├── EventProp.Benchmarks/   # BenchmarkDotNet benchmarks
 │   └── EventProp.Tests/        # Test project (TUnit)
-│       └── *.cs                # Unit tests
 ├── coverage-report/            # Generated HTML coverage reports (gitignored)
 └── AGENTS.md                   # This file
 ```
