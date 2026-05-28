@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace CW.EventProp;
@@ -6,15 +7,16 @@ namespace CW.EventProp;
 /// P/Invoke bindings for the EventProp native C++ wrapper (libeventprop_cpp_wrapper).
 /// Eigen/Boost-based reference implementation with parallel execution support.
 /// </summary>
-public partial static class NativeCppApi
+public static partial class NativeCppApi
 {
     private const string LibName = "libeventprop_cpp_wrapper";
 
     // ============================================================
     // compute_sums
     // ============================================================
-    [LibraryImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-    private partial static extern void eventprop_compute_sums(
+    [LibraryImport(LibName)]
+    [UnmanagedCallConv(CallConvs = [ typeof(CallConvCdecl) ])]
+    private static partial void eventprop_compute_sums(
         double[] w, int nPre, int nPost,
         double[] times, int[] sources, int nSpikes,
         double tauMem, double tauSyn,
@@ -33,8 +35,9 @@ public partial static class NativeCppApi
     // ============================================================
     // compute_spikes
     // ============================================================
-    [LibraryImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-    private partial static extern int eventprop_compute_spikes(
+    [LibraryImport(LibName)]
+    [UnmanagedCallConv(CallConvs = [ typeof(CallConvCdecl) ])]
+    private static partial int eventprop_compute_spikes(
         double[] w, int nPre, int nPost,
         double[] times, int[] sources, int nSpikes,
         double vTh, double tauMem, double tauSyn,
@@ -53,8 +56,9 @@ public partial static class NativeCppApi
     // ============================================================
     // compute_maxima
     // ============================================================
-    [LibraryImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-    private partial static extern void eventprop_compute_maxima(
+    [LibraryImport(LibName)]
+    [UnmanagedCallConv(CallConvs = [ typeof(CallConvCdecl) ])]
+    private static partial void eventprop_compute_maxima(
         double[] w, int nPre, int nPost,
         double[] times, int[] sources, int nSpikes,
         double tauMem, double tauSyn,
@@ -73,8 +77,9 @@ public partial static class NativeCppApi
     // ============================================================
     // backward_spikes
     // ============================================================
-    [LibraryImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-    private partial static extern void eventprop_backward_spikes(
+    [LibraryImport(LibName)]
+    [UnmanagedCallConv(CallConvs = [ typeof(CallConvCdecl) ])]
+    private static partial void eventprop_backward_spikes(
         double[] inputTimes, int[] inputSources, int nInputSpikes,
         double[] postTimes, int[] postSources, double[] postCurrents,
         double[] postErrors, int nPostSpikes,
@@ -101,8 +106,9 @@ public partial static class NativeCppApi
     // ============================================================
     // backward_maxima
     // ============================================================
-    [LibraryImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-    private partial static extern void eventprop_backward_maxima(
+    [LibraryImport(LibName)]
+    [UnmanagedCallConv(CallConvs = [ typeof(CallConvCdecl) ])]
+    private static partial void eventprop_backward_maxima(
         double[] inputTimes, int[] inputSources, int nInputSpikes,
         double[] maximaTimes, double[] maximaValues, double[] maximaErrors, int nMaxima,
         double[] w, int nPre, int nPost,
