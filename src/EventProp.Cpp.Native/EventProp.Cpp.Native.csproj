@@ -7,9 +7,14 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
-  <!-- Copy native library to output directory -->
+  <!-- Copy native libraries to output directory -->
   <ItemGroup>
-    <NativeLibrary Include="../EventProp.cpp/build/bin/libeventprop_cpp_wrapper.dylib" Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <!-- C++ algorithm library (core Eigen-based implementation) -->
+    <NativeLibrary Include="../EventProp.cpp/build/bin/libeventprop_cpp.dylib" Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </NativeLibrary>
+    <!-- C wrapper library (P/Invoke bindings) -->
+    <NativeLibrary Include="../EventProp.Cpp.Wrapper/build/libeventprop_cpp_wrapper.dylib" Condition="$([MSBuild]::IsOSPlatform('OSX'))">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </NativeLibrary>
   </ItemGroup>

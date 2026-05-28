@@ -58,7 +58,7 @@ std::vector<Spikes>
 compute_spikes_batch(Eigen::Ref<RowMatrixXd const> w,
                      std::vector<Spikes> const &batch, double v_th,
                      double tau_mem, double tau_syn);
-std::pair<RowMatrixXd, Eigen::ArrayXd> backward(Spikes const &input_spikes, Spikes const &post_spikes,
+std::pair<RowMatrixXd, Eigen::ArrayXd> backward(Spikes &input_spikes, Spikes const &post_spikes,
               Eigen::Ref<RowMatrixXd const> w,
               double v_th, double tau_mem, double tau_syn);
 void backward_spikes_batch(std::vector<Spikes> &input_batch,

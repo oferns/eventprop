@@ -25,9 +25,9 @@ add_library(eventprop_cpp_wrapper SHARED
     eventprop_reference.cpp
 )
 
-# Set output name
+# Set output name — the C++ algorithm library (Eigen-based core)
 set_target_properties(eventprop_cpp_wrapper PROPERTIES
-    PREFIX "" OUTPUT_NAME "libeventprop_cpp_wrapper"
+    PREFIX "" OUTPUT_NAME "libeventprop_cpp"
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
