@@ -134,6 +134,109 @@ static void scale_inplace_simd(double* span, double scalar, int n)
         span[j] *= scalar;
 }
 
+/* Vector-scalar multiply-accumulate: dest[j] += src[j] * scalar */
+static void vadd_scaled_simd(double* dest, const double* src, double scalar, int n)
+{
+    if (!simd_available() || n < 2) {
+        for (int j = 0; j < n; j++)
+            dest[j] += src[j] * scalar;
+        return;
+    }
+
+    int vec = simd_vec_width();
+    int vec_count = n / vec;
+
+#if defined(HAVE_AVX512F) || defined(HAVE_AVX2)
+    {
+        __m256d sc = _mm256_set1_pd(scalar);
+        for (int i = 0; i < vec_count; i++) {
+#if defined(HAVE_AVX512F)
+            __m512d d = _mm512_loadu_pd(dest + i * vec);
+            __m512d s = _mm512_loadu_pd(src + i * vec);
+            _mm512_storeu_pd(dest + i * vec, _mm512_add_pd(d, _mm512_mul_pd(s, sc)));
+#else
+            __m256d d = _mm256_loadu_pd(dest + i * vec);
+            __m256d s = _mm256_loadu_pd(src + i * vec);
+            d = _mm256_add_pd(d, _mm256_mul_pd(s, sc));
+            _mm256_storeu_pd(dest + i * vec, d);
+#endif
+        }
+    }
+#elif defined(__ARM_NEON)
+    (void)vec; (void)vec_count;
+    for (int j = 0; j < n; j++)
+        dest[j] += src[j] * scalar;
+#else
+    (void)vec; (void)vec_count;
+    for (int j = 0; j < n; j++)
+        dest[j] += src[j] * scalar;
+#endif
+
+    for (int j = vec_count * vec; j < n; j++)
+        dest[j] += src[j] * scalar;
+}
+
+/* Dot product: sum(a[j] * b[j]) for j = 0..n-1 */
+static double dot_product_simd(const double* a, const double* b, int n)
+{
+    if (!simd_available() || n < 2) {
+        double sum = 0.0;
+        for (int j = 0; j < n; j++)
+            sum += a[j] * b[j];
+        return sum;
+    }
+
+    int vec = simd_vec_width();
+    int vec_count = n / vec;
+
+#if defined(HAVE_AVX512F) || defined(HAVE_AVX2)
+    {
+        __m256d acc = _mm256_setzero_pd();
+        for (int i = 0; i < vec_count; i++) {
+#if defined(HAVE_AVX512F)
+            __m512d va = _mm512_loadu_pd(a + i * vec);
+            __m512d vb = _mm512_loadu_pd(b + i * vec);
+            acc = _mm512_add_pd(acc, _mm512_mul_pd(va, vb));
+#else
+            __m256d va = _mm256_loadu_pd(a + i * vec);
+            __m256d vb = _mm256_loadu_pd(b + i * vec);
+            acc = _mm256_add_pd(acc, _mm256_mul_pd(va, vb));
+#endif
+        }
+        /* Horizontal sum */
+#if defined(HAVE_AVX512F)
+        double result[8];
+        _mm512_storeu_pd(result, acc);
+#else
+        double result[4];
+        _mm256_storeu_pd(result, acc);
+#endif
+        double sum = result[0] + result[1];
+#if defined(HAVE_AVX512F)
+        sum += result[2] + result[3] + result[4] + result[5] + result[6] + result[7];
+#else
+        sum += result[2] + result[3];
+#endif
+        /* Remainder */
+        for (int j = vec_count * vec; j < n; j++)
+            sum += a[j] * b[j];
+        return sum;
+    }
+#elif defined(__ARM_NEON)
+    (void)vec; (void)vec_count;
+    double sum = 0.0;
+    for (int j = 0; j < n; j++)
+        sum += a[j] * b[j];
+    return sum;
+#else
+    (void)vec; (void)vec_count;
+    double sum = 0.0;
+    for (int j = 0; j < n; j++)
+        sum += a[j] * b[j];
+    return sum;
+#endif
+}
+
 /* ── Buffer initialization ─────────────────────────────────────────── */
 
 void eventprop_scratch_init(EventPropScratch* buf, int n_pre, int n_post, int n_spikes)
@@ -530,12 +633,17 @@ void eventprop_backward_spikes(const double* times, const int32_t* sources, int 
                 lambda_i[spike_source] += jumpMag * k_bwd * (exp(-(t_bwd - jumpTimeOffset) / tau_mem) - exp(-(t_bwd - jumpTimeOffset) / tau_syn));
             }
 
-            for (int nrn = 0; nrn < n_post; nrn++)
-                grad[spike_source * n_post + nrn] += -tau_syn * lambda_i[nrn];
+            vadd_scaled_simd(grad + spike_source * n_post, lambda_i, -tau_syn, n_post);
 
-            double outbound = 0.0;
-            for (int nrn = 0; nrn < n_post; nrn++)
-                outbound += w[spike_source * n_post + nrn] * (lambda_v[nrn] - lambda_i[nrn]);
+            /* Compute dot product: w[row] · (lambda_v - lambda_i) */
+            double diff[256]; /* Stack buffer for typical n_post sizes */
+            int dlen = (n_post <= 256) ? n_post : 256;
+            for (int j = 0; j < dlen; j++)
+                diff[j] = lambda_v[j] - lambda_i[j];
+            double outbound = dot_product_simd(w + spike_source * n_post, diff, dlen);
+            /* Handle remainder if n_post > 256 */
+            for (int j = dlen; j < n_post; j++)
+                outbound += w[spike_source * n_post + j] * (lambda_v[j] - lambda_i[j]);
             all_errors[spike_idx] += outbound;
         } else {
             double current = fwd_currents[spike_idx];
