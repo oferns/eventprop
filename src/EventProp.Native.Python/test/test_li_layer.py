@@ -4,7 +4,7 @@ from numpy.testing import assert_almost_equal
 from numpy.testing._private.utils import assert_equal
 
 from eventprop.li_layer import LILayer, LILayerParameters
-from eventprop.eventprop_cpp import Spikes, SpikesVector, Maxima, MaximaVector
+from eventprop.spikes import Spikes, SpikesVector, Maxima, MaximaVector
 from test_lif_layer import get_poisson_spikes, get_normalization_factor
 
 

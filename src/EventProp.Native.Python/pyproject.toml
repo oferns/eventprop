@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=64", "pybind11>=2.10"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eventprop-native"
+version = "0.1"
+description = "EventProp: Event-based backpropagation for Spiking Neural Networks (C library bindings)"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+dependencies = [
+    "numpy",
+    "scipy",
+    "dask",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.setuptools.packages.find]
+include = ["eventprop*"]
+
+[tool.setuptools.package-data]
+eventprop = ["*.dylib", "*.so"]

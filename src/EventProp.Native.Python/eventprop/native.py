@@ -1,86 +1,10 @@
-"""EventProp C++ bindings — pure Python types + native batch functions."""
+"""EventProp C bindings — loads _native.so and provides helper functions."""
 
 from __future__ import annotations
-import math
 import numpy as np
 from typing import List, Tuple
 
-
-# ── Spikes ──────────────────────────────────────────────────────────────────
-
-class Spikes:
-    """Container for post-synaptic spike times, sources, and associated data."""
-
-    __slots__ = ("times", "sources", "errors", "currents",
-                 "first_spike_times", "first_spike_idxs", "_n_spikes")
-
-    def __init__(self, times: np.ndarray = None, sources: np.ndarray = None,
-                 currents: np.ndarray = None,
-                 first_spike_times=None, first_spike_idxs=None):
-        self.times = np.asarray(times, dtype=np.float64) if times is not None else np.array([], dtype=np.float64)
-        self.sources = np.asarray(sources, dtype=np.int32) if sources is not None else np.array([], dtype=np.int32)
-        self.errors = np.zeros_like(self.times, dtype=np.float64) if self.times.size > 0 else np.array([], dtype=np.float64)
-        self.currents = np.asarray(currents, dtype=np.float64) if currents is not None else self.errors.copy()
-        self._n_spikes = len(self.times)
-
-        if first_spike_times is not None and first_spike_idxs is not None:
-            self.first_spike_times = list(first_spike_times)
-            self.first_spike_idxs = list(first_spike_idxs)
-        else:
-            n_post = max((self.sources.max() + 1).item(), 1) if self.sources.size > 0 else 0
-            fst = [None] * n_post
-            fsi = [-1] * n_post
-            for i in range(self._n_spikes):
-                nrn = int(self.sources[i])
-                if fst[nrn] is None or self.times[i] < fst[nrn]:
-                    fst[nrn] = float(self.times[i])
-                    fsi[nrn] = i
-            self.first_spike_times = [t if t is not None else float('nan') for t in fst]
-            self.first_spike_idxs = fsi
-
-    @property
-    def n_spikes(self) -> int:
-        return self._n_spikes
-
-    def set_error(self, spike_idx: int, error: float) -> None:
-        self.errors[spike_idx] = error
-
-    def set_time(self, spike_idx: int, time: float) -> None:
-        self.times[spike_idx] = time
-
-    def __len__(self) -> int:
-        return self._n_spikes
-
-
-# ── Maxima ──────────────────────────────────────────────────────────────────
-
-class Maxima:
-    """Container for membrane potential maxima per neuron."""
-
-    __slots__ = ("times", "values", "errors")
-
-    def __init__(self, times=None, values=None, errors=None):
-        self.times = np.asarray(times, dtype=np.float64) if times is not None else np.array([], dtype=np.float64)
-        self.values = np.asarray(values, dtype=np.float64) if values is not None else np.zeros_like(self.times, dtype=np.float64)
-        self.errors = np.asarray(errors, dtype=np.float64) if errors is not None else np.zeros_like(self.times, dtype=np.float64)
-
-    def set_error(self, nrn_idx: int, error: float) -> None:
-        self.errors[nrn_idx] = error
-
-    def set_value(self, nrn_idx: int, value: float) -> None:
-        self.values[nrn_idx] = value
-
-
-# ── SpikesVector / MaximaVector ─────────────────────────────────────────────
-
-class SpikesVector(list):
-    """Batch of Spikes — behaves like a list for indexing, slicing, len."""
-    pass
-
-
-class MaximaVector(list):
-    """Batch of Maxima — behaves like a list for indexing, slicing, len."""
-    pass
+from .spikes import Spikes, Maxima, SpikesVector, MaximaVector
 
 
 # ── Native function bindings (loaded from _native.so) ───────────────────────
@@ -144,7 +68,7 @@ def _from_maxima_tuple(tup):
 def compute_spikes_batch_cpp(w, batch, v_th, tau_mem, tau_syn):
     """Forward pass: predict post-synaptic spike times."""
     if _compute_spikes_batch_raw is None:
-        raise RuntimeError("eventprop_cpp._native not found")
+        raise RuntimeError("eventprop._native not found")
     n_pre, n_post = _infer_n(w)
     array_tuples = [_spikes_to_array_tuple(s) for s in batch]
     raw_result = _compute_spikes_batch_raw(w, n_pre, n_post, array_tuples, v_th, tau_mem, tau_syn)
@@ -154,7 +78,7 @@ def compute_spikes_batch_cpp(w, batch, v_th, tau_mem, tau_syn):
 def backward_spikes_batch_cpp(input_batch, post_batch, w, gradient, v_th, tau_mem, tau_syn):
     """Backward pass for spikes loss."""
     if _backward_spikes_batch_raw is None:
-        raise RuntimeError("eventprop_cpp._native not found")
+        raise RuntimeError("eventprop._native not found")
     n_pre, n_post = _infer_n(w)
     input_tuples = [_spikes_to_array_tuple(s) for s in input_batch]
     post_tuples = [_spikes_to_array_tuple(s) for s in post_batch]
@@ -165,7 +89,7 @@ def backward_spikes_batch_cpp(input_batch, post_batch, w, gradient, v_th, tau_me
 def compute_maxima_batch_cpp(w, batch, tau_mem, tau_syn):
     """Compute membrane potential maxima per neuron."""
     if _compute_maxima_batch_raw is None:
-        raise RuntimeError("eventprop_cpp._native not found")
+        raise RuntimeError("eventprop._native not found")
     n_pre, n_post = _infer_n(w)
     array_tuples = [_spikes_to_array_tuple(s) for s in batch]
     raw_result = _compute_maxima_batch_raw(w, n_pre, n_post, array_tuples, tau_mem, tau_syn)
@@ -175,7 +99,7 @@ def compute_maxima_batch_cpp(w, batch, tau_mem, tau_syn):
 def backward_maxima_batch_cpp(input_batch, maxima_list, w, gradient, tau_mem, tau_syn):
     """Backward pass for maxima loss."""
     if _backward_maxima_batch_raw is None:
-        raise RuntimeError("eventprop_cpp._native not found")
+        raise RuntimeError("eventprop._native not found")
     n_pre, n_post = _infer_n(w)
     input_tuples = [_spikes_to_array_tuple(s) for s in input_batch]
     max_tuples = [_maxima_to_array_tuple(m) for m in maxima_list]
@@ -186,7 +110,7 @@ def backward_maxima_batch_cpp(input_batch, maxima_list, w, gradient, tau_mem, ta
 def compute_voltage_trace_cpp(t_max, dt, target_nrn_idx, w, spikes, v_th, tau_mem, tau_syn):
     """Diagnostic: compute voltage trace for a single neuron."""
     if _compute_voltage_trace_raw is None:
-        raise RuntimeError("eventprop_cpp._native not found")
+        raise RuntimeError("eventprop._native not found")
     n_pre, n_post = _infer_n(w)
     return _compute_voltage_trace_raw(t_max, dt, target_nrn_idx, w, n_pre, n_post,
                                       spikes, v_th, tau_mem, tau_syn)
@@ -195,14 +119,14 @@ def compute_voltage_trace_cpp(t_max, dt, target_nrn_idx, w, spikes, v_th, tau_me
 def compute_lambda_i_cpp(t, target_nrn_idx, post_spikes, v_th, tau_mem, tau_syn):
     """Diagnostic: compute λ_i at time t for a single neuron."""
     if _compute_lambda_i_raw is None:
-        raise RuntimeError("eventprop_cpp._native not found")
+        raise RuntimeError("eventprop._native not found")
     return _compute_lambda_i_raw(t, target_nrn_idx, post_spikes, v_th, tau_mem, tau_syn)
 
 
 def compute_lambda_i_trace_cpp(t_max, dt, target_nrn_idx, post_spikes, v_th, tau_mem, tau_syn):
     """Diagnostic: compute λ_i trace over time for a single neuron."""
     if _compute_lambda_i_trace_raw is None:
-        raise RuntimeError("eventprop_cpp._native not found")
+        raise RuntimeError("eventprop._native not found")
     return _compute_lambda_i_trace_raw(t_max, dt, target_nrn_idx, post_spikes,
                                        v_th, tau_mem, tau_syn)
 
@@ -210,7 +134,7 @@ def compute_lambda_i_trace_cpp(t_max, dt, target_nrn_idx, post_spikes, v_th, tau
 def dropout_spikes_cpp(spikes, p_drop, random_seed):
     """Drop spikes with probability p_drop."""
     if _dropout_spikes_raw is None:
-        raise RuntimeError("eventprop_cpp._native not found")
+        raise RuntimeError("eventprop._native not found")
     array_tuples = [_spikes_to_array_tuple(s) for s in spikes]
     raw_result = _dropout_spikes_raw(array_tuples, p_drop, random_seed)
     return SpikesVector([_from_tuple(t, 0) for t in raw_result])

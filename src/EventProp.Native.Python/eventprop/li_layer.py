@@ -2,7 +2,7 @@ import numpy as np
 from typing import NamedTuple, Tuple
 
 from .layer import GaussianDistribution, Layer, WeightDistribution
-from .eventprop_cpp import (
+from .native import (
     MaximaVector,
     SpikesVector,
     compute_maxima_batch_cpp,

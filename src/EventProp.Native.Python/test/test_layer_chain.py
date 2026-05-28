@@ -10,7 +10,7 @@ from eventprop.loss_layer import (
     VMaxCrossEntropyLossParameters,
 )
 from eventprop.lif_layer import LIFLayer, LIFLayerParameters
-from eventprop.eventprop_cpp import Spikes, SpikesVector
+from eventprop.spikes import Spikes, SpikesVector
 from test_lif_layer import get_normalization_factor, get_poisson_spikes
 
 

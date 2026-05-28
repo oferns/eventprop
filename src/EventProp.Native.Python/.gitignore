@@ -1,0 +1,14 @@
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Compiled extensions
+*.so
+*.dylib
+*.pyd
+
+# Python cache
+__pycache__/
+*.pyc
+.pytest_cache/

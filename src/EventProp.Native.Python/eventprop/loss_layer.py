@@ -3,7 +3,7 @@ import numpy as np
 
 from .li_layer import LILayer, LILayerParameters
 from .lif_layer import LIFLayer, LIFLayerParameters
-from .eventprop_cpp import SpikesVector
+from .spikes import SpikesVector
 
 # fmt: off
 class TTFSCrossEntropyLossParameters(NamedTuple):

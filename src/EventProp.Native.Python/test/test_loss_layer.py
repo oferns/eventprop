@@ -8,7 +8,7 @@ from eventprop.loss_layer import (
     TTFSCrossEntropyLossParameters,
     VMaxCrossEntropyLoss,
 )
-from eventprop.eventprop_cpp import Spikes, SpikesVector
+from eventprop.spikes import Spikes, SpikesVector
 from eventprop.li_layer import LILayerParameters
 from eventprop.lif_layer import LIFLayerParameters
 from test_lif_layer import get_poisson_spikes
