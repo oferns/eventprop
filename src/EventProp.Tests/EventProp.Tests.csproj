@@ -22,12 +22,9 @@
     <Using Include="TUnit" />
   </ItemGroup>
 
-  <!-- Copy native C++ library to output directory -->
+  <!-- Copy native C library to output directory -->
   <Target Name="CopyNativeLib" BeforeTargets="Build">
-    <Copy SourceFiles="$(MSBuildThisFileDirectory)../EventProp.C/libeventprop_c_api.dylib" DestinationFolder="$(OutDir)" Condition="Exists('$(MSBuildThisFileDirectory)../EventProp.C/libeventprop_c_api.dylib')" />
-    <!-- Fallback to C++ lib if C lib not built:
-    <Copy SourceFiles="$(MSBuildThisFileDirectory)../cpp/build/libeventprop_c_api.dylib" DestinationFolder="$(OutDir)" Condition="Exists('$(MSBuildThisFileDirectory)../cpp/build/libeventprop_c_api.dylib')" />
-    -->
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)../EventProp.C/libeventprop_c_api.dylib" DestinationFolder="$(OutDir)" Condition="Exists('$(MSBuildThisFileDirectory)../EventProp.C/libeventprop_c_api.dylib')" />   
   </Target>
 
 </Project>

@@ -691,4 +691,152 @@ public static class EventPropMath
             return cmp != 0 ? cmp : Source.CompareTo(other.Source);
         }
     }
+
+    // ── Diagnostic methods (zero-allocation hot path) ───────────────────
+
+    /// <summary>
+    /// Compute the membrane potential trace for a single neuron over time.
+    /// Zero-allocation version — uses caller-provided ScratchBuffers for all intermediate storage.
+    /// Output arrays (times, voltages) are still allocated since this method returns data.
+    /// </summary>
+    public static (double[] times, double[] voltages) ComputeVoltageTrace(
+        double tMax, double dt,
+        int targetNrnIdx,
+        ReadOnlySpan<double> w, int nPre, int nPost,
+        ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
+        double vTh, double tauMem, double tauSyn,
+        ScratchBuffers buffers)
+    {
+        int nSpikes = times.Length;
+
+        // Use caller-provided buffers — no allocations.
+        // Sum0/Sum1 are the same buffers used by ComputeSums.
+        int nSums = (nSpikes + 1) * nPost;
+        buffers.EnsureCapacity(nPost, nPre, nSpikes);
+
+        Span<double> sum0 = buffers.Sum0.AsSpan(0, nSums);
+        Span<double> sum1 = buffers.Sum1.AsSpan(0, nSums);
+
+        // Clear sums before accumulation (caller may reuse buffers)
+        sum0.Clear();
+        sum1.Clear();
+
+        // Compute exp values in-place using pre-allocated buffers.
+        Span<double> expMem = buffers.ExpInputMem.AsSpan(0, nSpikes);
+        for (int i = 0; i < nSpikes; i++)
+            expMem[i] = Math.Exp(times[i] / tauMem);
+
+        Span<double> expSyn = buffers.ExpInputSyn.AsSpan(0, nSpikes);
+        for (int i = 0; i < nSpikes; i++)
+            expSyn[i] = Math.Exp(times[i] / tauSyn);
+
+        // Accumulate sums (same logic as ComputeSums)
+        for (int i = 0; i < nSpikes; i++)
+        {
+            int src = sources[i];
+            double expSynI = expSyn[i], expMemI = expMem[i];
+            int rowOut = i + 1, rowIn = i;
+            int srcOffset = src * nPost;
+
+            for (int j = 0; j < nPost; j++)
+            {
+                sum0[rowOut * nPost + j] = sum0[rowIn * nPost + j] + w[srcOffset + j] * expSynI;
+                sum1[rowOut * nPost + j] = sum1[rowIn * nPost + j] + w[srcOffset + j] * expMemI;
+            }
+        }
+
+        double kPrefactor = tauSyn / (tauMem - tauSyn);
+        int nT = (int)(tMax / dt) + 1;
+
+        var ts = new double[nT];
+        var vTrace = new double[nT];
+
+        for (int ti = 0; ti < nT; ti++)
+        {
+            double t = dt * ti;
+
+            // Find the number of spikes with times[i] <= t (binary search).
+            int tPreIdx;
+            if (nSpikes == 0)
+                tPreIdx = 0;
+            else
+            {
+                int lo = 0, hi = nSpikes - 1;
+                while (lo < hi)
+                {
+                    int mid = (lo + hi + 1) / 2;
+                    if (times[mid] <= t) lo = mid; else hi = mid - 1;
+                }
+                // lo is the largest index with times[lo] <= t, or 0 if none qualify
+                // Check: if times[lo] > t, then no spike is before/at t
+                tPreIdx = (times[lo] <= t) ? lo + 1 : 0;
+            }
+
+            double mem = kPrefactor * (
+                sum1[tPreIdx * nPost + targetNrnIdx] * Math.Exp(-t / tauMem) -
+                sum0[tPreIdx * nPost + targetNrnIdx] * Math.Exp(-t / tauSyn)
+            );
+
+            vTrace[ti] = mem;
+            ts[ti] = t;
+        }
+
+        return (ts, vTrace);
+    }
+
+    /// <summary>
+    /// Compute λ_i (synaptic adjoint) at a specific time t for a single neuron.
+    /// Zero-allocation — single pass over post-spike timeline.
+    /// </summary>
+    public static double ComputeLambdaI(
+        double t, int targetNrnIdx,
+        ReadOnlySpan<double> postTimes, ReadOnlySpan<int> postSources,
+        double vTh, double tauMem, double tauSyn)
+    {
+        int nSpikes = postTimes.Length;
+
+        if (nSpikes == 0) return 0.0;
+
+        double largestTime = postTimes[nSpikes - 1];
+        double tBwdTotal = largestTime - t;
+
+        // Single pass: accumulate jump contributions directly.
+        // Jump magnitude = 1 / (vTh + epsilon) for each post-spike after time t.
+        double kBwdPrefactor = tauMem / (tauMem - tauSyn);
+        double lambdaI = 0.0;
+
+        for (int i = nSpikes - 1; i >= 0; i--)
+        {
+            if (postTimes[i] < t) break;
+            double kb = kBwdPrefactor * (Math.Exp(-tBwdTotal / tauMem) - Math.Exp(-tBwdTotal / tauSyn));
+            lambdaI += 1.0 / (vTh + 0.001) * kb;
+        }
+
+        return lambdaI;
+    }
+
+    /// <summary>
+    /// Compute the λ_i trace over time for a single neuron.
+    /// </summary>
+    public static (double[] times, double[] lambdaI) ComputeLambdaITrace(
+        double tMax, double dt,
+        int targetNrnIdx,
+        ReadOnlySpan<double> postTimes, ReadOnlySpan<int> postSources,
+        double vTh, double tauMem, double tauSyn)
+    {
+        int nT = (int)(tMax / dt) + 1;
+        var ts = new double[nT];
+        var lambdaTrace = new double[nT];
+
+        for (int ti = 0; ti < nT; ti++)
+        {
+            lambdaTrace[ti] = ComputeLambdaI(
+                dt * ti, targetNrnIdx,
+                postTimes, postSources,
+                vTh, tauMem, tauSyn);
+            ts[ti] = dt * ti;
+        }
+
+        return (ts, lambdaTrace);
+    }
 }
