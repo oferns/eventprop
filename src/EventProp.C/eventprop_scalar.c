@@ -1,12 +1,138 @@
 /**
  * @file eventprop_scalar.c
- * @brief Scalar C implementation of EventProp algorithm (no SIMD, no dependencies).
+ * @brief EventProp algorithm implementation with optional SIMD (AVX2 / NEON).
+ *        Falls back to scalar when hardware acceleration is unavailable or spans
+ *        are too small. Zero-allocation hot paths via pre-allocated buffers.
  */
 
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
+
+/* Include SIMD headers at top level */
+#ifdef HAVE_AVX512F
+    #include <immintrin.h>
+#elif defined(HAVE_AVX2)
+    #include <immintrin.h>
+#endif
+#ifdef __ARM_NEON
+    #include <arm_neon.h>
+#endif
+
 #include "eventprop.h"
+
+/* ── SIMD helpers (AVX2 / NEON) ─────────────────────────────────────── */
+
+/* Runtime vector width (0 = no SIMD, 2 = NEON, 4 = AVX2, 8 = AVX-512) */
+static int simd_vec_width(void)
+{
+#ifdef HAVE_AVX512F
+    return 8;
+#elif defined(HAVE_AVX2)
+    return 4;
+#elif defined(__ARM_NEON)
+    return 2; /* NEON processes 2 doubles at a time */
+#else
+    (void)0;
+    return 0;
+#endif
+}
+
+static int simd_available(void)
+{
+    return simd_vec_width() > 0;
+}
+
+/* Fused multiply-add: dest[j] = src[j] + scalar * weights[j]
+   Operates on n elements. Falls back to scalar for small spans or no SIMD. */
+static void fma_row_simd(double* dest, const double* src, const double* weights,
+                         double scalar, int n)
+{
+    if (!simd_available() || n < 2) {
+        for (int j = 0; j < n; j++)
+            dest[j] = src[j] + scalar * weights[j];
+        return;
+    }
+
+    int vec = simd_vec_width();
+    int vec_count = n / vec;
+
+#if defined(HAVE_AVX512F) || defined(HAVE_AVX2)
+    /* x86 SIMD: 4 (AVX2) or 8 (AVX-512) doubles per vector */
+    {
+        for (int i = 0; i < vec_count; i++) {
+#if defined(HAVE_AVX512F)
+            __m512d s = _mm512_loadu_pd(src + i * vec);
+            __m512d w = _mm512_loadu_pd(weights + i * vec);
+            __m512d sc = _mm512_set1_pd(scalar);
+            _mm512_storeu_pd(dest + i * vec, _mm512_add_pd(s, _mm512_mul_pd(w, sc)));
+#else
+            __m256d s = _mm256_loadu_pd(src + i * vec);
+            __m256d w = _mm256_loadu_pd(weights + i * vec);
+            __m256d sc = _mm256_set1_pd(scalar);
+            _mm256_storeu_pd(dest + i * vec, _mm256_add_pd(s, _mm256_mul_pd(w, sc)));
+#endif
+        }
+    }
+#elif defined(__ARM_NEON)
+    /* ARM NEON: Apple clang has limited double-precision NEON intrinsics.
+       Use scalar loop — compiler auto-vectorizes with -O3. */
+    (void)vec; (void)vec_count;
+    for (int j = 0; j < n; j++)
+        dest[j] = src[j] + scalar * weights[j];
+#else
+    (void)vec; (void)vec_count;
+    for (int j = 0; j < n; j++)
+        dest[j] = src[j] + scalar * weights[j];
+#endif
+
+    /* Remainder */
+    for (int j = vec_count * vec; j < n; j++)
+        dest[j] = src[j] + scalar * weights[j];
+}
+
+/* Scale in-place: span[j] *= scalar */
+static void scale_inplace_simd(double* span, double scalar, int n)
+{
+    if (!simd_available() || n < 2) {
+        for (int j = 0; j < n; j++)
+            span[j] *= scalar;
+        return;
+    }
+
+    int vec = simd_vec_width();
+    int vec_count = n / vec;
+
+#if defined(HAVE_AVX512F) || defined(HAVE_AVX2)
+    {
+#if defined(HAVE_AVX512F)
+        __m512d sc = _mm512_set1_pd(scalar);
+        for (int i = 0; i < vec_count; i++) {
+            __m512d s = _mm512_loadu_pd(span + i * vec);
+            _mm512_storeu_pd(span + i * vec, _mm512_mul_pd(s, sc));
+        }
+#else
+        __m256d sc = _mm256_set1_pd(scalar);
+        for (int i = 0; i < vec_count; i++) {
+            __m256d s = _mm256_loadu_pd(span + i * vec);
+            _mm256_storeu_pd(span + i * vec, _mm256_mul_pd(s, sc));
+        }
+#endif
+    }
+#elif defined(__ARM_NEON)
+    /* ARM NEON: Apple clang has limited double-precision NEON intrinsics. */
+    (void)vec; (void)vec_count;
+    for (int j = 0; j < n; j++)
+        span[j] *= scalar;
+#else
+    (void)vec; (void)vec_count;
+    for (int j = 0; j < n; j++)
+        span[j] *= scalar;
+#endif
+
+    for (int j = vec_count * vec; j < n; j++)
+        span[j] *= scalar;
+}
 
 /* ── Buffer initialization ─────────────────────────────────────────── */
 
@@ -39,10 +165,11 @@ void eventprop_compute_sums(const double* w, int n_pre, int n_post,
         int row_out = i + 1, row_in = i;
         int src_offset = src * n_post;
 
-        for (int j = 0; j < n_post; j++) {
-            sum0[row_out * n_post + j] = sum0[row_in * n_post + j] + w[src_offset + j] * exp_syn_i;
-            sum1[row_out * n_post + j] = sum1[row_in * n_post + j] + w[src_offset + j] * exp_mem_i;
-        }
+        /* SIMD-accelerated FMA row update */
+        fma_row_simd(sum0 + row_out * n_post, sum0 + row_in * n_post,
+                     w + src_offset, exp_syn_i, n_post);
+        fma_row_simd(sum1 + row_out * n_post, sum1 + row_in * n_post,
+                     w + src_offset, exp_mem_i, n_post);
     }
 
     free(exp_mem); free(exp_syn);
@@ -392,7 +519,7 @@ void eventprop_backward_spikes(const double* times, const int32_t* sources, int 
 
         double t_bwd = largest_time - spike_time;
         double dt = previous_t - t_bwd;
-        for (int nrn = 0; nrn < n_post; nrn++) lambda_v[nrn] *= exp(-dt / tau_mem);
+        scale_inplace_simd(lambda_v, exp(-dt / tau_mem), n_post);
 
         if (is_input) {
             memset(lambda_i, 0, n_post * sizeof(double));
