@@ -243,6 +243,8 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
 
     // Gradient output buffer
     std::vector<double> grad(sz.n_pre * sz.n_post);
+    // Spike errors output buffer
+    std::vector<double> spike_errors(sz.n_spikes);
 
     for (auto _ : state) {
         std::memset(grad.data(), 0, grad.size() * sizeof(double));
@@ -252,13 +254,13 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
             fwd_times.data(), fwd_sources.data(), fwd_currents.data(),
             post_errors.data(), n_post_spikes,
             w.data(), sz.n_pre, sz.n_post,
-            1.0, 0.02, 0.005, grad.data());
+            1.0, 0.02, 0.005, grad.data(), spike_errors.data());
 #else
         eventprop_backward_spikes(times.data(), sources.data(), sz.n_spikes,
             fwd_times.data(), fwd_sources.data(), fwd_currents.data(),
             post_errors.data(), n_post_spikes,
             w.data(), sz.n_pre, sz.n_post,
-            1.0, 0.02, 0.005, grad.data());
+            1.0, 0.02, 0.005, grad.data(), spike_errors.data());
 #endif
         benchmark::DoNotOptimize(grad.data());
     }

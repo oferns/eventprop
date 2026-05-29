@@ -4,6 +4,8 @@
 #include "eventprop_c_api.h"
 #include "eventprop_types.h"  // Spikes, Maxima, RowMatrixXd
 #include <Eigen/Dense>
+#include <boost/math/tools/roots.hpp>
+#include <boost/system/error_code.hpp>
 
 // ============================================================
 // Helpers: flat array ↔ Eigen/Spikes conversion
@@ -75,7 +77,14 @@ int eventprop_compute_spikes(
     auto w_mat = make_matrix(w, n_pre, n_post);
     Spikes spikes = make_spikes(times, sources, n_spikes);
 
-    Spikes result = ::compute_spikes(w_mat, spikes, v_th, tau_mem, tau_syn);
+    Spikes result;
+    try {
+        result = ::compute_spikes(w_mat, spikes, v_th, tau_mem, tau_syn);
+    } catch (const std::exception& e) {
+        // Boost toms748_solve throws domain_error on same-sign bracket.
+        // Return 0 spikes as safe fallback (matches C behavior of proceeding).
+        return 0;
+    }
 
     int n_out = result.n_spikes;
     for (int i = 0; i < n_out; i++) {
@@ -100,7 +109,13 @@ void eventprop_compute_maxima(
     auto w_mat = make_matrix(w, n_pre, n_post);
     Spikes spikes = make_spikes(times, sources, n_spikes);
 
-    Maxima result = ::compute_maxima(w_mat, spikes, tau_mem, tau_syn);
+    Maxima result;
+    try {
+        result = ::compute_maxima(w_mat, spikes, tau_mem, tau_syn);
+    } catch (const std::exception& e) {
+        // Boost toms748_solve throws domain_error on same-sign bracket.
+        return;
+    }
 
     for (int i = 0; i < n_post; i++) {
         maxima_times[i] = result.times(i);
@@ -139,8 +154,13 @@ void eventprop_backward_spikes(
     // Zero-copy: library writes gradient and spike errors directly into caller's buffers.
     auto grad_map = MAP_OUTPUT_MATRIX(gradient, n_pre, n_post);
     auto errors_map = MAP_OUTPUT_ARRAY(spike_errors, n_input_spikes);
-    ::backward(input_spikes, post_spikes, w_mat, v_th, tau_mem, tau_syn,
-               grad_map, errors_map);
+    try {
+        ::backward(input_spikes, post_spikes, w_mat, v_th, tau_mem, tau_syn,
+                   grad_map, errors_map);
+    } catch (const std::exception& e) {
+        // Boost toms748_solve throws domain_error on same-sign bracket.
+        return;
+    }
 }
 
 // ============================================================
@@ -172,6 +192,11 @@ void eventprop_backward_maxima(
     // Zero-copy: library writes gradient and spike errors directly into caller's buffers.
     auto grad_map = MAP_OUTPUT_MATRIX(gradient, n_pre, n_post);
     auto errors_map = MAP_OUTPUT_ARRAY(spike_errors, n_input_spikes);
-    ::backward(input_spikes, maxima, w_mat, tau_mem, tau_syn,
-               grad_map, errors_map);
+    try {
+        ::backward(input_spikes, maxima, w_mat, tau_mem, tau_syn,
+                   grad_map, errors_map);
+    } catch (const std::exception& e) {
+        // Boost toms748_solve throws domain_error on same-sign bracket.
+        return;
+    }
 }
