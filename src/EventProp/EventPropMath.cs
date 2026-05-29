@@ -424,10 +424,17 @@ public static class EventPropMath
         // Backward prefactor (inlined, no lambda)
         double kBwdPrefactor = tauMem / (tauMem - tauSyn);
 
-        // Per-neuron jump counters — jumps stored in flat arrays with per-neuron offsets.
-        // Sized for max(nPre, nPost) since spikeSource can be either a pre-synaptic
-        // neuron index (input spikes) or post-synaptic neuron index (post-spikes).
-        int[] jumpEnd = new int[maxNeurons];
+        // Per-neuron jump storage — jagged arrays matching Eigen's vector<vector<pair>>.
+        // Each post-synaptic neuron has its own list of (timeOffset, magnitude) jumps.
+        // This avoids flat-array index collisions when multiple neurons record jumps.
+        var jumpTime = new double[nPost][];
+        var jumpMag = new double[nPost][];
+        for (int nrn = 0; nrn < nPost; nrn++)
+        {
+            jumpTime[nrn] = new double[totalSpikes]; // generous upper bound
+            jumpMag[nrn] = new double[totalSpikes];
+        }
+        int[] jumpEnd = new int[nPost]; // per-neuron jump counters
 
         // Main backward sweep through merged timeline (single pass, matching C++ structure)
         for (int s = 0; s < totalSpikes; s++)
@@ -451,13 +458,18 @@ public static class EventPropMath
                 double[] lambdaI = buffers.LambdaI;
                 Array.Fill(lambdaI, 0.0);
 
-                // Compute λ_i from accumulated jumps for this source neuron
-                int start = 0, end = jumpEnd[spikeSource];
-                for (int j = start; j < end; j++)
+                // Compute λ_i from accumulated jumps for EACH post-synaptic neuron.
+                // Jumps are stored per-neuron (jagged arrays), matching Eigen's
+                // vector<vector<pair>> structure. Must iterate over ALL neurons.
+                for (int nrn = 0; nrn < nPost; nrn++)
                 {
-                    double jumpTimeOffset = buffers.LambdaIJumpsTimeOffset[j];
-                    double jumpMag = buffers.LambdaIJumpsMagnitude[j];
-                    lambdaI[spikeSource] += jumpMag * kBwdPrefactor * (Math.Exp(-(tBwd - jumpTimeOffset) / tauMem) - Math.Exp(-(tBwd - jumpTimeOffset) / tauSyn));
+                    int end = jumpEnd[nrn];
+                    for (int j = 0; j < end; j++)
+                    {
+                        lambdaI[nrn] += jumpMag[nrn][j] * kBwdPrefactor *
+                            (Math.Exp(-(tBwd - jumpTime[nrn][j]) / tauMem)
+                             - Math.Exp(-(tBwd - jumpTime[nrn][j]) / tauSyn));
+                    }
                 }
 
                 // Add gradient contribution: gradient[source, nrn] += -tau_syn * lambda_i[nrn]
@@ -481,12 +493,12 @@ public static class EventPropMath
                 double current = postSpikes.Currents[spikeIdx];
                 double invICurrent = 1.0 / (current - vTh);
 
-                // Record λ_i jump for this neuron in the flat array
+                // Record λ_i jump for this neuron.
                 int jIdx = jumpEnd[spikeSource];
                 double postError = allErrors[nInputSpikes + spikeIdx]; // post-spikes stored at offset nInputSpikes
-                buffers.LambdaIJumpsMagnitude[jIdx] =
+                jumpMag[spikeSource][jIdx] =
                     invICurrent * (vTh * lambdaV[spikeSource] + postError);
-                buffers.LambdaIJumpsTimeOffset[jIdx] = tBwd;
+                jumpTime[spikeSource][jIdx] = tBwd;
                 jumpEnd[spikeSource]++;
 
                 // Update λ_v for this neuron
@@ -545,7 +557,7 @@ public static class EventPropMath
                 if (tVmaxBwd > tBwd) continue;
 
                 double lambdaV = -Math.Exp(-(tBwd - tVmaxBwd) / tauMem) * maximaErrors[maxIdx] / tauMem;
-                double kBwdVal = kBwdPrefactor * (Math.Exp(-tBwd / tauMem) - Math.Exp(-tBwd / tauSyn));
+                double kBwdVal = kBwdPrefactor * (Math.Exp(-(tBwd - tVmaxBwd) / tauMem) - Math.Exp(-(tBwd - tVmaxBwd) / tauSyn));
                 double lambdaI = -kBwdVal * maximaErrors[maxIdx] / tauMem;
 
                 int sourceNrn = inputSources[spikeIdx];
