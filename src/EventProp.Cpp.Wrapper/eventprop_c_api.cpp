@@ -1,8 +1,8 @@
-// eventprop_c_api.cpp — C-style wrapper that calls into EventProp.cpp (Eigen-based algorithm).
+// eventprop_c_api.cpp — C-style wrapper that calls into EventProp.Python's Eigen core.
 // Converts flat arrays ↔ Eigen/Spikes types for P/Invoke compatibility.
 
 #include "eventprop_c_api.h"
-#include "../EventProp.cpp/eventprop_types.h"  // Spikes, Maxima, RowMatrixXd
+#include "eventprop_types.h"  // Spikes, Maxima, RowMatrixXd
 #include <Eigen/Dense>
 
 // ============================================================
@@ -44,7 +44,7 @@ static Spikes make_spikes_with_currents(const double* times, const int32_t* sour
 }
 
 // ============================================================
-// compute_sums — delegates to EventProp.cpp::compute_sums (zero-copy output)
+// compute_sums — delegates to EventProp.Python::compute_sums (zero-copy output)
 // ============================================================
 
 void eventprop_compute_sums(
@@ -63,7 +63,7 @@ void eventprop_compute_sums(
 }
 
 // ============================================================
-// compute_spikes — delegates to EventProp.cpp::compute_spikes
+// compute_spikes — delegates to EventProp.Python::compute_spikes
 // ============================================================
 
 int eventprop_compute_spikes(
@@ -88,7 +88,7 @@ int eventprop_compute_spikes(
 }
 
 // ============================================================
-// compute_maxima — delegates to EventProp.cpp::compute_maxima
+// compute_maxima — delegates to EventProp.Python::compute_maxima
 // ============================================================
 
 void eventprop_compute_maxima(
@@ -109,7 +109,7 @@ void eventprop_compute_maxima(
 }
 
 // ============================================================
-// backward (Spikes loss) — delegates to EventProp.cpp::backward (zero-copy output)
+// backward (Spikes loss) — delegates to EventProp.Python::backward (zero-copy output)
 // ============================================================
 
 void eventprop_backward_spikes(
@@ -143,7 +143,7 @@ void eventprop_backward_spikes(
 }
 
 // ============================================================
-// backward (Maxima loss) — delegates to EventProp.cpp::backward (zero-copy output)
+// backward (Maxima loss) — delegates to EventProp.Python::backward (zero-copy output)
 // ============================================================
 
 void eventprop_backward_maxima(

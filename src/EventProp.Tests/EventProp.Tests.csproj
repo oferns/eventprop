@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -26,7 +26,6 @@
   <!-- Copy native C library to output directory -->
   <Target Name="CopyNativeLib" BeforeTargets="Build">
     <Copy SourceFiles="$(MSBuildThisFileDirectory)../EventProp.C/libeventprop_c_api.dylib" DestinationFolder="$(OutDir)" Condition="Exists('$(MSBuildThisFileDirectory)../EventProp.C/libeventprop_c_api.dylib')" />
-    <Copy SourceFiles="$(MSBuildThisFileDirectory)../EventProp.cpp/build/bin/libeventprop_cpp.dylib" DestinationFolder="$(OutDir)" Condition="Exists('$(MSBuildThisFileDirectory)../EventProp.cpp/build/bin/libeventprop_cpp.dylib')" />
     <Copy SourceFiles="$(MSBuildThisFileDirectory)../EventProp.Cpp.Wrapper/build/libeventprop_cpp_wrapper.dylib" DestinationFolder="$(OutDir)" Condition="Exists('$(MSBuildThisFileDirectory)../EventProp.Cpp.Wrapper/build/libeventprop_cpp_wrapper.dylib')" />
   </Target>
 

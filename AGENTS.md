@@ -42,18 +42,43 @@ eventprop.net/
 
 ## Running Tests & Coverage
 
-### TUnit Test Running (Critical)
-
-TUnit uses the Microsoft Testing Platform — **not** VSTest. `dotnet test` does NOT work on .NET 10.
-
-**Always run from the solution root or the test project directory.**
+### Quick Reference — Copy-Paste Ready Commands
 
 ```bash
-# Run ALL tests (Debug mode — default)
+# ── .NET Tests (TUnit on .NET 10) ────────────────────────────────
+# Debug (fast, different FP ordering — NOT for parity tests)
 cd src/EventProp.Tests && dotnet run --
 
-# Run ALL tests (Release mode — required for numerical parity tests)
-cd src/EventProp.Tests && dotnet run -- -c Release
+# Release (required for parity tests — matches C/C++ FP ordering)
+cd src/EventProp.Tests && dotnet build -c Release --nologo && dotnet run --no-build -c Release
+
+# ── C/C++ Parity Tests (C vs Eigen, standalone) ─────────────────
+cd src/EventProp.Native.ParityTests && rm -rf build && mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build . && ./parity_test ../../EventProp.C/build/libeventprop_c_api.dylib
+
+# ── C/C++ Benchmarks (C vs Eigen performance) ───────────────────
+cd src/EventProp.Native.Benchmarks && rm -rf build && mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build . && ./bench_c --benchmark_min_time=0.1s
+```
+
+### ⚠️ CRITICAL: How to Run .NET Tests on .NET 10
+
+TUnit uses the Microsoft Testing Platform — **not VSTest**. `dotnet test` does NOT work.
+
+**The `-c Release` flag is a PROJECT build option, not a TUnit runtime option.** It must be passed to `dotnet build`, NOT to `dotnet run`. Passing `-c` after `--` sends it to TUnit as an unknown flag (prints help, zero tests run).
+
+```bash
+# ── CORRECT: Build first, then run with --no-build ───────────────
+
+# Debug mode (default — fast build, different FP ordering)
+cd src/EventProp.Tests && dotnet run --
+
+# Release mode (required for parity tests — Debug has different FP ordering)
+cd src/EventProp.Tests && dotnet build -c Release --nologo && dotnet run --no-build -c Release
+
+# ── WRONG (will print TUnit help, run zero tests): ───────────────
+# cd src/EventProp.Tests && dotnet run -- -c Release   ← BROKEN
+# cd src/EventProp.Tests && dotnet test                ← BROKEN (VSTest unsupported)
 ```
 
 ### ⚠️ TUnit vs VSTest — Critical Difference
@@ -70,19 +95,18 @@ TUnit runs on Microsoft.Testing.Platform (MTP), **not VSTest**. If you come from
 | `--filter "FullyQualifiedName~LoginTests"` | `--treenode-filter "/*/*/LoginTests/*"` |
 | `--filter "Name=AcceptCookiesTest"` | `--treenode-filter "/*/*/*/AcceptCookiesTest"` |
 
-### TUnit Flags Reference
+### TUnit Flags Reference (Passed to `dotnet run --`, NOT `dotnet build`)
 
 | Flag | Effect | Example |
 |------|--------|---------|
-| `-c Release` | Build in Release mode (must use for parity tests — Debug has different FP ordering) | `dotnet run -- -c Release` |
-| `--no-progress` | Suppress the ASCII spinner, cleaner output for grep/parsing | `dotnet run -- -c Release --no-progress` |
-| `--treenode-filter "/*/*/BackwardSpikes/*"` | Run only tests matching pattern | `dotnet run -- -c Release --treenode-filter "/*/*/BackwardSpikes/*"` |
-| `--list-tests` | List all test names without running | `dotnet run -- --list-tests` |
-| `--output Detailed` | Show full failure details in output | `dotnet run -- -c Release --output Detailed` |
-| `--fail-fast` | Stop after first failure | `dotnet run -- -c Release --fail-fast` |
-| `--coverage` | Enable coverage collection | `dotnet run -- -c Release --coverage` |
-| `--coverage-output <file>` | Specify coverage output file path | `dotnet run -- -c Release --coverage --coverage-output coverage.cobertura.xml` |
-| `--coverage-output-format cobertura` | Coverage format (cobertura, json, etc.) | `dotnet run -- -c Release --coverage-output-format cobertura` |
+| `--no-progress` | Suppress the ASCII spinner, cleaner output for grep/parsing | `dotnet run --no-build -c Release --no-progress` |
+| `--treenode-filter "/*/*/BackwardSpikes/*"` | Run only tests matching pattern | `dotnet run --no-build -c Release --treenode-filter "/*/*/BackwardSpikes/*"` |
+| `--list-tests` | List all test names without running | `dotnet run --no-build -c Release --list-tests` |
+| `--output Detailed` | Show full failure details in output | `dotnet run --no-build -c Release --output Detailed` |
+| `--fail-fast` | Stop after first failure | `dotnet run --no-build -c Release --fail-fast` |
+| `--coverage` | Enable coverage collection | `dotnet run --no-build -c Release --coverage` |
+| `--coverage-output <file>` | Specify coverage output file path | `dotnet run --no-build -c Release --coverage --coverage-output coverage.cobertura.xml` |
+| `--coverage-output-format cobertura` | Coverage format (cobertura, json, etc.) | `dotnet run --no-build -c Release --coverage-output-format cobertura` |
 
 ### Common TUnit Filter Patterns (treenode-filter)
 
@@ -90,19 +114,19 @@ TUnit uses a tree path format: `/*/[project]/[class]/[test]` (4 segments). Use w
 
 ```bash
 # All BackwardSpikes tests
-dotnet run -- -c Release --treenode-filter "/*/*/BackwardSpikes/*"
+dotnet run --no-build -c Release --treenode-filter "/*/*/BackwardSpikes/*"
 
 # All tests in NativeVsManagedTests
-dotnet run -- -c Release --treenode-filter "/*/*/NativeVsManagedTests/*"
+dotnet run --no-build -c Release --treenode-filter "/*/*/NativeVsManagedTests/*"
 
 # All parity tests (NumericalParityTests + NativeLibraryParityTests)
-dotnet run -- -c Release --treenode-filter "/*/*/*ParityTests/*"
+dotnet run --no-build -c Release --treenode-filter "/*/*/*ParityTests/*"
 
 # Specific test
-dotnet run -- -c Release --treenode-filter "/*/*/BackwardSpikes_Uniform_Tiny"
+dotnet run --no-build -c Release --treenode-filter "/*/*/BackwardSpikes_Uniform_Tiny"
 
 # All tests matching a pattern in the name
-dotnet run -- -c Release --treenode-filter "/*/*/*[Name~Poisson*]"
+dotnet run --no-build -c Release --treenode-filter "/*/*/*[Name~Poisson*]"
 ```
 
 ### Parsing TUnit Output (Common Patterns)
@@ -111,31 +135,31 @@ TUnit output is verbose and multi-line. Use these grep patterns to extract meani
 
 ```bash
 # Count total failures
-dotnet run -- -c Release 2>&1 | grep "failed " | wc -l
+dotnet run --no-build -c Release 2>&1 | grep "failed " | wc -l
 
 # List only failed test names
-dotnet run -- -c Release 2>&1 | grep "failed BackwardSpikes"
+dotnet run --no-build -c Release 2>&1 | grep "failed BackwardSpikes"
 
 # Get failure reason for a specific test (3 lines after the name)
-dotnet run -- -c Release 2>&1 | grep "failed BackwardSpikes_Uniform_Tiny" -A3
+dotnet run --no-build -c Release 2>&1 | grep "failed BackwardSpikes_Uniform_Tiny" -A3
 
 # Show only C vs Eigen comparison failures (NativeLibraryParityTests)
-dotnet run -- -c Release 2>&1 | grep "CompareNativeBackwardSpikes" -B3
+dotnet run --no-build -c Release 2>&1 | grep "CompareNativeBackwardSpikes" -B3
 
 # Show only .NET vs Eigen comparison failures (NumericalParityTests)
-dotnet run -- -c Release 2>&1 | grep "CompareBackwardSpikes" -B3
+dotnet run --no-build -c Release 2>&1 | grep "CompareBackwardSpikes" -B3
 
 # Show only C vs .NET comparison failures (NativeVsManagedTests)
-dotnet run -- -c Release 2>&1 | grep "CompareNativeVsManaged" -B3
+dotnet run --no-build -c Release 2>&1 | grep "CompareNativeVsManaged" -B3
 
 # Check for Toms748 root-finder exceptions
-dotnet run -- -c Release 2>&1 | grep "f(a) and f(b)"
+dotnet run --no-build -c Release 2>&1 | grep "f(a) and f(b)"
 
 # Check for spike count mismatches
-dotnet run -- -c Release 2>&1 | grep "SPIKE COUNT"
+dotnet run --no-build -c Release 2>&1 | grep "SPIKE COUNT"
 
 # Get unique failure categories (test name only)
-dotnet run -- -c Release 2>&1 | grep "failed BackwardSpikes" | sort -u
+dotnet run --no-build -c Release 2>&1 | grep "failed BackwardSpikes" | sort -u
 ```
 
 ### Quick Commands (Copy-Paste Ready)
@@ -159,21 +183,41 @@ cd src/EventProp.Tests && dotnet run -- -c Release --fail-fast 2>&1 | grep "fail
 
 ### C/C++ Parity Test (Standalone Native Library)
 
-**Location**: `src/cpp_parity_test/`
+**Location**: `src/EventProp.Native.ParityTests/`
 
-A standalone C++ test project that compares the pure C implementation (`libeventprop_c_api.dylib`) against the Eigen-based core from `EventProp.Python` (source of truth). Uses identical input data and asserts numerical equality.
+A standalone C++ test project that compares the pure C implementation (`libeventprop_c_api.dylib`) against the Eigen-based core (stripped from EventProp.Python, no pybind11). Uses identical input data and asserts numerical equality.
 
 **Build & Run**:
 ```bash
-cd src/cpp_parity_test/build && cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
+cd src/EventProp.Native.ParityTests && rm -rf build && mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
 ./parity_test /path/to/libeventprop_c_api.dylib
 ```
 
 **What it tests**: ComputeSums, ComputeSpikes, BackwardSpikes, ComputeMaxima, BackwardMaxima across uniform/poisson/burst patterns.
 
-**Current results**: 19/20 pass. The one failure is ComputeSpikes poisson spike count mismatch (C=369 vs Eigen=541) — C systematically misses ~30% of later spikes. The first 15 spikes match perfectly.
+**Current results**: 20/20 pass. All C outputs match Eigen within tolerance (absolute 1e-10, relative 1e-9).
 
-### Test Project Structure & What Each File Tests (.NET)
+### C/C++ Benchmark Projects
+
+**Location**: `src/EventProp.Native.Benchmarks/`
+
+Compares C library vs Eigen core performance across problem sizes and spike patterns.
+
+**Build & Run**:
+```bash
+cd src/EventProp.Native.Benchmarks && rm -rf build && mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
+./bench_c --benchmark_min_time=0.1s
+./bench_cpp --benchmark_min_time=0.1s
+```
+
+**Raw benchmarks** (bypasses wrapper, links directly against Eigen core):
+```bash
+cd src/EventProp.Native.Benchmarks/raw && rm -rf build && mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
+./raw_bench
+```
 
 - **`NativeVsManagedTests.cs`** — C# (EventPropMath) vs NativeApi (C library). Tests: ComputeSums, ComputeSpikes, ComputeMaxima, Backward. Uses uniform patterns only.
 - **`NumericalParityTests.cs`** — Three-way: NativeApi (C) ≡ NativeCppApi (Eigen, source of truth) ≡ EventPropMath (.NET). All patterns/sizes. **This is the main parity test suite.**

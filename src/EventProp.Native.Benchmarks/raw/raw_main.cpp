@@ -1,4 +1,4 @@
-// Raw C++ EventProp benchmark — calls EventProp.cpp functions directly
+// Raw C++ EventProp benchmark — calls EventProp.Python Eigen core directly
 // No wrapper layer. Pure Eigen + Spikes/Maxima types.
 
 #include <benchmark/benchmark.h>
@@ -7,7 +7,7 @@
 #include <vector>
 #include <algorithm>
 
-// Include the C++ algorithm headers (EventProp.cpp)
+// Include the C++ algorithm headers (EventProp.Python)
 #include "eventprop_types.h"
 
 using RowMatrixXd = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;

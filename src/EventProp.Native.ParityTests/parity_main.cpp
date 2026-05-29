@@ -16,7 +16,7 @@
 #include <dlfcn.h>
 
 /* Eigen core (from EventProp.Python, stripped of pybind11) */
-#include "eventprop_eigen.h"
+#include "../EventProp.Cpp.Wrapper/eventprop_eigen_stripped.h"
 
 /* ── C library function pointer types (loaded via dlopen) ───────────── */
 typedef void (*cfn_compute_sums)(const double*, int, int, const double*, const int32_t*, int, double, double, double*, double*);

@@ -25,7 +25,7 @@ echo "============================================"
 
 # ── 1. C Library (EventProp.C) ─────────────────────────────
 echo ""
-echo "[1/4] Building C library (EventProp.C)..."
+echo "[1/3] Building C library (EventProp.C)..."
 cd "$SCRIPT_DIR/src/EventProp.C"
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR" && cd "$BUILD_DIR"
@@ -33,19 +33,10 @@ cmake .. -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE"
 make -j$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
 echo "  → libeventprop_c_api.dylib"
 
-# ── 2. C++ Algorithm Library (EventProp.cpp) ───────────────
+# ── 2. C++ Wrapper Library (EventProp.Cpp.Wrapper) ─────────
+#    Builds Eigen core from EventProp.Python sources + wrapper on top.
 echo ""
-echo "[2/4] Building C++ algorithm library (EventProp.cpp)..."
-cd "$SCRIPT_DIR/src/EventProp.cpp"
-rm -rf "$BUILD_DIR"
-mkdir -p "$BUILD_DIR" && cd "$BUILD_DIR"
-cmake .. -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE"
-make -j$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
-echo "  → bin/libeventprop_cpp.dylib"
-
-# ── 3. C++ Wrapper Library (EventProp.Cpp.Wrapper) ─────────
-echo ""
-echo "[3/4] Building C++ wrapper library (EventProp.Cpp.Wrapper)..."
+echo "[2/3] Building C++ wrapper library (EventProp.Cpp.Wrapper)..."
 cd "$SCRIPT_DIR/src/EventProp.Cpp.Wrapper"
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR" && cd "$BUILD_DIR"
@@ -53,9 +44,9 @@ cmake .. -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE"
 make -j$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
 echo "  → libeventprop_cpp_wrapper.dylib"
 
-# ── 4. .NET Projects (EventProp + EventProp.Tests) ─────────
+# ── 3. .NET Projects (EventProp + EventProp.Tests) ─────────
 echo ""
-echo "[4/4] Building .NET projects (EventProp + EventProp.Tests)..."
+echo "[3/3] Building .NET projects (EventProp + EventProp.Tests)..."
 cd "$SCRIPT_DIR/src"
 rm -rf EventProp/bin EventProp/obj \
        EventProp.Native/bin EventProp.Native/obj \
