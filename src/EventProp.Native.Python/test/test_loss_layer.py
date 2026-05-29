@@ -3,14 +3,14 @@ from itertools import product
 import numpy as np
 from numpy.testing import assert_almost_equal, assert_allclose
 
-from eventprop.loss_layer import (
+from eventprop_cffi.loss_layer import (
     TTFSCrossEntropyLoss,
     TTFSCrossEntropyLossParameters,
     VMaxCrossEntropyLoss,
 )
-from eventprop.spikes import Spikes, SpikesVector
-from eventprop.li_layer import LILayerParameters
-from eventprop.lif_layer import LIFLayerParameters
+from eventprop_cffi.spikes import Spikes, SpikesVector
+from eventprop_cffi.li_layer import LILayerParameters
+from eventprop_cffi.lif_layer import LIFLayerParameters
 from test_lif_layer import get_poisson_spikes
 
 

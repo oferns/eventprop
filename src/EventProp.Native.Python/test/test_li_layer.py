@@ -3,8 +3,8 @@ import numpy as np
 from numpy.testing import assert_almost_equal
 from numpy.testing._private.utils import assert_equal
 
-from eventprop.li_layer import LILayer, LILayerParameters
-from eventprop.spikes import Spikes, SpikesVector, Maxima, MaximaVector
+from eventprop_cffi.li_layer import LILayer, LILayerParameters
+from eventprop_cffi.spikes import Spikes, SpikesVector, Maxima, MaximaVector
 from test_lif_layer import get_poisson_spikes, get_normalization_factor
 
 

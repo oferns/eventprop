@@ -197,8 +197,8 @@ public static class EventPropMath
                     if (i == nSpikes)
                     {
                         // Last interval — check after last input spike
-                        double sum0Val = buffers.Sum0[targetNrn * (nSpikes + 1) + nSpikes];
-                        double sum1Val = buffers.Sum1[targetNrn * (nSpikes + 1) + nSpikes];
+                        double sum0Val = buffers.Sum0[nSpikes * nPost + targetNrn];
+                        double sum1Val = buffers.Sum1[nSpikes * nPost + targetNrn];
                         for (int s = 0; s < neuronSpikeCount; s++)
                             sum1Val += -vTh * Math.Exp(buffers.PostSpikeTimes[neuronOffset + s] / tauMem);
                         double tmax = tmaxPrefactor * (tmaxSummand + Math.Log(sum1Val / sum0Val));

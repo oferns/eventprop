@@ -42,23 +42,43 @@ eventprop.net/
 
 ## Running Tests & Coverage
 
+### TUnit Test Running (Critical)
+
+TUnit uses the Microsoft Testing Platform — **not** VSTest. `dotnet test` does NOT work on .NET 10.
+
 ```bash
-# Run tests
+# Run ALL tests (Debug mode — default)
 cd src/EventProp.Tests && dotnet run --
 
-# Run with coverage (output → bin/Debug/net10.0/TestResults/coverage.cobertura.xml)
-dotnet run --project src/EventProp.Tests -- --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
+# Run ALL tests (Release mode — required for numerical parity tests)
+cd src/EventProp.Tests && dotnet run -- -c Release
 
-# Generate HTML coverage report
-export PATH="$PATH:$HOME/.dotnet/tools"
-reportgenerator -reports:src/EventProp.Tests/bin/Debug/net10.0/TestResults/*.cobertura.xml \
-  -targetdir:coverage-report -reporttypes:Html
+# Run with coverage
+dotnet run -- --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 
-# Generate HTML coverage report
+# Generate HTML coverage report (after running with coverage)
 export PATH="$PATH:$HOME/.dotnet/tools"
 reportgenerator -reports:bin/Debug/net10.0/TestResults/*.cobertura.xml \
   -targetdir:../../coverage-report -reporttypes:Html
+
+# List all tests
+dotnet run -- --list-tests
+
+# Run with detailed output (shows failure reasons)
+dotnet run -- --output Detailed
+
+# Fail fast on first failure
+dotnet run -- --fail-fast
 ```
+
+**Important**: `dotnet test` outputs "Testing with VSTest target is no longer supported" on .NET 10. Always use `dotnet run --`.
+
+### Test Project Structure
+
+- **NativeVsManagedTests.cs** — C# vs NativeApi (C library) comparisons, uniform patterns only
+- **NumericalParityTests.cs** — Three-way: NativeApi (C) ≡ NativeCppApi (Eigen, source of truth) ≡ EventPropMath (.NET), all patterns/sizes
+- **ComputeSpikesTests.cs / ComputeSumsTests.cs / etc.** — Unit tests for individual operations
+- **BackwardSpikesTests.cs** — Numerical gradient verification
 
 ## Architecture Notes
 

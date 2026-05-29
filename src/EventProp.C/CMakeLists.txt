@@ -25,8 +25,26 @@ elif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
 endif()
 
 # Pure C shared library (no external dependencies)
+# Optional OpenMP for parallel neuron processing in ComputeSpikes
+find_package(OpenMP QUIET)
 add_library(eventprop_c_api SHARED eventprop_scalar.c)
 target_link_libraries(eventprop_c_api PRIVATE m)
+if(OpenMP_C_FOUND)
+    target_link_libraries(eventprop_c_api PRIVATE OpenMP::OpenMP_C)
+    message(STATUS "OpenMP found — enabling parallel neuron processing")
+else()
+    # macOS fallback: use Homebrew libomp
+    execute_process(COMMAND brew --prefix libomp OUTPUT_STRIP_TRAILING_WHITESPACE
+                    OUTPUT_VARIABLE _OPENMP_PREFIX RESULT_VARIABLE _BREW_FAIL)
+    if(_BREW_FAIL EQUAL 0 AND EXISTS "${_OPENMP_PREFIX}/lib/libomp.dylib")
+        target_compile_options(eventprop_c_api PRIVATE "-Xpreprocessor" "-fopenmp")
+        target_include_directories(eventprop_c_api PRIVATE "${_OPENMP_PREFIX}/include")
+        target_link_libraries(eventprop_c_api PRIVATE "${_OPENMP_PREFIX}/lib/libomp.dylib")
+        message(STATUS "OpenMP (Homebrew libomp) found — enabling parallel neuron processing")
+    else()
+        message(STATUS "OpenMP not found — running sequentially (Eigen uses OpenMP for parallel neuron processing)")
+    endif()
+endif()
 target_include_directories(eventprop_c_api PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Install

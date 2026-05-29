@@ -3,16 +3,14 @@ requires = ["setuptools>=64", "pybind11>=2.10"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "eventprop-native"
+name = "eventprop-cffi"
 version = "0.1"
-description = "EventProp: Event-based backpropagation for Spiking Neural Networks (C library bindings)"
+description = "EventProp: Event-based backpropagation for Spiking Neural Networks (C library bindings via CFFI)"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.8"
 dependencies = [
     "numpy",
-    "scipy",
-    "dask",
 ]
 
 [project.optional-dependencies]
@@ -21,7 +19,7 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["eventprop*"]
+include = ["eventprop_cffi*"]
 
 [tool.setuptools.package-data]
-eventprop = ["*.dylib", "*.so"]
+eventprop_cffi = ["*.dylib", "*.so"]

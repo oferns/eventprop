@@ -1,4 +1,4 @@
-"""Build script for eventprop._native C extension."""
+"""Build script for eventprop_cffi._native C extension."""
 
 import os
 import sys
@@ -12,7 +12,7 @@ here = os.path.dirname(os.path.abspath(__file__))
 c_lib_dir = os.path.join(here, "..", "EventProp.C")
 
 cpp_ext = Extension(
-    name="eventprop._native",
+    name="eventprop_cffi._native",
     sources=[os.path.join(here, "src", "eventprop_cpp.cpp")],
     include_dirs=[pybind11.get_include(), c_lib_dir],
     library_dirs=[c_lib_dir],
@@ -28,10 +28,9 @@ class _build_ext(build_ext):
     def run(self):
         super().run()
         for ext in self.extensions:
-            if ext.name == "eventprop._native":
+            if ext.name == "eventprop_cffi._native":
                 for output_file in self.get_outputs():
                     if output_file.endswith(".so"):
-                        # Use absolute path to C library (works for local development)
                         subprocess.run(
                             [
                                 "install_name_tool",

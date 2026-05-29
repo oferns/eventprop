@@ -75,11 +75,15 @@ static void fma_row_simd(double* dest, const double* src, const double* weights,
         }
     }
 #elif defined(__ARM_NEON)
-    /* ARM NEON: Apple clang has limited double-precision NEON intrinsics.
-       Use scalar loop — compiler auto-vectorizes with -O3. */
-    (void)vec; (void)vec_count;
-    for (int j = 0; j < n; j++)
-        dest[j] = src[j] + scalar * weights[j];
+    /* ARM NEON: double-precision via float64x2_t (2 doubles per vector) */
+    {
+        float64x2_t sc = vdupq_n_f64(scalar);
+        for (int i = 0; i < vec_count; i++) {
+            float64x2_t s = vld1q_f64(src + i * vec);
+            float64x2_t w = vld1q_f64(weights + i * vec);
+            vst1q_f64(dest + i * vec, vaddq_f64(s, vmulq_f64(w, sc)));
+        }
+    }
 #else
     (void)vec; (void)vec_count;
     for (int j = 0; j < n; j++)
@@ -120,10 +124,14 @@ static void scale_inplace_simd(double* span, double scalar, int n)
 #endif
     }
 #elif defined(__ARM_NEON)
-    /* ARM NEON: Apple clang has limited double-precision NEON intrinsics. */
-    (void)vec; (void)vec_count;
-    for (int j = 0; j < n; j++)
-        span[j] *= scalar;
+    /* ARM NEON: double-precision via float64x2_t */
+    {
+        float64x2_t sc = vdupq_n_f64(scalar);
+        for (int i = 0; i < vec_count; i++) {
+            float64x2_t s = vld1q_f64(span + i * vec);
+            vst1q_f64(span + i * vec, vmulq_f64(s, sc));
+        }
+    }
 #else
     (void)vec; (void)vec_count;
     for (int j = 0; j < n; j++)
@@ -163,9 +171,15 @@ static void vadd_scaled_simd(double* dest, const double* src, double scalar, int
         }
     }
 #elif defined(__ARM_NEON)
-    (void)vec; (void)vec_count;
-    for (int j = 0; j < n; j++)
-        dest[j] += src[j] * scalar;
+    /* ARM NEON: double-precision via float64x2_t */
+    {
+        float64x2_t sc = vdupq_n_f64(scalar);
+        for (int i = 0; i < vec_count; i++) {
+            float64x2_t d = vld1q_f64(dest + i * vec);
+            float64x2_t s = vld1q_f64(src + i * vec);
+            vst1q_f64(dest + i * vec, vaddq_f64(d, vmulq_f64(s, sc)));
+        }
+    }
 #else
     (void)vec; (void)vec_count;
     for (int j = 0; j < n; j++)
@@ -223,11 +237,21 @@ static double dot_product_simd(const double* a, const double* b, int n)
         return sum;
     }
 #elif defined(__ARM_NEON)
-    (void)vec; (void)vec_count;
-    double sum = 0.0;
-    for (int j = 0; j < n; j++)
-        sum += a[j] * b[j];
-    return sum;
+    /* ARM NEON: double-precision via float64x2_t, manual horizontal sum */
+    {
+        float64x2_t acc = vdupq_n_f64(0.0);
+        for (int i = 0; i < vec_count; i++) {
+            float64x2_t va = vld1q_f64(a + i * vec);
+            float64x2_t vb = vld1q_f64(b + i * vec);
+            acc = vaddq_f64(acc, vmulq_f64(va, vb));
+        }
+        double result[2];
+        vst1q_f64(result, acc);
+        double sum = result[0] + result[1];
+        for (int j = vec_count * vec; j < n; j++)
+            sum += a[j] * b[j];
+        return sum;
+    }
 #else
     (void)vec; (void)vec_count;
     double sum = 0.0;
@@ -478,11 +502,13 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
             int found = 0;
             for (int i = processed; i <= n_spikes; i++) {
                 if (i == n_spikes) {
-                    /* Last interval */
-                    double s0 = sum0[target_nrn * (n_spikes+1) + n_spikes];
-                    double s1 = sum1[target_nrn * (n_spikes+1) + n_spikes];
+                    /* Last interval — access sum0/sum1 at row n_spikes, col target_nrn */
+                    double s0 = sum0[n_spikes * n_post + target_nrn];
+                    double s1 = sum1[n_spikes * n_post + target_nrn];
                     for (int s = 0; s < count; s++)
                         s1 += -v_th * exp(post_times[offset + s] / tau_mem);
+
+
 
                     double tmax = tmax_prefactor * (tmax_summand + log(s1 / s0));
                     if (!isinf(tmax)) {
