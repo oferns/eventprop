@@ -50,7 +50,10 @@ eventprop.net/
 cd src/EventProp.Tests && dotnet run --
 
 # Release (required for parity tests — matches C/C++ FP ordering)
-cd src/EventProp.Tests && dotnet build -c Release --nologo && dotnet run --no-build -c Release
+cd src/EventProp.Tests && dotnet run -c Release --
+
+# With filter (Release mode)
+cd src/EventProp.Tests && dotnet run -c Release -- --treenode-filter "/*/*/ComputeSumsTests/*"
 
 # ── C/C++ Parity Tests (C vs Eigen, standalone) ─────────────────
 cd src/EventProp.Native.ParityTests && rm -rf build && mkdir build && cd build
@@ -61,22 +64,18 @@ cd src/EventProp.Native.Benchmarks && rm -rf build && mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build . && ./bench_c --benchmark_min_time=0.1s
 ```
 
-### ⚠️ CRITICAL: How to Run .NET Tests on .NET 10
+### ⚠️ How to Run .NET Tests on .NET 10
 
 TUnit uses the Microsoft Testing Platform — **not VSTest**. `dotnet test` does NOT work.
 
-**The `-c Release` flag is a PROJECT build option, not a TUnit runtime option.** It must be passed to `dotnet build`, NOT to `dotnet run`. Passing `-c` after `--` sends it to TUnit as an unknown flag (prints help, zero tests run).
+**The `-c` flag goes BEFORE `--`, TUnit flags go AFTER `--`.** The `dotnet run` CLI splits on `--`: everything before is a dotnet build option, everything after goes to the test runner.
 
 ```bash
-# ── CORRECT: Build first, then run with --no-build ───────────────
+# ── CORRECT: -c before --, TUnit flags after -- ─────────────────
+cd src/EventProp.Tests && dotnet run -c Release --                          # all tests, release
+cd src/EventProp.Tests && dotnet run -c Release -- --treenode-filter "/*/*/BackwardSpikes/*"  # filtered
 
-# Debug mode (default — fast build, different FP ordering)
-cd src/EventProp.Tests && dotnet run --
-
-# Release mode (required for parity tests — Debug has different FP ordering)
-cd src/EventProp.Tests && dotnet build -c Release --nologo && dotnet run --no-build -c Release
-
-# ── WRONG (will print TUnit help, run zero tests): ───────────────
+# ── WRONG: -c after -- (TUnit rejects it as unknown flag): ─────────
 # cd src/EventProp.Tests && dotnet run -- -c Release   ← BROKEN
 # cd src/EventProp.Tests && dotnet test                ← BROKEN (VSTest unsupported)
 ```
@@ -95,18 +94,20 @@ TUnit runs on Microsoft.Testing.Platform (MTP), **not VSTest**. If you come from
 | `--filter "FullyQualifiedName~LoginTests"` | `--treenode-filter "/*/*/LoginTests/*"` |
 | `--filter "Name=AcceptCookiesTest"` | `--treenode-filter "/*/*/*/AcceptCookiesTest"` |
 
-### TUnit Flags Reference (Passed to `dotnet run --`, NOT `dotnet build`)
+### TUnit Flags Reference (Passed after `--`, NOT before)
+
+Everything **before** `--` is a dotnet CLI option (e.g. `-c Release`). Everything **after** `--` goes to TUnit.
 
 | Flag | Effect | Example |
 |------|--------|---------|
-| `--no-progress` | Suppress the ASCII spinner, cleaner output for grep/parsing | `dotnet run --no-build -c Release --no-progress` |
-| `--treenode-filter "/*/*/BackwardSpikes/*"` | Run only tests matching pattern | `dotnet run --no-build -c Release --treenode-filter "/*/*/BackwardSpikes/*"` |
-| `--list-tests` | List all test names without running | `dotnet run --no-build -c Release --list-tests` |
-| `--output Detailed` | Show full failure details in output | `dotnet run --no-build -c Release --output Detailed` |
-| `--fail-fast` | Stop after first failure | `dotnet run --no-build -c Release --fail-fast` |
-| `--coverage` | Enable coverage collection | `dotnet run --no-build -c Release --coverage` |
-| `--coverage-output <file>` | Specify coverage output file path | `dotnet run --no-build -c Release --coverage --coverage-output coverage.cobertura.xml` |
-| `--coverage-output-format cobertura` | Coverage format (cobertura, json, etc.) | `dotnet run --no-build -c Release --coverage-output-format cobertura` |
+| `--no-progress` | Suppress the ASCII spinner, cleaner output for grep/parsing | `dotnet run -c Release -- --no-progress` |
+| `--treenode-filter "/*/*/BackwardSpikes/*"` | Run only tests matching pattern | `dotnet run -c Release -- --treenode-filter "/*/*/BackwardSpikes/*"` |
+| `--list-tests` | List all test names without running | `dotnet run -c Release -- --list-tests` |
+| `--output Detailed` | Show full failure details in output | `dotnet run -c Release -- --output Detailed` |
+| `--fail-fast` | Stop after first failure | `dotnet run -c Release -- --fail-fast` |
+| `--coverage` | Enable coverage collection | `dotnet run -c Release -- --coverage` |
+| `--coverage-output <file>` | Specify coverage output file path | `dotnet run -c Release -- --coverage --coverage-output coverage.cobertura.xml` |
+| `--coverage-output-format cobertura` | Coverage format (cobertura, json, etc.) | `dotnet run -c Release -- --coverage-output-format cobertura` |
 
 ### Common TUnit Filter Patterns (treenode-filter)
 
@@ -114,19 +115,19 @@ TUnit uses a tree path format: `/*/[project]/[class]/[test]` (4 segments). Use w
 
 ```bash
 # All BackwardSpikes tests
-dotnet run --no-build -c Release --treenode-filter "/*/*/BackwardSpikes/*"
+dotnet run -c Release -- --treenode-filter "/*/*/BackwardSpikes/*"
 
 # All tests in NativeVsManagedTests
-dotnet run --no-build -c Release --treenode-filter "/*/*/NativeVsManagedTests/*"
+dotnet run -c Release -- --treenode-filter "/*/*/NativeVsManagedTests/*"
 
 # All parity tests (NumericalParityTests + NativeLibraryParityTests)
-dotnet run --no-build -c Release --treenode-filter "/*/*/*ParityTests/*"
+dotnet run -c Release -- --treenode-filter "/*/*/*ParityTests/*"
 
 # Specific test
-dotnet run --no-build -c Release --treenode-filter "/*/*/BackwardSpikes_Uniform_Tiny"
+dotnet run -c Release -- --treenode-filter "/*/*/BackwardSpikes_Uniform_Tiny"
 
 # All tests matching a pattern in the name
-dotnet run --no-build -c Release --treenode-filter "/*/*/*[Name~Poisson*]"
+dotnet run -c Release -- --treenode-filter "/*/*/*[Name~Poisson*]"
 ```
 
 ### Parsing TUnit Output (Common Patterns)
@@ -135,50 +136,50 @@ TUnit output is verbose and multi-line. Use these grep patterns to extract meani
 
 ```bash
 # Count total failures
-dotnet run --no-build -c Release 2>&1 | grep "failed " | wc -l
+dotnet run -c Release -- 2>&1 | grep "failed " | wc -l
 
 # List only failed test names
-dotnet run --no-build -c Release 2>&1 | grep "failed BackwardSpikes"
+dotnet run -c Release -- 2>&1 | grep "failed BackwardSpikes"
 
 # Get failure reason for a specific test (3 lines after the name)
-dotnet run --no-build -c Release 2>&1 | grep "failed BackwardSpikes_Uniform_Tiny" -A3
+dotnet run -c Release -- 2>&1 | grep "failed BackwardSpikes_Uniform_Tiny" -A3
 
 # Show only C vs Eigen comparison failures (NativeLibraryParityTests)
-dotnet run --no-build -c Release 2>&1 | grep "CompareNativeBackwardSpikes" -B3
+dotnet run -c Release -- 2>&1 | grep "CompareNativeBackwardSpikes" -B3
 
 # Show only .NET vs Eigen comparison failures (NumericalParityTests)
-dotnet run --no-build -c Release 2>&1 | grep "CompareBackwardSpikes" -B3
+dotnet run -c Release -- 2>&1 | grep "CompareBackwardSpikes" -B3
 
 # Show only C vs .NET comparison failures (NativeVsManagedTests)
-dotnet run --no-build -c Release 2>&1 | grep "CompareNativeVsManaged" -B3
+dotnet run -c Release -- 2>&1 | grep "CompareNativeVsManaged" -B3
 
 # Check for Toms748 root-finder exceptions
-dotnet run --no-build -c Release 2>&1 | grep "f(a) and f(b)"
+dotnet run -c Release -- 2>&1 | grep "f(a) and f(b)"
 
 # Check for spike count mismatches
-dotnet run --no-build -c Release 2>&1 | grep "SPIKE COUNT"
+dotnet run -c Release -- 2>&1 | grep "SPIKE COUNT"
 
 # Get unique failure categories (test name only)
-dotnet run --no-build -c Release 2>&1 | grep "failed BackwardSpikes" | sort -u
+dotnet run -c Release -- 2>&1 | grep "failed BackwardSpikes" | sort -u
 ```
 
 ### Quick Commands (Copy-Paste Ready)
 
 ```bash
 # Run all tests — Release mode
-cd src/EventProp.Tests && dotnet run -- -c Release
+cd src/EventProp.Tests && dotnet run -c Release --
 
 # Run only backward pass tests
-cd src/EventProp.Tests && dotnet run -- -c Release --treenode-filter "/*/*/BackwardSpikes/*"
+cd src/EventProp.Tests && dotnet run -c Release -- --treenode-filter "/*/*/BackwardSpikes/*"
 
 # Run only C vs Eigen parity tests
-cd src/EventProp.Tests && dotnet run -- -c Release --treenode-filter "/*/*/NativeLibraryParityTests/*"
+cd src/EventProp.Tests && dotnet run -c Release -- --treenode-filter "/*/*/NativeLibraryParityTests/*"
 
 # Count failures
-cd src/EventProp.Tests && dotnet run -- -c Release 2>&1 | grep "failed " | wc -l
+cd src/EventProp.Tests && dotnet run -c Release -- 2>&1 | grep "failed " | wc -l
 
 # Show first failure reason
-cd src/EventProp.Tests && dotnet run -- -c Release --fail-fast 2>&1 | grep "failed" -A3
+cd src/EventProp.Tests && dotnet run -c Release -- --fail-fast 2>&1 | grep "failed" -A3
 ```
 
 ### C/C++ Parity Test (Standalone Native Library)
@@ -229,8 +230,8 @@ cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
 ### Coverage Report Generation
 
 ```bash
-# Run with coverage (output → bin/Debug/net10.0/TestResults/coverage.cobertura.xml)
-cd src/EventProp.Tests && dotnet run -- -c Release --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
+# Run with coverage (output → bin/Release/net10.0/TestResults/coverage.cobertura.xml)
+cd src/EventProp.Tests && dotnet run -c Release -- --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 
 # Generate HTML coverage report (from test project directory)
 export PATH="$PATH:$HOME/.dotnet/tools"
