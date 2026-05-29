@@ -157,7 +157,23 @@ cd src/EventProp.Tests && dotnet run -- -c Release 2>&1 | grep "failed " | wc -l
 cd src/EventProp.Tests && dotnet run -- -c Release --fail-fast 2>&1 | grep "failed" -A3
 ```
 
-### Test Project Structure & What Each File Tests
+### C/C++ Parity Test (Standalone Native Library)
+
+**Location**: `src/cpp_parity_test/`
+
+A standalone C++ test project that compares the pure C implementation (`libeventprop_c_api.dylib`) against the Eigen-based core from `EventProp.Python` (source of truth). Uses identical input data and asserts numerical equality.
+
+**Build & Run**:
+```bash
+cd src/cpp_parity_test/build && cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
+./parity_test /path/to/libeventprop_c_api.dylib
+```
+
+**What it tests**: ComputeSums, ComputeSpikes, BackwardSpikes, ComputeMaxima, BackwardMaxima across uniform/poisson/burst patterns.
+
+**Current results**: 19/20 pass. The one failure is ComputeSpikes poisson spike count mismatch (C=369 vs Eigen=541) — C systematically misses ~30% of later spikes. The first 15 spikes match perfectly.
+
+### Test Project Structure & What Each File Tests (.NET)
 
 - **`NativeVsManagedTests.cs`** — C# (EventPropMath) vs NativeApi (C library). Tests: ComputeSums, ComputeSpikes, ComputeMaxima, Backward. Uses uniform patterns only.
 - **`NumericalParityTests.cs`** — Three-way: NativeApi (C) ≡ NativeCppApi (Eigen, source of truth) ≡ EventPropMath (.NET). All patterns/sizes. **This is the main parity test suite.**
