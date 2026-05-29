@@ -84,3 +84,19 @@ azure-pipelines.yml
 
 # BenchmarkDotNet artifacts
 BenchmarkDotNet.Artifacts/
+
+# C/C++ benchmarks (build artifacts and test binaries)
+src/cpp_benchmarks/build_c/
+src/cpp_benchmarks/build_cpp/
+src/cpp_benchmarks/check_eps.cpp
+src/cpp_benchmarks/check_sorted*
+src/cpp_benchmarks/compare_*
+src/cpp_benchmarks/count_poisson*
+src/cpp_benchmarks/direct_compare*
+src/cpp_benchmarks/profile_*
+src/cpp_benchmarks/side_by_side
+src/cpp_benchmarks/test_eigen_spike_count
+src/cpp_benchmarks/test_omp*
+src/cpp_benchmarks/test_spike_count
+src/cpp_benchmarks/test_threshold
+src/cpp_benchmarks/verify_poisson*

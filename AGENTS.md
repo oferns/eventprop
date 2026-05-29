@@ -46,29 +46,82 @@ eventprop.net/
 
 TUnit uses the Microsoft Testing Platform — **not** VSTest. `dotnet test` does NOT work on .NET 10.
 
+**Always run from the solution root or the test project directory.**
+
 ```bash
 # Run ALL tests (Debug mode — default)
 cd src/EventProp.Tests && dotnet run --
 
 # Run ALL tests (Release mode — required for numerical parity tests)
 cd src/EventProp.Tests && dotnet run -- -c Release
+```
 
-# Run with coverage
-dotnet run -- --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
+### TUnit Flags Reference
 
-# Generate HTML coverage report (after running with coverage)
+| Flag | Effect | Example |
+|------|--------|---------|
+| `-c Release` | Build in Release mode (must use for parity tests — Debug has different FP ordering) | `dotnet run -- -c Release` |
+| `--no-progress` | Suppress the ASCII spinner, cleaner output for grep/parsing | `dotnet run -- -c Release --no-progress` |
+| `--filter "FullyQualifiedName~BackwardSpikes"` | Run only tests matching pattern | `dotnet run -- -c Release --filter "FullyQualifiedName~BackwardSpikes"` |
+| `--list-tests` | List all test names without running | `dotnet run -- --list-tests` |
+| `--output Detailed` | Show full failure details in output | `dotnet run -- -c Release --output Detailed` |
+| `--fail-fast` | Stop after first failure | `dotnet run -- -c Release --fail-fast` |
+| `--coverage` | Enable coverage collection | `dotnet run -- -c Release --coverage` |
+| `--coverage-output <file>` | Specify coverage output file path | `dotnet run -- -c Release --coverage --coverage-output coverage.cobertura.xml` |
+| `--coverage-output-format cobertura` | Coverage format (cobertura, json, etc.) | `dotnet run -- -c Release --coverage-output-format cobertura` |
+
+### Parsing TUnit Output (Common Patterns)
+
+TUnit output is verbose and multi-line. Use these grep patterns to extract meaningful information:
+
+```bash
+# Count total failures
+dotnet run -- -c Release 2>&1 | grep "failed " | wc -l
+
+# List only failed test names
+dotnet run -- -c Release 2>&1 | grep "failed BackwardSpikes"
+
+# Get failure reason for a specific test (3 lines after the name)
+dotnet run -- -c Release 2>&1 | grep "failed BackwardSpikes_Uniform_Tiny" -A3
+
+# Show only C vs Eigen comparison failures (NativeLibraryParityTests)
+dotnet run -- -c Release 2>&1 | grep "CompareNativeBackwardSpikes" -B3
+
+# Show only .NET vs Eigen comparison failures (NumericalParityTests)
+dotnet run -- -c Release 2>&1 | grep "CompareBackwardSpikes" -B3
+
+# Show only C vs .NET comparison failures (NativeVsManagedTests)
+dotnet run -- -c Release 2>&1 | grep "CompareNativeVsManaged" -B3
+
+# Check for Toms748 root-finder exceptions
+dotnet run -- -c Release 2>&1 | grep "f(a) and f(b)"
+
+# Check for spike count mismatches
+dotnet run -- -c Release 2>&1 | grep "SPIKE COUNT"
+
+# Get unique failure categories (test name only)
+dotnet run -- -c Release 2>&1 | grep "failed BackwardSpikes" | sort -u
+```
+
+### Test Project Structure & What Each File Tests
+
+- **`NativeVsManagedTests.cs`** — C# (EventPropMath) vs NativeApi (C library). Tests: ComputeSums, ComputeSpikes, ComputeMaxima, Backward. Uses uniform patterns only.
+- **`NumericalParityTests.cs`** — Three-way: NativeApi (C) ≡ NativeCppApi (Eigen, source of truth) ≡ EventPropMath (.NET). All patterns/sizes. **This is the main parity test suite.**
+- **`NativeLibraryParityTests.cs`** — C vs Eigen ONLY (no .NET). Tests: BackwardSpikes, BackwardMaxima. All patterns/sizes.
+- **`ComputeSpikesTests.cs`** — Unit tests for ComputeSpikes forward pass.
+- **`ComputeSumsTests.cs`** — Unit tests for ComputeSums.
+- **`BackwardSpikesTests.cs`** — Numerical gradient verification for backward pass.
+
+### Coverage Report Generation
+
+```bash
+# Run with coverage (output → bin/Debug/net10.0/TestResults/coverage.cobertura.xml)
+cd src/EventProp.Tests && dotnet run -- -c Release --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
+
+# Generate HTML coverage report (from test project directory)
 export PATH="$PATH:$HOME/.dotnet/tools"
-reportgenerator -reports:bin/Debug/net10.0/TestResults/*.cobertura.xml \
+reportgenerator -reports:bin/Release/net10.0/TestResults/*.cobertura.xml \
   -targetdir:../../coverage-report -reporttypes:Html
-
-# List all tests
-dotnet run -- --list-tests
-
-# Run with detailed output (shows failure reasons)
-dotnet run -- --output Detailed
-
-# Fail fast on first failure
-dotnet run -- --fail-fast
 ```
 
 **Important**: `dotnet test` outputs "Testing with VSTest target is no longer supported" on .NET 10. Always use `dotnet run --`.

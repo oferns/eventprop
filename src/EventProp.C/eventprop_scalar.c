@@ -632,11 +632,17 @@ void eventprop_backward_spikes(const double* times, const int32_t* sources, int 
 
     double* lambda_v = calloc(n_post, sizeof(double));
     double* lambda_i = malloc(n_post * sizeof(double));
-    int max_jumps = n_post_spikes;
-    double* jump_time = malloc(max_jumps * sizeof(double));
-    double* jump_mag = malloc(max_jumps * sizeof(double));
-    int max_nrn = n_pre > n_post ? n_pre : n_post;
-    int* jump_end = calloc(max_nrn, sizeof(int));
+
+    /* Per-neuron jump storage (matching Eigen's vector<vector<pair<double,double>>> structure) */
+    double** jump_time = calloc(n_post, sizeof(double*));
+    double** jump_mag  = calloc(n_post, sizeof(double*));
+    int*   jump_count  = calloc(n_post, sizeof(int));
+    int*   jump_cap    = calloc(n_post, sizeof(int));
+    for (int i = 0; i < n_post; i++) {
+        jump_cap[i] = 8;  /* initial capacity */
+        jump_time[i] = malloc(jump_cap[i] * sizeof(double));
+        jump_mag[i]  = malloc(jump_cap[i] * sizeof(double));
+    }
 
     double largest_time = merged[0].time, previous_t = largest_time;
     double k_bwd = tau_mem / (tau_mem - tau_syn);
@@ -648,15 +654,16 @@ void eventprop_backward_spikes(const double* times, const int32_t* sources, int 
 
         double t_bwd = largest_time - spike_time;
         double dt = previous_t - t_bwd;
-        scale_inplace_simd(lambda_v, exp(-dt / tau_mem), n_post);
+        scale_inplace_simd(lambda_v, exp(dt / tau_mem), n_post);
 
         if (is_input) {
+            /* Compute lambda_i for ALL post-synaptic neurons (matching Eigen structure) */
             memset(lambda_i, 0, n_post * sizeof(double));
-            int start = 0, end = jump_end[spike_source];
-            for (int j = start; j < end; j++) {
-                double jumpTimeOffset = jump_time[j];
-                double jumpMag = jump_mag[j];
-                lambda_i[spike_source] += jumpMag * k_bwd * (exp(-(t_bwd - jumpTimeOffset) / tau_mem) - exp(-(t_bwd - jumpTimeOffset) / tau_syn));
+            for (int nrn = 0; nrn < n_post; nrn++) {
+                for (int j = 0; j < jump_count[nrn]; j++) {
+                    double dt_jump = t_bwd - jump_time[nrn][j];
+                    lambda_i[nrn] += jump_mag[nrn][j] * k_bwd * (exp(-dt_jump / tau_mem) - exp(-dt_jump / tau_syn));
+                }
             }
 
             vadd_scaled_simd(grad + spike_source * n_post, lambda_i, -tau_syn, n_post);
@@ -674,18 +681,29 @@ void eventprop_backward_spikes(const double* times, const int32_t* sources, int 
         } else {
             double current = fwd_currents[spike_idx];
             double inv_ic = 1.0 / (current - v_th);
-            int j_idx = jump_end[spike_source];
+            int nrn = spike_source;  /* post-spike: spike_source is the post-synaptic neuron */
             double post_err = all_errors[n_spikes + spike_idx];
-            jump_mag[j_idx] = inv_ic * (v_th * lambda_v[spike_source] + post_err);
-            jump_time[j_idx] = t_bwd;
-            jump_end[spike_source]++;
 
-            lambda_v[spike_source] = (current / (current - v_th)) * lambda_v[spike_source] + inv_ic * post_err;
+            /* Record jump for this neuron (with capacity management) */
+            if (jump_count[nrn] >= jump_cap[nrn]) {
+                jump_cap[nrn] *= 2;
+                jump_time[nrn] = realloc(jump_time[nrn], jump_cap[nrn] * sizeof(double));
+                jump_mag[nrn]  = realloc(jump_mag[nrn],  jump_cap[nrn] * sizeof(double));
+            }
+            jump_time[nrn][jump_count[nrn]] = t_bwd;
+            jump_mag[nrn][jump_count[nrn]]  = inv_ic * (v_th * lambda_v[nrn] + post_err);
+            jump_count[nrn]++;
+
+            lambda_v[nrn] = (current / (current - v_th)) * lambda_v[nrn] + inv_ic * post_err;
         }
         previous_t = t_bwd;
     }
 
-    free(merged); free(all_errors); free(lambda_v); free(lambda_i); free(jump_time); free(jump_mag); free(jump_end);
+    for (int i = 0; i < n_post; i++) {
+        free(jump_time[i]); free(jump_mag[i]);
+    }
+    free(merged); free(all_errors); free(lambda_v); free(lambda_i);
+    free(jump_time); free(jump_mag); free(jump_count); free(jump_cap);
 }
 
 /* ── ComputeMaxima: membrane potential maxima per neuron ───────────── */
