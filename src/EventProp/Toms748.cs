@@ -25,12 +25,7 @@ public static class Toms748
         double fa = f(a);
         double fb = f(b);
 
-        if (fa * fb > 0.0)
-        {
-            // f(a) and f(b) have the same sign — no valid bracket.
-            // Return midpoint as best estimate and let caller handle it.
-            return 0.5 * (a + b);
-        }
+
 
         // Ensure a < b
         if (a > b)
