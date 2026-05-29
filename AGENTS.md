@@ -56,19 +56,54 @@ cd src/EventProp.Tests && dotnet run --
 cd src/EventProp.Tests && dotnet run -- -c Release
 ```
 
+### ⚠️ TUnit vs VSTest — Critical Difference
+
+TUnit runs on Microsoft.Testing.Platform (MTP), **not VSTest**. If you come from xUnit/NUnit/MSTest:
+
+- **`--filter` is silently rejected** — the flag is ignored, MTP help prints, and zero tests run
+- This looks like a "test failure" when it's actually just an unrecognised flag
+- **Always use `--treenode-filter` instead**
+
+| VSTest (xUnit/NUnit/MSTest) | TUnit (MTP) |
+|------------------------------|-------------|
+| `--filter "Category=Integration"` | `--treenode-filter "/*/*/*/*[Category=Integration]"` |
+| `--filter "FullyQualifiedName~LoginTests"` | `--treenode-filter "/*/*/LoginTests/*"` |
+| `--filter "Name=AcceptCookiesTest"` | `--treenode-filter "/*/*/*/AcceptCookiesTest"` |
+
 ### TUnit Flags Reference
 
 | Flag | Effect | Example |
 |------|--------|---------|
 | `-c Release` | Build in Release mode (must use for parity tests — Debug has different FP ordering) | `dotnet run -- -c Release` |
 | `--no-progress` | Suppress the ASCII spinner, cleaner output for grep/parsing | `dotnet run -- -c Release --no-progress` |
-| `--filter "FullyQualifiedName~BackwardSpikes"` | Run only tests matching pattern | `dotnet run -- -c Release --filter "FullyQualifiedName~BackwardSpikes"` |
+| `--treenode-filter "/*/*/BackwardSpikes/*"` | Run only tests matching pattern | `dotnet run -- -c Release --treenode-filter "/*/*/BackwardSpikes/*"` |
 | `--list-tests` | List all test names without running | `dotnet run -- --list-tests` |
 | `--output Detailed` | Show full failure details in output | `dotnet run -- -c Release --output Detailed` |
 | `--fail-fast` | Stop after first failure | `dotnet run -- -c Release --fail-fast` |
 | `--coverage` | Enable coverage collection | `dotnet run -- -c Release --coverage` |
 | `--coverage-output <file>` | Specify coverage output file path | `dotnet run -- -c Release --coverage --coverage-output coverage.cobertura.xml` |
 | `--coverage-output-format cobertura` | Coverage format (cobertura, json, etc.) | `dotnet run -- -c Release --coverage-output-format cobertura` |
+
+### Common TUnit Filter Patterns (treenode-filter)
+
+TUnit uses a tree path format: `/*/[project]/[class]/[test]` (4 segments). Use wildcards (`*`) to match any segment:
+
+```bash
+# All BackwardSpikes tests
+dotnet run -- -c Release --treenode-filter "/*/*/BackwardSpikes/*"
+
+# All tests in NativeVsManagedTests
+dotnet run -- -c Release --treenode-filter "/*/*/NativeVsManagedTests/*"
+
+# All parity tests (NumericalParityTests + NativeLibraryParityTests)
+dotnet run -- -c Release --treenode-filter "/*/*/*ParityTests/*"
+
+# Specific test
+dotnet run -- -c Release --treenode-filter "/*/*/BackwardSpikes_Uniform_Tiny"
+
+# All tests matching a pattern in the name
+dotnet run -- -c Release --treenode-filter "/*/*/*[Name~Poisson*]"
+```
 
 ### Parsing TUnit Output (Common Patterns)
 
@@ -101,6 +136,25 @@ dotnet run -- -c Release 2>&1 | grep "SPIKE COUNT"
 
 # Get unique failure categories (test name only)
 dotnet run -- -c Release 2>&1 | grep "failed BackwardSpikes" | sort -u
+```
+
+### Quick Commands (Copy-Paste Ready)
+
+```bash
+# Run all tests — Release mode
+cd src/EventProp.Tests && dotnet run -- -c Release
+
+# Run only backward pass tests
+cd src/EventProp.Tests && dotnet run -- -c Release --treenode-filter "/*/*/BackwardSpikes/*"
+
+# Run only C vs Eigen parity tests
+cd src/EventProp.Tests && dotnet run -- -c Release --treenode-filter "/*/*/NativeLibraryParityTests/*"
+
+# Count failures
+cd src/EventProp.Tests && dotnet run -- -c Release 2>&1 | grep "failed " | wc -l
+
+# Show first failure reason
+cd src/EventProp.Tests && dotnet run -- -c Release --fail-fast 2>&1 | grep "failed" -A3
 ```
 
 ### Test Project Structure & What Each File Tests
