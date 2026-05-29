@@ -14,6 +14,16 @@ EventProp is an event-based backpropagation method that computes **exact gradien
 - **Two loss modes** — Time-To-First-Spike (TTFS) cross-entropy and voltage-based (membrane potential maxima)
 - **.NET 10 native** — modern C# with nullable reference types, implicit usings
 
+## Building
+
+```bash
+# Build everything (C, C++, Python, .NET)
+./build.sh release
+
+# Clean all build outputs
+clean.sh
+```
+
 ## Quick Start
 
 ### Low-level API (EventPropMath)

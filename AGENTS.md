@@ -40,6 +40,24 @@ eventprop.net/
 - **Test framework**: TUnit 1.45+ (Microsoft Testing Platform)
 - **Coverage**: TUnit `--coverage --coverage-output-format=cobertura` + ReportGenerator
 
+## Building
+
+```bash
+# Build everything (C, C++, Python, .NET) — Release mode
+./build.sh release
+
+# Build everything — Debug mode
+./build.sh debug
+
+# Clean all build outputs
+clean.sh              # removes everything
+clean.sh c            # only C library
+./clean.sh cpp        # only C++ wrapper
+./clean.sh python     # only Python package
+./clean.sh dotnet     # only .NET projects
+clean.sh all          # same as clean.sh (no args)
+```
+
 ## Running Tests & Coverage
 
 ### Quick Reference — Copy-Paste Ready Commands
