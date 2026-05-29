@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-// Include the C API header — both libraries export the same symbols
+// Include the C API header — both libraries export the same extern "C" symbols
 #ifdef USE_CPP_WRAPPER
 #include "eventprop_c_api.h"
 #else
@@ -203,5 +203,83 @@ COMPUTESPIKES_BENCH(Tiny,    10,   5,   20);
 COMPUTESPIKES_BENCH(Small,   50,   20,  100);
 COMPUTESPIKES_BENCH(Medium,  200,  80,  500);
 COMPUTESPIKES_BENCH(Large,   500,  200, 1000);
+
+// ============================================================
+// Benchmark: BackwardSpikes (backward pass)
+// Requires post-spike data from a forward pass.
+// Forward pass is run once outside the timing loop; backward is benchmarked.
+// ============================================================
+
+static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, DataGenerator gen)
+{
+    std::vector<double> w(sz.n_pre * sz.n_post);
+    std::vector<double> times(sz.n_spikes);
+    std::vector<int32_t> sources(sz.n_spikes);
+    gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
+
+    // Run forward pass ONCE to get post-spike data (not benchmarked)
+    int max_out = sz.n_spikes * sz.n_post;
+    std::vector<double> fwd_times(max_out);
+    std::vector<int32_t> fwd_sources(max_out);
+    std::vector<double> fwd_currents(max_out);
+
+#ifdef USE_CPP_WRAPPER
+    int n_post_spikes = eventprop_compute_spikes(w.data(), sz.n_pre, sz.n_post,
+        times.data(), sources.data(), sz.n_spikes,
+        1.0, 0.02, 0.005, fwd_times.data(), fwd_sources.data(), fwd_currents.data());
+#else
+    int n_post_spikes = eventprop_compute_spikes(w.data(), sz.n_pre, sz.n_post,
+        times.data(), sources.data(), sz.n_spikes,
+        1.0, 0.02, 0.005, fwd_times.data(), fwd_sources.data(), fwd_currents.data());
+#endif
+
+    // Resize to actual spike count (trim unused capacity)
+    fwd_times.resize(n_post_spikes);
+    fwd_sources.resize(n_post_spikes);
+    fwd_currents.resize(n_post_spikes);
+
+    // Post-spike errors (all 1.0, matching .NET benchmark convention)
+    std::vector<double> post_errors(n_post_spikes, 1.0);
+
+    // Gradient output buffer
+    std::vector<double> grad(sz.n_pre * sz.n_post);
+
+    for (auto _ : state) {
+        std::memset(grad.data(), 0, grad.size() * sizeof(double));
+
+#ifdef USE_CPP_WRAPPER
+        eventprop_backward_spikes(times.data(), sources.data(), sz.n_spikes,
+            fwd_times.data(), fwd_sources.data(), fwd_currents.data(),
+            post_errors.data(), n_post_spikes,
+            w.data(), sz.n_pre, sz.n_post,
+            1.0, 0.02, 0.005, grad.data());
+#else
+        eventprop_backward_spikes(times.data(), sources.data(), sz.n_spikes,
+            fwd_times.data(), fwd_sources.data(), fwd_currents.data(),
+            post_errors.data(), n_post_spikes,
+            w.data(), sz.n_pre, sz.n_post,
+            1.0, 0.02, 0.005, grad.data());
+#endif
+        benchmark::DoNotOptimize(grad.data());
+    }
+
+    state.SetItemsProcessed(state.iterations() * sz.n_spikes);
+}
+
+#define BACKWARDSPIKES_BENCH(SizeName, NP, NPO, NS)                                              \
+    BENCHMARK_CAPTURE(BM_BackwardSpikes, SizeName##_uniform,                                     \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(                    \
+        "BackwardSpikes/" #SizeName "/uniform/default");                                          \
+    BENCHMARK_CAPTURE(BM_BackwardSpikes, SizeName##_poisson,                                     \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(                    \
+        "BackwardSpikes/" #SizeName "/poisson/default");                                          \
+    BENCHMARK_CAPTURE(BM_BackwardSpikes, SizeName##_burst,                                       \
+        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(                      \
+        "BackwardSpikes/" #SizeName "/burst/default")
+
+BACKWARDSPIKES_BENCH(Tiny,    10,   5,   20);
+BACKWARDSPIKES_BENCH(Small,   50,   20,  100);
+BACKWARDSPIKES_BENCH(Medium,  200,  80,  500);
+BACKWARDSPIKES_BENCH(Large,   500,  200, 1000);
 
 BENCHMARK_MAIN();

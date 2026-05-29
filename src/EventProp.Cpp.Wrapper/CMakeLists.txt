@@ -16,7 +16,8 @@ endif()
 set(EVENTPROP_CPP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.cpp")
 
 # Build the C API wrapper as a shared library
-add_library(eventprop_c_api SHARED eventprop_c_api.cpp)
+add_library(eventprop_cpp_wrapper_lib SHARED eventprop_c_api.cpp)
+set_target_properties(eventprop_cpp_wrapper_lib PROPERTIES OUTPUT_NAME "eventprop_cpp_wrapper")
 target_include_directories(eventprop_c_api PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${EVENTPROP_CPP_DIR}

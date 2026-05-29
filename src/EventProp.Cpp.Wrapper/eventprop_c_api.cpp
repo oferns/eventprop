@@ -7,17 +7,19 @@
 
 // ============================================================
 // Helpers: flat array ↔ Eigen/Spikes conversion
+// All conversions are zero-copy via Eigen::Map. Output copies
+// (copy_matrix_to_flat) are unavoidable — the C API returns
+// flat arrays that callers own.
 // ============================================================
 
 static RowMatrixXd make_matrix(const double* data, int rows, int cols) {
-    RowMatrixXd m(rows, cols);
-    for (int r = 0; r < rows; r++)
-        for (int c = 0; c < cols; c++)
-            m(r, c) = data[r * cols + c];
-    return m;
+    // Zero-copy: Map flat row-major array directly as Eigen matrix.
+    // Eigen::Ref<RowMatrixXd const> in library functions accepts this.
+    return RowMatrixXd::Map(data, rows, cols);
 }
 
 static void copy_matrix_to_flat(const RowMatrixXd& src, double* dst) {
+    // Output copy is unavoidable — caller owns flat array.
     for (int r = 0; r < src.rows(); r++)
         for (int c = 0; c < src.cols(); c++)
             dst[r * src.cols() + c] = src(r, c);
