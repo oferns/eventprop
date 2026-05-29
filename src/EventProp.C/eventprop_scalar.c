@@ -495,7 +495,7 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
     int* spike_counts = calloc(n_post, sizeof(int));
 
 #ifdef _OPENMP
-#pragma omp parallel for schedule(static)
+#pragma omp parallel for schedule(static) if(n_post >= 40)
 #endif
     for (int target_nrn = 0; target_nrn < n_post; target_nrn++) {
         int offset = target_nrn * max_spikes, count = 0;
