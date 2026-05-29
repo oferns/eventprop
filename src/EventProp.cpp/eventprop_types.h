@@ -48,6 +48,10 @@ struct Maxima {
 };
 
 std::pair<RowMatrixXd, RowMatrixXd> compute_sums(Eigen::Ref<RowMatrixXd const> w, Spikes const& spikes, double tau_mem, double tau_syn);
+// Zero-copy overload: writes into caller-provided output matrices (must be pre-allocated).
+void compute_sums(Eigen::Ref<RowMatrixXd const> w, Spikes const& spikes,
+                  double tau_mem, double tau_syn,
+                  Eigen::Ref<RowMatrixXd> sum0_out, Eigen::Ref<RowMatrixXd> sum1_out);
 std::pair<Eigen::ArrayXd, Eigen::ArrayXd> compute_voltage_trace(double t_max, double dt, int target_nrn_idx, Eigen::Ref<RowMatrixXd const> w, Spikes const& spikes, double v_th, double tau_mem, double tau_syn);
 double compute_lambda_i(double t, int target_nrn_idx, Spikes const& post_spikes, double v_th, double tau_mem, double tau_syn);
 std::pair<Eigen::ArrayXd, Eigen::ArrayXd> compute_lambda_i_trace(double t_max, double dt, int target_nrn_idx, Spikes const& post_spikes, double v_th, double tau_mem, double tau_syn);
@@ -61,6 +65,11 @@ compute_spikes_batch(Eigen::Ref<RowMatrixXd const> w,
 std::pair<RowMatrixXd, Eigen::ArrayXd> backward(Spikes &input_spikes, Spikes const &post_spikes,
               Eigen::Ref<RowMatrixXd const> w,
               double v_th, double tau_mem, double tau_syn);
+// Zero-copy overload: writes gradient and spike errors into caller-provided buffers.
+void backward(Spikes &input_spikes, Spikes const &post_spikes,
+              Eigen::Ref<RowMatrixXd const> w,
+              double v_th, double tau_mem, double tau_syn,
+              Eigen::Ref<RowMatrixXd> grad_out, Eigen::Ref<Eigen::ArrayXd> errors_out);
 void backward_spikes_batch(std::vector<Spikes> &input_batch,
                     std::vector<Spikes> const &post_batch,
                     Eigen::Ref<RowMatrixXd const> w,
@@ -68,6 +77,10 @@ void backward_spikes_batch(std::vector<Spikes> &input_batch,
                     double tau_mem, double tau_syn);
 Maxima compute_maxima(Eigen::Ref<RowMatrixXd const> w, Spikes const& spikes, double tau_mem, double tau_syn);
 std::pair<RowMatrixXd, Eigen::ArrayXd> backward(Spikes & input_spikes, Maxima const& maxima, Eigen::Ref<RowMatrixXd const> w, double tau_mem, double tau_syn);
+// Zero-copy overload: writes gradient and spike errors into caller-provided buffers.
+void backward(Spikes & input_spikes, Maxima const& maxima, Eigen::Ref<RowMatrixXd const> w,
+              double tau_mem, double tau_syn,
+              Eigen::Ref<RowMatrixXd> grad_out, Eigen::Ref<Eigen::ArrayXd> errors_out);
 std::vector<Maxima>
 compute_maxima_batch(Eigen::Ref<RowMatrixXd const> w, std::vector<Spikes> const& batch, double tau_mem, double tau_syn);
 void

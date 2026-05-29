@@ -7,23 +7,23 @@
 
 // ============================================================
 // Helpers: flat array ↔ Eigen/Spikes conversion
-// All conversions are zero-copy via Eigen::Map. Output copies
-// (copy_matrix_to_flat) are unavoidable — the C API returns
-// flat arrays that callers own.
+// All conversions are zero-copy via Eigen::Map.
+// Input: Map caller's flat array as read-only Eigen view.
+// Output: Library overloads write directly into caller's buffer
+//         via Eigen::Map (no intermediate copy).
 // ============================================================
 
 static RowMatrixXd make_matrix(const double* data, int rows, int cols) {
     // Zero-copy: Map flat row-major array directly as Eigen matrix.
-    // Eigen::Ref<RowMatrixXd const> in library functions accepts this.
     return RowMatrixXd::Map(data, rows, cols);
 }
 
-static void copy_matrix_to_flat(const RowMatrixXd& src, double* dst) {
-    // Output copy is unavoidable — caller owns flat array.
-    for (int r = 0; r < src.rows(); r++)
-        for (int c = 0; c < src.cols(); c++)
-            dst[r * src.cols() + c] = src(r, c);
-}
+// Helper to create a named Eigen::Map for zero-copy output.
+// Must be kept as a local variable so the Ref can bind to it (not a temporary).
+#define MAP_OUTPUT_MATRIX(dst, rows, cols) \
+    RowMatrixXd::Map((dst), (rows), (cols))
+#define MAP_OUTPUT_ARRAY(dst, n) \
+    Eigen::ArrayXd::Map((dst), (n))
 
 static Spikes make_spikes(const double* times, const int32_t* sources, int n) {
     return Spikes(
@@ -44,7 +44,7 @@ static Spikes make_spikes_with_currents(const double* times, const int32_t* sour
 }
 
 // ============================================================
-// compute_sums — delegates to EventProp.cpp::compute_sums
+// compute_sums — delegates to EventProp.cpp::compute_sums (zero-copy output)
 // ============================================================
 
 void eventprop_compute_sums(
@@ -56,11 +56,10 @@ void eventprop_compute_sums(
     auto w_mat = make_matrix(w, n_pre, n_post);
     Spikes spikes = make_spikes(times, sources, n_spikes);
 
-    RowMatrixXd sum0, sum1;
-    std::tie(sum0, sum1) = ::compute_sums(w_mat, spikes, tau_mem, tau_syn);
-
-    copy_matrix_to_flat(sum0, sum0_out);
-    copy_matrix_to_flat(sum1, sum1_out);
+    // Zero-copy: library writes directly into caller's buffers via Eigen::Map.
+    auto sum0_map = MAP_OUTPUT_MATRIX(sum0_out, n_spikes + 1, n_post);
+    auto sum1_map = MAP_OUTPUT_MATRIX(sum1_out, n_spikes + 1, n_post);
+    ::compute_sums(w_mat, spikes, tau_mem, tau_syn, sum0_map, sum1_map);
 }
 
 // ============================================================
@@ -110,7 +109,7 @@ void eventprop_compute_maxima(
 }
 
 // ============================================================
-// backward (Spikes loss) — delegates to EventProp.cpp::backward
+// backward (Spikes loss) — delegates to EventProp.cpp::backward (zero-copy output)
 // ============================================================
 
 void eventprop_backward_spikes(
@@ -136,15 +135,15 @@ void eventprop_backward_spikes(
         post_spikes = Spikes();
     }
 
-    RowMatrixXd grad;
-    Eigen::ArrayXd spike_errors;
-    std::tie(grad, spike_errors) = ::backward(input_spikes, post_spikes, w_mat, v_th, tau_mem, tau_syn);
-
-    copy_matrix_to_flat(grad, gradient);
+    // Zero-copy: library writes gradient directly into caller's buffer.
+    auto grad_map = MAP_OUTPUT_MATRIX(gradient, n_pre, n_post);
+    Eigen::ArrayXd dummy_errors;
+    ::backward(input_spikes, post_spikes, w_mat, v_th, tau_mem, tau_syn,
+               grad_map, dummy_errors);
 }
 
 // ============================================================
-// backward (Maxima loss) — delegates to EventProp.cpp::backward
+// backward (Maxima loss) — delegates to EventProp.cpp::backward (zero-copy output)
 // ============================================================
 
 void eventprop_backward_maxima(
@@ -168,9 +167,9 @@ void eventprop_backward_maxima(
         maxima = Maxima();
     }
 
-    RowMatrixXd grad;
-    Eigen::ArrayXd spike_errors;
-    std::tie(grad, spike_errors) = ::backward(input_spikes, maxima, w_mat, tau_mem, tau_syn);
-
-    copy_matrix_to_flat(grad, gradient);
+    // Zero-copy: library writes gradient directly into caller's buffer.
+    auto grad_map = MAP_OUTPUT_MATRIX(gradient, n_pre, n_post);
+    Eigen::ArrayXd dummy_errors;
+    ::backward(input_spikes, maxima, w_mat, tau_mem, tau_syn,
+               grad_map, dummy_errors);
 }

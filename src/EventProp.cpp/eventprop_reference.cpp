@@ -32,6 +32,25 @@ std::pair<RowMatrixXd, RowMatrixXd> compute_sums(Eigen::Ref<RowMatrixXd const> w
   return {sum0, sum1};
 }
 
+// Zero-copy overload: writes into caller-provided output matrices.
+void compute_sums(Eigen::Ref<RowMatrixXd const> w, Spikes const& spikes,
+                  double tau_mem, double tau_syn,
+                  Eigen::Ref<RowMatrixXd> sum0_out, Eigen::Ref<RowMatrixXd> sum1_out)
+{
+  auto const &times = spikes.times;
+  auto const &sources = spikes.sources;
+  Eigen::ArrayXd const exp_input_mem = Eigen::exp(times.array() / tau_mem);
+  Eigen::ArrayXd const exp_input_syn = Eigen::exp(times.array() / tau_syn);
+  auto const n_spikes = times.size();
+  // sum0_out and sum1_out must be pre-allocated with correct dimensions.
+  for (int i = 0; i < n_spikes; i++) {
+    sum0_out.row(i + 1) =
+        sum0_out.row(i).array() + exp_input_syn[i] * w.row(sources[i]).array();
+    sum1_out.row(i + 1) =
+        sum1_out.row(i).array() + exp_input_mem[i] * w.row(sources[i]).array();
+  }
+}
+
 std::pair<Eigen::ArrayXd, Eigen::ArrayXd> compute_voltage_trace(double t_max, double dt, int target_nrn_idx, Eigen::Ref<RowMatrixXd const> w, Spikes const& spikes, double v_th, double tau_mem, double tau_syn) {
   auto const k_prefactor = tau_syn / (tau_mem - tau_syn);
   auto const post_spikes = compute_spikes(w, spikes, v_th, tau_mem, tau_syn);
@@ -301,6 +320,99 @@ compute_spikes_batch(Eigen::Ref<RowMatrixXd const> w,
   return result;
 }
 
+// Zero-copy overload: writes gradient and spike errors into caller-provided buffers.
+void backward(Spikes &input_spikes, Spikes const &post_spikes,
+              Eigen::Ref<RowMatrixXd const> w,
+              double v_th, double tau_mem, double tau_syn,
+              Eigen::Ref<RowMatrixXd> grad_out, Eigen::Ref<Eigen::ArrayXd> errors_out)
+{
+  RowMatrixXd gradient = RowMatrixXd::Zero(w.rows(), w.cols());
+  Eigen::ArrayXd spike_errors = Eigen::ArrayXd::Zero(input_spikes.n_spikes);
+  auto const n = gradient.cols();
+
+  std::vector<int> input_idxs(input_spikes.times.size());
+  std::vector<int> post_idxs(post_spikes.times.size());
+  std::vector<std::pair<int, bool>> sorted_idxs;
+  std::iota(input_idxs.begin(), input_idxs.end(), 0);
+  std::iota(post_idxs.begin(), post_idxs.end(), 0);
+  std::for_each(input_idxs.begin(), input_idxs.end(), [&](int idx) {
+    sorted_idxs.push_back({idx, true});
+  });
+  std::for_each(post_idxs.begin(), post_idxs.end(), [&](int idx) {
+    sorted_idxs.push_back({idx, false});
+  });
+  std::sort(sorted_idxs.begin(), sorted_idxs.end(),
+            [&](std::pair<int, bool> a, std::pair<int, bool> b) -> bool {
+              double t_a, t_b;
+              if (a.second)
+                t_a = input_spikes.times[a.first];
+              else
+                t_a = post_spikes.times[a.first];
+              if (b.second)
+                t_b = input_spikes.times[b.first];
+              else
+                t_b = post_spikes.times[b.first];
+              return t_a > t_b;
+            });
+
+  auto get_time = [&](std::pair<int, bool> idx) {
+    if (idx.second)
+      return input_spikes.times[idx.first];
+    else
+      return post_spikes.times[idx.first];
+  };
+  auto get_source = [&](std::pair<int, bool> idx) {
+    if (idx.second)
+      return input_spikes.sources[idx.first];
+    else
+      return post_spikes.sources[idx.first];
+  };
+  Eigen::ArrayXd lambda_v = Eigen::ArrayXd::Zero(n);
+  std::vector<std::vector<std::pair<double, double>>> lambda_i_jumps(n);
+  auto const largest_time = get_time(sorted_idxs.front());
+  double previous_t = largest_time;
+
+  auto const k_bwd_prefactor = tau_mem / (tau_mem - tau_syn);
+  auto k_bwd = [&](double t) {
+    return k_bwd_prefactor * (std::exp(-t / tau_mem) - std::exp(-t / tau_syn));
+  };
+
+  auto w_t = w.transpose();
+  for (auto const &spike_idx : sorted_idxs) {
+    auto const spike_time = get_time(spike_idx);
+    auto const spike_source = get_source(spike_idx);
+    auto const t_bwd = largest_time - spike_time;
+    lambda_v = lambda_v * std::exp(-(t_bwd - previous_t) / tau_mem);
+    if (spike_idx.second) {
+      Eigen::ArrayXd lambda_i = Eigen::ArrayXd::Zero(n);
+      for (int nrn_idx = 0; nrn_idx < n; nrn_idx++) {
+        for (auto const &jump : lambda_i_jumps.at(nrn_idx)) {
+          lambda_i[nrn_idx] += jump.first * k_bwd(t_bwd - jump.second);
+        }
+        gradient(spike_source, nrn_idx) += -tau_syn * lambda_i[nrn_idx];
+      }
+      auto const outbound_signal =
+          (w_t.col(spike_source).array() * (lambda_v - lambda_i))
+              .sum();
+      input_spikes.errors[spike_idx.first] += outbound_signal;
+    } else {
+      auto const i = post_spikes.currents[spike_idx.first];
+      lambda_i_jumps.at(spike_source)
+          .push_back({1 / (i - v_th) *
+                          (v_th * lambda_v[spike_source] +
+                           post_spikes.errors[spike_idx.first]),
+                      t_bwd});
+      lambda_v[spike_source] =
+          i / (i - v_th) * lambda_v[spike_source] +
+          1 / (i - v_th) * post_spikes.errors[spike_idx.first];
+    }
+    previous_t = t_bwd;
+  }
+  // Write results into caller-provided buffers (zero-copy via Eigen::Map).
+  grad_out = gradient;
+  errors_out = spike_errors;
+}
+
 std::pair<RowMatrixXd, Eigen::ArrayXd> backward(Spikes &input_spikes, Spikes const &post_spikes,
               Eigen::Ref<RowMatrixXd const> w,
               double v_th, double tau_mem, double tau_syn) {
@@ -483,6 +595,38 @@ Maxima compute_maxima(Eigen::Ref<RowMatrixXd const> w, Spikes const& spikes, dou
       }
   }
   return {maxima_times, maxima_values};
+}
+
+// Zero-copy overload: writes gradient and spike errors into caller-provided buffers.
+void backward(Spikes & input_spikes, Maxima const& maxima, Eigen::Ref<RowMatrixXd const> w,
+              double tau_mem, double tau_syn,
+              Eigen::Ref<RowMatrixXd> grad_out, Eigen::Ref<Eigen::ArrayXd> errors_out)
+{
+  RowMatrixXd gradient = RowMatrixXd::Zero(w.rows(), w.cols());
+  Eigen::ArrayXd spike_errors = Eigen::ArrayXd::Zero(input_spikes.n_spikes);
+  auto const largest_time = input_spikes.times(input_spikes.n_spikes-1);
+  auto const n_maxima = maxima.times.size();
+  auto const k_bwd_prefactor = tau_mem/(tau_mem-tau_syn);
+  auto k_bwd = [&](double t) { return k_bwd_prefactor*(std::exp(-t/tau_mem)-std::exp(-t/tau_syn));};
+  for (int spike_idx = input_spikes.n_spikes-1; spike_idx >=0; spike_idx--) {
+    auto const t_bwd = largest_time - input_spikes.times(spike_idx);
+    for (int max_idx = 0; max_idx < n_maxima; max_idx++) {
+      if (std::isnan(maxima.times(max_idx))) {
+        continue;
+      }
+      auto const t_vmax_bwd = largest_time - maxima.times(max_idx);
+      if (t_vmax_bwd > t_bwd) {
+        continue;
+      }
+      auto const lambda_v = -std::exp(-(t_bwd-t_vmax_bwd)/tau_mem)*maxima.errors(max_idx)/tau_mem;
+      auto const lambda_i = -k_bwd(t_bwd-t_vmax_bwd)*maxima.errors(max_idx)/tau_mem;
+      gradient(input_spikes.sources(spike_idx), max_idx) += -tau_syn*lambda_i;
+      spike_errors[spike_idx] += w(input_spikes.sources(spike_idx), max_idx) * (lambda_v - lambda_i);
+    }
+  }
+  // Write results into caller-provided buffers (zero-copy via Eigen::Map).
+  grad_out = gradient;
+  errors_out = spike_errors;
 }
 
 std::pair<RowMatrixXd, Eigen::ArrayXd> backward(Spikes & input_spikes, Maxima const& maxima, Eigen::Ref<RowMatrixXd const> w, double tau_mem, double tau_syn) {

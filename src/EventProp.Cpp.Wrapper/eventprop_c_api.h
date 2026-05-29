@@ -10,6 +10,15 @@
 extern "C" {
 #endif
 
+// C-compatible matrix descriptor for zero-copy output.
+// Caller allocates `rows * cols` doubles; library writes directly into it
+// via Eigen::Map (no intermediate copy).
+typedef struct CMatrix {
+    double* data;
+    int rows;
+    int cols;
+} CMatrix;
+
 // --- compute_sums ---
 // Writes sum0 and sum1 matrices (row-major, n_spikes+1 rows x n_post cols)
 // Caller must allocate buffers of size (n_spikes+1)*n_post each.
