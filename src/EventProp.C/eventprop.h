@@ -61,17 +61,21 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
                              double* out_times, int32_t* out_sources, double* out_currents);
 
 /**
- * Backward pass: adjoint method computing weight gradients.
+ * Backward pass: adjoint method computing weight gradients and input spike errors.
  *
  * Propagates λ_v (membrane) and λ_i (synaptic) adjoints in time-reversed order,
  * accumulating weight gradients via Eq. 18-20 in the EventProp paper.
+ *
+ * @param grad          Output: weight gradient (row-major, n_pre x n_post), zero-initialized by caller
+ * @param spike_errors  Output: input spike errors (n_spikes), mutated in-place by caller
  */
 void eventprop_backward_spikes(const double* times, const int32_t* sources, int n_spikes,
                                const double* fwd_times, const int32_t* fwd_sources,
                                const double* fwd_currents, const double* post_errors, int n_post_spikes,
                                const double* w, int n_pre, int n_post,
                                double v_th, double tau_mem, double tau_syn,
-                               double* grad);
+                               double* grad,
+                               double* spike_errors);
 
 /**
  * Find membrane potential maxima per neuron (for voltage-based loss).
@@ -88,7 +92,10 @@ void eventprop_compute_maxima(const double* w, int n_pre, int n_post,
  * Backward pass for maxima-based loss.
  *
  * Propagates error signals from membrane potential maxima backward through the
- * input spike timeline. Gradient is accumulated in-place (caller zero-initializes).
+ * input spike timeline. Gradient and spike errors are written zero-copy.
+ *
+ * @param gradient      Output: weight gradient (row-major, n_pre x n_post), zero-initialized by caller
+ * @param spike_errors  Output: input spike errors (n_input_spikes), mutated in-place by caller
  */
 void eventprop_backward_maxima(const double* input_times, const int32_t* input_sources,
                                int n_input_spikes,
@@ -96,7 +103,8 @@ void eventprop_backward_maxima(const double* input_times, const int32_t* input_s
                                const double* maxima_errors, int n_maxima,
                                const double* w, int n_pre, int n_post,
                                double tau_mem, double tau_syn,
-                               double* gradient);
+                               double* gradient,
+                               double* spike_errors);
 
 #ifdef __cplusplus
 }

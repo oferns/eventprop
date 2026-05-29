@@ -47,21 +47,25 @@ void eventprop_compute_maxima(
 
 // --- backward (Spikes loss) ---
 // Computes weight gradient and spike errors.
+// Caller must allocate: gradient[n_pre * n_post], spike_errors[n_input_spikes]
 void eventprop_backward_spikes(
     const double* input_times, const int32_t* input_sources, int n_input_spikes,
     const double* post_times, const int32_t* post_sources, const double* post_currents,
     const double* post_errors, int n_post_spikes,
     const double* w, int n_pre, int n_post,
     double v_th, double tau_mem, double tau_syn,
-    double* gradient);  // row-major, n_pre x n_post
+    double* gradient,      // row-major output: n_pre x n_post
+    double* spike_errors); // output: n_input_spikes (mutated)
 
 // --- backward (Maxima loss) ---
+// Caller must allocate: gradient[n_pre * n_post], spike_errors[n_input_spikes]
 void eventprop_backward_maxima(
     const double* input_times, const int32_t* input_sources, int n_input_spikes,
     const double* maxima_times, const double* maxima_values, const double* maxima_errors, int n_maxima,
     const double* w, int n_pre, int n_post,
     double tau_mem, double tau_syn,
-    double* gradient);  // row-major, n_pre x n_post
+    double* gradient,      // row-major output: n_pre x n_post
+    double* spike_errors); // output: n_input_spikes (mutated)
 
 #ifdef __cplusplus
 }

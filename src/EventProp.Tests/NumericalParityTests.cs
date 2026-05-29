@@ -437,15 +437,17 @@ public class NumericalParityTests
 
         // C library via P/Invoke
         var cGradient = new double[nPre * nPost]; Array.Fill(cGradient, 0.0);
+        var cSpikeErrors = new double[times.Length]; Array.Fill(cSpikeErrors, 0.0);
         NativeApi.BackwardSpikes(times, sources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, cGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, cGradient, cSpikeErrors);
 
         // C++ (Eigen) via P/Invoke
         var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var cppSpikeErrors = new double[times.Length]; Array.Fill(cppSpikeErrors, 0.0);
         NativeCppApi.BackwardSpikes(times, sources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, cppGradient, cppSpikeErrors);
 
         // Assert: all three match
         for (int i = 0; i < netGradient.Length; i++)
@@ -533,15 +535,17 @@ public class NumericalParityTests
 
         // C library via P/Invoke
         var cGradient = new double[nPre * nPost]; Array.Fill(cGradient, 0.0);
+        var cSpikeErrors = new double[times.Length]; Array.Fill(cSpikeErrors, 0.0);
         NativeApi.BackwardMaxima(times, sources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, cGradient);
+            w, nPre, nPost, 0.02, 0.005, cGradient, cSpikeErrors);
 
         // C++ (Eigen) via P/Invoke
         var cppGradient = new double[nPre * nPost]; Array.Fill(cppGradient, 0.0);
+        var cppSpikeErrors = new double[times.Length]; Array.Fill(cppSpikeErrors, 0.0);
         NativeCppApi.BackwardMaxima(times, sources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, cppGradient);
+            w, nPre, nPost, 0.02, 0.005, cppGradient, cppSpikeErrors);
 
         // Assert: all three match
         for (int i = 0; i < netGradient.Length; i++)

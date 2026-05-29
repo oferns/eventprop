@@ -75,7 +75,7 @@ public static partial class NativeApi
     }
 
     // ============================================================
-    // backward_spikes
+    // backward_spikes — zero-copy output for gradient + spike errors
     // ============================================================
     [LibraryImport(LibName)]
     [UnmanagedCallConv(CallConvs = [ typeof(CallConvCdecl) ])]
@@ -85,26 +85,29 @@ public static partial class NativeApi
         double[] postErrors, int nPostSpikes,
         double[] w, int nPre, int nPost,
         double vTh, double tauMem, double tauSyn,
-        double[] gradient);
+        double[] gradient,      // zero-copy output: n_pre x n_post (row-major)
+        double[] spikeErrors);  // zero-copy output: n_input_spikes (mutated)
 
-    /// <summary>Call backward (Spikes loss) via native C library.</summary>
+    /// <summary>Call backward (Spikes loss) via native C library.
+    /// gradient must be zero-initialized (n_pre * n_post). spikeErrors is mutated in-place.</summary>
     public static void BackwardSpikes(
         double[] inputTimes, int[] inputSources,
         double[] postTimes, int[] postSources, double[] postCurrents,
         double[] postErrors, double[] w, int nPre, int nPost,
         double vTh, double tauMem, double tauSyn,
-        double[] gradient)
+        double[] gradient,      // zero-initialized output: n_pre * n_post
+        double[] spikeErrors)   // mutated in-place: n_input_spikes
     {
         eventprop_backward_spikes(
             inputTimes, inputSources, inputTimes.Length,
             postTimes, postSources, postCurrents,
             postErrors, postErrors.Length,
             w, nPre, nPost,
-            vTh, tauMem, tauSyn, gradient);
+            vTh, tauMem, tauSyn, gradient, spikeErrors);
     }
 
     // ============================================================
-    // backward_maxima
+    // backward_maxima — zero-copy output for gradient + spike errors
     // ============================================================
     [LibraryImport(LibName)]
     [UnmanagedCallConv(CallConvs = [ typeof(CallConvCdecl) ])]
@@ -113,18 +116,21 @@ public static partial class NativeApi
         double[] maximaTimes, double[] maximaValues, double[] maximaErrors, int nMaxima,
         double[] w, int nPre, int nPost,
         double tauMem, double tauSyn,
-        double[] gradient);
+        double[] gradient,      // zero-copy output: n_pre x n_post (row-major)
+        double[] spikeErrors);  // zero-copy output: n_input_spikes (mutated)
 
-    /// <summary>Call backward (Maxima loss) via native C library.</summary>
+    /// <summary>Call backward (Maxima loss) via native C library.
+    /// gradient must be zero-initialized (n_pre * n_post). spikeErrors is mutated in-place.</summary>
     public static void BackwardMaxima(
         double[] inputTimes, int[] inputSources,
         double[] maximaTimes, double[] maximaValues, double[] maximaErrors,
         double[] w, int nPre, int nPost,
         double tauMem, double tauSyn,
-        double[] gradient)
+        double[] gradient,      // zero-initialized output: n_pre * n_post
+        double[] spikeErrors)   // mutated in-place: n_input_spikes
     {
         eventprop_backward_maxima(inputTimes, inputSources, inputTimes.Length,
             maximaTimes, maximaValues, maximaErrors, maximaTimes.Length,
-            w, nPre, nPost, tauMem, tauSyn, gradient);
+            w, nPre, nPost, tauMem, tauSyn, gradient, spikeErrors);
     }
 }

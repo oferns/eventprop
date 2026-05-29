@@ -162,11 +162,12 @@ static void test_backward_spikes(void)
     for (int i = 0; i < n_fwd; i++) post_errors[i] = 1.0;
 
     double* grad = calloc(n_pre * n_post, sizeof(double));
+    double* spike_errors = calloc(n_spikes, sizeof(double));
     eventprop_backward_spikes(times, sources, n_spikes,
                                fwd_times, fwd_sources, fwd_currents,
                                post_errors, n_fwd,
                                w, n_pre, n_post,
-                               1.0, 0.02, 0.005, grad);
+                               1.0, 0.02, 0.005, grad, spike_errors);
 
     /* No NaN/Inf in gradients */
     for (int i = 0; i < n_pre * n_post; i++) {
@@ -175,7 +176,7 @@ static void test_backward_spikes(void)
     }
 
     free(fwd_times); free(fwd_sources); free(fwd_currents);
-    free(post_errors); free(grad);
+    free(post_errors); free(grad); free(spike_errors);
     TEST_END;
 }
 
@@ -222,10 +223,11 @@ static void test_backward_maxima(void)
 
     /* Backward pass */
     double* grad = calloc(n_pre * n_post, sizeof(double));
+    double* spike_errors = calloc(n_spikes, sizeof(double));
     eventprop_backward_maxima(times, sources, n_spikes,
                                max_times, max_values, max_errors, n_post,
                                w, n_pre, n_post,
-                               0.02, 0.005, grad);
+                               0.02, 0.005, grad, spike_errors);
 
     /* No NaN/Inf in gradients */
     for (int i = 0; i < n_pre * n_post; i++) {
@@ -238,7 +240,7 @@ static void test_backward_maxima(void)
     for (int i = 0; i < n_pre * n_post; i++) grad_sum += fabs(grad[i]);
     ASSERT(grad_sum > 1e-12, "all gradients zero");
 
-    free(max_times); free(max_values); free(max_errors); free(grad);
+    free(max_times); free(max_values); free(max_errors); free(grad); free(spike_errors);
     TEST_END;
 }
 
@@ -264,17 +266,18 @@ static void test_backward_maxima_zero_weights(void)
     for (int i = 0; i < n_post; i++) max_errors[i] = 1.0;
 
     double* grad = calloc(n_pre * n_post, sizeof(double));
+    double* spike_errors = calloc(n_spikes, sizeof(double));
     eventprop_backward_maxima(times, sources, n_spikes,
                                max_times, max_values, max_errors, n_post,
                                w, n_pre, n_post,
-                               0.02, 0.005, grad);
+                               0.02, 0.005, grad, spike_errors);
 
     /* All gradients should be zero (NaN maxima are skipped) */
     for (int i = 0; i < n_pre * n_post; i++) {
         ASSERT_NEAR(grad[i], 0.0, EPSILON);
     }
 
-    free(max_times); free(max_values); free(max_errors); free(grad);
+    free(max_times); free(max_values); free(max_errors); free(grad); free(spike_errors);
     TEST_END;
 }
 
@@ -296,16 +299,18 @@ static void test_backward_maxima_linear_scale(void)
     double* max_errors = malloc(n_post * sizeof(double));
     for (int i = 0; i < n_post; i++) max_errors[i] = 1.0;
     double* grad1 = calloc(n_pre * n_post, sizeof(double));
+    double* spike_errors1 = calloc(n_spikes, sizeof(double));
     eventprop_backward_maxima(times, sources, n_spikes,
                                max_times, max_values, max_errors, n_post,
-                               w, n_pre, n_post, 0.02, 0.005, grad1);
+                               w, n_pre, n_post, 0.02, 0.005, grad1, spike_errors1);
 
     /* Backward with errors=2.0 */
     for (int i = 0; i < n_post; i++) max_errors[i] = 2.0;
     double* grad2 = calloc(n_pre * n_post, sizeof(double));
+    double* spike_errors2 = calloc(n_spikes, sizeof(double));
     eventprop_backward_maxima(times, sources, n_spikes,
                                max_times, max_values, max_errors, n_post,
-                               w, n_pre, n_post, 0.02, 0.005, grad2);
+                               w, n_pre, n_post, 0.02, 0.005, grad2, spike_errors2);
 
     /* grad2 should be exactly 2× grad1 */
     for (int i = 0; i < n_pre * n_post; i++) {
@@ -313,7 +318,7 @@ static void test_backward_maxima_linear_scale(void)
     }
 
     free(max_times); free(max_values); free(max_errors);
-    free(grad1); free(grad2);
+    free(grad1); free(grad2); free(spike_errors1); free(spike_errors2);
     TEST_END;
 }
 

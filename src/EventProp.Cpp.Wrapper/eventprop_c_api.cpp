@@ -23,7 +23,7 @@ static RowMatrixXd make_matrix(const double* data, int rows, int cols) {
 #define MAP_OUTPUT_MATRIX(dst, rows, cols) \
     RowMatrixXd::Map((dst), (rows), (cols))
 #define MAP_OUTPUT_ARRAY(dst, n) \
-    Eigen::ArrayXd::Map((dst), (n))
+    Eigen::Map<Eigen::ArrayXd>((dst), (n))
 
 static Spikes make_spikes(const double* times, const int32_t* sources, int n) {
     return Spikes(
@@ -118,7 +118,8 @@ void eventprop_backward_spikes(
     const double* post_errors, int n_post_spikes,
     const double* w, int n_pre, int n_post,
     double v_th, double tau_mem, double tau_syn,
-    double* gradient)  // row-major n_pre x n_post, caller zero-initialized
+    double* gradient,      // row-major n_pre x n_post, caller zero-initialized
+    double* spike_errors)  // output: n_input_spikes (mutated)
 {
     auto w_mat = make_matrix(w, n_pre, n_post);
 
@@ -135,11 +136,11 @@ void eventprop_backward_spikes(
         post_spikes = Spikes();
     }
 
-    // Zero-copy: library writes gradient directly into caller's buffer.
+    // Zero-copy: library writes gradient and spike errors directly into caller's buffers.
     auto grad_map = MAP_OUTPUT_MATRIX(gradient, n_pre, n_post);
-    Eigen::ArrayXd dummy_errors;
+    auto errors_map = MAP_OUTPUT_ARRAY(spike_errors, n_input_spikes);
     ::backward(input_spikes, post_spikes, w_mat, v_th, tau_mem, tau_syn,
-               grad_map, dummy_errors);
+               grad_map, errors_map);
 }
 
 // ============================================================
@@ -151,7 +152,8 @@ void eventprop_backward_maxima(
     const double* maxima_times, const double* maxima_values, const double* maxima_errors, int n_maxima,
     const double* w, int n_pre, int n_post,
     double tau_mem, double tau_syn,
-    double* gradient)  // row-major n_pre x n_post, caller zero-initialized
+    double* gradient,      // row-major n_pre x n_post, caller zero-initialized
+    double* spike_errors)  // output: n_input_spikes (mutated)
 {
     auto w_mat = make_matrix(w, n_pre, n_post);
 
@@ -167,9 +169,9 @@ void eventprop_backward_maxima(
         maxima = Maxima();
     }
 
-    // Zero-copy: library writes gradient directly into caller's buffer.
+    // Zero-copy: library writes gradient and spike errors directly into caller's buffers.
     auto grad_map = MAP_OUTPUT_MATRIX(gradient, n_pre, n_post);
-    Eigen::ArrayXd dummy_errors;
+    auto errors_map = MAP_OUTPUT_ARRAY(spike_errors, n_input_spikes);
     ::backward(input_spikes, maxima, w_mat, tau_mem, tau_syn,
-               grad_map, dummy_errors);
+               grad_map, errors_map);
 }

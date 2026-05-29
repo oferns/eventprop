@@ -125,7 +125,7 @@ public class NativeVsManagedEdgeTests
         EventPropMath.BackwardSpikes(w, inputTimes, sources, new SpikesData(postTimes, postSourcesArr, postCurrents) { Errors = postErrors }, nPost, 1.0, 0.02, 0.005, csGradient, buffers);
 
         var nativeGradient = new double[nPre * nPost];
-        NativeApi.BackwardSpikes(inputTimes, sources, postTimes, postSourcesArr, postCurrents, postErrors, w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
+        NativeApi.BackwardSpikes(inputTimes, sources, postTimes, postSourcesArr, postCurrents, postErrors, w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient, new double[inputTimes.Length]);
 
         for (int i = 0; i < nPre * nPost; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], Tolerance);
@@ -152,7 +152,7 @@ public class NativeVsManagedEdgeTests
         EventPropMath.BackwardSpikes(w, inputTimes, sources, csSpikes, nPost, 1.0, 0.02, 0.005, csGradient, buffers);
 
         var nativeGradient = new double[nPre * nPost];
-        NativeApi.BackwardSpikes(inputTimes, sources, csSpikes.Times[..csSpikes.NSpikes], csSpikes.Sources[..csSpikes.NSpikes], csSpikes.Currents[..csSpikes.NSpikes], csSpikes.Errors[..csSpikes.NSpikes], w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
+        NativeApi.BackwardSpikes(inputTimes, sources, csSpikes.Times[..csSpikes.NSpikes], csSpikes.Sources[..csSpikes.NSpikes], csSpikes.Currents[..csSpikes.NSpikes], csSpikes.Errors[..csSpikes.NSpikes], w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient, new double[inputTimes.Length]);
 
         for (int i = 0; i < nPre * nPost; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], Tolerance);
@@ -178,7 +178,7 @@ public class NativeVsManagedEdgeTests
         EventPropMath.BackwardSpikes(w, inputTimes, sources, csSpikes, nPost, 1.0, 0.02, 0.005, csGradient, buffers);
 
         var nativeGradient = new double[nPre * nPost];
-        NativeApi.BackwardSpikes(inputTimes, sources, csSpikes.Times[..csSpikes.NSpikes], csSpikes.Sources[..csSpikes.NSpikes], csSpikes.Currents[..csSpikes.NSpikes], csSpikes.Errors[..csSpikes.NSpikes], w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
+        NativeApi.BackwardSpikes(inputTimes, sources, csSpikes.Times[..csSpikes.NSpikes], csSpikes.Sources[..csSpikes.NSpikes], csSpikes.Currents[..csSpikes.NSpikes], csSpikes.Errors[..csSpikes.NSpikes], w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient, new double[inputTimes.Length]);
 
         for (int i = 0; i < nPre * nPost; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], Tolerance);
@@ -206,7 +206,7 @@ public class NativeVsManagedEdgeTests
         EventPropMath.BackwardMaxima(inputTimes, sources, maximaTimes, maximaValues, maximaErrors, w, nPost, 0.02, 0.005, csGradient);
 
         var nativeGradient = new double[nPre * nPost];
-        NativeApi.BackwardMaxima(inputTimes, sources, maximaTimes, maximaValues, maximaErrors, w, nPre, nPost, 0.02, 0.005, nativeGradient);
+        NativeApi.BackwardMaxima(inputTimes, sources, maximaTimes, maximaValues, maximaErrors, w, nPre, nPost, 0.02, 0.005, nativeGradient, new double[inputTimes.Length]);
 
         for (int i = 0; i < nPre * nPost; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], Tolerance);

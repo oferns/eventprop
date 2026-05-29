@@ -620,7 +620,8 @@ void eventprop_backward_spikes(const double* times, const int32_t* sources, int 
                                const double* fwd_currents, const double* post_errors, int n_post_spikes,
                                const double* w, int n_pre, int n_post,
                                double v_th, double tau_mem, double tau_syn,
-                               double* grad)
+                               double* grad,
+                               double* spike_errors)
 {
     if (n_post_spikes == 0) return;
 
@@ -684,6 +685,10 @@ void eventprop_backward_spikes(const double* times, const int32_t* sources, int 
             for (int j = dlen; j < n_post; j++)
                 outbound += w[spike_source * n_post + j] * (lambda_v[j] - lambda_i[j]);
             all_errors[spike_idx] += outbound;
+
+            /* Write spike error to caller's buffer (zero-copy) */
+            if (spike_errors != NULL)
+                spike_errors[spike_idx] = all_errors[spike_idx];
         } else {
             double current = fwd_currents[spike_idx];
             double inv_ic = 1.0 / (current - v_th);
@@ -765,7 +770,8 @@ void eventprop_backward_maxima(const double* input_times, const int32_t* input_s
                                const double* maxima_errors, int n_maxima,
                                const double* w, int n_pre, int n_post,
                                double tau_mem, double tau_syn,
-                               double* gradient)
+                               double* gradient,
+                               double* spike_errors)
 {
     (void)w; /* Not used — gradient depends on maximaTimes and errors only */
 
@@ -793,6 +799,12 @@ void eventprop_backward_maxima(const double* input_times, const int32_t* input_s
 
             int source_nrn = input_sources[spike_idx];
             gradient[source_nrn * n_post + max_idx] -= tau_syn * lambda_i;
+
+            /* Write spike error to caller's buffer (zero-copy) */
+            if (spike_errors != NULL) {
+                double lambda_v_val = -exp(-(t_bwd - t_vmax_bwd) / tau_mem) * maxima_errors[max_idx] / tau_mem;
+                spike_errors[spike_idx] += lambda_v_val - lambda_i;
+            }
         }
     }
 }

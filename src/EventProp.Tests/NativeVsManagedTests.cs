@@ -233,7 +233,7 @@ public class NativeVsManagedTests
             w, nPost, 0.02, 0.005, csGradient);
         NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, nativeGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient, new double[1024]);
 
         for (int i = 0; i < csGradient.Length; i++)
             await Assert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
@@ -308,7 +308,7 @@ public class NativeVsManagedTests
         Array.Fill(nativeGradient, 0.0);
         NativeApi.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, tauMem, tauSyn, nativeGradient);
+            w, nPre, nPost, 1.0, tauMem, tauSyn, nativeGradient, new double[1024]);
 
         // Both should produce non-trivial gradients when post-spike error is set
         double csSum = 0.0, nativeSum = 0.0;
@@ -352,7 +352,7 @@ public class NativeVsManagedTests
             1.0, 0.02, 0.005, csGradient, buffers);
         NativeApi.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient, new double[1024]);
 
         for (int i = 0; i < csGradient.Length; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
@@ -384,7 +384,7 @@ public class NativeVsManagedTests
             1.0, 0.02, 0.005, csGradient, buffers);
         NativeApi.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient, new double[1024]);
 
         for (int i = 0; i < csGradient.Length; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
@@ -418,7 +418,7 @@ public class NativeVsManagedTests
             1.0, 0.02, 0.005, csGradient, buffers);
         NativeApi.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient, new double[1024]);
 
         for (int i = 0; i < csGradient.Length; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
@@ -451,7 +451,7 @@ public class NativeVsManagedTests
             1.0, 0.02, 0.005, csGradient, buffers);
         NativeApi.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient, new double[1024]);
 
         for (int i = 0; i < csGradient.Length; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
@@ -478,7 +478,7 @@ public class NativeVsManagedTests
             1.0, 0.02, 0.005, csGradient, new ScratchBuffers());
         NativeApi.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient, new double[1024]);
 
         for (int i = 0; i < csGradient.Length; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
@@ -512,7 +512,7 @@ public class NativeVsManagedTests
             1.0, 0.02, 0.005, csGradient, buffers);
         NativeApi.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient, new double[1024]);
 
         for (int i = 0; i < csGradient.Length; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
@@ -547,7 +547,7 @@ public class NativeVsManagedTests
             w, nPost, 0.02, 0.005, csGradient);
         NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, nativeGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient, new double[1024]);
 
         for (int i = 0; i < csGradient.Length; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
@@ -576,7 +576,7 @@ public class NativeVsManagedTests
             w, nPost, 0.02, 0.005, csGradient);
         NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, nativeGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient, new double[1024]);
 
         for (int i = 0; i < csGradient.Length; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
@@ -606,7 +606,7 @@ public class NativeVsManagedTests
             w, nPost, 0.02, 0.005, csGradient);
         NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, nativeGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient, new double[1024]);
 
         for (int i = 0; i < csGradient.Length; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
@@ -636,7 +636,7 @@ public class NativeVsManagedTests
             w, nPost, 0.02, 0.005, csGradient);
         NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, nativeGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient, new double[1024]);
 
         for (int i = 0; i < csGradient.Length; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
@@ -665,7 +665,7 @@ public class NativeVsManagedTests
             w, nPost, 0.02, 0.005, csGradient);
         NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, nativeGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient, new double[1024]);
 
         for (int i = 0; i < csGradient.Length; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
@@ -709,7 +709,7 @@ public class NativeVsManagedTests
             w, nPost, 0.02, 0.005, csGradient);
         NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, nativeGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient, new double[1024]);
 
         for (int i = 0; i < csGradient.Length; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
@@ -738,7 +738,7 @@ public class NativeVsManagedTests
             w, nPost, 0.01, 0.003, csGradient);
         NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.01, 0.003, nativeGradient);
+            w, nPre, nPost, 0.01, 0.003, nativeGradient, new double[1024]);
 
         for (int i = 0; i < csGradient.Length; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
@@ -811,7 +811,7 @@ public class NativeVsManagedTests
             1.0, 0.02, 0.005, csGradient, buffers);
         NativeApi.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient, new double[1024]);
 
         SyncAssert.That(csGradient[0]).IsCloseTo(nativeGradient[0], 1e-10);
     }
@@ -874,7 +874,7 @@ public class NativeVsManagedTests
             w, nPost, 0.02, 0.005, csGradient);
         NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, nativeGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient, new double[1024]);
 
         // Both should produce zero gradients (maxima before any input spike)
         for (int i = 0; i < csGradient.Length; i++)
@@ -915,7 +915,7 @@ public class NativeVsManagedTests
             1.0, 0.02, 0.005, csGradient, buffers);
         NativeApi.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient, new double[1024]);
 
         // All neurons should have matching gradients (including zero-weight rows)
         // Note: Zero weights don't necessarily mean zero gradients because the adjoint
@@ -955,7 +955,7 @@ public class NativeVsManagedTests
             w, nPost, 0.02, 0.005, csGradient);
         NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, nativeGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient, new double[1024]);
 
         for (int i = 0; i < csGradient.Length; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);
@@ -1021,7 +1021,7 @@ public class NativeVsManagedTests
             1.0, 0.02, 0.005, csGradient, buffers);
         NativeApi.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            weakW, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
+            weakW, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient, new double[1024]);
 
         // Both should produce zero gradients (no post-spike activity)
         for (int i = 0; i < csGradient.Length; i++)
@@ -1056,7 +1056,7 @@ public class NativeVsManagedTests
             w, nPost, 0.02, 0.005, csGradient);
         NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, nativeGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient, new double[1024]);
 
         // Both should produce zero gradients (maxima before any input spike)
         for (int i = 0; i < csGradient.Length; i++)
@@ -1095,7 +1095,7 @@ public class NativeVsManagedTests
         // C++ backward pass with empty input spikes
         NativeApi.BackwardSpikes(inputTimes, inputSources,
             postTimes, postSources, postCurrents, postErrors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient, new double[1024]);
 
         // Both should produce zero gradients (no input spikes to propagate through)
         for (int i = 0; i < csGradient.Length; i++)
@@ -1190,7 +1190,7 @@ public class NativeVsManagedTests
             1.0, 0.02, 0.005, csGradient, buffers);
         NativeApi.BackwardSpikes([0.05], [0],
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient);
+            w, nPre, nPost, 1.0, 0.02, 0.005, nativeGradient, new double[1024]);
 
         SyncAssert.That(csGradient[0]).IsCloseTo(nativeGradient[0], 1e-10);
     }
@@ -1222,7 +1222,7 @@ public class NativeVsManagedTests
             w, nPost, 0.02, 0.005, csGradient);
         NativeApi.BackwardMaxima(inputTimes, inputSources,
             maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, nativeGradient);
+            w, nPre, nPost, 0.02, 0.005, nativeGradient, new double[1024]);
 
         for (int i = 0; i < csGradient.Length; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeGradient[i], 1e-10);

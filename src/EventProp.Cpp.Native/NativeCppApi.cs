@@ -6,13 +6,14 @@ namespace CW.EventProp;
 /// <summary>
 /// P/Invoke bindings for the EventProp native C++ wrapper (libeventprop_cpp_wrapper).
 /// Eigen/Boost-based reference implementation with parallel execution support.
+/// All output arrays are written zero-copy via Eigen::Map — no intermediate copies.
 /// </summary>
 public static partial class NativeCppApi
 {
     private const string LibName = "libeventprop_cpp_wrapper";
 
     // ============================================================
-    // compute_sums
+    // compute_sums — zero-copy output into caller-allocated buffers
     // ============================================================
     [LibraryImport(LibName)]
     [UnmanagedCallConv(CallConvs = [ typeof(CallConvCdecl) ])]
@@ -22,7 +23,8 @@ public static partial class NativeCppApi
         double tauMem, double tauSyn,
         double[] sum0Out, double[] sum1Out);
 
-    /// <summary>Call compute_sums via native C library.</summary>
+    /// <summary>Compute cumulative exponential-weighted sums.
+    /// sum0Out and sum1Out must be pre-allocated with size (nSpikes+1)*nPost each.</summary>
     public static void ComputeSums(
         double[] w, int nPre, int nPost,
         double[] times, int[] sources,
@@ -33,7 +35,7 @@ public static partial class NativeCppApi
     }
 
     // ============================================================
-    // compute_spikes
+    // compute_spikes — returns count, outputs written zero-copy
     // ============================================================
     [LibraryImport(LibName)]
     [UnmanagedCallConv(CallConvs = [ typeof(CallConvCdecl) ])]
@@ -43,7 +45,7 @@ public static partial class NativeCppApi
         double vTh, double tauMem, double tauSyn,
         double[] outTimes, int[] outSources, double[] outCurrents);
 
-    /// <summary>Call compute_spikes via native C library. Returns number of output spikes.</summary>
+    /// <summary>Predict post-synaptic spike times. Returns number of output spikes.</summary>
     public static int ComputeSpikes(
         double[] w, int nPre, int nPost,
         double[] times, int[] sources,
@@ -54,7 +56,7 @@ public static partial class NativeCppApi
     }
 
     // ============================================================
-    // compute_maxima
+    // compute_maxima — zero-copy output into caller-allocated buffers
     // ============================================================
     [LibraryImport(LibName)]
     [UnmanagedCallConv(CallConvs = [ typeof(CallConvCdecl) ])]
@@ -64,7 +66,8 @@ public static partial class NativeCppApi
         double tauMem, double tauSyn,
         double[] maximaTimesOut, double[] maximaValuesOut);
 
-    /// <summary>Call compute_maxima via native C library.</summary>
+    /// <summary>Find membrane potential maxima per neuron.
+    /// maximaTimesOut and maximaValuesOut must be pre-allocated with size nPost each.</summary>
     public static void ComputeMaxima(
         double[] w, int nPre, int nPost,
         double[] times, int[] sources,
@@ -75,7 +78,7 @@ public static partial class NativeCppApi
     }
 
     // ============================================================
-    // backward_spikes
+    // backward_spikes — zero-copy output for gradient + spike errors
     // ============================================================
     [LibraryImport(LibName)]
     [UnmanagedCallConv(CallConvs = [ typeof(CallConvCdecl) ])]
@@ -85,26 +88,29 @@ public static partial class NativeCppApi
         double[] postErrors, int nPostSpikes,
         double[] w, int nPre, int nPost,
         double vTh, double tauMem, double tauSyn,
-        double[] gradient);
+        double[] gradient,      // zero-copy output: n_pre x n_post (row-major)
+        double[] spikeErrors);  // zero-copy output: n_input_spikes (mutated)
 
-    /// <summary>Call backward (Spikes loss) via native C library.</summary>
+    /// <summary>Backward pass with Spikes loss.
+    /// gradient must be zero-initialized (n_pre * n_post). spikeErrors is mutated in-place.</summary>
     public static void BackwardSpikes(
         double[] inputTimes, int[] inputSources,
         double[] postTimes, int[] postSources, double[] postCurrents,
         double[] postErrors, double[] w, int nPre, int nPost,
         double vTh, double tauMem, double tauSyn,
-        double[] gradient)
+        double[] gradient,      // zero-initialized output: n_pre * n_post
+        double[] spikeErrors)   // mutated in-place: n_input_spikes
     {
         eventprop_backward_spikes(
             inputTimes, inputSources, inputTimes.Length,
             postTimes, postSources, postCurrents,
             postErrors, postErrors.Length,
             w, nPre, nPost,
-            vTh, tauMem, tauSyn, gradient);
+            vTh, tauMem, tauSyn, gradient, spikeErrors);
     }
 
     // ============================================================
-    // backward_maxima
+    // backward_maxima — zero-copy output for gradient + spike errors
     // ============================================================
     [LibraryImport(LibName)]
     [UnmanagedCallConv(CallConvs = [ typeof(CallConvCdecl) ])]
@@ -113,18 +119,22 @@ public static partial class NativeCppApi
         double[] maximaTimes, double[] maximaValues, double[] maximaErrors, int nMaxima,
         double[] w, int nPre, int nPost,
         double tauMem, double tauSyn,
-        double[] gradient);
+        double[] gradient,      // zero-copy output: n_pre x n_post (row-major)
+        double[] spikeErrors);  // zero-copy output: n_input_spikes (mutated)
 
-    /// <summary>Call backward (Maxima loss) via native C library.</summary>
+    /// <summary>Backward pass with Maxima loss.
+    /// gradient must be zero-initialized (n_pre * n_post). spikeErrors is mutated in-place.</summary>
     public static void BackwardMaxima(
         double[] inputTimes, int[] inputSources,
         double[] maximaTimes, double[] maximaValues, double[] maximaErrors,
         double[] w, int nPre, int nPost,
         double tauMem, double tauSyn,
-        double[] gradient)
+        double[] gradient,      // zero-initialized output: n_pre * n_post
+        double[] spikeErrors)   // mutated in-place: n_input_spikes
     {
-        eventprop_backward_maxima(inputTimes, inputSources, inputTimes.Length,
+        eventprop_backward_maxima(
+            inputTimes, inputSources, inputTimes.Length,
             maximaTimes, maximaValues, maximaErrors, maximaTimes.Length,
-            w, nPre, nPost, tauMem, tauSyn, gradient);
+            w, nPre, nPost, tauMem, tauSyn, gradient, spikeErrors);
     }
 }
