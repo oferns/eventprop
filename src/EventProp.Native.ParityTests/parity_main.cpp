@@ -22,10 +22,10 @@
 typedef void (*cfn_compute_sums)(const double*, int, int, const double*, const int32_t*, int, double, double, double*, double*);
 typedef int  (*cfn_compute_spikes)(const double*, int, int, const double*, const int32_t*, int, double, double, double, double*, int32_t*, double*);
 typedef void (*cfn_backward_spikes)(const double*, const int32_t*, int, const double*, const int32_t*, const double*, const double*, int,
-                                    const double*, int, int, double, double, double, double*);
+                                    const double*, int, int, double, double, double, double*, double*);
 typedef void (*cfn_compute_maxima)(const double*, int, int, const double*, const int32_t*, int, double, double, double*, double*);
 typedef void (*cfn_backward_maxima)(const double*, const int32_t*, int, const double*, const double*, const double*, int,
-                                    const double*, int, int, double, double, double*);
+                                    const double*, int, int, double, double, double*, double*);
 
 /* ── C library runtime loader (dlopen/dlsym) ─────────────────────────── */
 
@@ -323,7 +323,8 @@ static void test_backward_spikes(const char* pattern, int n_pre, int n_post, int
     fn_backward_spikes(times, sources, n_spikes,
                         fwd_times_c, fwd_sources_c, fwd_currents_c,
                         post_errors_c, n_fwd_c,
-                        w, n_pre, n_post, 1.0, 0.02, 0.005, grad_c);
+                        w, n_pre, n_post, 1.0, 0.02, 0.005, grad_c,
+                        nullptr);
 
     /* Eigen backward */
     RowMatrixXd w_mat(n_pre, n_post);
@@ -439,7 +440,8 @@ static void test_backward_maxima(const char* pattern, int n_pre, int n_post, int
     double* grad_c = (double*)calloc(n_pre * n_post, sizeof(double));
     fn_backward_maxima(times, sources, n_spikes,
                         max_times_c, max_values_c, max_errors_c, n_post,
-                        w, n_pre, n_post, 0.02, 0.005, grad_c);
+                        w, n_pre, n_post, 0.02, 0.005, grad_c,
+                        nullptr);
 
     /* Eigen maxima */
     RowMatrixXd w_mat(n_pre, n_post);

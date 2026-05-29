@@ -449,8 +449,7 @@ public static class EventPropMath
 
             // Propagate λ_v backward through membrane decay
             double dt = previousT - tBwd;
-            double decayFactor = Math.Exp(-dt / tauMem);
-            SimdAlgorithms.ScaleInPlace(lambdaV.AsSpan(0, nPost), decayFactor);
+            SimdAlgorithms.ScaleInPlace(lambdaV.AsSpan(0, nPost), Math.Exp(dt / tauMem));
 
             if (isInput)
             {

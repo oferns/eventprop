@@ -11,11 +11,11 @@ namespace CW.EventProp.Tests;
 /// </summary>
 public class NativeLibraryParityTests
 {
-    private const double Tolerance = 1e-10;
-
-    /// <summary>Larger tolerance for ComputeSums — accumulated sums have FP noise that scales with magnitude.
-    /// Max observed relative error: ~4e-16 (machine epsilon). Values up to 4e14 → abs error ~0.06.</summary>
-    private const double ComputeSumsTolerance = 1e-6;
+    /// <summary>Matches C/C++ parity test tolerances: ABS_TOLERANCE=1e-10, REL_TOLERANCE=1e-9.
+    /// Fails only if BOTH: diff > abs_tol AND diff > rel_tol * scale. This gives tight absolute
+    /// tolerance for small values while allowing relative error for large accumulated sums.</summary>
+    private const double AbsTolerance = 1e-10;
+    private const double RelTolerance = 1e-9;
 
     // ========================================================================
     // Shared Data Generation (seed 42, deterministic)
@@ -175,11 +175,11 @@ public class NativeLibraryParityTests
         var cppSum1 = new double[(times.Length + 1) * nPost];
         NativeCppApi.ComputeSums(w, nPre, nPost, times, sources, 0.02, 0.005, cppSum0, cppSum1);
 
-        // Assert: C matches Eigen (use larger tolerance for accumulated sums — FP noise scales with magnitude)
+        // Assert: C matches Eigen (scaled tolerance — absolute for small values, relative for large)
         for (int i = 0; i < cSum0.Length; i++)
         {
-            await Assert.That(cSum0[i]).IsCloseTo(cppSum0[i], ComputeSumsTolerance);
-            await Assert.That(cSum1[i]).IsCloseTo(cppSum1[i], ComputeSumsTolerance);
+            AssertScaled(cSum0[i], cppSum0[i], "sum0", i);
+            AssertScaled(cSum1[i], cppSum1[i], "sum1", i);
         }
     }
 
@@ -286,12 +286,12 @@ public class NativeLibraryParityTests
         }
         await Assert.That(nCSpikes).IsEqualTo(nCppSpikes);
 
-        // Then element-wise comparison
+        // Then element-wise comparison (scaled tolerance)
         for (int i = 0; i < nCSpikes; i++)
         {
-            await Assert.That(cTimes[i]).IsCloseTo(cppTimes[i], Tolerance);
+            AssertScaled(cTimes[i], cppTimes[i], "times", i);
             await Assert.That(cSources[i]).IsEqualTo(cppSources[i]);
-            await Assert.That(cCurrents[i]).IsCloseTo(cppCurrents[i], Tolerance);
+            AssertScaled(cCurrents[i], cppCurrents[i], "currents", i);
         }
     }
 
@@ -369,8 +369,8 @@ public class NativeLibraryParityTests
             }
             else
             {
-                await Assert.That(cTimes[i]).IsCloseTo(cppTimes[i], Tolerance);
-                await Assert.That(cValues[i]).IsCloseTo(cppValues[i], Tolerance);
+                AssertScaled(cTimes[i], cppTimes[i], "max_times", i);
+                AssertScaled(cValues[i], cppValues[i], "max_values", i);
             }
         }
     }
@@ -453,10 +453,10 @@ public class NativeLibraryParityTests
             postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
             w, nPre, nPost, 1.0, 0.02, 0.005, cppGradient, cppSpikeErrors);
 
-        // Assert: C matches Eigen
+        // Assert: C matches Eigen (scaled tolerance)
         for (int i = 0; i < cGradient.Length; i++)
         {
-            await Assert.That(cGradient[i]).IsCloseTo(cppGradient[i], Tolerance);
+            AssertScaled(cGradient[i], cppGradient[i], "gradient", i);
         }
     }
 
@@ -544,10 +544,25 @@ public class NativeLibraryParityTests
             maximaTimes, maximaValues, maximaErrors,
             w, nPre, nPost, 0.02, 0.005, cppGradient, cppSpikeErrors);
 
-        // Assert: C matches Eigen
+        // Assert: C matches Eigen (scaled tolerance)
         for (int i = 0; i < cGradient.Length; i++)
         {
-            await Assert.That(cGradient[i]).IsCloseTo(cppGradient[i], Tolerance);
+            AssertScaled(cGradient[i], cppGradient[i], "gradient", i);
         }
+    }
+
+    // ========================================================================
+    // Scaled Tolerance Helper (matches C/C++ parity test logic)
+    // ========================================================================
+
+    /// <summary>Asserts that two doubles are close using scaled tolerance.
+    /// Matches the C/C++ parity test: FAILS only if diff > abs_tol AND diff > rel_tol * scale.
+    /// This gives tight absolute tolerance for small values, relative tolerance for large ones.</summary>
+    private static void AssertScaled(double actual, double expected, string name, int index)
+    {
+        double diff = Math.Abs(actual - expected);
+        double scale = Math.Max(Math.Abs(actual), Math.Abs(expected));
+        if (diff > AbsTolerance && diff > RelTolerance * scale)
+            throw new Exception($"Mismatch [{name}[{index}]]: {actual} vs {expected}, diff={diff}");
     }
 }
