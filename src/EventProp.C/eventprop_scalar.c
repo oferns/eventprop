@@ -782,7 +782,7 @@ void eventprop_backward_maxima(const double* input_times, const int32_t* input_s
                 continue;
 
             double lambda_v = -exp(-(t_bwd - t_vmax_bwd) / tau_mem) * maxima_errors[max_idx] / tau_mem;
-            double k_bwd_val = k_bwd_prefactor * (exp(-t_bwd / tau_mem) - exp(-t_bwd / tau_syn));
+            double k_bwd_val = k_bwd_prefactor * (exp(-(t_bwd - t_vmax_bwd) / tau_mem) - exp(-(t_bwd - t_vmax_bwd) / tau_syn));
             double lambda_i = -k_bwd_val * maxima_errors[max_idx] / tau_mem;
 
             int source_nrn = input_sources[spike_idx];
