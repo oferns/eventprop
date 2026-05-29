@@ -525,7 +525,13 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
                             }
                         }
                     }
-                    finished = 1;
+                    /* Only mark finished if no spike was found in the last interval */
+                    if (!found) {
+                        finished = 1;
+                    } else {
+                        /* Spike was found — advance processed and continue searching */
+                        processed = n_spikes;
+                    }
                 } else {
                     double t_input = times[i];
                     double tmax = compute_tmax(i, n_spikes, times, count, post_times, offset,
