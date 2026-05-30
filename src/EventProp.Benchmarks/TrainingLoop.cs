@@ -94,8 +94,11 @@ public abstract class Bench_TrainingLoop_Base : BenchBase
             OutTimesNative, OutSourcesNative, OutCurrentsNative);
 
         // Backward pass via native
-        NativeApi.BackwardSpikes(Times, Sources, OutTimesNative, OutSourcesNative,
-            OutCurrentsNative, PostErrorsNative, W, NPre, NPost, VTh, TauMem, TauSyn, GradNative);
+        Array.Clear(SpikeErrorsNative, 0, SpikeErrorsNative.Length);
+        NativeApi.BackwardSpikes(Times, Sources,
+            OutTimesNative, OutSourcesNative, OutCurrentsNative,
+            PostErrorsNative, W, NPre, NPost,
+            VTh, TauMem, TauSyn, GradNative, SpikeErrorsNative);
     }
 
     [Benchmark]
@@ -109,8 +112,10 @@ public abstract class Bench_TrainingLoop_Base : BenchBase
             fwdResult.SetError(i, 1.0);
 
         // Backward pass via native (P/Invoke)
-        NativeApi.BackwardSpikes(Times, Sources, fwdResult.Times, fwdResult.Sources,
-            fwdResult.Currents, fwdResult.Errors, W, NPre, NPost, VTh, TauMem, TauSyn, GradManaged);
+        NativeApi.BackwardSpikes(Times, Sources,
+            fwdResult.Times, fwdResult.Sources, fwdResult.Currents,
+            fwdResult.Errors, W, NPre, NPost,
+            VTh, TauMem, TauSyn, GradManaged, fwdResult.Errors);
     }
 }
 

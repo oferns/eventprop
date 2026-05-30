@@ -616,6 +616,34 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
     return total;
 }
 
+/* ── FirstSpike: compute first_spike per neuron from sorted output ───── */
+
+void eventprop_compute_first_spike(int n_post, const double* out_times,
+                                    const int32_t* out_sources, int n_total_spikes,
+                                    double* first_spike_times, int32_t* first_spike_idxs)
+{
+    /* Initialize: NaN for times, 0 for indices (matches C++ behavior) */
+    for (int n = 0; n < n_post; n++) {
+        first_spike_times[n] = NAN;
+        first_spike_idxs[n]  = 0;
+    }
+
+    /* Scan sorted output: first match per neuron = its first spike */
+    int* seen = calloc(n_post, sizeof(int));
+    if (!seen) return;
+
+    for (int i = 0; i < n_total_spikes; i++) {
+        int src = (int)out_sources[i];
+        if (!seen[src]) {
+            first_spike_times[src] = out_times[i];
+            first_spike_idxs[src]  = (int32_t)i;
+            seen[src] = 1;
+        }
+    }
+
+    free(seen);
+}
+
 /* ── BackwardSpikes: adjoint method backward pass ──────────────────── */
 
 void eventprop_backward_spikes(const double* times, const int32_t* sources, int n_spikes,
@@ -809,5 +837,98 @@ void eventprop_backward_maxima(const double* input_times, const int32_t* input_s
                 spike_errors[spike_idx] += lambda_v_val - lambda_i;
             }
         }
+    }
+}
+
+/* ── Diagnostic: compute_voltage_trace ─────────────────────────────── */
+
+void eventprop_compute_voltage_trace(double t_max, double dt, int target_nrn_idx,
+                                     const double* w, int n_pre, int n_post,
+                                     const double* times, const int32_t* sources, int n_spikes,
+                                     const double* fwd_times, const int32_t* fwd_sources, int n_post_spikes,
+                                     double v_th, double tau_mem, double tau_syn,
+                                     double* v_trace, double* ts)
+{
+    double k_prefactor = tau_syn / (tau_mem - tau_syn);
+    int n_t = (int)(t_max / dt);
+
+    for (int ti = 0; ti < n_t; ti++) {
+        double t = dt * ti;
+        ts[ti] = t;
+        double mem = 0.0;
+
+        /* Pre-synaptic contribution */
+        for (int i = 0; i < n_spikes; i++) {
+            if (times[i] > t) break;
+            mem += w[sources[i] * n_post + target_nrn_idx] *
+                   k_prefactor * (exp(-(t - times[i]) / tau_mem) -
+                                  exp(-(t - times[i]) / tau_syn));
+        }
+
+        /* Post-synaptic contribution (spike reset) */
+        for (int i = 0; i < n_post_spikes; i++) {
+            if (fwd_times[i] > t) break;
+            if (fwd_sources[i] == target_nrn_idx)
+                mem -= v_th * exp(-(t - fwd_times[i]) / tau_mem);
+        }
+
+        v_trace[ti] = mem;
+    }
+}
+
+/* ── Diagnostic: compute_lambda_i ──────────────────────────────────── */
+
+double eventprop_compute_lambda_i(double t, int target_nrn_idx,
+                                  const double* fwd_times, int n_post_spikes,
+                                  double v_th, double tau_mem, double tau_syn)
+{
+    if (n_post_spikes == 0) return 0.0;
+
+    double largest_time = fwd_times[n_post_spikes - 1];
+    struct Jump {
+        double mag;
+        double time_bwd;
+    };
+
+    /* Collect jumps from post-synaptic spikes after time t */
+    int n_jumps = 0;
+    struct Jump jumps[256]; /* max spikes per neuron */
+
+    for (int i = n_post_spikes - 1; i >= 0; i--) {
+        if (fwd_times[i] < t) break;
+        double t_bwd = largest_time - fwd_times[i];
+        jumps[n_jumps].mag = 1.0 / (v_th + 0.001);
+        jumps[n_jumps].time_bwd = t_bwd;
+        n_jumps++;
+    }
+
+    double lambda_i = 0.0;
+    double t_bwd_from_t = largest_time - t;
+    double k_bwd_prefactor = tau_mem / (tau_mem - tau_syn);
+
+    for (int j = 0; j < n_jumps; j++) {
+        double dt_jump = t_bwd_from_t - jumps[j].time_bwd;
+        lambda_i += jumps[j].mag * k_bwd_prefactor *
+                    (exp(-dt_jump / tau_mem) - exp(-dt_jump / tau_syn));
+    }
+
+    return lambda_i;
+}
+
+/* ── Diagnostic: compute_lambda_i_trace ────────────────────────────── */
+
+void eventprop_compute_lambda_i_trace(double t_max, double dt, int target_nrn_idx,
+                                      const double* fwd_times, int n_post_spikes,
+                                      double v_th, double tau_mem, double tau_syn,
+                                      double* lambda_trace, double* ts)
+{
+    int n_t = (int)(t_max / dt);
+
+    for (int ti = 0; ti < n_t; ti++) {
+        double t = dt * ti;
+        ts[ti] = t;
+        lambda_trace[ti] = eventprop_compute_lambda_i(
+            t, target_nrn_idx, fwd_times, n_post_spikes,
+            v_th, tau_mem, tau_syn);
     }
 }

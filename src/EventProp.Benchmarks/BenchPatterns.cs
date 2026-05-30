@@ -54,6 +54,7 @@ public abstract class Bench_Pattern_Base : BenchBase
         PostSourcesNative = new int[nPost];
         PostCurrentsNative = new double[nPost];
         PostErrorsNative = new double[nPost];
+        SpikeErrorsNative = new double[NSpikes];
         for (int idx = 0; idx < nPost; idx++)
         {
             PostTimesNative[idx] = PostSpikes.Times[idx];
@@ -107,8 +108,10 @@ public abstract class Bench_Pattern_Base : BenchBase
     public void BackwardSpikes_Native()
     {
         Array.Clear(GradNative);
-        NativeApi.BackwardSpikes(Times, Sources, PostTimesNative, PostSourcesNative,
-            PostCurrentsNative, PostErrorsNative, W, NPre, NPost, VTh, TauMem, TauSyn, GradNative);
+        NativeApi.BackwardSpikes(Times, Sources,
+            PostTimesNative, PostSourcesNative, PostCurrentsNative,
+            PostErrorsNative, W, NPre, NPost,
+            VTh, TauMem, TauSyn, GradNative, PostErrorsNative);
     }
 }
 

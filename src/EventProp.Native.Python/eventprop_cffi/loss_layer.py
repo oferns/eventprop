@@ -40,7 +40,7 @@ class TTFSCrossEntropyLoss(LIFLayer):
             (self.n_batch, self.parameters.n),
         )
         self.first_spike_idxs = np.empty(
-            (self.n_batch, self.parameters.n), dtype=np.int
+            (self.n_batch, self.parameters.n), dtype=int
         )
         for batch_idx, spikes in enumerate(self.post_batch):
             self.first_spike_times[batch_idx, :] = self.post_batch[

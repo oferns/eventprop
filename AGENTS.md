@@ -26,7 +26,11 @@ eventprop.net/
 │   ├── EventProp.Cpp.Native/   # P/Invoke bindings (C++ wrapper)
 │   │   └── NativeCppApi.cs     # LibraryImport + UnmanagedCallConv
 │   ├── EventProp.Benchmarks/   # BenchmarkDotNet benchmarks
-│   └── EventProp.Tests/        # Test project (TUnit)
+│   ├── EventProp.Tests/        # Test project (TUnit)
+│   ├── EventProp.Cpp.Wrapper/  # C bridge: flat arrays ↔ Eigen/Spikes
+│   ├── EventProp.C/            # Pure C implementation (libeventprop_c_api)
+│   ├── EventProp.Native.Python/# Python bindings: CFFI (pure C → CPython)
+│   └── EventProp.Python/       # Python bindings: pybind11 (git submodule)
 ├── coverage-report/            # Generated HTML coverage reports (gitignored)
 └── AGENTS.md                   # This file
 ```
@@ -237,6 +241,28 @@ cd src/EventProp.Native.Benchmarks/raw && rm -rf build && mkdir build && cd buil
 cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
 ./raw_bench
 ```
+
+### Python Bindings (CFFI)
+
+**Location**: `src/EventProp.Native.Python/`
+
+Pure C FFI bindings — no pybind11 dependency. The `eventprop_cffi.c` module uses standard CPython API to expose all C library functions (`compute_spikes_batch`, `backward_spikes`, `compute_voltage_trace`, etc.) to Python.
+
+**Build**:
+```bash
+cd src/EventProp.Native.Python && rm -rf build eventprop_cffi/*.so
+python3 setup.py build_ext --inplace
+```
+
+**Key implementation notes for `eventprop_cffi.c`**:
+- All `PyArg_ParseTuple` format strings must match the exact number and types of arguments passed from Python
+- Format specifiers: `O` = PyObject* (numpy arrays, lists), `i` = int, `d` = double
+- Common pitfall: counting specifiers vs pointer arguments — mismatch causes segfaults or TypeError
+- Numpy arrays passed as `O` are accessed via `PyArray_DATA()` and `PyArray_SIZE()`, NOT `PyLong_AsSsize_t`
+- Memory: use `PyArray_SimpleNew` to create numpy-owned arrays, then copy data in — never `malloc` + `PyArray_SimpleNewFromData` (dangling pointers)
+- Empty spike arrays: use `ARR_D(dtype, 1, 0, NULL)` for 1-d empty arrays (NOT `ndim=0` scalars)
+- Rpath: use `install_name_tool -change @rpath/...` to fix shared library lookup at runtime
+- Architecture: build as `arm64` only (matches libomp on Apple Silicon), NOT universal2
 
 - **`NativeVsManagedTests.cs`** — C# (EventPropMath) vs NativeApi (C library). Tests: ComputeSums, ComputeSpikes, ComputeMaxima, Backward. Uses uniform patterns only.
 - **`NumericalParityTests.cs`** — Three-way: NativeApi (C) ≡ NativeCppApi (Eigen, source of truth) ≡ EventPropMath (.NET). All patterns/sizes. **This is the main parity test suite.**

@@ -100,6 +100,24 @@ The project includes two P/Invoke binding layers for calling native code:
 
 Both use modern .NET 10 source-generated P/Invoke (no `DllImport`).
 
+## Python Bindings
+
+Two Python binding layers are available:
+
+- **`EventProp.Native.Python/`** — Pure C FFI bindings using the standard CPython API. No pybind11 dependency. Exposes all C library functions (`compute_spikes_batch`, `backward_spikes`, `compute_voltage_trace`, etc.) via a compiled C extension module (`eventprop_cffi._native`).
+- **`EventProp.Python/`** — pybind11-based bindings (git submodule). Includes a complete Python layer with LIF/LI layers, loss functions, and dropout.
+
+**Build CFFI bindings**:
+```bash
+cd src/EventProp.Native.Python && rm -rf build eventprop_cffi/*.so
+python3 setup.py build_ext --inplace
+```
+
+**Build pybind11 bindings**:
+```bash
+cd src/EventProp.Python && pip install -e .
+```
+
 ## Project Structure
 
 ```
@@ -121,7 +139,11 @@ src/
 ├── EventProp.Native/       # P/Invoke bindings (C library)
 ├── EventProp.Cpp.Native/   # P/Invoke bindings (C++ wrapper)
 ├── EventProp.Benchmarks/   # BenchmarkDotNet benchmarks
-└── EventProp.Tests/        # TUnit tests
+├── EventProp.Tests/        # TUnit tests
+├── EventProp.Cpp.Wrapper/  # C bridge: flat arrays ↔ Eigen/Spikes
+├── EventProp.C/            # Pure C implementation (libeventprop_c_api)
+├── EventProp.Native.Python/# Python bindings: CFFI (pure C → CPython)
+└── EventProp.Python/       # Python bindings: pybind11 (git submodule)
 ```
 
 ## Running Tests

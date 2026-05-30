@@ -61,6 +61,23 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
                              double* out_times, int32_t* out_sources, double* out_currents);
 
 /**
+ * Compute first_spike per neuron from sorted spike output.
+ *
+ * For each post-synaptic neuron, finds the time and index of its first spike
+ * in the sorted output array. Neurons with no spikes get NaN/0.
+ *
+ * @param n_post           Number of post-synaptic neurons
+ * @param out_times        Sorted spike times (from eventprop_compute_spikes)
+ * @param out_sources      Sorted spike sources (from eventprop_compute_spikes)
+ * @param n_total_spikes   Total number of spikes in the output
+ * @param first_spike_times Output: time of neuron i's first spike (NaN if none)
+ * @param first_spike_idxs  Output: index in out_times of neuron i's first spike (0 if none)
+ */
+void eventprop_compute_first_spike(int n_post, const double* out_times,
+                                    const int32_t* out_sources, int n_total_spikes,
+                                    double* first_spike_times, int32_t* first_spike_idxs);
+
+/**
  * Backward pass: adjoint method computing weight gradients and input spike errors.
  *
  * Propagates λ_v (membrane) and λ_i (synaptic) adjoints in time-reversed order,
@@ -105,6 +122,72 @@ void eventprop_backward_maxima(const double* input_times, const int32_t* input_s
                                double tau_mem, double tau_syn,
                                double* gradient,
                                double* spike_errors);
+
+/* ── Diagnostic functions ─────────────────────────────────────────── */
+
+/**
+ * Compute membrane potential voltage trace for a single post-synaptic neuron.
+ *
+ * Evaluates v(t) at uniformly spaced time points [0, dt, 2*dt, ..., t_max).
+ * Includes contributions from both pre-synaptic and post-synaptic spikes.
+ *
+ * @param t_max          Maximum simulation time
+ * @param dt             Time step
+ * @param target_nrn_idx Post-synaptic neuron index
+ * @param w              Weight matrix (row-major, n_pre x n_post)
+ * @param times          Pre-synaptic spike times
+ * @param sources        Pre-synaptic spike source neurons
+ * @param n_spikes       Number of pre-synaptic spikes
+ * @param fwd_times      Post-synaptic spike times (from eventprop_compute_spikes)
+ * @param fwd_sources    Post-synaptic spike source neurons
+ * @param n_post_spikes  Number of post-synaptic spikes
+ * @param v_th           Spike threshold
+ * @param tau_mem        Membrane time constant
+ * @param tau_syn        Synaptic time constant
+ * @param v_trace        Output: voltage trace (size = t_max/dt)
+ * @param ts             Output: time array (size = t_max/dt)
+ */
+void eventprop_compute_voltage_trace(double t_max, double dt, int target_nrn_idx,
+                                     const double* w, int n_pre, int n_post,
+                                     const double* times, const int32_t* sources, int n_spikes,
+                                     const double* fwd_times, const int32_t* fwd_sources, int n_post_spikes,
+                                     double v_th, double tau_mem, double tau_syn,
+                                     double* v_trace, double* ts);
+
+/**
+ * Compute λ_i (synaptic adjoint) at a specific time for a single neuron.
+ *
+ * @param t              Time at which to compute λ_i
+ * @param target_nrn_idx Post-synaptic neuron index
+ * @param fwd_times      Post-synaptic spike times
+ * @param n_post_spikes  Number of post-synaptic spikes
+ * @param v_th           Spike threshold
+ * @param tau_mem        Membrane time constant
+ * @param tau_syn        Synaptic time constant
+ * @return λ_i value at time t for the target neuron
+ */
+double eventprop_compute_lambda_i(double t, int target_nrn_idx,
+                                  const double* fwd_times, int n_post_spikes,
+                                  double v_th, double tau_mem, double tau_syn);
+
+/**
+ * Compute λ_i trace over time for a single post-synaptic neuron.
+ *
+ * @param t_max          Maximum simulation time
+ * @param dt             Time step
+ * @param target_nrn_idx Post-synaptic neuron index
+ * @param fwd_times      Post-synaptic spike times
+ * @param n_post_spikes  Number of post-synaptic spikes
+ * @param v_th           Spike threshold
+ * @param tau_mem        Membrane time constant
+ * @param tau_syn        Synaptic time constant
+ * @param lambda_trace   Output: λ_i trace (size = t_max/dt)
+ * @param ts             Output: time array (size = t_max/dt)
+ */
+void eventprop_compute_lambda_i_trace(double t_max, double dt, int target_nrn_idx,
+                                      const double* fwd_times, int n_post_spikes,
+                                      double v_th, double tau_mem, double tau_syn,
+                                      double* lambda_trace, double* ts);
 
 #ifdef __cplusplus
 }
