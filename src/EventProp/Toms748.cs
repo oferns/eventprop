@@ -25,7 +25,8 @@ public static class Toms748
         double fa = f(a);
         double fb = f(b);
 
-
+        // Guard: if endpoints are not finite, abort immediately
+        if (!double.IsFinite(fa) || !double.IsFinite(fb)) return a;
 
         // Ensure a < b
         if (a > b)
@@ -98,6 +99,9 @@ public static class Toms748
             b = s;
             fb = f(b);
 
+            // Guard: abort on NaN/Inf at any evaluation point
+            if (!double.IsFinite(fb)) return prevB;
+
             // Check convergence
             if (Math.Abs(fb) <= tolerance || Math.Abs(b - prevB) <= tolerance * Math.Max(1.0, Math.Abs(prevB)))
                 return b;
@@ -121,6 +125,9 @@ public static class Toms748
                 // Restore bracketing: set a = prevB (opposite sign to new b)
                 a = prevB; fa = f(prevB);
             }
+
+            // Guard: abort if bracketing values become NaN/Inf
+            if (!double.IsFinite(fa) || !double.IsFinite(fc)) return prevB;
 
             // Track step size for stagnation detection in next iteration
             d = b - prevB;
