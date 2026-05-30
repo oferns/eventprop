@@ -38,22 +38,10 @@ static PyObject* py_compute_spikes_batch(PyObject* self, PyObject* args) {
     Py_ssize_t batch_size = PyList_Size(batch_obj);
     PyObject* result_list = PyList_New(0);
 
-    /* Determine max spikes for scratch allocation */
-    int max_spikes = 64;
-    for (Py_ssize_t bi = 0; bi < batch_size; bi++) {
-        PyObject* item = PyList_GetItem(batch_obj, bi);
-        if (PyTuple_Check(item) && PyTuple_Size(item) >= 2) {
-            PyObject* times_item = PyTuple_GetItem(item, 0);
-            if (PyArray_Check(times_item)) {
-                Py_ssize_t n_spikes = PyArray_SIZE((PyArrayObject*)times_item);
-                if (n_spikes > max_spikes) max_spikes = (int)n_spikes;
-            }
-        }
-    }
-
-    double* fwd_times      = malloc(max_spikes * n_post * sizeof(double));
-    int32_t* fwd_sources   = malloc(max_spikes * n_post * sizeof(int32_t));
-    double* fwd_currents   = malloc(max_spikes * n_post * sizeof(double));
+    /* Shared scratch buffers — large enough for any single batch item */
+    double* fwd_times      = malloc(n_post * 1024 * sizeof(double));
+    int32_t* fwd_sources   = malloc(n_post * 1024 * sizeof(int32_t));
+    double* fwd_currents   = malloc(n_post * 1024 * sizeof(double));
     double* first_spike_times = malloc(n_post * sizeof(double));
     int32_t* first_spike_idxs   = malloc(n_post * sizeof(int32_t));
 
@@ -105,12 +93,20 @@ static PyObject* py_compute_spikes_batch(PyObject* self, PyObject* args) {
                                        n_post_spikes, first_spike_times, first_spike_idxs);
 
         /* Build result tuple: (times_array, sources_array, currents_array,
-                                first_spike_times_list, first_spike_idxs_list) */
+                                first_spike_times_list, first_spike_idxs_list)
+           Create numpy-owned arrays and copy data — required since scratch buffers
+           are reused across iterations. */
         if (n_post_spikes > 0) {
-            PyObject* t_arr = ARR_D(NPY_DOUBLE, 1, n_post_spikes, fwd_times);
-            PyObject* s_arr = ARR_D(NPY_INT32, 1, n_post_spikes, fwd_sources);
-            PyObject* c_arr = ARR_D(NPY_DOUBLE, 1, n_post_spikes, fwd_currents);
+            npy_intp t_dim = n_post_spikes;
+            PyObject* t_arr = PyArray_SimpleNew(1, &t_dim, NPY_DOUBLE);
+            npy_intp s_dim = n_post_spikes;
+            PyObject* s_arr = PyArray_SimpleNew(1, &s_dim, NPY_INT32);
+            npy_intp c_dim = n_post_spikes;
+            PyObject* c_arr = PyArray_SimpleNew(1, &c_dim, NPY_DOUBLE);
             if (t_arr && s_arr && c_arr) {
+                memcpy(PyArray_DATA((PyArrayObject*)t_arr), fwd_times, n_post_spikes * sizeof(double));
+                memcpy(PyArray_DATA((PyArrayObject*)s_arr), fwd_sources, n_post_spikes * sizeof(int32_t));
+                memcpy(PyArray_DATA((PyArrayObject*)c_arr), fwd_currents, n_post_spikes * sizeof(double));
                 PyObject* fst_list = PyList_New(n_post);
                 PyObject* fsi_list = PyList_New(n_post);
                 for (int n = 0; n < n_post; n++) {
@@ -123,9 +119,10 @@ static PyObject* py_compute_spikes_batch(PyObject* self, PyObject* args) {
                 Py_XDECREF(fst_list); Py_XDECREF(fsi_list);
             } else { PyErr_NoMemory(); goto cleanup; }
         } else {
-            PyObject* t_arr = ARR_D(NPY_DOUBLE, 1, 0, NULL);
-            PyObject* s_arr = ARR_D(NPY_INT32, 1, 0, NULL);
-            PyObject* c_arr = ARR_D(NPY_DOUBLE, 1, 0, NULL);
+            npy_intp z_dim = 0;
+            PyObject* t_arr = PyArray_SimpleNew(1, &z_dim, NPY_DOUBLE);
+            PyObject* s_arr = PyArray_SimpleNew(1, &z_dim, NPY_INT32);
+            PyObject* c_arr = PyArray_SimpleNew(1, &z_dim, NPY_DOUBLE);
             if (t_arr && s_arr && c_arr) {
                 PyObject* fst_list = PyList_New(n_post);
                 PyObject* fsi_list = PyList_New(n_post);
@@ -182,13 +179,11 @@ static PyObject* py_backward_spikes_batch(PyObject* self, PyObject* args) {
 
         if (n_post_spikes == 0) continue;
 
-        /* Get post_errors from Spikes.errors attribute */
-        PyObject* errors_obj = PyObject_GetAttrString(post_item, "errors");
+        /* Get post_errors from 4th element of tuple */
+        PyObject* errors_obj = PyTuple_GetItem(post_item, 3);
         const double* post_errors = NULL;
         if (errors_obj && PyArray_Check(errors_obj)) {
             post_errors = (const double*)PyArray_DATA((PyArrayObject*)errors_obj);
-        } else {
-            if (errors_obj) Py_DECREF(errors_obj);
         }
 
         double* grad_buf = calloc(n_pre * n_post, sizeof(double));
@@ -258,9 +253,14 @@ static PyObject* py_compute_maxima_batch(PyObject* self, PyObject* args) {
             tau_mem, tau_syn,
             maxima_times, maxima_values);
 
-        PyObject* t_arr = ARR_D(NPY_DOUBLE, 1, n_post, maxima_times);
-        PyObject* v_arr = ARR_D(NPY_DOUBLE, 1, n_post, maxima_values);
+        /* Create numpy-owned arrays and copy data */
+        npy_intp t_dim = n_post;
+        PyObject* t_arr = PyArray_SimpleNew(1, &t_dim, NPY_DOUBLE);
+        npy_intp v_dim = n_post;
+        PyObject* v_arr = PyArray_SimpleNew(1, &v_dim, NPY_DOUBLE);
         if (t_arr && v_arr) {
+            memcpy(PyArray_DATA((PyArrayObject*)t_arr), maxima_times, n_post * sizeof(double));
+            memcpy(PyArray_DATA((PyArrayObject*)v_arr), maxima_values, n_post * sizeof(double));
             PyObject* tup = Py_BuildValue("(OO)", t_arr, v_arr);
             if (tup) PyList_Append(result_list, tup);
             Py_XDECREF(t_arr); Py_XDECREF(v_arr);

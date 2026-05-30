@@ -44,8 +44,8 @@ def _infer_n(w):
 
 
 def _spikes_to_array_tuple(spikes_obj):
-    """Convert Spikes → (times, sources, currents) for zero-copy C++ access."""
-    return (spikes_obj.times, spikes_obj.sources, spikes_obj.currents)
+    """Convert Spikes → (times, sources, currents, errors) for zero-copy C access."""
+    return (spikes_obj.times, spikes_obj.sources, spikes_obj.currents, spikes_obj.errors)
 
 
 def _maxima_to_array_tuple(max_obj):
