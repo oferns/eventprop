@@ -410,7 +410,9 @@ static double root_fn(void* ctx_ptr, double t) {
 
 /* Exact port of .NET Toms748.Solve — Brent's method with IQI */
 static double toms748_solve(void* ctx, root_fn_t fn, double a, double b) {
+    /* Guard: if endpoints are not finite, abort immediately */
     double fa = fn(ctx, a), fb = fn(ctx, b);
+    if (!isfinite(fa) || !isfinite(fb)) return a;
 
     /* Ensure a < b (swap if needed) */
     if (a > b) { double tmp=a; a=b; b=tmp; tmp=fa; fa=fb; fb=tmp; }
@@ -455,6 +457,9 @@ static double toms748_solve(void* ctx, root_fn_t fn, double a, double b) {
         b = s;
         fb = fn(ctx, b);
 
+        /* Guard: abort on NaN/Inf at any evaluation point */
+        if (!isfinite(fb)) return prevB;
+
         if (fabs(fb) <= TOMS748_TOL || fabs(b - prevB) <= TOMS748_TOL * fmax(1.0, fabs(prevB)))
             return b;
 
@@ -466,6 +471,9 @@ static double toms748_solve(void* ctx, root_fn_t fn, double a, double b) {
         } else {
             a = prevB; fa = fn(ctx, prevB);
         }
+
+        /* Guard: abort if bracketing values become NaN/Inf */
+        if (!isfinite(fa) || !isfinite(fc)) return prevB;
 
         d = b - prevB;
     }
