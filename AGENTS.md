@@ -275,6 +275,30 @@ python3 setup.py build_ext --inplace
 
 - **`tests_capi.cpp`** (`EventProp.Cpp.Wrapper/`) — C API wrapper unit tests mirroring the pure C suite. 14 tests covering all flat-array functions (compute_sums, compute_spikes, backward_spikes, compute_maxima, backward_maxima) plus edge cases (zero weights, linear scaling, zero/negative inputs) and large-scale validation (200×80, 500 spikes).
 
+### EventProp.Python Submodule (pybind11)
+
+**Location**: `src/EventProp.Python/` (git submodule, read-only)
+
+The pybind11 Python bindings submodule requires a patch to build on non-Apple-M3 hardware:
+
+**Required Patch**: Remove `-mcpu=apple-m3` from `setup.py`
+```bash
+cd src/EventProp.Python
+patch -p0 < setup.py.patch  # or edit manually: remove lines 12-13
+```
+
+**Manual edit in `setup.py`**: Replace:
+```python
+        # macOS clang doesn't support -march=native; use explicit arch
+        "-mcpu=apple-m3",
+```
+With:
+```python
+        # Let compiler auto-detect CPU features (no -mcpu flag)
+```
+
+**Note**: The submodule is read-only — patches must be reapplied after pulling from upstream.
+
 - **`NativeVsManagedTests.cs`** — C# (EventPropMath) vs NativeApi (C library). Tests: ComputeSums, ComputeSpikes, ComputeMaxima, Backward. Uses uniform patterns only.
 - **`NumericalParityTests.cs`** — Three-way: NativeApi (C) ≡ NativeCppApi (Eigen, source of truth) ≡ EventPropMath (.NET). All patterns/sizes. **This is the main parity test suite.**
 - **`NativeLibraryParityTests.cs`** — C vs Eigen ONLY (no .NET). Tests: BackwardSpikes, BackwardMaxima. All patterns/sizes.
