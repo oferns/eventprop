@@ -122,7 +122,8 @@ static void test_compute_spikes_medium(void)
     int32_t* sources = malloc(n_spikes * sizeof(int32_t));
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
 
-    int max_out = (n_spikes + 1) * n_post; /* +1 per neuron for safety */
+    /* Dynamic buffers — no fixed upper bound. Allocate generous space for burst patterns */
+    int max_out = 10 * (n_spikes + 1) * n_post;
     double* out_times = malloc(max_out * sizeof(double));
     int32_t* out_sources = malloc(max_out * sizeof(int32_t));
     double* out_currents = malloc(max_out * sizeof(double));
@@ -132,8 +133,6 @@ static void test_compute_spikes_medium(void)
                                                   1.0, 0.02, 0.005,
                                                   out_times, out_sources, out_currents);
 
-    if (n_post_spikes == 0 || n_post_spikes >= max_out)
-        fprintf(stderr, "DEBUG: n_post_spikes=%d (expected >0 and <%d)\n", n_post_spikes, max_out);
     ASSERT(n_post_spikes > 0 && n_post_spikes < max_out, "spike count out of range");
 
     free(w); free(times); free(sources);
@@ -322,6 +321,325 @@ static void test_backward_maxima_linear_scale(void)
     TEST_END;
 }
 
+static void test_compute_first_spike(void)
+{
+    TEST("ComputeFirstSpike normal + no-spike neuron");
+    int n_pre = 10, n_post = 5, n_spikes = 20;
+    double* w = malloc(n_pre * n_post * sizeof(double));
+    double* times = malloc(n_spikes * sizeof(double));
+    int32_t* sources = malloc(n_spikes * sizeof(int32_t));
+    gen_data(n_pre, n_post, n_spikes, w, times, sources);
+
+    /* Forward pass */
+    int max_out = 10 * (n_spikes + 1) * n_post;
+    double* out_times = malloc(max_out * sizeof(double));
+    int32_t* out_sources = malloc(max_out * sizeof(int32_t));
+    double* out_currents = malloc(max_out * sizeof(double));
+
+    int n_fwd = eventprop_compute_spikes(w, n_pre, n_post,
+                                          times, sources, n_spikes,
+                                          1.0, 0.02, 0.005,
+                                          out_times, out_sources, out_currents);
+
+    double* first_times = malloc(n_post * sizeof(double));
+    int32_t* first_idxs = malloc(n_post * sizeof(int32_t));
+    eventprop_compute_first_spike(n_post, out_times, out_sources, n_fwd,
+                                   first_times, first_idxs);
+
+    /* Every neuron with a spike should have a valid time */
+    int spike_count = 0;
+    for (int j = 0; j < n_post; j++) {
+        if (!isnan(first_times[j])) {
+            ASSERT(first_idxs[j] >= 0 && first_idxs[j] < n_fwd, "invalid index");
+            ASSERT_NEAR(out_times[first_idxs[j]], first_times[j], EPSILON);
+            spike_count++;
+        }
+    }
+    ASSERT(spike_count > 0, "no neurons fired");
+
+    free(w); free(times); free(sources);
+    free(out_times); free(out_sources); free(out_currents);
+    free(first_times); free(first_idxs);
+    TEST_END;
+}
+
+static void test_zero_spikes(void)
+{
+    TEST("ZeroSpikes — all functions handle n_spikes=0");
+    int n_pre = 10, n_post = 5, n_spikes = 0;
+    double* w = malloc(n_pre * n_post * sizeof(double));
+    for (int i = 0; i < n_pre * n_post; i++) w[i] = 5.0;
+
+    /* compute_sums with zero spikes */
+    int n_sums = (n_spikes + 1) * n_post;
+    double* sum0 = calloc(n_sums, sizeof(double));
+    double* sum1 = calloc(n_sums, sizeof(double));
+    eventprop_compute_sums(w, n_pre, n_post, NULL, NULL, n_spikes,
+                           0.02, 0.005, sum0, sum1);
+
+    /* compute_spikes with zero spikes */
+    int max_out = 1;
+    double* out_times = malloc(max_out * sizeof(double));
+    int32_t* out_sources = malloc(max_out * sizeof(int32_t));
+    double* out_currents = malloc(max_out * sizeof(double));
+    int n_fwd = eventprop_compute_spikes(w, n_pre, n_post,
+                                          NULL, NULL, n_spikes,
+                                          1.0, 0.02, 0.005,
+                                          out_times, out_sources, out_currents);
+    ASSERT(n_fwd == 0, "should produce zero spikes");
+
+    /* compute_maxima with zero spikes */
+    double* max_times = malloc(n_post * sizeof(double));
+    double* max_values = malloc(n_post * sizeof(double));
+    eventprop_compute_maxima(w, n_pre, n_post,
+                              NULL, NULL, n_spikes,
+                              0.02, 0.005, max_times, max_values);
+
+    free(w); free(sum0); free(sum1);
+    free(out_times); free(out_sources); free(out_currents);
+    free(max_times); free(max_values);
+    TEST_END;
+}
+
+static void test_negative_weights(void)
+{
+    TEST("ComputeSpikes negative weights → no spikes");
+    int n_pre = 10, n_post = 5, n_spikes = 20;
+    double* w = malloc(n_pre * n_post * sizeof(double));
+    double* times = malloc(n_spikes * sizeof(double));
+    int32_t* sources = malloc(n_spikes * sizeof(int32_t));
+
+    /* All negative weights — membrane potential should never reach threshold */
+    for (int i = 0; i < n_pre * n_post; i++) w[i] = -5.0;
+    for (int i = 0; i < n_spikes; i++) {
+        times[i] = 0.01 + (i + 1.0) / (n_spikes + 1.0) * 0.09;
+        sources[i] = i % n_pre;
+    }
+
+    int max_out = 10 * (n_spikes + 1) * n_post;
+    double* out_times = malloc(max_out * sizeof(double));
+    int32_t* out_sources = malloc(max_out * sizeof(int32_t));
+    double* out_currents = malloc(max_out * sizeof(double));
+
+    int n_fwd = eventprop_compute_spikes(w, n_pre, n_post,
+                                          times, sources, n_spikes,
+                                          1.0, 0.02, 0.005,
+                                          out_times, out_sources, out_currents);
+    ASSERT(n_fwd == 0, "negative weights should produce no spikes");
+
+    free(w); free(times); free(sources);
+    free(out_times); free(out_sources); free(out_currents);
+    TEST_END;
+}
+
+static void test_backward_spikes_linear_scale(void)
+{
+    TEST("BackwardSpikes GradientScalesLinearly");
+    int n_pre = 10, n_post = 5, n_spikes = 20;
+    double* w = malloc(n_pre * n_post * sizeof(double));
+    double* times = malloc(n_spikes * sizeof(double));
+    int32_t* sources = malloc(n_spikes * sizeof(int32_t));
+    gen_data(n_pre, n_post, n_spikes, w, times, sources);
+
+    /* Forward pass */
+    int max_out = 10 * (n_spikes + 1) * n_post;
+    double* fwd_times = malloc(max_out * sizeof(double));
+    int32_t* fwd_sources = malloc(max_out * sizeof(int32_t));
+    double* fwd_currents = malloc(max_out * sizeof(double));
+
+    int n_fwd = eventprop_compute_spikes(w, n_pre, n_post,
+                                          times, sources, n_spikes,
+                                          1.0, 0.02, 0.005,
+                                          fwd_times, fwd_sources, fwd_currents);
+    ASSERT(n_fwd > 0, "no forward spikes");
+
+    /* Backward with errors=1.0 */
+    double* post_errors = calloc(n_fwd, sizeof(double));
+    for (int i = 0; i < n_fwd; i++) post_errors[i] = 1.0;
+    double* grad1 = calloc(n_pre * n_post, sizeof(double));
+    double* spike_errors1 = calloc(n_spikes, sizeof(double));
+    eventprop_backward_spikes(times, sources, n_spikes,
+                               fwd_times, fwd_sources, fwd_currents,
+                               post_errors, n_fwd,
+                               w, n_pre, n_post,
+                               1.0, 0.02, 0.005, grad1, spike_errors1);
+
+    /* Backward with errors=2.0 */
+    for (int i = 0; i < n_fwd; i++) post_errors[i] = 2.0;
+    double* grad2 = calloc(n_pre * n_post, sizeof(double));
+    double* spike_errors2 = calloc(n_spikes, sizeof(double));
+    eventprop_backward_spikes(times, sources, n_spikes,
+                               fwd_times, fwd_sources, fwd_currents,
+                               post_errors, n_fwd,
+                               w, n_pre, n_post,
+                               1.0, 0.02, 0.005, grad2, spike_errors2);
+
+    /* grad2 should be exactly 2× grad1 */
+    for (int i = 0; i < n_pre * n_post; i++) {
+        ASSERT_NEAR(grad2[i], 2.0 * grad1[i], EPSILON);
+    }
+
+    free(w); free(times); free(sources);
+    free(fwd_times); free(fwd_sources); free(fwd_currents);
+    free(post_errors);
+    free(grad1); free(grad2); free(spike_errors1); free(spike_errors2);
+    TEST_END;
+}
+
+/* ── Large-scale tests (200×80, 500 spikes) — original OOB trigger ─ */
+
+static void test_compute_sums_large(void)
+{
+    TEST("ComputeSums Large (200×80, 500 spikes)");
+    int n_pre = 200, n_post = 80, n_spikes = 500;
+    double* w = malloc(n_pre * n_post * sizeof(double));
+    double* times = malloc(n_spikes * sizeof(double));
+    int32_t* sources = malloc(n_spikes * sizeof(int32_t));
+    gen_data(n_pre, n_post, n_spikes, w, times, sources);
+
+    int n_sums = (n_spikes + 1) * n_post;
+    double* sum0 = calloc(n_sums, sizeof(double));
+    double* sum1 = calloc(n_sums, sizeof(double));
+
+    eventprop_compute_sums(w, n_pre, n_post, times, sources, n_spikes,
+                           0.02, 0.005, sum0, sum1);
+
+    /* Row 0 should be zeros */
+    for (int j = 0; j < n_post; j++) {
+        ASSERT_NEAR(sum0[j], 0.0, EPSILON);
+        ASSERT_NEAR(sum1[j], 0.0, EPSILON);
+    }
+
+    /* No NaN/Inf in sums */
+    for (int i = 0; i < n_sums; i++) {
+        ASSERT(!isnan(sum0[i]), "sum0 NaN");
+        ASSERT(!isinf(sum0[i]), "sum0 Inf");
+        ASSERT(!isnan(sum1[i]), "sum1 NaN");
+        ASSERT(!isinf(sum1[i]), "sum1 Inf");
+    }
+
+    free(w); free(times); free(sources);
+    free(sum0); free(sum1);
+    TEST_END;
+}
+
+static void test_backward_spikes_large(void)
+{
+    TEST("BackwardSpikes Large (200×80, 500 spikes)");
+    int n_pre = 200, n_post = 80, n_spikes = 500;
+    double* w = malloc(n_pre * n_post * sizeof(double));
+    double* times = malloc(n_spikes * sizeof(double));
+    int32_t* sources = malloc(n_spikes * sizeof(int32_t));
+    gen_data(n_pre, n_post, n_spikes, w, times, sources);
+
+    /* Forward pass */
+    int max_out = 10 * (n_spikes + 1) * n_post;
+    double* fwd_times = malloc(max_out * sizeof(double));
+    int32_t* fwd_sources = malloc(max_out * sizeof(int32_t));
+    double* fwd_currents = malloc(max_out * sizeof(double));
+
+    int n_fwd = eventprop_compute_spikes(w, n_pre, n_post,
+                                          times, sources, n_spikes,
+                                          1.0, 0.02, 0.005,
+                                          fwd_times, fwd_sources, fwd_currents);
+    ASSERT(n_fwd > 0, "no forward spikes");
+
+    /* Set errors = 1.0 */
+    double* post_errors = calloc(n_fwd, sizeof(double));
+    for (int i = 0; i < n_fwd; i++) post_errors[i] = 1.0;
+
+    /* Backward pass */
+    double* grad = calloc(n_pre * n_post, sizeof(double));
+    double* spike_errors = calloc(n_spikes, sizeof(double));
+    eventprop_backward_spikes(times, sources, n_spikes,
+                               fwd_times, fwd_sources, fwd_currents,
+                               post_errors, n_fwd,
+                               w, n_pre, n_post,
+                               1.0, 0.02, 0.005, grad, spike_errors);
+
+    /* No NaN/Inf in gradients */
+    for (int i = 0; i < n_pre * n_post; i++) {
+        ASSERT(!isnan(grad[i]), "grad NaN");
+        ASSERT(!isinf(grad[i]), "grad Inf");
+    }
+
+    free(w); free(times); free(sources);
+    free(fwd_times); free(fwd_sources); free(fwd_currents);
+    free(post_errors); free(grad); free(spike_errors);
+    TEST_END;
+}
+
+static void test_compute_maxima_large(void)
+{
+    TEST("ComputeMaxima Large (200×80, 500 spikes)");
+    int n_pre = 200, n_post = 80, n_spikes = 500;
+    double* w = malloc(n_pre * n_post * sizeof(double));
+    double* times = malloc(n_spikes * sizeof(double));
+    int32_t* sources = malloc(n_spikes * sizeof(int32_t));
+    gen_data(n_pre, n_post, n_spikes, w, times, sources);
+
+    double* max_times = malloc(n_post * sizeof(double));
+    double* max_values = malloc(n_post * sizeof(double));
+
+    eventprop_compute_maxima(w, n_pre, n_post,
+                              times, sources, n_spikes,
+                              0.02, 0.005, max_times, max_values);
+
+    /* No NaN in times/values pairs */
+    for (int i = 0; i < n_post; i++) {
+        ASSERT(!isnan(max_times[i]) || isnan(max_values[i]), "times/values mismatch");
+    }
+
+    free(w); free(times); free(sources);
+    free(max_times); free(max_values);
+    TEST_END;
+}
+
+static void test_backward_maxima_large(void)
+{
+    TEST("BackwardMaxima Large (200×80, 500 spikes)");
+    int n_pre = 200, n_post = 80, n_spikes = 500;
+    double* w = malloc(n_pre * n_post * sizeof(double));
+    double* times = malloc(n_spikes * sizeof(double));
+    int32_t* sources = malloc(n_spikes * sizeof(int32_t));
+    gen_data(n_pre, n_post, n_spikes, w, times, sources);
+
+    /* Forward: compute maxima */
+    double* max_times = malloc(n_post * sizeof(double));
+    double* max_values = malloc(n_post * sizeof(double));
+    eventprop_compute_maxima(w, n_pre, n_post,
+                              times, sources, n_spikes,
+                              0.02, 0.005, max_times, max_values);
+
+    /* Set up errors (all 1.0) */
+    double* max_errors = malloc(n_post * sizeof(double));
+    for (int i = 0; i < n_post; i++) max_errors[i] = 1.0;
+
+    /* Backward pass */
+    double* grad = calloc(n_pre * n_post, sizeof(double));
+    double* spike_errors = calloc(n_spikes, sizeof(double));
+    eventprop_backward_maxima(times, sources, n_spikes,
+                               max_times, max_values, max_errors, n_post,
+                               w, n_pre, n_post,
+                               0.02, 0.005, grad, spike_errors);
+
+    /* No NaN/Inf in gradients */
+    for (int i = 0; i < n_pre * n_post; i++) {
+        ASSERT(!isnan(grad[i]), "grad NaN");
+        ASSERT(!isinf(grad[i]), "grad Inf");
+    }
+
+    /* At least some gradient should be non-zero */
+    double grad_sum = 0.0;
+    for (int i = 0; i < n_pre * n_post; i++) grad_sum += fabs(grad[i]);
+    ASSERT(grad_sum > 1e-12, "all gradients zero");
+
+    free(w); free(times); free(sources);
+    free(max_times); free(max_values); free(max_errors);
+    free(grad); free(spike_errors);
+    TEST_END;
+}
+
 /* ── Main ─────────────────────────────────────────────────────────── */
 
 int main(void)
@@ -337,6 +655,18 @@ int main(void)
     test_backward_maxima();
     test_backward_maxima_zero_weights();
     test_backward_maxima_linear_scale();
+
+    /* Edge cases */
+    test_compute_first_spike();
+    test_zero_spikes();
+    test_negative_weights();
+    test_backward_spikes_linear_scale();
+
+    /* Large-scale (200×80, 500 spikes) — original OOB trigger */
+    test_compute_sums_large();
+    test_backward_spikes_large();
+    test_compute_maxima_large();
+    test_backward_maxima_large();
 
     printf("\n=================================\n");
     printf("Results: %d/%d passed, %d failed\n", tests_passed, tests_run, tests_failed);

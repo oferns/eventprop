@@ -497,16 +497,27 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
     eventprop_compute_sums(w, n_pre, n_post, times, sources, n_spikes,
                            tau_mem, tau_syn, sum0, sum1);
 
-    int max_spikes = n_spikes + 1;
-    double* post_times = calloc(max_spikes * n_post, sizeof(double));
-    double* post_currents = calloc(max_spikes * n_post, sizeof(double));
+    /* Per-neuron dynamic buffers — growable to handle burst patterns */
+    double** post_times_arr   = malloc(n_post * sizeof(double*));
+    double** post_currents_arr = malloc(n_post * sizeof(double*));
+    int* spike_caps  = calloc(n_post, sizeof(int));
     int* spike_counts = calloc(n_post, sizeof(int));
+
+    int initial_cap = n_spikes + 1;
+    for (int n = 0; n < n_post; n++) {
+        post_times_arr[n]   = calloc(initial_cap, sizeof(double));
+        post_currents_arr[n] = calloc(initial_cap, sizeof(double));
+        spike_caps[n]       = initial_cap;
+    }
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) if(n_post >= 40)
 #endif
     for (int target_nrn = 0; target_nrn < n_post; target_nrn++) {
-        int offset = target_nrn * max_spikes, count = 0;
+        double* p_times   = post_times_arr[target_nrn];
+        double* p_currents = post_currents_arr[target_nrn];
+        int cap = spike_caps[target_nrn];
+        int count = 0;
         int finished = 0, processed = 0;
 
         while (!finished) {
@@ -517,21 +528,26 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
                     double s0 = sum0[n_spikes * n_post + target_nrn];
                     double s1 = sum1[n_spikes * n_post + target_nrn];
                     for (int s = 0; s < count; s++)
-                        s1 += -v_th * exp(post_times[offset + s] / tau_mem);
+                        s1 += -v_th * exp(p_times[s] / tau_mem);
 
 
 
                     double tmax = tmax_prefactor * (tmax_summand + log(s1 / s0));
                     if (!isinf(tmax)) {
-                        double v = compute_v(tmax, i, count, post_times, offset, sum0, sum1,
+                        double v = compute_v(tmax, i, count, p_times, 0, sum0, sum1,
                                              target_nrn, n_post, k_prefactor, tau_mem, tau_syn, v_th);
                         if (v > v_th + 1e-14) {
-                            double t_lower = count > 0 ? post_times[offset + count - 1] : 0.0;
-                            struct root_ctx rctx; memset(&rctx, 0, sizeof(rctx)); rctx.sum0=sum0; rctx.sum1=sum1; rctx.i=i; rctx.spike_count=count; rctx.post_spike_times=post_times; rctx.neuron_offset=offset; rctx.target_nrn=target_nrn; rctx.n_post=n_post; rctx.k_prefactor=k_prefactor; rctx.tau_mem=tau_mem; rctx.tau_syn=tau_syn; rctx.v_th=v_th;
+                            double t_lower = count > 0 ? p_times[count - 1] : 0.0;
+                            struct root_ctx rctx; memset(&rctx, 0, sizeof(rctx)); rctx.sum0=sum0; rctx.sum1=sum1; rctx.i=i; rctx.spike_count=count; rctx.post_spike_times=p_times; rctx.neuron_offset=0; rctx.target_nrn=target_nrn; rctx.n_post=n_post; rctx.k_prefactor=k_prefactor; rctx.tau_mem=tau_mem; rctx.tau_syn=tau_syn; rctx.v_th=v_th;
                             double t_post = toms748_solve(&rctx, root_fn, t_lower, tmax);
                             if (t_post > t_lower && t_post < tmax) {
-                                post_times[offset + count] = t_post;
-                                post_currents[offset + count] = compute_i(t_post, n_spikes, times, sum0, target_nrn, n_post, tau_syn);
+                                if (count >= cap) {
+                                    cap *= 2;
+                                    p_times    = realloc(p_times, cap * sizeof(double));
+                                    p_currents = realloc(p_currents, cap * sizeof(double));
+                                }
+                                p_times[count]   = t_post;
+                                p_currents[count] = compute_i(t_post, n_spikes, times, sum0, target_nrn, n_post, tau_syn);
                                 count++; found = 1;
                             }
                         }
@@ -545,24 +561,29 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
                     }
                 } else {
                     double t_input = times[i];
-                    double tmax = compute_tmax(i, n_spikes, times, count, post_times, offset,
+                    double tmax = compute_tmax(i, n_spikes, times, count, p_times, 0,
                                                sum0, sum1, target_nrn, n_post, tmax_prefactor, tmax_summand, tau_mem, v_th);
 
                     if (!isinf(tmax)) {
-                        double v = compute_v(tmax, i, count, post_times, offset, sum0, sum1,
+                        double v = compute_v(tmax, i, count, p_times, 0, sum0, sum1,
                                              target_nrn, n_post, k_prefactor, tau_mem, tau_syn, v_th);
                         if (v > v_th + 1e-14) {
                             double t_before = (i > 0) ? times[i-1] : 0.0;
                             for (int s = 0; s < count; s++) {
-                                double st = post_times[offset + s];
+                                double st = p_times[s];
                                 if (st > t_input) break;
                                 if (st > t_before) t_before = st;
                             }
-                            struct root_ctx rctx; memset(&rctx, 0, sizeof(rctx)); rctx.sum0=sum0; rctx.sum1=sum1; rctx.i=i; rctx.spike_count=count; rctx.post_spike_times=post_times; rctx.neuron_offset=offset; rctx.target_nrn=target_nrn; rctx.n_post=n_post; rctx.k_prefactor=k_prefactor; rctx.tau_mem=tau_mem; rctx.tau_syn=tau_syn; rctx.v_th=v_th;
+                            struct root_ctx rctx; memset(&rctx, 0, sizeof(rctx)); rctx.sum0=sum0; rctx.sum1=sum1; rctx.i=i; rctx.spike_count=count; rctx.post_spike_times=p_times; rctx.neuron_offset=0; rctx.target_nrn=target_nrn; rctx.n_post=n_post; rctx.k_prefactor=k_prefactor; rctx.tau_mem=tau_mem; rctx.tau_syn=tau_syn; rctx.v_th=v_th;
                             double t_post = toms748_solve(&rctx, root_fn, t_before, tmax);
                             if (t_post > t_before && t_post < tmax) {
-                                post_times[offset + count] = t_post;
-                                post_currents[offset + count] = compute_i(t_post, n_spikes, times, sum0, target_nrn, n_post, tau_syn);
+                                if (count >= cap) {
+                                    cap *= 2;
+                                    p_times    = realloc(p_times, cap * sizeof(double));
+                                    p_currents = realloc(p_currents, cap * sizeof(double));
+                                }
+                                p_times[count]   = t_post;
+                                p_currents[count] = compute_i(t_post, n_spikes, times, sum0, target_nrn, n_post, tau_syn);
                                 count++; found = 1;
                             }
                             processed = i; break;
@@ -570,20 +591,25 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
                     }
 
                     /* Check at input spike time */
-                    double v_at_input = compute_v(t_input, i, count, post_times, offset, sum0, sum1,
+                    double v_at_input = compute_v(t_input, i, count, p_times, 0, sum0, sum1,
                                                   target_nrn, n_post, k_prefactor, tau_mem, tau_syn, v_th);
                     if (v_at_input > v_th + 1e-14) {
                         double t_before = (i > 0) ? times[i-1] : 0.0;
                         for (int s = 0; s < count; s++) {
-                            double st = post_times[offset + s];
+                            double st = p_times[s];
                             if (st > t_input) break;
                             if (st > t_before) t_before = st;
                         }
-                        struct root_ctx rctx; memset(&rctx, 0, sizeof(rctx)); rctx.sum0=sum0; rctx.sum1=sum1; rctx.i=i; rctx.spike_count=count; rctx.post_spike_times=post_times; rctx.neuron_offset=offset; rctx.target_nrn=target_nrn; rctx.n_post=n_post; rctx.k_prefactor=k_prefactor; rctx.tau_mem=tau_mem; rctx.tau_syn=tau_syn; rctx.v_th=v_th;
+                        struct root_ctx rctx; memset(&rctx, 0, sizeof(rctx)); rctx.sum0=sum0; rctx.sum1=sum1; rctx.i=i; rctx.spike_count=count; rctx.post_spike_times=p_times; rctx.neuron_offset=0; rctx.target_nrn=target_nrn; rctx.n_post=n_post; rctx.k_prefactor=k_prefactor; rctx.tau_mem=tau_mem; rctx.tau_syn=tau_syn; rctx.v_th=v_th;
                         double t_post = toms748_solve(&rctx, root_fn, t_before, t_input);
                         if (t_post > t_before && t_post < t_input) {
-                            post_times[offset + count] = t_post;
-                            post_currents[offset + count] = compute_i(t_post, n_spikes, times, sum0, target_nrn, n_post, tau_syn);
+                            if (count >= cap) {
+                                cap *= 2;
+                                p_times    = realloc(p_times, cap * sizeof(double));
+                                p_currents = realloc(p_currents, cap * sizeof(double));
+                            }
+                            p_times[count]   = t_post;
+                            p_currents[count] = compute_i(t_post, n_spikes, times, sum0, target_nrn, n_post, tau_syn);
                             count++; found = 1;
                         }
                         processed = i; break;
@@ -592,22 +618,32 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
             }
             if (!found) processed = (processed + 1 < n_spikes) ? processed + 1 : n_spikes;
         }
-        spike_counts[target_nrn] = count;
+        /* Write back updated pointers (in case realloc moved them) */
+        post_times_arr[target_nrn]   = p_times;
+        post_currents_arr[target_nrn] = p_currents;
+        spike_caps[target_nrn]       = cap;
+        spike_counts[target_nrn]     = count;
     }
 
     int total = 0;
     for (int n = 0; n < n_post; n++) total += spike_counts[n];
 
-    if (total == 0) { free(sum0); free(sum1); free(post_times); free(post_currents); free(spike_counts); return 0; }
+    if (total == 0) {
+        for (int n = 0; n < n_post; n++) { free(post_times_arr[n]); free(post_currents_arr[n]); }
+        free(sum0); free(sum1); free(post_times_arr); free(post_currents_arr);
+        free(spike_caps); free(spike_counts); return 0;
+    }
 
     SpikeEntry* entries = malloc(total * sizeof(SpikeEntry));
     int idx = 0;
     for (int n = 0; n < n_post; n++) {
-        int cnt = spike_counts[n], off = n * max_spikes;
+        int cnt = spike_counts[n];
+        double* pt   = post_times_arr[n];
+        double* pc   = post_currents_arr[n];
         for (int k = 0; k < cnt; k++) {
-            entries[idx].time = post_times[off + k];
-            entries[idx].source = n;
-            entries[idx].current = post_currents[off + k];
+            entries[idx].time    = pt[k];
+            entries[idx].source  = n;
+            entries[idx].current = pc[k];
             idx++;
         }
     }
@@ -620,7 +656,9 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
         out_currents[i] = entries[i].current;
     }
 
-    free(sum0); free(sum1); free(post_times); free(post_currents); free(spike_counts); free(entries);
+    for (int n = 0; n < n_post; n++) { free(post_times_arr[n]); free(post_currents_arr[n]); }
+    free(sum0); free(sum1); free(post_times_arr); free(post_currents_arr);
+    free(spike_caps); free(spike_counts); free(entries);
     return total;
 }
 
