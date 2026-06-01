@@ -336,3 +336,20 @@ Tests are written before implementation. Each new function should have:
 - **`ComputeSpikes`**: Forward pass — finds threshold-crossing times via root-finding (Toms748/Brent)
 - **`Backward`**: Adjoint method — time-reversed sweep propagating λ_v (membrane) and λ_i (synaptic) adjoints
 - **`ComputeMaxima`**: Finds membrane potential maxima per neuron (for voltage-based loss)
+
+---
+
+## ⚠️ KNOWN ISSUE: OOB Buffer Overflow in `eventprop_compute_spikes`
+
+**Location**: `src/EventProp.C/eventprop_scalar.c` — `eventprop_compute_spikes()`
+
+**Root cause**: The C library uses a **fixed-size internal spike buffer** sized `(n_spikes + 1) * n_post`, assuming at most one output spike per input interval. Burst patterns with tightly clustered spikes cause **multiple threshold crossings** per interval, producing more output spikes than the buffer can hold.
+
+**Symptom**: Buffer overflow (OOB writes) corrupts adjacent memory, causing:
+- Infinite loops in the root-finder (clipped spikes never update voltage)
+- Segfaults/bus errors on Medium/Large problem sizes (200×80, 500×200)
+- Uniform/poisson patterns work fine (spikes are well-spaced, ≤1 output spike per interval)
+
+**Why C++/Eigen doesn't crash**: It uses `std::vector<std::vector<...>>` which **dynamically resizes** — no fixed buffer, no overflow.
+
+**Fix needed**: Replace fixed-size buffer with dynamic reallocation (or accept a caller-provided scratch buffer) and add bounds checks in all spike-writing loops.
