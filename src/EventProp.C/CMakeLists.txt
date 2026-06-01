@@ -28,6 +28,7 @@ endif()
 # Optional OpenMP for parallel neuron processing in ComputeSpikes
 find_package(OpenMP QUIET)
 add_library(eventprop_c_api SHARED eventprop_scalar.c)
+target_compile_options(eventprop_c_api PRIVATE -ffp-contract=fast)
 target_link_libraries(eventprop_c_api PRIVATE m)
 if(OpenMP_C_FOUND)
     target_link_libraries(eventprop_c_api PRIVATE OpenMP::OpenMP_C)
