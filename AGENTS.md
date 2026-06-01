@@ -28,6 +28,9 @@ eventprop.net/
 │   ├── EventProp.Benchmarks/   # BenchmarkDotNet benchmarks
 │   ├── EventProp.Tests/        # Test project (TUnit)
 │   ├── EventProp.Cpp.Wrapper/  # C bridge: flat arrays ↔ Eigen/Spikes
+│   │   ├── eventprop_c_api.h/.cpp  # Flat-array C API over Eigen core
+│   │   ├── tests.cpp               # Eigen direct unit tests (23 tests)
+│   │   └── tests_capi.cpp          # C API wrapper unit tests (14 tests)
 │   ├── EventProp.C/            # Pure C implementation (libeventprop_c_api)
 │   ├── EventProp.Native.Python/  # Python bindings: CFFI (pure C → CPython)
 │   └── EventProp.Python/       # Python bindings: pybind11 (git submodule)
@@ -82,6 +85,10 @@ cd src/EventProp.Tests && dotnet run -c Release -- --treenode-filter "/*/*/Compu
 # ── C/C++ Parity Tests (C vs Eigen, standalone) ─────────────────
 cd src/EventProp.Native.ParityTests && rm -rf build && mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build . && ./parity_test ../../EventProp.C/build/libeventprop_c_api.dylib
+
+# ── C API Wrapper Tests (C++ flat-array → Eigen) ───────────────
+cd src/EventProp.Cpp.Wrapper && rm -rf build && mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build . && ./eventprop_capi_tests
 
 # ── C/C++ Benchmarks (C vs Eigen performance) ───────────────────
 cd src/EventProp.Native.Benchmarks && rm -rf build && mkdir build && cd build
@@ -266,6 +273,8 @@ python3 setup.py build_ext --inplace
 - Rpath: use `install_name_tool -change @rpath/...` to fix shared library lookup at runtime
 - Architecture: build as `arm64` only (matches libomp on Apple Silicon), NOT universal2
 
+- **`tests_capi.cpp`** (`EventProp.Cpp.Wrapper/`) — C API wrapper unit tests mirroring the pure C suite. 14 tests covering all flat-array functions (compute_sums, compute_spikes, backward_spikes, compute_maxima, backward_maxima) plus edge cases (zero weights, linear scaling, zero/negative inputs) and large-scale validation (200×80, 500 spikes).
+
 - **`NativeVsManagedTests.cs`** — C# (EventPropMath) vs NativeApi (C library). Tests: ComputeSums, ComputeSpikes, ComputeMaxima, Backward. Uses uniform patterns only.
 - **`NumericalParityTests.cs`** — Three-way: NativeApi (C) ≡ NativeCppApi (Eigen, source of truth) ≡ EventPropMath (.NET). All patterns/sizes. **This is the main parity test suite.**
 - **`NativeLibraryParityTests.cs`** — C vs Eigen ONLY (no .NET). Tests: BackwardSpikes, BackwardMaxima. All patterns/sizes.
@@ -347,7 +356,7 @@ Tests are written before implementation. Each new function should have:
 
 **Fix applied**: Replaced flat `double* post_times` / `double* post_currents` arrays with per-neuron dynamic buffers (`double**`) that double capacity via `realloc` on overflow. OpenMP parallelization retained — each thread owns its neuron's buffer, and updated pointers are written back after the loop.
 
-**Verification**: 17/17 C unit tests pass (including large-scale 200×80), 23/23 C++ Eigen unit tests pass, 20/20 C vs Eigen parity tests pass at original sizes, 60/60 NativeVsManaged (.NET) tests pass. No meaningful performance regression on realistic workloads.
+**Verification**: 17/17 C unit tests pass (including large-scale 200×80), 23/23 C++ Eigen direct unit tests pass, 14/14 C API wrapper unit tests pass, 20/20 C vs Eigen parity tests pass at original sizes, 60/60 NativeVsManaged (.NET) tests pass. No meaningful performance regression on realistic workloads.
 
 ### Parity Test Limitation — Large-Scale In-Process Testing
 
@@ -355,7 +364,10 @@ The C library and Eigen core **both use OpenMP** (`#pragma omp parallel for` in 
 
 - Both libraries link against the same `/opt/homebrew/opt/libomp/lib/libomp.dylib`
 - `OMP_NUM_THREADS=1` reduces but doesn't eliminate the issue (still ~10% failure rate)
-- Each library passes large-scale tests **in isolation** (C: 17/17, Eigen: 23/23)
+- Each library passes large-scale tests **in isolation** (C: 17/17, Eigen direct: 23/23, C API wrapper: 14/14)
 - The parity test was also fixed to use **independent data copies** instead of `Eigen::Map` views onto C-owned buffers — this eliminated buffer aliasing but the race persists
 
-**Workaround**: Keep parity tests at ≤50×20 scale. Validate large-scale correctness via isolated unit test suites (`tests.c` for C, `tests.cpp` for Eigen).
+**Workaround**: Keep parity tests at ≤50×20 scale. Validate large-scale correctness via isolated unit test suites:
+- **C library** — `src/EventProp.C/tests.c` (17 tests, includes 4 large-scale at 200×80)
+- **Eigen direct** — `src/EventProp.Cpp.Wrapper/tests.cpp` (23 tests, includes 5 large-scale + edge cases)
+- **C API wrapper** — `src/EventProp.Cpp.Wrapper/tests_capi.cpp` (14 tests, mirrors C suite via flat-array interface)

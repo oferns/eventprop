@@ -147,6 +147,9 @@ src/
 ├── EventProp.Benchmarks/   # BenchmarkDotNet benchmarks
 ├── EventProp.Tests/        # TUnit tests
 ├── EventProp.Cpp.Wrapper/  # C bridge: flat arrays ↔ Eigen/Spikes
+│   ├── eventprop_c_api.h/.cpp  # Flat-array C API over Eigen core
+│   ├── tests.cpp               # Eigen direct unit tests (23 tests)
+│   └── tests_capi.cpp          # C API wrapper unit tests (14 tests)
 ├── EventProp.C/            # Pure C implementation (libeventprop_c_api)
 ├── EventProp.Native.Python/  # Python bindings: CFFI (pure C → CPython)
 └── EventProp.Python/       # Python bindings: pybind11 (git submodule)
@@ -160,6 +163,31 @@ cd src/EventProp.Tests && dotnet run -c Release -- --no-progress
 
 > **Note**: TUnit uses Microsoft Testing Platform (MTP), not VSTest. `dotnet test` does NOT work.
 > The `-c` flag goes BEFORE `--`, TUnit flags go AFTER `--`.
+
+### Native Unit Tests
+
+Three independent native test suites validate correctness across implementations:
+
+```bash
+# C library unit tests (17 tests, includes large-scale 200×80)
+cd src/EventProp.C && rm -rf build && mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build . && ./test_runner
+
+# Eigen direct unit tests (23 tests, edge cases + large-scale)
+cd src/EventProp.Cpp.Wrapper && rm -rf build && mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build . && ./eventprop_cpp_tests
+
+# C API wrapper unit tests (14 tests, flat-array interface over Eigen)
+cd src/EventProp.Cpp.Wrapper/build && ./eventprop_capi_tests
+```
+
+| Suite | Tests | Coverage |
+|-------|-------|----------|
+| **C library** (`tests.c`) | 17 | All functions + edge cases (zero spikes, negative weights, large-scale) |
+| **Eigen direct** (`tests.cpp`) | 23 | All Eigen methods + degenerate shapes, parameter variations, temporal extremes |
+| **C API wrapper** (`tests_capi.cpp`) | 14 | Flat-array C interface mirroring pure C suite |
+| **Parity tests** (C vs Eigen) | 20 | Numerical equivalence at ≤50×20 scale |
+| **.NET** (TUnit) | 408 | Full managed API + three-way parity (C ≡ Eigen ≡ .NET) |
 
 ## Coverage
 
