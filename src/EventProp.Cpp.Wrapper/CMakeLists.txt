@@ -73,19 +73,22 @@ endif()
 
 # ── Unit tests (targets Eigen directly, not via C API) ─────────
 add_executable(eventprop_cpp_tests tests.cpp)
+
+# ── C API wrapper unit tests (mirrors src/EventProp.C/tests.c) ──
+add_executable(eventprop_capi_tests tests_capi.cpp eventprop_c_api.cpp)
+target_include_directories(eventprop_capi_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${EIGEN_DIR}
+    ${BOOST_INCLUDE_DIR}
+)
+target_link_libraries(eventprop_capi_tests PRIVATE eventprop_eigen_core)
+
 target_include_directories(eventprop_cpp_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${EIGEN_DIR}
     ${BOOST_INCLUDE_DIR}
 )
 target_link_libraries(eventprop_cpp_tests PRIVATE eventprop_eigen_core)
-if(APPLE AND _BREW_FAIL EQUAL 0)
-    target_compile_options(eventprop_cpp_tests PRIVATE -mcpu=apple-m3)
-    target_include_directories(eventprop_cpp_tests PRIVATE ${OpenMP_CXX_INCLUDE_DIRS})
-    target_link_libraries(eventprop_cpp_tests PRIVATE ${OpenMP_CXX_LIBRARIES})
-elseif(OpenMP_CXX_FOUND)
-    target_link_libraries(eventprop_cpp_tests PRIVATE OpenMP::OpenMP_CXX)
-endif()
 
 # Install targets
 install(TARGETS eventprop_c_api LIBRARY DESTINATION lib)
