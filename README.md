@@ -121,10 +121,10 @@ python3 setup.py build_ext --inplace
 
 **Build pybind11 bindings**:
 
-⚠️ **Note**: The submodule is read-only. Before building, apply the patch to remove M3-specific CPU flags:
+⚠️ **Note**: The submodule is read-only. Before building, apply the patch for macOS compatibility:
 ```bash
 cd src/EventProp.Python
-patch -p0 < setup.py.patch  # or edit setup.py: remove "-mcpu=apple-m3" from extra_compile_args
+patch -p0 < setup.py.patch  # fixes OpenMP flag and adds include paths
 pip install -e .
 ```
 
