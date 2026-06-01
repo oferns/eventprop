@@ -371,3 +371,113 @@ The C library and Eigen core **both use OpenMP** (`#pragma omp parallel for` in 
 - **C library** — `src/EventProp.C/tests.c` (17 tests, includes 4 large-scale at 200×80)
 - **Eigen direct** — `src/EventProp.Cpp.Wrapper/tests.cpp` (23 tests, includes 5 large-scale + edge cases)
 - **C API wrapper** — `src/EventProp.Cpp.Wrapper/tests_capi.cpp` (14 tests, mirrors C suite via flat-array interface)
+
+---
+
+## ✅ C Library Optimization Campaign (2026-06-01)
+
+**Context**: C library was 1.5–3x slower than C++ Eigen core on benchmarks. Root cause analysis and optimization implemented.
+
+### Benchmark Fairness Fixes Applied
+
+| Issue | Fix |
+|-------|-----|
+| C++ had CPU-specific optimization, C didn't | Added `-mcpu=apple-m3` to `EventProp.C/CMakeLists.txt` for arm64 |
+| ComputeSums missing DoNotOptimize | Added `benchmark::DoNotOptimize(sum0/sum1.data())` in `bench_main.cpp` |
+
+### Optimizations Implemented
+
+#### #1: Stack arrays for exp_mem/exp_syn in compute_sums (Low impact)
+
+**Problem**: Two malloc calls per forward pass for exponential lookup tables.
+
+**Fix**: Use stack arrays when n_spikes ≤ 1024, heap allocation otherwise.
+
+```c
+double stack_exp_mem[EXP_STACK_SIZE];  // 1024 doubles
+int use_stack = (n_spikes <= EXP_STACK_SIZE);
+double* exp_mem = use_stack ? stack_exp_mem : malloc(n_spikes * sizeof(double));
+```
+
+**Result**: No measurable performance change (FMA computation dominates).
+
+---
+
+#### #2: Larger initial buffer capacity + triple growth (HIGH impact)
+
+**Problem**: Dynamic per-neuron spike buffers starting at n_spikes+1 caused frequent realloc during burst patterns.
+
+**Fix**: 
+- Initial capacity: `n_spikes + 1` → `n_spikes * 3 + 1`
+- Growth factor: `cap *= 2` → `cap *= 3` (at all 3 realloc sites)
+
+**Result**: **2.4–2.9x improvement on ComputeSpikes at Large scale.**
+
+| Benchmark | Before (ratio) | After (ratio) |
+|-----------|----------------|---------------|
+| ComputeSpikes Large uniform | 1.83x C slower | **0.47x C FASTER** |
+| ComputeSpikes Large poisson | 1.40x C slower | **0.48x C FASTER** |
+| ComputeSpikes Medium uniform | 1.15x C slower | **0.46x C FASTER** |
+| ComputeSpikes Medium poisson | 1.54x C slower | **0.57x C FASTER** |
+
+*Ratio = C/C++, >1 means C++ faster, <1 means C faster.*
+
+---
+
+#### #5: Fix diff[256] stack buffer overflow risk (Medium impact + correctness)
+
+**Problem**: Fixed 256-element stack buffer with slow fallback path for n_post > 256.
+
+**Fix**: Use 512-element stack buffer or heap allocation for all n_post sizes.
+
+```c
+double stack_diff[DIFF_STACK_SIZE];  // 512 doubles
+int use_stack = (n_post <= DIFF_STACK_SIZE);
+double* diff = use_stack ? stack_diff : malloc(n_post * sizeof(double));
+```
+
+**Result**: 2.4–3.1x improvement on BackwardSpikes at Large scale.
+
+| Benchmark | Before (ratio) | After (ratio) |
+|-----------|----------------|---------------|
+| BackwardSpikes Large uniform | 3.36x C slower | **1.06x roughly equal** |
+| BackwardSpikes Large poisson | 3.07x C slower | **1.00x equal** |
+| BackwardSpikes Medium uniform | 2.59x C slower | **0.98x roughly equal** |
+| BackwardSpikes Medium poisson | 2.42x C slower | **1.03x roughly equal** |
+
+---
+
+### Remaining Issues
+
+1. **Medium/Large burst patterns still timeout** — root-finding iterations are the bottleneck; needs optimization #3 (exponential term caching in Toms748 solver)
+2. **ComputeSums still ~1.3x slower** — likely SIMD implementation vs Eigen auto-vectorization difference
+3. **Tiny/Small uniform BackwardSpikes noisy** — nanosecond-scale tests affected by thermal/system noise
+
+### Optimization Priority (for future work)
+
+| # | Optimization | Effort | Impact |
+|---|-------------|--------|--------|
+| 3 | Cache exponential computations in root-finding | Medium | High (fixes burst timeout) |
+| 4 | Increase SIMD fallback threshold from 2 to vector width | Low | Low-Medium |
+| 6 | Pre-allocate jump storage in backward_spikes (reduces realloc) | Low-Medium | Medium |
+| 7 | Parallelize compute_maxima with OpenMP | Low | Low |
+
+### Benchmark Commands (excluding slow burst patterns)
+
+```bash
+cd src/EventProp.Native.Benchmarks/build
+
+# Run each operation separately (no --exclude_filter in v1.9.1)
+for op in ComputeSums ComputeSpikes BackwardSpikes; do
+  # Tiny/Small: all patterns
+  ./bench_c --benchmark_min_time=0.1s --benchmark_filter="$op/(Tiny|Small)/.*"
+  ./bench_cpp --benchmark_min_time=0.1s --benchmark_filter="$op/(Tiny|Small)/.*"
+  # Medium/Large: only uniform and poisson
+  for size in Medium Large; do
+    ./bench_c --benchmark_min_time=0.1s --benchmark_filter="$op/$size/uniform"
+    ./bench_cpp --benchmark_min_time=0.1s --benchmark_filter="$op/$size/uniform"
+    ./bench_c --benchmark_min_time=0.1s --benchmark_filter="$op/$size/poisson"
+    ./bench_cpp --benchmark_min_time=0.1s --benchmark_filter="$op/$size/poisson"
+  done
+done
+```

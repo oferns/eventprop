@@ -278,8 +278,14 @@ void eventprop_compute_sums(const double* w, int n_pre, int n_post,
                             double tau_mem, double tau_syn,
                             double* sum0, double* sum1)
 {
-    double* exp_mem = (double*)malloc(n_spikes * sizeof(double));
-    double* exp_syn = (double*)malloc(n_spikes * sizeof(double));
+    /* Stack allocation for small spike counts — avoids malloc overhead */
+#define EXP_STACK_SIZE 1024
+    double stack_exp_mem[EXP_STACK_SIZE];
+    double stack_exp_syn[EXP_STACK_SIZE];
+
+    int use_stack = (n_spikes <= EXP_STACK_SIZE);
+    double* exp_mem   = use_stack ? stack_exp_mem  : (double*)malloc(n_spikes * sizeof(double));
+    double* exp_syn   = use_stack ? stack_exp_syn  : (double*)malloc(n_spikes * sizeof(double));
 
     for (int i = 0; i < n_spikes; i++) {
         exp_mem[i] = exp(times[i] / tau_mem);
@@ -299,7 +305,7 @@ void eventprop_compute_sums(const double* w, int n_pre, int n_post,
                      w + src_offset, exp_mem_i, n_post);
     }
 
-    free(exp_mem); free(exp_syn);
+    if (!use_stack) { free(exp_mem); free(exp_syn); }
 }
 
 /* ── ComputeV: membrane potential at time t for interval i ─────────── */
@@ -503,7 +509,8 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
     int* spike_caps  = calloc(n_post, sizeof(int));
     int* spike_counts = calloc(n_post, sizeof(int));
 
-    int initial_cap = n_spikes + 1;
+    /* Start with 3× estimated spikes to reduce realloc overhead in burst patterns */
+    int initial_cap = n_spikes * 3 + 1;
     for (int n = 0; n < n_post; n++) {
         post_times_arr[n]   = calloc(initial_cap, sizeof(double));
         post_currents_arr[n] = calloc(initial_cap, sizeof(double));
@@ -542,7 +549,7 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
                             double t_post = toms748_solve(&rctx, root_fn, t_lower, tmax);
                             if (t_post > t_lower && t_post < tmax) {
                                 if (count >= cap) {
-                                    cap *= 2;
+                                    cap *= 3; /* Triple capacity to reduce realloc frequency */
                                     p_times    = realloc(p_times, cap * sizeof(double));
                                     p_currents = realloc(p_currents, cap * sizeof(double));
                                 }
@@ -578,7 +585,7 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
                             double t_post = toms748_solve(&rctx, root_fn, t_before, tmax);
                             if (t_post > t_before && t_post < tmax) {
                                 if (count >= cap) {
-                                    cap *= 2;
+                                    cap *= 3; /* Triple capacity to reduce realloc frequency */
                                     p_times    = realloc(p_times, cap * sizeof(double));
                                     p_currents = realloc(p_currents, cap * sizeof(double));
                                 }
@@ -604,7 +611,7 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
                         double t_post = toms748_solve(&rctx, root_fn, t_before, t_input);
                         if (t_post > t_before && t_post < t_input) {
                             if (count >= cap) {
-                                cap *= 2;
+                                cap *= 3; /* Triple capacity to reduce realloc frequency */
                                 p_times    = realloc(p_times, cap * sizeof(double));
                                 p_currents = realloc(p_currents, cap * sizeof(double));
                             }
@@ -752,16 +759,19 @@ void eventprop_backward_spikes(const double* times, const int32_t* sources, int 
 
             vadd_scaled_simd(grad + spike_source * n_post, lambda_i, -tau_syn, n_post);
 
-            /* Compute dot product: w[row] · (lambda_v - lambda_i) */
-            double diff[256]; /* Stack buffer for typical n_post sizes */
-            int dlen = (n_post <= 256) ? n_post : 256;
-            for (int j = 0; j < dlen; j++)
+            /* Compute dot product: w[row] · (lambda_v - lambda_i)
+               Use stack allocation for small n_post, heap otherwise. */
+#define DIFF_STACK_SIZE 512
+            double stack_diff[DIFF_STACK_SIZE];
+            int use_stack = (n_post <= DIFF_STACK_SIZE);
+            double* diff = use_stack ? stack_diff : malloc(n_post * sizeof(double));
+
+            for (int j = 0; j < n_post; j++)
                 diff[j] = lambda_v[j] - lambda_i[j];
-            double outbound = dot_product_simd(w + spike_source * n_post, diff, dlen);
-            /* Handle remainder if n_post > 256 */
-            for (int j = dlen; j < n_post; j++)
-                outbound += w[spike_source * n_post + j] * (lambda_v[j] - lambda_i[j]);
+            double outbound = dot_product_simd(w + spike_source * n_post, diff, n_post);
             all_errors[spike_idx] += outbound;
+
+            if (!use_stack) free(diff);
 
             /* Write spike error to caller's buffer (zero-copy) */
             if (spike_errors != NULL)

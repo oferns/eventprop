@@ -133,6 +133,8 @@ static void BM_ComputeSums(benchmark::State& state, const ProblemSize& sz, DataG
         eventprop_compute_sums(w.data(), sz.n_pre, sz.n_post,
             times.data(), sources.data(), sz.n_spikes, 0.02, 0.005, sum0.data(), sum1.data());
 #endif
+        benchmark::DoNotOptimize(sum0.data());
+        benchmark::DoNotOptimize(sum1.data());
     }
 
     state.SetItemsProcessed(state.iterations() * sz.n_spikes);

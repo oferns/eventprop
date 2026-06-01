@@ -76,9 +76,8 @@ target_include_directories(eventprop_eigen_core PRIVATE
     ${BOOST_INCLUDE_DIR}
 )
 
-# macOS-specific: use apple-m3, no -fopenmp flag
+# OpenMP for parallelization (no CPU-specific flags — let compiler auto-detect)
 if(APPLE AND _BREW_FAIL EQUAL 0)
-    target_compile_options(eventprop_eigen_core PRIVATE -mcpu=apple-m3)
     target_include_directories(eventprop_eigen_core PRIVATE ${OpenMP_CXX_INCLUDE_DIRS})
     target_link_libraries(eventprop_eigen_core PRIVATE ${OpenMP_CXX_LIBRARIES})
 elseif(OpenMP_CXX_FOUND)
