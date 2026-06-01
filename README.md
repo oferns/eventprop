@@ -17,11 +17,17 @@ EventProp is an event-based backpropagation method that computes **exact gradien
 ## Building
 
 ```bash
-# Build everything (C, C++, Python, .NET)
+# Build everything (C, C++, Python, .NET, parity tests, benchmarks)
 ./build.sh release
 
 # Clean all build outputs
-clean.sh
+clean.sh              # removes everything (all targets)
+clean.sh c            # only C library
+clean.sh cpp          # only C++ wrapper
+clean.sh python       # only Python package
+clean.sh dotnet       # only .NET projects
+clean.sh parity       # only parity tests (C vs Eigen)
+clean.sh benchmarks   # only native benchmarks
 ```
 
 ## Quick Start
@@ -142,15 +148,18 @@ src/
 ├── EventProp.Tests/        # TUnit tests
 ├── EventProp.Cpp.Wrapper/  # C bridge: flat arrays ↔ Eigen/Spikes
 ├── EventProp.C/            # Pure C implementation (libeventprop_c_api)
-├── EventProp.Native.Python/# Python bindings: CFFI (pure C → CPython)
+├── EventProp.Native.Python/  # Python bindings: CFFI (pure C → CPython)
 └── EventProp.Python/       # Python bindings: pybind11 (git submodule)
 ```
 
 ## Running Tests
 
 ```bash
-cd src/EventProp.Tests && dotnet run -- --report-trx
+cd src/EventProp.Tests && dotnet run -c Release -- --no-progress
 ```
+
+> **Note**: TUnit uses Microsoft Testing Platform (MTP), not VSTest. `dotnet test` does NOT work.
+> The `-c` flag goes BEFORE `--`, TUnit flags go AFTER `--`.
 
 ## Coverage
 

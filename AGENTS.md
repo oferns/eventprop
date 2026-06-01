@@ -29,7 +29,7 @@ eventprop.net/
 │   ├── EventProp.Tests/        # Test project (TUnit)
 │   ├── EventProp.Cpp.Wrapper/  # C bridge: flat arrays ↔ Eigen/Spikes
 │   ├── EventProp.C/            # Pure C implementation (libeventprop_c_api)
-│   ├── EventProp.Native.Python/# Python bindings: CFFI (pure C → CPython)
+│   ├── EventProp.Native.Python/  # Python bindings: CFFI (pure C → CPython)
 │   └── EventProp.Python/       # Python bindings: pybind11 (git submodule)
 ├── coverage-report/            # Generated HTML coverage reports (gitignored)
 └── AGENTS.md                   # This file
@@ -47,18 +47,20 @@ eventprop.net/
 ## Building
 
 ```bash
-# Build everything (C, C++, Python, .NET) — Release mode
+# Build everything (C, C++, Python, .NET, parity tests, benchmarks) — Release mode
 ./build.sh release
 
 # Build everything — Debug mode
 ./build.sh debug
 
 # Clean all build outputs
-clean.sh              # removes everything
+clean.sh              # removes everything (all targets)
 clean.sh c            # only C library
-./clean.sh cpp        # only C++ wrapper
-./clean.sh python     # only Python package
-./clean.sh dotnet     # only .NET projects
+clean.sh cpp          # only C++ wrapper
+clean.sh python       # only Python package
+clean.sh dotnet       # only .NET projects
+clean.sh parity       # only parity tests (C vs Eigen)
+clean.sh benchmarks   # only native benchmarks (C vs C++)
 clean.sh all          # same as clean.sh (no args)
 ```
 
@@ -208,7 +210,7 @@ cd src/EventProp.Tests && dotnet run -c Release -- --fail-fast 2>&1 | grep "fail
 
 **Location**: `src/EventProp.Native.ParityTests/`
 
-A standalone C++ test project that compares the pure C implementation (`libeventprop_c_api.dylib`) against the Eigen-based core (stripped from EventProp.Python, no pybind11). Uses identical input data and asserts numerical equality.
+A standalone C++ test project that compares the pure C implementation (`libeventprop_c_api.dylib`) against the Eigen-based core (stripped from EventProp.Python, no pybind11). Uses identical input data and asserts numerical equality. Built automatically by `./build.sh`.
 
 **Build & Run**:
 ```bash
@@ -225,7 +227,7 @@ cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
 
 **Location**: `src/EventProp.Native.Benchmarks/`
 
-Compares C library vs Eigen core performance across problem sizes and spike patterns.
+Compares C library vs Eigen core (C++ wrapper) performance across problem sizes and spike patterns. Built automatically by `./build.sh`.
 
 **Build & Run**:
 ```bash
