@@ -40,13 +40,16 @@ if [[ "$TARGET" == "all" || "$TARGET" == "dotnet" ]]; then
   done
 fi
 
+# ── Parity Tests (C vs Eigen) ──────────────────────────────
+if [[ "$TARGET" == "all" || "$TARGET" == "parity" ]]; then
+  echo "[5/6] Cleaning parity tests..."
+  rm -rf "$SCRIPT_DIR/src/EventProp.Native.ParityTests/build"
+fi
+
 # ── C/C++ Benchmark Projects ───────────────────────────────
-if [[ "$TARGET" == "all" ]]; then
-  echo "[5/5] Cleaning benchmark projects..."
-  rm -rf "$SCRIPT_DIR/src/EventProp.Native.Benchmarks/build" \
-         "$SCRIPT_DIR/src/EventProp.Native.ParityTests/build"
-  # Remove compiled binaries from benchmarks
-  find "$SCRIPT_DIR/src/EventProp.Native.Benchmarks" -maxdepth 1 -type f \( -name "*.o" -o -executable \) ! -name "*.cpp" ! -name "*.c" -exec rm -f {} + 2>/dev/null || true
+if [[ "$TARGET" == "all" || "$TARGET" == "benchmarks" ]]; then
+  echo "[6/6] Cleaning benchmark projects..."
+  rm -rf "$SCRIPT_DIR/src/EventProp.Native.Benchmarks/build"
 fi
 
 echo "Done."

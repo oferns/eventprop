@@ -66,12 +66,32 @@ echo "  → CW.EventProp.dll + EventProp.Native.dll + EventProp.Cpp.Native.dll"
 
 # ── 5. .NET Tests (EventProp.Tests) ────────────────────────
 echo ""
-echo "[5/5] Building .NET tests..."
+echo "[5/7] Building .NET tests..."
 cd "$SCRIPT_DIR/src"
 rm -rf EventProp.Tests/bin EventProp.Tests/obj
 
 dotnet build EventProp.Tests/EventProp.Tests.csproj -c "$DOTNET_CONFIG" --nologo
 echo "  → CW.EventProp.Tests.dll"
+
+# ── 6. Parity Tests (C vs Eigen) ───────────────────────────
+echo ""
+echo "[6/7] Building parity tests (C vs Eigen)..."
+cd "$SCRIPT_DIR/src/EventProp.Native.ParityTests"
+rm -rf build
+mkdir -p build && cd build
+cmake .. -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE"
+make -j$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
+echo "  → parity_test built"
+
+# ── 7. Native Benchmarks (C vs C++) ────────────────────────
+echo ""
+echo "[7/7] Building native benchmarks (C vs C++)..."
+cd "$SCRIPT_DIR/src/EventProp.Native.Benchmarks"
+rm -rf build
+mkdir -p build && cd build
+cmake .. -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE"
+make -j$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
+echo "  → bench_c + bench_cpp built"
 
 # ── Done ───────────────────────────────────────────────────
 echo ""
@@ -79,6 +99,8 @@ echo "============================================"
 echo " Build complete — $BUILD_TYPE mode"
 echo "============================================"
 echo ""
-echo "Run tests:  cd src/EventProp.Tests && dotnet run -c $DOTNET_CONFIG --"
-echo "Run parity: cd src/EventProp.Native.ParityTests/build && ./parity_test ../../EventProp.C/build/libeventprop_c_api.dylib"
+echo "Run tests:    cd src/EventProp.Tests && dotnet run -c $DOTNET_CONFIG --"
+echo "Run parity:   cd src/EventProp.Native.ParityTests/build && ./parity_test ../../EventProp.C/build/libeventprop_c_api.dylib"
+echo "Run bench C:  cd src/EventProp.Native.Benchmarks/build && ./bench_c --benchmark_min_time=0.1s"
+echo "Run bench C++: cd src/EventProp.Native.Benchmarks/build && ./bench_cpp --benchmark_min_time=0.1s"
 echo ""
