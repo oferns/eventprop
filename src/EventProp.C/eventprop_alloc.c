@@ -85,6 +85,166 @@ static void alloc_fma_row_simd(double* dest, const double* src, const double* we
         dest[j] = src[j] + scalar * weights[j];
 }
 
+/* Scale in-place: span[j] *= scalar */
+static void alloc_scale_inplace_simd(double* span, double scalar, int n)
+{
+    if (!alloc_simd_available() || n < 2) {
+        for (int j = 0; j < n; j++)
+            span[j] *= scalar;
+        return;
+    }
+
+    int vec = alloc_simd_vec_width();
+    int vec_count = n / vec;
+
+#if defined(HAVE_AVX512F) || defined(HAVE_AVX2)
+    {
+#if defined(HAVE_AVX512F)
+        __m512d sc = _mm512_set1_pd(scalar);
+        for (int i = 0; i < vec_count; i++) {
+            __m512d s = _mm512_loadu_pd(span + i * vec);
+            _mm512_storeu_pd(span + i * vec, _mm512_mul_pd(s, sc));
+        }
+#else
+        __m256d sc = _mm256_set1_pd(scalar);
+        for (int i = 0; i < vec_count; i++) {
+            __m256d s = _mm256_loadu_pd(span + i * vec);
+            _mm256_storeu_pd(span + i * vec, _mm256_mul_pd(s, sc));
+        }
+#endif
+    }
+#elif defined(__ARM_NEON)
+    {
+        float64x2_t sc = vdupq_n_f64(scalar);
+        for (int i = 0; i < vec_count; i++) {
+            float64x2_t s = vld1q_f64(span + i * vec);
+            vst1q_f64(span + i * vec, vmulq_f64(s, sc));
+        }
+    }
+#endif
+
+    for (int j = vec_count * vec; j < n; j++)
+        span[j] *= scalar;
+}
+
+/* Vector-scalar multiply-accumulate: dest[j] += src[j] * scalar */
+static void alloc_vadd_scaled_simd(double* dest, const double* src, double scalar, int n)
+{
+    if (!alloc_simd_available() || n < 2) {
+        for (int j = 0; j < n; j++)
+            dest[j] += src[j] * scalar;
+        return;
+    }
+
+    int vec = alloc_simd_vec_width();
+    int vec_count = n / vec;
+
+#if defined(HAVE_AVX512F) || defined(HAVE_AVX2)
+    {
+        __m256d sc = _mm256_set1_pd(scalar);
+        for (int i = 0; i < vec_count; i++) {
+#if defined(HAVE_AVX512F)
+            __m512d d = _mm512_loadu_pd(dest + i * vec);
+            __m512d s = _mm512_loadu_pd(src + i * vec);
+            _mm512_storeu_pd(dest + i * vec, _mm512_add_pd(d, _mm512_mul_pd(s, sc)));
+#else
+            __m256d d = _mm256_loadu_pd(dest + i * vec);
+            __m256d s = _mm256_loadu_pd(src + i * vec);
+            d = _mm256_add_pd(d, _mm256_mul_pd(s, sc));
+            _mm256_storeu_pd(dest + i * vec, d);
+#endif
+        }
+    }
+#elif defined(__ARM_NEON)
+    {
+        float64x2_t sc = vdupq_n_f64(scalar);
+        for (int i = 0; i < vec_count; i++) {
+            float64x2_t d = vld1q_f64(dest + i * vec);
+            float64x2_t s = vld1q_f64(src + i * vec);
+            vst1q_f64(dest + i * vec, vaddq_f64(d, vmulq_f64(s, sc)));
+        }
+    }
+#endif
+
+    for (int j = vec_count * vec; j < n; j++)
+        dest[j] += src[j] * scalar;
+}
+
+/* Dot product: sum(a[j] * b[j]) for j = 0..n-1 */
+static double alloc_dot_product_simd(const double* a, const double* b, int n)
+{
+    if (!alloc_simd_available() || n < 2) {
+        double sum = 0.0;
+        for (int j = 0; j < n; j++)
+            sum += a[j] * b[j];
+        return sum;
+    }
+
+    int vec = alloc_simd_vec_width();
+    int vec_count = n / vec;
+
+#if defined(HAVE_AVX512F) || defined(HAVE_AVX2)
+    {
+        __m256d acc = _mm256_setzero_pd();
+        for (int i = 0; i < vec_count; i++) {
+#if defined(HAVE_AVX512F)
+            __m512d va = _mm512_loadu_pd(a + i * vec);
+            __m512d vb = _mm512_loadu_pd(b + i * vec);
+            acc = _mm512_add_pd(acc, _mm512_mul_pd(va, vb));
+#else
+            __m256d va = _mm256_loadu_pd(a + i * vec);
+            __m256d vb = _mm256_loadu_pd(b + i * vec);
+            acc = _mm256_add_pd(acc, _mm256_mul_pd(va, vb));
+#endif
+        }
+        double result[8];
+#if defined(HAVE_AVX512F)
+        _mm512_storeu_pd(result, acc);
+#else
+        _mm256_storeu_pd(result, acc);
+#endif
+        double sum = result[0] + result[1];
+#if defined(HAVE_AVX512F)
+        sum += result[2] + result[3] + result[4] + result[5] + result[6] + result[7];
+#else
+        sum += result[2] + result[3];
+#endif
+        for (int j = vec_count * vec; j < n; j++)
+            sum += a[j] * b[j];
+        return sum;
+    }
+#elif defined(__ARM_NEON)
+    {
+        float64x2_t acc = vdupq_n_f64(0.0);
+        for (int i = 0; i < vec_count; i++) {
+            float64x2_t va = vld1q_f64(a + i * vec);
+            float64x2_t vb = vld1q_f64(b + i * vec);
+            acc = vaddq_f64(acc, vmulq_f64(va, vb));
+        }
+        double result[2];
+        vst1q_f64(result, acc);
+        double sum = result[0] + result[1];
+        for (int j = vec_count * vec; j < n; j++)
+            sum += a[j] * b[j];
+        return sum;
+    }
+#endif
+
+    double sum = 0.0;
+    for (int j = 0; j < n; j++)
+        sum += a[j] * b[j];
+    return sum;
+}
+
+/* Merge spike comparison for qsort (descending by time) */
+typedef struct { double time; int idx; int is_input; } AllocMergedSpike;
+
+static int alloc_cmp_merged_desc(const void* a, const void* b) {
+    double ta = ((const AllocMergedSpike*)a)->time;
+    double tb = ((const AllocMergedSpike*)b)->time;
+    return (ta < tb) - (ta > tb);
+}
+
 /* ── Helper functions for compute_spikes_alloc (mirroring original) ─── */
 
 #define ALLOC_COMPUTE_V_INLINE(t, i, spike_count, post_spike_times, neuron_offset, \
@@ -603,14 +763,110 @@ BackwardSpikesOutput eventprop_backward_spikes_alloc(const double* times, const 
                                                      const double* w, int n_pre, int n_post,
                                                      double v_th, double tau_mem, double tau_syn)
 {
-    (void)times; (void)sources; (void)n_spikes;
-    (void)fwd_times; (void)fwd_sources; (void)fwd_currents;
-    (void)post_errors; (void)n_post_spikes;
-    (void)w; (void)n_pre; (void)n_post;
-    (void)v_th; (void)tau_mem; (void)tau_syn;
+    BackwardSpikesOutput result;
 
-    BackwardSpikesOutput result = {0, 0, NULL, NULL};
-    /* TODO: implement */
+    /* Allocate output — exact sizes known upfront */
+    result.n_pre = n_pre;
+    result.n_post = n_post;
+    result.grad = calloc(n_pre * n_post, sizeof(double));
+    result.spike_errors = calloc(n_spikes, sizeof(double));
+
+    if (n_post_spikes == 0)
+        return result;
+
+    int total = n_spikes + n_post_spikes;
+    AllocMergedSpike* merged = malloc(total * sizeof(AllocMergedSpike));
+
+    for (int i = 0; i < n_spikes; i++) { merged[i].time=times[i]; merged[i].idx=i; merged[i].is_input=1; }
+    for (int i = 0; i < n_post_spikes; i++) { merged[n_spikes+i].time=fwd_times[i]; merged[n_spikes+i].idx=i; merged[n_spikes+i].is_input=0; }
+
+    /* Sort descending by time: O(n log n) via qsort */
+    qsort(merged, total, sizeof(AllocMergedSpike), alloc_cmp_merged_desc);
+
+    double* all_errors = calloc(total, sizeof(double));
+    for (int i = 0; i < n_post_spikes; i++) all_errors[n_spikes + i] = post_errors[i];
+
+    double* lambda_v = calloc(n_post, sizeof(double));
+    double* lambda_i = malloc(n_post * sizeof(double));
+
+    /* Per-neuron jump storage (matching Eigen's vector<vector<pair<double,double>>> structure) */
+    double** jump_time = calloc(n_post, sizeof(double*));
+    double** jump_mag  = calloc(n_post, sizeof(double*));
+    int*   jump_count  = calloc(n_post, sizeof(int));
+    int*   jump_cap    = calloc(n_post, sizeof(int));
+    for (int i = 0; i < n_post; i++) {
+        jump_cap[i] = 8;  /* initial capacity */
+        jump_time[i] = malloc(jump_cap[i] * sizeof(double));
+        jump_mag[i]  = malloc(jump_cap[i] * sizeof(double));
+    }
+
+    double largest_time = merged[0].time, previous_t = largest_time;
+    double k_bwd = tau_mem / (tau_mem - tau_syn);
+
+    for (int s = 0; s < total; s++) {
+        int spike_idx = merged[s].idx, is_input = merged[s].is_input;
+        double spike_time = merged[s].time;
+        int spike_source = is_input ? sources[spike_idx] : fwd_sources[spike_idx];
+
+        double t_bwd = largest_time - spike_time;
+        double dt = previous_t - t_bwd;
+        alloc_scale_inplace_simd(lambda_v, exp(dt / tau_mem), n_post);
+
+        if (is_input) {
+            /* Compute lambda_i for ALL post-synaptic neurons (matching Eigen structure) */
+            memset(lambda_i, 0, n_post * sizeof(double));
+            for (int nrn = 0; nrn < n_post; nrn++) {
+                for (int j = 0; j < jump_count[nrn]; j++) {
+                    double dt_jump = t_bwd - jump_time[nrn][j];
+                    lambda_i[nrn] += jump_mag[nrn][j] * k_bwd * (exp(-dt_jump / tau_mem) - exp(-dt_jump / tau_syn));
+                }
+            }
+
+            alloc_vadd_scaled_simd(result.grad + spike_source * n_post, lambda_i, -tau_syn, n_post);
+
+            /* Compute dot product: w[row] · (lambda_v - lambda_i)
+               Use stack allocation for small n_post, heap otherwise. */
+#define BACKWARD_DIFF_STACK_SIZE 512
+            double stack_diff[BACKWARD_DIFF_STACK_SIZE];
+            int use_stack = (n_post <= BACKWARD_DIFF_STACK_SIZE);
+            double* diff = use_stack ? stack_diff : malloc(n_post * sizeof(double));
+
+            for (int j = 0; j < n_post; j++)
+                diff[j] = lambda_v[j] - lambda_i[j];
+            double outbound = alloc_dot_product_simd(w + spike_source * n_post, diff, n_post);
+            all_errors[spike_idx] += outbound;
+
+            if (!use_stack) free(diff);
+
+            /* Write spike error to alloc buffer */
+            result.spike_errors[spike_idx] = all_errors[spike_idx];
+        } else {
+            double current = fwd_currents[spike_idx];
+            double inv_ic = 1.0 / (current - v_th);
+            int nrn = spike_source;  /* post-spike: spike_source is the post-synaptic neuron */
+            double post_err = all_errors[n_spikes + spike_idx];
+
+            /* Record jump for this neuron (with capacity management) */
+            if (jump_count[nrn] >= jump_cap[nrn]) {
+                jump_cap[nrn] *= 2;
+                jump_time[nrn] = realloc(jump_time[nrn], jump_cap[nrn] * sizeof(double));
+                jump_mag[nrn]  = realloc(jump_mag[nrn],  jump_cap[nrn] * sizeof(double));
+            }
+            jump_time[nrn][jump_count[nrn]] = t_bwd;
+            jump_mag[nrn][jump_count[nrn]]  = inv_ic * (v_th * lambda_v[nrn] + post_err);
+            jump_count[nrn]++;
+
+            lambda_v[nrn] = (current / (current - v_th)) * lambda_v[nrn] + inv_ic * post_err;
+        }
+        previous_t = t_bwd;
+    }
+
+    for (int i = 0; i < n_post; i++) {
+        free(jump_time[i]); free(jump_mag[i]);
+    }
+    free(merged); free(all_errors); free(lambda_v); free(lambda_i);
+    free(jump_time); free(jump_mag); free(jump_count); free(jump_cap);
+
     return result;
 }
 

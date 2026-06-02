@@ -896,6 +896,111 @@ static void test_compute_spikes_alloc_parity(void)
     TEST_END;
 }
 
+static void test_backward_spikes_alloc(void)
+{
+    TEST("BackwardSpikes Alloc Tiny (10x5, 20 spikes)");
+    int n_pre = 10, n_post = 5, n_spikes = 20;
+    double w[10*5], times[20]; int32_t sources[20];
+    gen_data(n_pre, n_post, n_spikes, w, times, sources);
+
+    /* Run forward pass to get post-spike data */
+    int max_out = n_spikes * n_post;
+    double* fwd_times = malloc(max_out * sizeof(double));
+    int32_t* fwd_sources = malloc(max_out * sizeof(int32_t));
+    double* fwd_currents = malloc(max_out * sizeof(double));
+
+    int n_post_spikes = eventprop_compute_spikes(w, n_pre, n_post,
+                                                  times, sources, n_spikes,
+                                                  1.0, 0.02, 0.005,
+                                                  fwd_times, fwd_sources, fwd_currents);
+
+    if (n_post_spikes == 0) {
+        free(fwd_times); free(fwd_sources); free(fwd_currents);
+        TEST_END;
+    }
+
+    double* post_errors = malloc(n_post_spikes * sizeof(double));
+    for (int i = 0; i < n_post_spikes; i++) post_errors[i] = 1.0;
+
+    BackwardSpikesOutput result = eventprop_backward_spikes_alloc(
+        times, sources, n_spikes,
+        fwd_times, fwd_sources, fwd_currents,
+        post_errors, n_post_spikes,
+        w, n_pre, n_post,
+        1.0, 0.02, 0.005);
+
+    ASSERT(result.n_pre == n_pre, "wrong pre count");
+    ASSERT(result.n_post == n_post, "wrong post count");
+
+    /* Check gradient is not all zeros */
+    double grad_sum = 0;
+    for (int i = 0; i < n_pre * n_post; i++)
+        grad_sum += fabs(result.grad[i]);
+    ASSERT(grad_sum > 0, "gradient should not be all zeros");
+
+    eventprop_free_backward_spikes_output(&result);
+    free(fwd_times); free(fwd_sources); free(fwd_currents);
+    free(post_errors);
+    TEST_END;
+}
+
+static void test_backward_spikes_alloc_parity(void)
+{
+    TEST("BackwardSpikes Alloc parity with original");
+    int n_pre = 10, n_post = 5, n_spikes = 20;
+    double w[10*5], times[20]; int32_t sources[20];
+    gen_data(n_pre, n_post, n_spikes, w, times, sources);
+
+    /* Run forward pass to get post-spike data */
+    int max_out = n_spikes * n_post;
+    double* fwd_times = malloc(max_out * sizeof(double));
+    int32_t* fwd_sources = malloc(max_out * sizeof(int32_t));
+    double* fwd_currents = malloc(max_out * sizeof(double));
+
+    int n_post_spikes = eventprop_compute_spikes(w, n_pre, n_post,
+                                                  times, sources, n_spikes,
+                                                  1.0, 0.02, 0.005,
+                                                  fwd_times, fwd_sources, fwd_currents);
+
+    if (n_post_spikes == 0) {
+        free(fwd_times); free(fwd_sources); free(fwd_currents);
+        TEST_END;
+    }
+
+    double* post_errors = malloc(n_post_spikes * sizeof(double));
+    for (int i = 0; i < n_post_spikes; i++) post_errors[i] = 1.0;
+
+    /* Original function */
+    double* grad_orig = calloc(n_pre * n_post, sizeof(double));
+    double* spike_errors_orig = malloc(n_spikes * sizeof(double));
+
+    eventprop_backward_spikes(times, sources, n_spikes,
+                              fwd_times, fwd_sources, fwd_currents,
+                              post_errors, n_post_spikes,
+                              w, n_pre, n_post,
+                              1.0, 0.02, 0.005,
+                              grad_orig, spike_errors_orig);
+
+    /* Alloc function */
+    BackwardSpikesOutput result = eventprop_backward_spikes_alloc(
+        times, sources, n_spikes,
+        fwd_times, fwd_sources, fwd_currents,
+        post_errors, n_post_spikes,
+        w, n_pre, n_post,
+        1.0, 0.02, 0.005);
+
+    /* Compare gradient values */
+    for (int i = 0; i < n_pre * n_post; i++) {
+        ASSERT_NEAR(grad_orig[i], result.grad[i], 1e-12);
+    }
+
+    free(grad_orig); free(spike_errors_orig);
+    eventprop_free_backward_spikes_output(&result);
+    free(fwd_times); free(fwd_sources); free(fwd_currents);
+    free(post_errors);
+    TEST_END;
+}
+
 /* ── ComputeMaxima Alloc tests ─────────────────────────────────────── */
 
 static void test_compute_maxima_alloc(void)
@@ -1091,6 +1196,10 @@ int main(void)
     /* ComputeSpikes Alloc tests */
     test_compute_spikes_alloc();
     test_compute_spikes_alloc_parity();
+
+    /* BackwardSpikes Alloc tests */
+    test_backward_spikes_alloc();
+    test_backward_spikes_alloc_parity();
 
     /* Low threshold tests — demonstrates C library handles extreme thresholds */
 //    test_compute_spikes_low_threshold();
