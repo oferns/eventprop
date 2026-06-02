@@ -27,7 +27,10 @@ endif()
 # Pure C shared library (no external dependencies)
 # Optional OpenMP for parallel neuron processing in ComputeSpikes
 find_package(OpenMP QUIET)
-add_library(eventprop_c_api SHARED eventprop_scalar.c)
+add_library(eventprop_c_api SHARED
+    eventprop_scalar.c
+    eventprop_alloc.c
+)
 target_compile_options(eventprop_c_api PRIVATE -ffp-contract=fast)
 target_link_libraries(eventprop_c_api PRIVATE m)
 if(OpenMP_C_FOUND)
@@ -50,7 +53,7 @@ target_include_directories(eventprop_c_api PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Install
 install(TARGETS eventprop_c_api LIBRARY DESTINATION lib)
-install(FILES eventprop.h DESTINATION include)
+install(FILES eventprop.h eventprop_alloc.h DESTINATION include)
 
 # Unit tests
 add_executable(test_runner tests.c)

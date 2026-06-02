@@ -1,0 +1,127 @@
+/**
+ * @file eventprop_alloc.h
+ * @brief EventProp complementary API with automatic memory allocation.
+ *
+ * Functions allocate output buffers internally and return ownership to the caller.
+ * Use corresponding free functions to release memory.
+ */
+
+#ifndef EVENTPROP_ALLOC_H
+#define EVENTPROP_ALLOC_H
+
+#include <stdint.h>
+#include "eventprop.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* ── Spike output (owned memory) ─────────────────────────────────────── */
+
+typedef struct {
+    int n_spikes;            /* Number of output spikes */
+    double* times;           /* Output spike times (malloc'd) */
+    int32_t* sources;        /* Output source neurons (malloc'd) */
+    double* currents;        /* Synaptic currents at spike times (malloc'd) */
+} SpikeOutput;
+
+/**
+ * Forward pass with automatic memory allocation.
+ * Returns a SpikeOutput struct — caller must free via eventprop_free_spike_output().
+ */
+SpikeOutput eventprop_compute_spikes_alloc(const double* w, int n_pre, int n_post,
+                                           const double* times, const int32_t* sources, int n_spikes,
+                                           double v_th, double tau_mem, double tau_syn);
+
+/** Free memory owned by a SpikeOutput struct. */
+void eventprop_free_spike_output(SpikeOutput* output);
+
+/* ── Cumulative sums output (owned memory) ───────────────────────────── */
+
+typedef struct {
+    int n_rows;              /* n_spikes + 1 */
+    int n_post;              /* Number of post-synaptic neurons */
+    double* sum0;            /* Cumulative sums (malloc'd, n_rows * n_post) */
+    double* sum1;            /* Cumulative sums (malloc'd, n_rows * n_post) */
+} SumsOutput;
+
+/**
+ * Compute cumulative sums with automatic memory allocation.
+ * Returns a SumsOutput struct — caller must free via eventprop_free_sums_output().
+ */
+SumsOutput eventprop_compute_sums_alloc(const double* w, int n_pre, int n_post,
+                                        const double* times, const int32_t* sources, int n_spikes,
+                                        double tau_mem, double tau_syn);
+
+/** Free memory owned by a SumsOutput struct. */
+void eventprop_free_sums_output(SumsOutput* output);
+
+/* ── Maxima output (owned memory) ─────────────────────────────────────── */
+
+typedef struct {
+    int n_post;              /* Number of post-synaptic neurons */
+    double* times;           /* Maxima times (malloc'd, n_post) */
+    double* values;          /* Maxima values (malloc'd, n_post) */
+} MaximaOutput;
+
+/**
+ * Compute membrane potential maxima with automatic memory allocation.
+ * Returns a MaximaOutput struct — caller must free via eventprop_free_maxima_output().
+ */
+MaximaOutput eventprop_compute_maxima_alloc(const double* w, int n_pre, int n_post,
+                                           const double* times, const int32_t* sources, int n_spikes,
+                                           double tau_mem, double tau_syn);
+
+/** Free memory owned by a MaximaOutput struct. */
+void eventprop_free_maxima_output(MaximaOutput* output);
+
+/* ── Backward pass outputs (owned memory) ───────────────────────────── */
+
+typedef struct {
+    int n_pre;               /* Number of pre-synaptic neurons */
+    int n_post;              /* Number of post-synaptic neurons */
+    double* grad;            /* Weight gradient (malloc'd, n_pre * n_post) */
+    double* spike_errors;   /* Input spike errors (malloc'd, n_spikes) */
+} BackwardSpikesOutput;
+
+/**
+ * Backward pass (spikes) with automatic memory allocation.
+ * Returns a BackwardSpikesOutput struct — caller must free via eventprop_free_backward_spikes_output().
+ */
+BackwardSpikesOutput eventprop_backward_spikes_alloc(const double* times, const int32_t* sources,
+                                                     int n_spikes,
+                                                     const double* fwd_times, const int32_t* fwd_sources,
+                                                     const double* fwd_currents,
+                                                     const double* post_errors, int n_post_spikes,
+                                                     const double* w, int n_pre, int n_post,
+                                                     double v_th, double tau_mem, double tau_syn);
+
+/** Free memory owned by a BackwardSpikesOutput struct. */
+void eventprop_free_backward_spikes_output(BackwardSpikesOutput* output);
+
+typedef struct {
+    int n_pre;               /* Number of pre-synaptic neurons */
+    int n_post;              /* Number of post-synaptic neurons */
+    double* gradient;        /* Weight gradient (malloc'd, n_pre * n_post) */
+    double* spike_errors;   /* Input spike errors (malloc'd, n_input_spikes) */
+} BackwardMaximaOutput;
+
+/**
+ * Backward pass (maxima) with automatic memory allocation.
+ * Returns a BackwardMaximaOutput struct — caller must free via eventprop_free_backward_maxima_output().
+ */
+BackwardMaximaOutput eventprop_backward_maxima_alloc(const double* input_times, const int32_t* input_sources,
+                                                     int n_input_spikes,
+                                                     const double* maxima_times, const double* maxima_values,
+                                                     const double* maxima_errors, int n_maxima,
+                                                     const double* w, int n_pre, int n_post,
+                                                     double tau_mem, double tau_syn);
+
+/** Free memory owned by a BackwardMaximaOutput struct. */
+void eventprop_free_backward_maxima_output(BackwardMaximaOutput* output);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* EVENTPROP_ALLOC_H */

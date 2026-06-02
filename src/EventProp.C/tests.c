@@ -8,6 +8,7 @@
 #include <string.h>
 #include <math.h>
 #include "eventprop.h"
+#include "eventprop_alloc.h"
 
 #define EPSILON 1e-6
 static int tests_run = 0, tests_passed = 0, tests_failed = 0;
@@ -714,6 +715,175 @@ static void test_compute_spikes_very_low_threshold(void)
 
 /* ── Main ─────────────────────────────────────────────────────────── */
 
+/* ── Alloc API tests ─────────────────────────────────────────────── */
+
+static void test_compute_sums_alloc(void)
+{
+    TEST("ComputeSums Alloc Tiny (10×5, 20 spikes)");
+    int n_pre = 10, n_post = 5, n_spikes = 20;
+    double w[10*5], times[20]; int32_t sources[20];
+    gen_data(n_pre, n_post, n_spikes, w, times, sources);
+
+    SumsOutput result = eventprop_compute_sums_alloc(w, n_pre, n_post,
+                                                      times, sources, n_spikes,
+                                                      0.02, 0.005);
+
+    /* Check dimensions */
+    ASSERT(result.n_rows == n_spikes + 1, "wrong row count");
+    ASSERT(result.n_post == n_post, "wrong post count");
+
+    /* Row 0 should be zeros */
+    for (int j = 0; j < n_post; j++) {
+        ASSERT_NEAR(result.sum0[j], 0.0, EPSILON);
+        ASSERT_NEAR(result.sum1[j], 0.0, EPSILON);
+    }
+
+    /* Row 1 should have contributions from first spike */
+    int32_t src0 = sources[0];
+    double exp_syn_0 = exp(times[0] / 0.005);
+    for (int j = 0; j < n_post; j++) {
+        double expected = w[src0 * n_post + j] * exp_syn_0;
+        ASSERT_NEAR(result.sum0[n_post + j], expected, EPSILON * 10);
+    }
+
+    eventprop_free_sums_output(&result);
+    TEST_END;
+}
+
+static void test_compute_sums_alloc_zero_spikes(void)
+{
+    TEST("ComputeSums Alloc zero spikes");
+
+    SumsOutput result = eventprop_compute_sums_alloc(NULL, 10, 5,
+                                                      NULL, NULL, 0,
+                                                      0.02, 0.005);
+
+    ASSERT(result.n_rows == 1, "should have 1 row");
+    ASSERT(result.n_post == 5, "wrong post count");
+
+    eventprop_free_sums_output(&result);
+    TEST_END;
+}
+
+static void test_compute_sums_alloc_large(void)
+{
+    TEST("ComputeSums Alloc Large (200×80, 500 spikes)");
+    int n_pre = 200, n_post = 80, n_spikes = 500;
+    double* w = malloc(n_pre * n_post * sizeof(double));
+    double* times = malloc(n_spikes * sizeof(double));
+    int32_t* sources = malloc(n_spikes * sizeof(int32_t));
+    gen_data(n_pre, n_post, n_spikes, w, times, sources);
+
+    SumsOutput result = eventprop_compute_sums_alloc(w, n_pre, n_post,
+                                                      times, sources, n_spikes,
+                                                      0.02, 0.005);
+
+    ASSERT(result.n_rows == n_spikes + 1, "wrong row count");
+    ASSERT(result.n_post == n_post, "wrong post count");
+
+    /* Check row 0 is zero */
+    for (int j = 0; j < n_post; j++) {
+        ASSERT_NEAR(result.sum0[j], 0.0, EPSILON);
+    }
+
+    /* Check values are non-trivial */
+    double total = 0;
+    for (int i = 1; i < result.n_rows; i++)
+        for (int j = 0; j < n_post; j++)
+            total += fabs(result.sum0[i * n_post + j]);
+    ASSERT(total > 0, "sums should be non-zero");
+
+    eventprop_free_sums_output(&result);
+    free(w); free(times); free(sources);
+    TEST_END;
+}
+
+static void test_compute_sums_alloc_parity(void)
+{
+    TEST("ComputeSums Alloc parity with original");
+    int n_pre = 10, n_post = 5, n_spikes = 20;
+    double w[10*5], times[20]; int32_t sources[20];
+    gen_data(n_pre, n_post, n_spikes, w, times, sources);
+
+    /* Original function */
+    int n_sums = (n_spikes + 1) * n_post;
+    double* sum0_orig = calloc(n_sums, sizeof(double));
+    double* sum1_orig = calloc(n_sums, sizeof(double));
+    eventprop_compute_sums(w, n_pre, n_post, times, sources, n_spikes,
+                           0.02, 0.005, sum0_orig, sum1_orig);
+
+    /* Alloc function */
+    SumsOutput result = eventprop_compute_sums_alloc(w, n_pre, n_post,
+                                                      times, sources, n_spikes,
+                                                      0.02, 0.005);
+
+    /* Compare element-by-element */
+    for (int i = 0; i < n_sums; i++) {
+        ASSERT_NEAR(sum0_orig[i], result.sum0[i], 1e-12);
+        ASSERT_NEAR(sum1_orig[i], result.sum1[i], 1e-12);
+    }
+
+    free(sum0_orig); free(sum1_orig);
+    eventprop_free_sums_output(&result);
+    TEST_END;
+}
+
+/* ── ComputeMaxima Alloc tests ─────────────────────────────────────── */
+
+static void test_compute_maxima_alloc(void)
+{
+    TEST("ComputeMaxima Alloc Tiny (10×5, 20 spikes)");
+    int n_pre = 10, n_post = 5, n_spikes = 20;
+    double w[10*5], times[20]; int32_t sources[20];
+    gen_data(n_pre, n_post, n_spikes, w, times, sources);
+
+    MaximaOutput result = eventprop_compute_maxima_alloc(w, n_pre, n_post,
+                                                          times, sources, n_spikes,
+                                                          0.02, 0.005);
+
+    ASSERT(result.n_post == n_post, "wrong post count");
+
+    /* No NaN in times/values pairs */
+    for (int i = 0; i < n_post; i++) {
+        ASSERT(!isnan(result.times[i]) || isnan(result.values[i]), "times/values mismatch");
+    }
+
+    eventprop_free_maxima_output(&result);
+    TEST_END;
+}
+
+static void test_compute_maxima_alloc_parity(void)
+{
+    TEST("ComputeMaxima Alloc parity with original");
+    int n_pre = 10, n_post = 5, n_spikes = 20;
+    double w[10*5], times[20]; int32_t sources[20];
+    gen_data(n_pre, n_post, n_spikes, w, times, sources);
+
+    /* Original function */
+    double* max_times_orig = malloc(n_post * sizeof(double));
+    double* max_values_orig = malloc(n_post * sizeof(double));
+    eventprop_compute_maxima(w, n_pre, n_post,
+                              times, sources, n_spikes,
+                              0.02, 0.005, max_times_orig, max_values_orig);
+
+    /* Alloc function */
+    MaximaOutput result = eventprop_compute_maxima_alloc(w, n_pre, n_post,
+                                                          times, sources, n_spikes,
+                                                          0.02, 0.005);
+
+    /* Compare element-by-element */
+    for (int i = 0; i < n_post; i++) {
+        if (!isnan(max_times_orig[i]))
+            ASSERT_NEAR(max_times_orig[i], result.times[i], 1e-12);
+        if (!isnan(max_values_orig[i]))
+            ASSERT_NEAR(max_values_orig[i], result.values[i], 1e-12);
+    }
+
+    free(max_times_orig); free(max_values_orig);
+    eventprop_free_maxima_output(&result);
+    TEST_END;
+}
+
 int main(void)
 {
     printf("EventProp C Implementation Tests\n=================================\n\n");
@@ -739,6 +909,16 @@ int main(void)
     test_backward_spikes_large();
     test_compute_maxima_large();
     test_backward_maxima_large();
+
+    /* Alloc API tests */
+    test_compute_sums_alloc();
+    test_compute_sums_alloc_zero_spikes();
+    test_compute_sums_alloc_large();
+    test_compute_sums_alloc_parity();
+
+    /* ComputeMaxima Alloc tests */
+    test_compute_maxima_alloc();
+    test_compute_maxima_alloc_parity();
 
     /* Low threshold tests — demonstrates C library handles extreme thresholds */
 //    test_compute_spikes_low_threshold();
