@@ -18,6 +18,7 @@
 #else
 #include "eventprop.h"
 #endif
+#include "eventprop_alloc.h"
 
 // ============================================================
 // Data generation (same for both)
@@ -285,5 +286,138 @@ BACKWARDSPIKES_BENCH(Tiny,    10,   5,   20);
 BACKWARDSPIKES_BENCH(Small,   50,   20,  100);
 BACKWARDSPIKES_BENCH(Medium,  200,  80,  500);
 BACKWARDSPIKES_BENCH(Large,   500,  200, 1000);
+
+// ============================================================
+// Benchmark: ComputeSums Alloc (automatic allocation)
+// ============================================================
+
+static void BM_ComputeSumsAlloc(benchmark::State& state, const ProblemSize& sz, DataGenerator gen)
+{
+    std::vector<double> w(sz.n_pre * sz.n_post);
+    std::vector<double> times(sz.n_spikes);
+    std::vector<int32_t> sources(sz.n_spikes);
+    gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
+
+    for (auto _ : state) {
+        SumsOutput result = eventprop_compute_sums_alloc(
+            w.data(), sz.n_pre, sz.n_post,
+            times.data(), sources.data(), sz.n_spikes,
+            0.02, 0.005);
+
+        benchmark::DoNotOptimize(result.sum0);
+        eventprop_free_sums_output(&result);
+    }
+
+    state.SetItemsProcessed(state.iterations() * sz.n_spikes);
+}
+
+#define COMPUTESUMS_ALLOC_BENCH(SizeName, NP, NPO, NS)                                          \
+    BENCHMARK_CAPTURE(BM_ComputeSumsAlloc, SizeName##_uniform,                                  \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(                    \
+        "ComputeSumsAlloc/" #SizeName "/uniform/default");                                      \
+    BENCHMARK_CAPTURE(BM_ComputeSumsAlloc, SizeName##_poisson,                                  \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(                    \
+        "ComputeSumsAlloc/" #SizeName "/poisson/default");                                      \
+    BENCHMARK_CAPTURE(BM_ComputeSumsAlloc, SizeName##_burst,                                    \
+        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(                      \
+        "ComputeSumsAlloc/" #SizeName "/burst/default")
+
+COMPUTESUMS_ALLOC_BENCH(Tiny,    10,   5,   20);
+COMPUTESUMS_ALLOC_BENCH(Small,   50,   20,  100);
+COMPUTESUMS_ALLOC_BENCH(Medium,  200,  80,  500);
+COMPUTESUMS_ALLOC_BENCH(Large,   500,  200, 1000);
+
+// ============================================================
+// Benchmark: ComputeSpikes Alloc (automatic allocation)
+// ============================================================
+
+static void BM_ComputeSpikesAlloc(benchmark::State& state, const ProblemSize& sz, DataGenerator gen)
+{
+    std::vector<double> w(sz.n_pre * sz.n_post);
+    std::vector<double> times(sz.n_spikes);
+    std::vector<int32_t> sources(sz.n_spikes);
+    gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
+
+    for (auto _ : state) {
+        SpikeOutput result = eventprop_compute_spikes_alloc(
+            w.data(), sz.n_pre, sz.n_post,
+            times.data(), sources.data(), sz.n_spikes,
+            1.0, 0.02, 0.005);
+
+        benchmark::DoNotOptimize(result.times);
+        eventprop_free_spike_output(&result);
+    }
+
+    state.SetItemsProcessed(state.iterations() * sz.n_spikes);
+}
+
+#define COMPUTESPIKES_ALLOC_BENCH(SizeName, NP, NPO, NS)                                        \
+    BENCHMARK_CAPTURE(BM_ComputeSpikesAlloc, SizeName##_uniform,                                \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(                    \
+        "ComputeSpikesAlloc/" #SizeName "/uniform/default");                                    \
+    BENCHMARK_CAPTURE(BM_ComputeSpikesAlloc, SizeName##_poisson,                                \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(                    \
+        "ComputeSpikesAlloc/" #SizeName "/poisson/default");                                    \
+    BENCHMARK_CAPTURE(BM_ComputeSpikesAlloc, SizeName##_burst,                                  \
+        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(                      \
+        "ComputeSpikesAlloc/" #SizeName "/burst/default")
+
+COMPUTESPIKES_ALLOC_BENCH(Tiny,    10,   5,   20);
+COMPUTESPIKES_ALLOC_BENCH(Small,   50,   20,  100);
+COMPUTESPIKES_ALLOC_BENCH(Medium,  200,  80,  500);
+COMPUTESPIKES_ALLOC_BENCH(Large,   500,  200, 1000);
+
+// ============================================================
+// Benchmark: BackwardSpikes Alloc (automatic allocation)
+// Requires post-spike data from a forward pass.
+// ============================================================
+
+static void BM_BackwardSpikesAlloc(benchmark::State& state, const ProblemSize& sz, DataGenerator gen)
+{
+    std::vector<double> w(sz.n_pre * sz.n_post);
+    std::vector<double> times(sz.n_spikes);
+    std::vector<int32_t> sources(sz.n_spikes);
+    gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
+
+    // Run forward pass ONCE to get post-spike data (not benchmarked)
+    SpikeOutput fwd_result = eventprop_compute_spikes_alloc(
+        w.data(), sz.n_pre, sz.n_post,
+        times.data(), sources.data(), sz.n_spikes,
+        1.0, 0.02, 0.005);
+
+    int n_post_spikes = fwd_result.n_spikes;
+    std::vector<double> post_errors(n_post_spikes, 1.0);
+
+    for (auto _ : state) {
+        BackwardSpikesOutput result = eventprop_backward_spikes_alloc(
+            times.data(), sources.data(), sz.n_spikes,
+            fwd_result.times, fwd_result.sources, fwd_result.currents,
+            post_errors.data(), n_post_spikes,
+            w.data(), sz.n_pre, sz.n_post,
+            1.0, 0.02, 0.005);
+
+        benchmark::DoNotOptimize(result.grad);
+        eventprop_free_backward_spikes_output(&result);
+    }
+
+    state.SetItemsProcessed(state.iterations() * sz.n_spikes);
+    eventprop_free_spike_output(&fwd_result);
+}
+
+#define BACKWARDSPIKES_ALLOC_BENCH(SizeName, NP, NPO, NS)                                      \
+    BENCHMARK_CAPTURE(BM_BackwardSpikesAlloc, SizeName##_uniform,                              \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(                    \
+        "BackwardSpikesAlloc/" #SizeName "/uniform/default");                                  \
+    BENCHMARK_CAPTURE(BM_BackwardSpikesAlloc, SizeName##_poisson,                              \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(                    \
+        "BackwardSpikesAlloc/" #SizeName "/poisson/default");                                  \
+    BENCHMARK_CAPTURE(BM_BackwardSpikesAlloc, SizeName##_burst,                                \
+        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(                      \
+        "BackwardSpikesAlloc/" #SizeName "/burst/default")
+
+BACKWARDSPIKES_ALLOC_BENCH(Tiny,    10,   5,   20);
+BACKWARDSPIKES_ALLOC_BENCH(Small,   50,   20,  100);
+BACKWARDSPIKES_ALLOC_BENCH(Medium,  200,  80,  500);
+BACKWARDSPIKES_ALLOC_BENCH(Large,   500,  200, 1000);
 
 BENCHMARK_MAIN();

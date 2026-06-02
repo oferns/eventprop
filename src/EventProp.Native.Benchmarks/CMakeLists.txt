@@ -96,8 +96,10 @@ target_link_libraries(eventprop_cpp_wrapper_lib PRIVATE eventprop_eigen_core)
 
 add_executable(bench_cpp bench_main.cpp)
 target_compile_definitions(bench_cpp PRIVATE USE_CPP_WRAPPER)
-target_include_directories(bench_cpp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.Cpp.Wrapper)
-target_link_libraries(bench_cpp PRIVATE eventprop_cpp_wrapper_lib benchmark::benchmark benchmark::benchmark_main)
+target_include_directories(bench_cpp PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.Cpp.Wrapper
+    ${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.C)
+target_link_libraries(bench_cpp PRIVATE eventprop_cpp_wrapper_lib eventprop_c_api benchmark::benchmark benchmark::benchmark_main)
 
 # Copy C++ wrapper library to output
 if(APPLE)
