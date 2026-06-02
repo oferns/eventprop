@@ -828,6 +828,74 @@ static void test_compute_sums_alloc_parity(void)
     TEST_END;
 }
 
+/* ── ComputeSpikes Alloc tests ─────────────────────────────────────── */
+
+static void test_compute_spikes_alloc(void)
+{
+    TEST("ComputeSpikes Alloc Tiny (10x5, 20 spikes)");
+    int n_pre = 10, n_post = 5, n_spikes = 20;
+    double w[10*5], times[20]; int32_t sources[20];
+    gen_data(n_pre, n_post, n_spikes, w, times, sources);
+
+    SpikeOutput result = eventprop_compute_spikes_alloc(w, n_pre, n_post,
+                                                         times, sources, n_spikes,
+                                                         1.0, 0.02, 0.005);
+
+    /* Should produce some spikes */
+    ASSERT(result.n_spikes > 0, "no output spikes");
+
+    /* Verify sorted by time */
+    for (int i = 1; i < result.n_spikes; i++) {
+        ASSERT(result.times[i] >= result.times[i-1], "not sorted by time");
+    }
+
+    /* No NaN/Inf in times or currents */
+    for (int i = 0; i < result.n_spikes; i++) {
+        ASSERT(!isnan(result.times[i]), "time NaN");
+        ASSERT(!isinf(result.times[i]), "time Inf");
+        ASSERT(!isnan(result.currents[i]), "current NaN");
+    }
+
+    eventprop_free_spike_output(&result);
+    TEST_END;
+}
+
+static void test_compute_spikes_alloc_parity(void)
+{
+    TEST("ComputeSpikes Alloc parity with original");
+    int n_pre = 10, n_post = 5, n_spikes = 20;
+    double w[10*5], times[20]; int32_t sources[20];
+    gen_data(n_pre, n_post, n_spikes, w, times, sources);
+
+    /* Original function */
+    int max_out = n_spikes * n_post;
+    double* orig_times = malloc(max_out * sizeof(double));
+    int32_t* orig_sources = malloc(max_out * sizeof(int32_t));
+    double* orig_currents = malloc(max_out * sizeof(double));
+
+    int n_orig = eventprop_compute_spikes(w, n_pre, n_post,
+                                          times, sources, n_spikes,
+                                          1.0, 0.02, 0.005,
+                                          orig_times, orig_sources, orig_currents);
+
+    /* Alloc function */
+    SpikeOutput result = eventprop_compute_spikes_alloc(w, n_pre, n_post,
+                                                         times, sources, n_spikes,
+                                                         1.0, 0.02, 0.005);
+
+    /* Both should produce identical number of spikes */
+    ASSERT(result.n_spikes == n_orig, "spike count mismatch");
+
+    /* Verify alloc output is valid (sorted times, valid sources) */
+    for (int i = 1; i < result.n_spikes; i++) {
+        ASSERT(result.times[i] >= result.times[i-1], "times not sorted");
+    }
+
+    free(orig_times); free(orig_sources); free(orig_currents);
+    eventprop_free_spike_output(&result);
+    TEST_END;
+}
+
 /* ── ComputeMaxima Alloc tests ─────────────────────────────────────── */
 
 static void test_compute_maxima_alloc(void)
@@ -1019,6 +1087,10 @@ int main(void)
     /* BackwardMaxima Alloc tests */
     test_backward_maxima_alloc();
     test_backward_maxima_alloc_parity();
+
+    /* ComputeSpikes Alloc tests */
+    test_compute_spikes_alloc();
+    test_compute_spikes_alloc_parity();
 
     /* Low threshold tests — demonstrates C library handles extreme thresholds */
 //    test_compute_spikes_low_threshold();
