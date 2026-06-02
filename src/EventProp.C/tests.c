@@ -884,6 +884,102 @@ static void test_compute_maxima_alloc_parity(void)
     TEST_END;
 }
 
+/* ── BackwardMaxima Alloc tests ─────────────────────────────────────── */
+
+static void test_backward_maxima_alloc(void)
+{
+    TEST("BackwardMaxima Alloc Tiny (10×5, 20 spikes)");
+    int n_pre = 10, n_post = 5, n_spikes = 20;
+    double w[10*5], times[20]; int32_t sources[20];
+    gen_data(n_pre, n_post, n_spikes, w, times, sources);
+
+    /* Forward: compute maxima */
+    MaximaOutput maxima = eventprop_compute_maxima_alloc(w, n_pre, n_post,
+                                                          times, sources, n_spikes,
+                                                          0.02, 0.005);
+
+    /* Set up errors (all 1.0) */
+    double* max_errors = malloc(n_post * sizeof(double));
+    for (int i = 0; i < n_post; i++) max_errors[i] = 1.0;
+
+    /* Backward pass with alloc */
+    BackwardMaximaOutput result = eventprop_backward_maxima_alloc(times, sources, n_spikes,
+                                                                   maxima.times, maxima.values,
+                                                                   max_errors, n_post,
+                                                                   w, n_pre, n_post,
+                                                                   0.02, 0.005);
+
+    /* Check dimensions */
+    ASSERT(result.n_pre == n_pre, "wrong pre count");
+    ASSERT(result.n_post == n_post, "wrong post count");
+
+    /* No NaN/Inf in gradients */
+    for (int i = 0; i < n_pre * n_post; i++) {
+        ASSERT(!isnan(result.gradient[i]), "grad NaN");
+        ASSERT(!isinf(result.gradient[i]), "grad Inf");
+    }
+
+    /* At least some gradient should be non-zero */
+    double grad_sum = 0.0;
+    for (int i = 0; i < n_pre * n_post; i++) grad_sum += fabs(result.gradient[i]);
+    ASSERT(grad_sum > 1e-12, "all gradients zero");
+
+    free(max_errors);
+    eventprop_free_maxima_output(&maxima);
+    eventprop_free_backward_maxima_output(&result);
+    TEST_END;
+}
+
+static void test_backward_maxima_alloc_parity(void)
+{
+    TEST("BackwardMaxima Alloc parity with original");
+    int n_pre = 10, n_post = 5, n_spikes = 20;
+    double w[10*5], times[20]; int32_t sources[20];
+    gen_data(n_pre, n_post, n_spikes, w, times, sources);
+
+    /* Forward: compute maxima */
+    double* max_times = malloc(n_post * sizeof(double));
+    double* max_values = malloc(n_post * sizeof(double));
+    eventprop_compute_maxima(w, n_pre, n_post,
+                              times, sources, n_spikes,
+                              0.02, 0.005, max_times, max_values);
+
+    /* Set up errors */
+    double* max_errors = malloc(n_post * sizeof(double));
+    for (int i = 0; i < n_post; i++) max_errors[i] = 1.0;
+
+    /* Original function */
+    double* grad_orig = calloc(n_pre * n_post, sizeof(double));
+    double* spike_errors_orig = calloc(n_spikes, sizeof(double));
+    eventprop_backward_maxima(times, sources, n_spikes,
+                               max_times, max_values, max_errors, n_post,
+                               w, n_pre, n_post,
+                               0.02, 0.005, grad_orig, spike_errors_orig);
+
+    /* Alloc function */
+    BackwardMaximaOutput result = eventprop_backward_maxima_alloc(times, sources, n_spikes,
+                                                                   max_times, max_values,
+                                                                   max_errors, n_post,
+                                                                   w, n_pre, n_post,
+                                                                   0.02, 0.005);
+
+    /* Compare gradients element-by-element */
+    for (int i = 0; i < n_pre * n_post; i++) {
+        ASSERT_NEAR(grad_orig[i], result.gradient[i], 1e-12);
+    }
+
+    /* Compare spike errors element-by-element */
+    for (int i = 0; i < n_spikes; i++) {
+        ASSERT_NEAR(spike_errors_orig[i], result.spike_errors[i], 1e-12);
+    }
+
+    free(max_times); free(max_values);
+    free(max_errors);
+    free(grad_orig); free(spike_errors_orig);
+    eventprop_free_backward_maxima_output(&result);
+    TEST_END;
+}
+
 int main(void)
 {
     printf("EventProp C Implementation Tests\n=================================\n\n");
@@ -919,6 +1015,10 @@ int main(void)
     /* ComputeMaxima Alloc tests */
     test_compute_maxima_alloc();
     test_compute_maxima_alloc_parity();
+
+    /* BackwardMaxima Alloc tests */
+    test_backward_maxima_alloc();
+    test_backward_maxima_alloc_parity();
 
     /* Low threshold tests — demonstrates C library handles extreme thresholds */
 //    test_compute_spikes_low_threshold();

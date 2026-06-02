@@ -274,14 +274,52 @@ BackwardMaximaOutput eventprop_backward_maxima_alloc(const double* input_times, 
                                                      const double* w, int n_pre, int n_post,
                                                      double tau_mem, double tau_syn)
 {
-    (void)input_times; (void)input_sources; (void)n_input_spikes;
-    (void)maxima_times; (void)maxima_values;
-    (void)maxima_errors; (void)n_maxima;
-    (void)w; (void)n_pre; (void)n_post;
-    (void)tau_mem; (void)tau_syn;
+    BackwardMaximaOutput result;
+    (void)w; /* Not used — gradient depends on maximaTimes and errors only */
 
-    BackwardMaximaOutput result = {0, 0, NULL, NULL};
-    /* TODO: implement */
+    result.n_pre = n_pre;
+    result.n_post = n_post;
+
+    /* Allocate output — exact sizes known upfront */
+    result.gradient = calloc(n_pre * n_post, sizeof(double));
+    result.spike_errors = calloc(n_input_spikes, sizeof(double));
+
+    if (n_input_spikes == 0 || n_maxima == 0)
+        return result;
+
+    double largest_time = input_times[n_input_spikes - 1];
+    double k_bwd_prefactor = tau_mem / (tau_mem - tau_syn);
+
+    /* Precompute inverse time constants */
+    double tau_mem_inv = 1.0 / tau_mem;
+    double tau_syn_inv = 1.0 / tau_syn;
+
+    /* Sweep backward through input spikes */
+    for (int spike_idx = n_input_spikes - 1; spike_idx >= 0; spike_idx--) {
+        double t_bwd = largest_time - input_times[spike_idx];
+
+        for (int max_idx = 0; max_idx < n_maxima; max_idx++) {
+            if (isnan(maxima_times[max_idx]))
+                continue;
+
+            double t_vmax_bwd = largest_time - maxima_times[max_idx];
+            if (t_vmax_bwd > t_bwd)
+                continue;
+
+            double dt_mem = -(t_bwd - t_vmax_bwd) * tau_mem_inv;
+            double dt_syn = -(t_bwd - t_vmax_bwd) * tau_syn_inv;
+
+            double lambda_v = -exp(dt_mem) * maxima_errors[max_idx] * tau_mem_inv;
+            double k_bwd_val = k_bwd_prefactor * (exp(dt_mem) - exp(dt_syn));
+            double lambda_i = -k_bwd_val * maxima_errors[max_idx] * tau_mem_inv;
+
+            int source_nrn = input_sources[spike_idx];
+            result.gradient[source_nrn * n_post + max_idx] -= tau_syn * lambda_i;
+
+            result.spike_errors[spike_idx] += lambda_v - lambda_i;
+        }
+    }
+
     return result;
 }
 
