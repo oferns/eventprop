@@ -500,3 +500,63 @@ for op in ComputeSums ComputeSpikes BackwardSpikes; do
   done
 done
 ```
+
+---
+
+## C Library Complementary API Design (2026-06-02)
+
+### Problem Identified
+
+The original `eventprop_compute_spikes` function has an OOB buffer overflow vulnerability:
+- Caller must guess output buffer size beforehand
+- Function writes past buffer bounds when producing more spikes than allocated
+- No way to know if buffer was large enough after the call
+
+Example failure: v_th=0.01 produced 240,986 spikes when buffer only held 101,000.
+
+### Proposed Solution
+
+Create a complementary API with automatic memory allocation that coexists with original code.
+
+#### Pattern
+
+```c
+/* Output struct with owned memory */
+typedef struct {
+    int n_spikes;            // Count (replaces return value)
+    double* times;           // malloc'd by function, freed by caller
+    int32_t* sources;        // malloc'd by function, freed by caller  
+    double* currents;        // malloc'd by function, freed by caller
+} SpikeOutput;
+
+/* Function allocates internally */
+SpikeOutput eventprop_compute_spikes_alloc(const double* w, int n_pre, int n_post:
+                                           const double* times, const int32_t* sources, int n_spikes,\n                                           Double v_th, double tau_mem, double tau_syn);\n\n/* Cleanup helper */\nvoid eventprop_free_spike_output(SpikeOutput* output);\n```
+
+#### Functions to Implement
+1. `eventprop_compute_spikes_alloc` - forward pass (high priority)
+2. `eventprop_compute_sums_alloc` - cumulative sums
+3. `eventprop_compute_maxima_alloc` - membrane potential maxima
+4. `eventprop_backward_spikes_alloc` - backward pass (spikes)
+5. `eventprop_backward_maxima_alloc` - backward pass (maxima)
+
+#### Files Created
+- `src/EventProp.C/eventprop_alloc.h` - header with struct definitions and function declarations
+- `src/EventProp.C/eventprop_alloc.c` - C file with stub implementations
+
+#### Implementation Notes
+- Keep existing API unchanged - just add new functions alongside
+- Function knows exact output size needed, so can allocate exactly that much
+- Eliminates OOB risk by removing caller's guesswork about buffer sizes
+
+#### Status (when session ended)
+- Header and C file created with stubs for eventprop_compute_spikes_alloc only
+- Build issues: syntax errors (colons vs commas in function signatures)
+- Need to complete implementation and add unit tests
+
+#### Next Steps
+1. Fix syntax errors in existing stubs
+2. Complete eventprop_compute_spikes_alloc implementation
+3. Add unit tests for the new API
+4. Implement remaining functions one at a time
+

@@ -332,6 +332,69 @@ static void test_long_window(void)
     TEST_END;
 }
 
+static void test_compute_spikes_low_threshold(void)
+{
+    TEST("ComputeSpikes LowThreshold (v_th=0.1) -> many spikes");
+    int n_pre = 50, n_post = 20, n_spikes = 100;
+    Eigen::ArrayXd times(n_spikes);
+    Eigen::ArrayXi sources(n_spikes);
+    for (int i = 0; i < n_spikes; i++) {
+        times[i] = 0.01 + (i + 1.0) / (n_spikes + 1.0) * 0.09;
+        sources[i] = i % n_pre;
+    }
+    Spikes input(std::move(times), std::move(sources));
+    auto w = gen_weights(n_pre, n_post);
+
+    /* Low threshold — should produce many output spikes */
+    double v_th = 0.1;
+    Spikes fwd = compute_spikes(w, input, v_th, 0.02, 0.005);
+
+    printf("     Low threshold v_th=%.1f: %d output spikes\n", v_th, fwd.n_spikes);
+    ASSERT(fwd.n_spikes > 0, "should produce spikes with low threshold");
+
+    /* Verify times are sorted */
+    for (int i = 1; i < fwd.n_spikes; i++)
+        ASSERT(fwd.times[i] >= fwd.times[i-1], "times not sorted");
+
+    TEST_END;
+}
+
+static void test_compute_spikes_very_low_threshold(void)
+{
+    TEST("ComputeSpikes VeryLowThreshold (v_th=0.01) -> Toms748 exception");
+    int n_pre = 50, n_post = 20, n_spikes = 100;
+    Eigen::ArrayXd times(n_spikes);
+    Eigen::ArrayXi sources(n_spikes);
+    for (int i = 0; i < n_spikes; i++) {
+        times[i] = 0.01 + (i + 1.0) / (n_spikes + 1.0) * 0.09;
+        sources[i] = i % n_pre;
+    }
+    Spikes input(std::move(times), std::move(sources));
+    auto w = gen_weights(n_pre, n_post);
+
+    /* Very low threshold — Eigen's Toms748 root-finder should fail */
+    double v_th = 0.01;
+    bool exception_caught = false;
+    const char* exception_msg = nullptr;
+
+    try {
+        Spikes fwd = compute_spikes(w, input, v_th, 0.02, 0.005);
+        printf("     Very low threshold v_th=%.2f: %d output spikes (no exception)\n", v_th, fwd.n_spikes);
+    } catch(const std::exception& e) {
+        exception_caught = true;
+        exception_msg = e.what();
+        printf("     Very low threshold v_th=%.2f: caught exception\n", v_th);
+        printf("     Exception: %s\n", e.what());
+    }
+
+    /* Test passes if we catch the expected exception */
+    ASSERT(exception_caught, "expected Toms748 exception with very low threshold");
+    ASSERT(strstr(exception_msg, "toms748") || strstr(exception_msg, "bracket"),
+           "expected root-finding exception");
+
+    TEST_END;
+}
+
 int main(void)
 {
     printf("EventProp C++ (Eigen) Tests\n");
@@ -358,6 +421,10 @@ int main(void)
     test_simultaneous_spikes();
     test_t_zero_cluster();
     test_long_window();
+
+    /* Low threshold tests — demonstrates Eigen's root-finder limitation */
+    test_compute_spikes_low_threshold();
+    test_compute_spikes_very_low_threshold();
     printf("\nResults: %d/%d passed, %d failed\n", tests_passed, tests_run, tests_failed);
     return tests_failed > 0 ? 1 : 0;
 }

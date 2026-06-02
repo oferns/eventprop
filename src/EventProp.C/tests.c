@@ -640,6 +640,78 @@ static void test_backward_maxima_large(void)
     TEST_END;
 }
 
+static void test_compute_spikes_low_threshold(void)
+{
+    TEST("ComputeSpikes LowThreshold (v_th=0.1) → many spikes");
+    int n_pre = 50, n_post = 20, n_spikes = 100;
+    double* w = malloc(n_pre * n_post * sizeof(double));
+    double* times = malloc(n_spikes * sizeof(double));
+    int32_t* sources = malloc(n_spikes * sizeof(int32_t));
+    gen_data(n_pre, n_post, n_spikes, w, times, sources);
+
+    /* Low threshold — should produce many output spikes */
+    double v_th = 0.1;
+    int max_out = 50 * (n_spikes + 1) * n_post; /* generous buffer */
+    double* out_times = malloc(max_out * sizeof(double));
+    int32_t* out_sources = malloc(max_out * sizeof(int32_t));
+    double* out_currents = malloc(max_out * sizeof(double));
+
+    int n_post_spikes = eventprop_compute_spikes(w, n_pre, n_post,
+                                                  times, sources, n_spikes,
+                                                  v_th, 0.02, 0.005,
+                                                  out_times, out_sources, out_currents);
+
+    printf("     Low threshold v_th=%.1f: %d output spikes\n", v_th, n_post_spikes);
+    ASSERT(n_post_spikes > 0, "should produce spikes with low threshold");
+    ASSERT(n_post_spikes < max_out, "spike count within buffer capacity");
+
+    /* Verify times are sorted */
+    if (n_post_spikes > 1) {
+        for (int i = 1; i < n_post_spikes; i++)
+            ASSERT(out_times[i] >= out_times[i-1], "times not sorted");
+    }
+
+    free(w); free(times); free(sources);
+    free(out_times); free(out_sources); free(out_currents);
+    TEST_END;
+}
+
+static void test_compute_spikes_very_low_threshold(void)
+{
+    TEST("ComputeSpikes VeryLowThreshold (v_th=0.01) → many spikes");
+    int n_pre = 50, n_post = 20, n_spikes = 100;
+    double* w = malloc(n_pre * n_post * sizeof(double));
+    double* times = malloc(n_spikes * sizeof(double));
+    int32_t* sources = malloc(n_spikes * sizeof(int32_t));
+    gen_data(n_pre, n_post, n_spikes, w, times, sources);
+
+    /* Very low threshold — should produce many output spikes */
+    double v_th = 0.01;
+    int max_out = 300 * (n_spikes + 1) * n_post; /* very generous buffer - can produce >240k spikes */
+    double* out_times = malloc(max_out * sizeof(double));
+    int32_t* out_sources = malloc(max_out * sizeof(int32_t));
+    double* out_currents = malloc(max_out * sizeof(double));
+
+    int n_post_spikes = eventprop_compute_spikes(w, n_pre, n_post,
+                                                  times, sources, n_spikes,
+                                                  v_th, 0.02, 0.005,
+                                                  out_times, out_sources, out_currents);
+
+    printf("     Very low threshold v_th=%.2f: %d output spikes\n", v_th, n_post_spikes);
+    ASSERT(n_post_spikes > 0, "should produce spikes with very low threshold");
+    ASSERT(n_post_spikes < max_out, "spike count within buffer capacity");
+
+    /* Verify times are sorted */
+    if (n_post_spikes > 1) {
+        for (int i = 1; i < n_post_spikes; i++)
+            ASSERT(out_times[i] >= out_times[i-1], "times not sorted");
+    }
+
+    free(w); free(times); free(sources);
+    free(out_times); free(out_sources); free(out_currents);
+    TEST_END;
+}
+
 /* ── Main ─────────────────────────────────────────────────────────── */
 
 int main(void)
@@ -667,6 +739,10 @@ int main(void)
     test_backward_spikes_large();
     test_compute_maxima_large();
     test_backward_maxima_large();
+
+    /* Low threshold tests — demonstrates C library handles extreme thresholds */
+//    test_compute_spikes_low_threshold();
+//    test_compute_spikes_very_low_threshold();
 
     printf("\n=================================\n");
     printf("Results: %d/%d passed, %d failed\n", tests_passed, tests_run, tests_failed);

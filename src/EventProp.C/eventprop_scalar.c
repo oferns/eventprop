@@ -308,22 +308,32 @@ void eventprop_compute_sums(const double* w, int n_pre, int n_post,
     if (!use_stack) { free(exp_mem); free(exp_syn); }
 }
 
-/* ── ComputeV: membrane potential at time t for interval i ─────────── */
+/* ── ComputeV: membrane potential at time t for interval i (inlined)── */
 
+#define COMPUTE_V_INLINE(t, i, spike_count, post_spike_times, neuron_offset, \
+                         sum0, sum1, target_nrn, n_post, k_prefactor, tau_mem_inv, \
+                         tau_syn_inv, v_th) \
+({ \
+    double mem = k_prefactor * (sum1[i * n_post + target_nrn] * exp(-t * tau_mem_inv) \
+                    - sum0[i * n_post + target_nrn] * exp(-t * tau_syn_inv)); \
+    for (int s = 0; s < spike_count; s++) { \
+        double st = post_spike_times[neuron_offset + s]; \
+        if (st > t) break; \
+        mem -= v_th * exp(-(t - st) * tau_mem_inv); \
+    } \
+    mem; \
+})
+
+/* Keep function for external use */
 static double compute_v(double t, int i, int spike_count,
                         const double* post_spike_times, int neuron_offset,
                         const double* sum0, const double* sum1,
                         int target_nrn, int n_post,
                         double k_prefactor, double tau_mem, double tau_syn, double v_th)
 {
-    double mem = k_prefactor * (sum1[i * n_post + target_nrn] * exp(-t / tau_mem)
-                    - sum0[i * n_post + target_nrn] * exp(-t / tau_syn));
-    for (int s = 0; s < spike_count; s++) {
-        double st = post_spike_times[neuron_offset + s];
-        if (st > t) break;
-        mem -= v_th * exp(-(t - st) / tau_mem);
-    }
-    return mem;
+    return COMPUTE_V_INLINE(t, i, spike_count, post_spike_times, neuron_offset,
+                           sum0, sum1, target_nrn, n_post, k_prefactor, tau_mem,
+                           1.0/tau_syn, v_th);
 }
 
 /* ── ComputeTmax: time of maximum voltage in interval i ────────────── */
@@ -404,14 +414,14 @@ struct root_ctx {
     const double* sum0; const double* sum1;
     int i, spike_count, target_nrn, n_post;
     const double* post_spike_times; int neuron_offset;
-    double k_prefactor, tau_mem, tau_syn, v_th;
+    double k_prefactor, tau_mem_inv, tau_syn_inv, v_th;
 };
 
 static double root_fn(void* ctx_ptr, double t) {
     struct root_ctx* c = (struct root_ctx*)ctx_ptr;
     return compute_v(t, c->i, c->spike_count, c->post_spike_times, c->neuron_offset,
                      c->sum0, c->sum1, c->target_nrn, c->n_post,
-                     c->k_prefactor, c->tau_mem, c->tau_syn, c->v_th) - c->v_th;
+                     c->k_prefactor, c->tau_mem_inv, 1.0/c->tau_syn_inv, c->v_th) - c->v_th;
 }
 
 /* Exact port of .NET Toms748.Solve — Brent's method with IQI */
@@ -496,6 +506,9 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
     double k_prefactor = tau_syn / (tau_mem - tau_syn);
     double tmax_prefactor = 1.0 / (1.0 / tau_mem - 1.0 / tau_syn);
     double tmax_summand = log(tau_syn / tau_mem);
+    /* Pre-compute inverse time constants for exp() calls */
+    double tau_mem_inv = 1.0 / tau_mem;
+    double tau_syn_inv = 1.0 / tau_syn;
 
     int n_sums = (n_spikes + 1) * n_post;
     double* sum0 = calloc(n_sums, sizeof(double));
@@ -518,7 +531,7 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
     }
 
 #ifdef _OPENMP
-#pragma omp parallel for schedule(static) if(n_post >= 40)
+#pragma omp parallel for schedule(static) if(n_post >= 20)
 #endif
     for (int target_nrn = 0; target_nrn < n_post; target_nrn++) {
         double* p_times   = post_times_arr[target_nrn];
@@ -541,11 +554,11 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
 
                     double tmax = tmax_prefactor * (tmax_summand + log(s1 / s0));
                     if (!isinf(tmax)) {
-                        double v = compute_v(tmax, i, count, p_times, 0, sum0, sum1,
-                                             target_nrn, n_post, k_prefactor, tau_mem, tau_syn, v_th);
+                        double v = COMPUTE_V_INLINE(tmax, i, count, p_times, 0, sum0, sum1,
+                                             target_nrn, n_post, k_prefactor, tau_mem_inv, tau_syn_inv, v_th);
                         if (v > v_th + 1e-14) {
                             double t_lower = count > 0 ? p_times[count - 1] : 0.0;
-                            struct root_ctx rctx; memset(&rctx, 0, sizeof(rctx)); rctx.sum0=sum0; rctx.sum1=sum1; rctx.i=i; rctx.spike_count=count; rctx.post_spike_times=p_times; rctx.neuron_offset=0; rctx.target_nrn=target_nrn; rctx.n_post=n_post; rctx.k_prefactor=k_prefactor; rctx.tau_mem=tau_mem; rctx.tau_syn=tau_syn; rctx.v_th=v_th;
+                            struct root_ctx rctx; memset(&rctx, 0, sizeof(rctx)); rctx.sum0=sum0; rctx.sum1=sum1; rctx.i=i; rctx.spike_count=count; rctx.post_spike_times=p_times; rctx.neuron_offset=0; rctx.target_nrn=target_nrn; rctx.n_post=n_post; rctx.k_prefactor=k_prefactor; rctx.tau_mem_inv=tau_mem_inv; rctx.tau_syn_inv=tau_syn_inv; rctx.v_th=v_th;
                             double t_post = toms748_solve(&rctx, root_fn, t_lower, tmax);
                             if (t_post > t_lower && t_post < tmax) {
                                 if (count >= cap) {
@@ -572,8 +585,8 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
                                                sum0, sum1, target_nrn, n_post, tmax_prefactor, tmax_summand, tau_mem, v_th);
 
                     if (!isinf(tmax)) {
-                        double v = compute_v(tmax, i, count, p_times, 0, sum0, sum1,
-                                             target_nrn, n_post, k_prefactor, tau_mem, tau_syn, v_th);
+                        double v = COMPUTE_V_INLINE(tmax, i, count, p_times, 0, sum0, sum1,
+                                             target_nrn, n_post, k_prefactor, tau_mem_inv, tau_syn_inv, v_th);
                         if (v > v_th + 1e-14) {
                             double t_before = (i > 0) ? times[i-1] : 0.0;
                             for (int s = 0; s < count; s++) {
@@ -581,7 +594,7 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
                                 if (st > t_input) break;
                                 if (st > t_before) t_before = st;
                             }
-                            struct root_ctx rctx; memset(&rctx, 0, sizeof(rctx)); rctx.sum0=sum0; rctx.sum1=sum1; rctx.i=i; rctx.spike_count=count; rctx.post_spike_times=p_times; rctx.neuron_offset=0; rctx.target_nrn=target_nrn; rctx.n_post=n_post; rctx.k_prefactor=k_prefactor; rctx.tau_mem=tau_mem; rctx.tau_syn=tau_syn; rctx.v_th=v_th;
+                            struct root_ctx rctx; memset(&rctx, 0, sizeof(rctx)); rctx.sum0=sum0; rctx.sum1=sum1; rctx.i=i; rctx.spike_count=count; rctx.post_spike_times=p_times; rctx.neuron_offset=0; rctx.target_nrn=target_nrn; rctx.n_post=n_post; rctx.k_prefactor=k_prefactor; rctx.tau_mem_inv=tau_mem_inv; rctx.tau_syn_inv=tau_syn_inv; rctx.v_th=v_th;
                             double t_post = toms748_solve(&rctx, root_fn, t_before, tmax);
                             if (t_post > t_before && t_post < tmax) {
                                 if (count >= cap) {
@@ -598,8 +611,8 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
                     }
 
                     /* Check at input spike time */
-                    double v_at_input = compute_v(t_input, i, count, p_times, 0, sum0, sum1,
-                                                  target_nrn, n_post, k_prefactor, tau_mem, tau_syn, v_th);
+                    double v_at_input = COMPUTE_V_INLINE(t_input, i, count, p_times, 0, sum0, sum1,
+                                                  target_nrn, n_post, k_prefactor, tau_mem_inv, tau_syn_inv, v_th);
                     if (v_at_input > v_th + 1e-14) {
                         double t_before = (i > 0) ? times[i-1] : 0.0;
                         for (int s = 0; s < count; s++) {
@@ -607,7 +620,7 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
                             if (st > t_input) break;
                             if (st > t_before) t_before = st;
                         }
-                        struct root_ctx rctx; memset(&rctx, 0, sizeof(rctx)); rctx.sum0=sum0; rctx.sum1=sum1; rctx.i=i; rctx.spike_count=count; rctx.post_spike_times=p_times; rctx.neuron_offset=0; rctx.target_nrn=target_nrn; rctx.n_post=n_post; rctx.k_prefactor=k_prefactor; rctx.tau_mem=tau_mem; rctx.tau_syn=tau_syn; rctx.v_th=v_th;
+                        struct root_ctx rctx; memset(&rctx, 0, sizeof(rctx)); rctx.sum0=sum0; rctx.sum1=sum1; rctx.i=i; rctx.spike_count=count; rctx.post_spike_times=p_times; rctx.neuron_offset=0; rctx.target_nrn=target_nrn; rctx.n_post=n_post; rctx.k_prefactor=k_prefactor; rctx.tau_mem_inv=tau_mem_inv; rctx.tau_syn_inv=tau_syn_inv; rctx.v_th=v_th;
                         double t_post = toms748_solve(&rctx, root_fn, t_before, t_input);
                         if (t_post > t_before && t_post < t_input) {
                             if (count >= cap) {

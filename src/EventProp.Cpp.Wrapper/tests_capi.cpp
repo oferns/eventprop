@@ -256,11 +256,92 @@ static void test_backward_maxima_large(void) {
     free(spike_errors); TEST_END;
 }
 
+static void test_compute_spikes_low_threshold(void) {
+    TEST("ComputeSpikes LowThreshold (v_th=0.1) -> many spikes");
+    int n_pre = 50, n_post = 20, n_spikes = 100;
+    double* w = (double*)malloc(n_pre * n_post * sizeof(double));
+    for (int i = 0; i < n_pre * n_post; i++) w[i] = 5.0 + sin((double)i * 0.1);
+    double* times = (double*)malloc(n_spikes * sizeof(double));
+    int32_t* sources = (int32_t*)malloc(n_spikes * sizeof(int32_t));
+    for (int i = 0; i < n_spikes; i++) { times[i] = 0.01 + (i + 1.0) / (n_spikes + 1.0) * 0.09; sources[i] = i % n_pre; }
+
+    /* Low threshold — should produce many output spikes */
+    double v_th = 0.1;
+    int max_out = 50 * (n_spikes + 1) * n_post;
+    double* out_times = (double*)malloc(max_out * sizeof(double));
+    int32_t* out_sources = (int32_t*)malloc(max_out * sizeof(int32_t));
+    double* out_currents = (double*)malloc(max_out * sizeof(double));
+
+    int n_post_spikes = eventprop_compute_spikes(w, n_pre, n_post,
+                                                  times, sources, n_spikes,
+                                                  v_th, 0.02, 0.005,
+                                                  out_times, out_sources, out_currents);
+
+    printf("     Low threshold v_th=%.1f: %d output spikes\n", v_th, n_post_spikes);
+    ASSERT(n_post_spikes > 0, "should produce spikes with low threshold");
+
+    /* Verify times are sorted */
+    if (n_post_spikes > 1) {
+        for (int i = 1; i < n_post_spikes; i++)
+            ASSERT(out_times[i] >= out_times[i-1], "times not sorted");
+    }
+
+    free(w); free(times); free(sources);
+    free(out_times); free(out_sources); free(out_currents);
+    TEST_END;
+}
+
+static void test_compute_spikes_very_low_threshold(void) {
+    TEST("ComputeSpikes VeryLowThreshold (v_th=0.01) -> Toms748 exception");
+    int n_pre = 50, n_post = 20, n_spikes = 100;
+    double* w = (double*)malloc(n_pre * n_post * sizeof(double));
+    for (int i = 0; i < n_pre * n_post; i++) w[i] = 5.0 + sin((double)i * 0.1);
+    double* times = (double*)malloc(n_spikes * sizeof(double));
+    int32_t* sources = (int32_t*)malloc(n_spikes * sizeof(int32_t));
+    for (int i = 0; i < n_spikes; i++) { times[i] = 0.01 + (i + 1.0) / (n_spikes + 1.0) * 0.09; sources[i] = i % n_pre; }
+
+    /* Very low threshold — Eigen's Toms748 root-finder should fail */
+    double v_th = 0.01;
+    bool exception_caught = false;
+    const char* exception_msg = nullptr;
+
+    try {
+        int max_out = 50 * (n_spikes + 1) * n_post;
+        double* out_times = (double*)malloc(max_out * sizeof(double));
+        int32_t* out_sources = (int32_t*)malloc(max_out * sizeof(int32_t));
+        double* out_currents = (double*)malloc(max_out * sizeof(double));
+
+        int n_post_spikes = eventprop_compute_spikes(w, n_pre, n_post,
+                                                      times, sources, n_spikes,
+                                                      v_th, 0.02, 0.005,
+                                                      out_times, out_sources, out_currents);
+        printf("     Very low threshold v_th=%.2f: %d output spikes (no exception)\n", v_th, n_post_spikes);
+        free(out_times); free(out_sources); free(out_currents);
+    } catch(const std::exception& e) {
+        exception_caught = true;
+        exception_msg = e.what();
+        printf("     Very low threshold v_th=%.2f: caught exception\n", v_th);
+        printf("     Exception: %s\n", e.what());
+    }
+
+    /* Test passes if we catch the expected exception */
+    ASSERT(exception_caught, "expected Toms748 exception with very low threshold");
+    ASSERT(strstr(exception_msg, "toms748") || strstr(exception_msg, "bracket"),
+           "expected root-finding exception");
+
+    free(w); free(times); free(sources);
+    TEST_END;
+}
+
 int main(void) {
     printf("EventProp C API Wrapper Tests (C++ → Eigen)\n"); printf("=========================================\n\n");
     test_compute_sums(); test_compute_spikes(); test_backward_spikes(); test_compute_maxima(); test_backward_maxima();
     test_backward_maxima_zero_weights(); test_backward_maxima_linear_scale(); test_zero_spikes(); test_negative_weights(); test_backward_spikes_linear_scale();
     test_compute_sums_large(); test_backward_spikes_large(); test_compute_maxima_large(); test_backward_maxima_large();
+
+    /* Low threshold tests — demonstrates Eigen's root-finder limitation */
+    test_compute_spikes_low_threshold();
+    test_compute_spikes_very_low_threshold();
     printf("\n=========================================\n"); printf("Results: %d/%d passed, %d failed\n", tests_passed, tests_run, tests_failed); return tests_failed > 0 ? 1 : 0;
 }
 
