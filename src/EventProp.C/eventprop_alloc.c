@@ -334,7 +334,16 @@ static double alloc_root_fn(void* ctx_ptr, double t) {
                      c->k_prefactor, c->tau_mem_inv, c->tau_syn_inv, c->v_th) - c->v_th;
 }
 
+static int alloc_rootfind_calls = 0;
+
 static double alloc_toms748_solve(void* ctx, alloc_root_fn_t fn, double a, double b) {
+    alloc_rootfind_calls++;
+
+    if (alloc_rootfind_calls % 10000 == 0) {
+        fprintf(stderr, "[DIAG] Alloc: root-finding call %d\n", alloc_rootfind_calls);
+        fflush(stderr);
+    }
+
     double fa = fn(ctx, a), fb = fn(ctx, b);
     if (!isfinite(fa) || !isfinite(fb)) return a;
 
@@ -402,12 +411,21 @@ SpikeOutput eventprop_compute_spikes_alloc(const double* w, int n_pre, int n_pos
     double tau_mem_inv = 1.0 / tau_mem;
     double tau_syn_inv = 1.0 / tau_syn;
 
+    /* Initialize diagnostic counters */
+    alloc_rootfind_calls = 0;
+
     /* Compute sums using alloc version */
+    fprintf(stderr, "[DIAG] Alloc: computing sums (n_spikes=%d)\n", n_spikes);
+    fflush(stderr);
+
     SumsOutput sums = eventprop_compute_sums_alloc(w, n_pre, n_post,
                                                     times, sources, n_spikes,
                                                     tau_mem, tau_syn);
     const double* sum0 = sums.sum0;
     const double* sum1 = sums.sum1;
+
+    fprintf(stderr, "[DIAG] Alloc: sums computed\n");
+    fflush(stderr);
 
     /* Per-neuron dynamic buffers — growable to handle burst patterns */
     double** post_times_arr   = malloc(n_post * sizeof(double*));
@@ -427,6 +445,11 @@ SpikeOutput eventprop_compute_spikes_alloc(const double* w, int n_pre, int n_pos
 #pragma omp parallel for schedule(static) if(n_post >= 20)
 #endif
     for (int target_nrn = 0; target_nrn < n_post; target_nrn++) {
+        if (target_nrn == 0) {
+            fprintf(stderr, "[DIAG] Alloc: starting per-neuron processing\n");
+            fflush(stderr);
+        }
+
         double* p_times   = post_times_arr[target_nrn];
         double* p_currents = post_currents_arr[target_nrn];
         int cap = spike_caps[target_nrn];
@@ -552,10 +575,16 @@ SpikeOutput eventprop_compute_spikes_alloc(const double* w, int n_pre, int n_pos
         spike_counts[target_nrn]     = count;
     }
 
+    fprintf(stderr, "[DIAG] Alloc: per-neuron processing complete\n");
+    fflush(stderr);
+
     /* Count total spikes and allocate exact-size output */
     result.n_spikes = 0;
     for (int n = 0; n < n_post; n++)
         result.n_spikes += spike_counts[n];
+
+    fprintf(stderr, "[DIAG] Alloc: processing complete, total spikes=%d\n", result.n_spikes);
+    fflush(stderr);
 
     if (result.n_spikes == 0) {
         result.times = NULL;

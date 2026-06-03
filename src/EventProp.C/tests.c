@@ -1001,6 +1001,58 @@ static void test_backward_spikes_alloc_parity(void)
     TEST_END;
 }
 
+/* Diagnostic test for burst pattern timeout at Medium scale */
+static void test_compute_spikes_alloc_burst_medium(void)
+{
+    TEST("ComputeSpikes Alloc burst Medium (diagnostic)");
+    int n_pre = 200, n_post = 80, n_spikes = 500;
+
+    /* Generate burst pattern data matching benchmark */
+    double* w = malloc(n_pre * n_post * sizeof(double));
+    double* times = malloc(n_spikes * sizeof(double));
+    int32_t* sources = malloc(n_spikes * sizeof(int32_t));
+
+    /* Fill weights with random values 0.5 to 2.0 */
+    for (int i = 0; i < n_pre * n_post; i++) {
+        w[i] = 0.5 + ((double)rand() / RAND_MAX) * 1.5;
+    }
+
+    /* Generate burst pattern: clusters of spikes per neuron */
+    int spike_idx = 0;
+    for (int nrn = 0; nrn < n_pre && spike_idx < n_spikes; nrn++) {
+        double burst_start = 0.05 + nrn * 0.1;
+        for (int b = 0; burst_start < 1.0 && spike_idx < n_spikes; b++) {
+            for (int s = 0; s < 5 && spike_idx < n_spikes; s++) {
+                times[spike_idx] = burst_start + s * 0.002;
+                sources[spike_idx] = nrn;
+                spike_idx++;
+            }
+            burst_start += 0.12;
+        }
+    }
+
+    fprintf(stderr, "Generated %d input spikes\n", spike_idx);
+    fflush(stderr);
+
+    /* Run alloc function */
+    fprintf(stderr, "Running compute_spikes_alloc...\n");
+    fflush(stderr);
+
+    SpikeOutput result = eventprop_compute_spikes_alloc(
+        w, n_pre, n_post,
+        times, sources, spike_idx,
+        1.0, 0.02, 0.005);
+
+    fprintf(stderr, "Completed: %d output spikes\n", result.n_spikes);
+    fflush(stderr);
+
+    ASSERT(result.n_spikes > 0, "should produce output spikes");
+
+    eventprop_free_spike_output(&result);
+    free(w); free(times); free(sources);
+    TEST_END;
+}
+
 /* ── ComputeMaxima Alloc tests ─────────────────────────────────────── */
 
 static void test_compute_maxima_alloc(void)
@@ -1200,6 +1252,9 @@ int main(void)
     /* BackwardSpikes Alloc tests */
     test_backward_spikes_alloc();
     test_backward_spikes_alloc_parity();
+
+    /* Diagnostic tests */
+    test_compute_spikes_alloc_burst_medium();
 
     /* Low threshold tests — demonstrates C library handles extreme thresholds */
 //    test_compute_spikes_low_threshold();
