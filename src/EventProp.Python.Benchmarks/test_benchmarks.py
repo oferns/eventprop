@@ -1,4 +1,4 @@
-"""Benchmarks comparing pybind11 (EventProp.Python) vs CFFI (eventprop_cffi).
+"""Benchmarks comparing pybind11 (EventProp.Python) vs ctypes (eventprop).
 
 Tests the Python public API surface — layer forward/backward passes and loss functions.
 Problem sizes and spike patterns match the .NET/C benchmark suite for alignment.
@@ -12,23 +12,17 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-# Import both libraries — they coexist because eventprop_cffi was renamed.
+# Import both libraries — they coexist because eventprop was renamed.
 from eventprop.eventprop_cpp import (
     Spikes, SpikesVector, Maxima, MaximaVector,
 )
 
-from eventprop_cffi.spikes import (
-    Spikes as NativeSpikes, SpikesVector as NativeSpikesVector,
-    Maxima as NativeMaxima, MaximaVector as NativeMaximaVector,
-)
+# Import ctypes library (eventprop) — new implementation to benchmark
+import eventprop as native_lib
 
 from eventprop.lif_layer import LIFLayer, LIFLayerParameters
 from eventprop.li_layer import LILayer, LILayerParameters as LiLIFLayerParameters
 from eventprop.loss_layer import TTFSCrossEntropyLoss, VMaxCrossEntropyLoss
-
-from eventprop_cffi.lif_layer import LIFLayer as NativeLIFLayer, LIFLayerParameters as NativeLIFLayerParameters
-from eventprop_cffi.li_layer import LILayer as NativeLILayer, LILayerParameters as NativeLiLIFLayerParameters
-from eventprop_cffi.loss_layer import TTFSCrossEntropyLoss as NativeTTFSCrossEntropyLoss, VMaxCrossEntropyLoss as NativeVMaxCrossEntropyLoss
 
 from conftest import SIZES, TAU_MEM, TAU_SYN, V_TH, make_input_batch, make_weights
 
@@ -37,22 +31,50 @@ from conftest import SIZES, TAU_MEM, TAU_SYN, V_TH, make_input_batch, make_weigh
 # Helper: create Spikes objects for both libraries.
 # ============================================================
 
+# Get ctypes library instance (cached for performance)
+def _get_native_lib():
+    """Get or create a ctypes library instance."""
+    if not hasattr(_get_native_lib, '_lib'):
+        from pathlib import Path
+        
+        # Try to find library relative to project root
+        _project_root = Path(__file__).resolve().parent.parent.parent  # eventprop.net root
+        lib_paths = [
+            _project_root / "src" / "EventProp.C" / "build" / "libeventprop_c_api.dylib",
+            _project_root / "src" / "EventProp.C" / "build" / "libeventprop_c_api.so",
+            Path.cwd() / "libeventprop_c_api.dylib",
+            Path.cwd() / "libeventprop_c_api.so",
+        ]
+        
+        for path in lib_paths:
+            if path.exists():
+                _get_native_lib._lib = native_lib.EventPropCtypes(str(path))
+                return
+        
+        raise FileNotFoundError(
+            "Could not find libeventprop_c_api.dylib/.so. Run ./build.sh c first."
+        )
+    return _get_native_lib._lib
+
 def make_spikes(times, sources):
     """Create Spikes objects for both libraries from raw arrays."""
-    return (Spikes(times, sources), NativeSpikes(times, sources))
+    # For ctypes, we just pass the raw arrays directly (zero-copy)
+    return (Spikes(times, sources), (times, sources))
 
 
 def make_spikes_vector(batch):
     """Create SpikesVector objects for both libraries from a list of (times, sources) tuples."""
     pybind11_batch = SpikesVector([Spikes(t, s) for t, s in batch])
-    native_batch = NativeSpikesVector([NativeSpikes(t, s) for t, s in batch])
+    # For ctypes, we just use the list of tuples directly
+    native_batch = batch
     return pybind11_batch, native_batch
 
 
 def make_maxima_vector(batch):
     """Create MaximaVector objects for both libraries."""
     pybind11_batch = MaximaVector([Maxima(t, v) for t, v in batch])
-    native_batch = NativeMaximaVector([NativeMaxima(t, v) for t, v in batch])
+    # For ctypes, we just use the list of tuples directly
+    native_batch = batch
     return pybind11_batch, native_batch
 
 
@@ -96,13 +118,13 @@ class TestLIFForward:
         times, sources = make_input_batch(n_in, n_out, spikes_per_neuron, pattern)
 
         pybind11_spikes = Spikes(times, sources)
-        native_spikes = NativeSpikes(times, sources)
+        native_spikes = (times, sources)
 
         pybind11_params = LIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
-        native_params = NativeLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
+        native_params = LIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
 
         pybind11_layer = LIFLayer(pybind11_params, w_in=w)
-        native_layer = NativeLIFLayer(native_params, w_in=w)
+        native_layer = LIFLayer(native_params, w_in=w)
 
         return (pybind11_layer, native_layer), pybind11_spikes, native_spikes
 
@@ -112,7 +134,7 @@ class TestLIFForward:
         benchmark(layer_pair[0].forward, SpikesVector([spikes]))
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
-    def test_cffi(self, benchmark, size_name, pattern):
+    def test_ctypes(self, benchmark, size_name, pattern):
         layer_pair, _, spikes = self._make_layer_and_input(size_name, pattern)
         benchmark(layer_pair[1].forward, [spikes])
 
@@ -129,13 +151,13 @@ class TestLIFBackward:
         times, sources = make_input_batch(n_in, n_out, spikes_per_neuron, pattern)
 
         pybind11_spikes = Spikes(times, sources)
-        native_spikes = NativeSpikes(times, sources)
+        native_spikes = (times, sources)
 
         pybind11_params = LIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
-        native_params = NativeLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
+        native_params = LIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
 
         pybind11_layer = LIFLayer(pybind11_params, w_in=w)
-        native_layer = NativeLIFLayer(native_params, w_in=w)
+        native_layer = LIFLayer(native_params, w_in=w)
 
         # Run forward pass for both
         pybind11_post = pybind11_layer.forward(SpikesVector([pybind11_spikes]))
@@ -155,7 +177,7 @@ class TestLIFBackward:
         benchmark(layer_pair[0].backward)
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
-    def test_cffi(self, benchmark, size_name, pattern):
+    def test_ctypes(self, benchmark, size_name, pattern):
         layer_pair, _, post_spikes = self._make_layer_and_batch(size_name, pattern)
         benchmark(layer_pair[1].backward)
 
@@ -175,13 +197,13 @@ class TestLIForward:
         times, sources = make_input_batch(n_in, n_out, spikes_per_neuron, pattern)
 
         pybind11_spikes = Spikes(times, sources)
-        native_spikes = NativeSpikes(times, sources)
+        native_spikes = (times, sources)
 
         pybind11_params = LiLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN)
-        native_params = NativeLiLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN)
+        native_params = LiLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN)
 
         pybind11_layer = LILayer(pybind11_params, w_in=w)
-        native_layer = NativeLILayer(native_params, w_in=w)
+        native_layer = LILayer(native_params, w_in=w)
 
         return (pybind11_layer, native_layer), pybind11_spikes, native_spikes
 
@@ -191,7 +213,7 @@ class TestLIForward:
         benchmark(layer_pair[0].forward, SpikesVector([spikes]))
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
-    def test_cffi(self, benchmark, size_name, pattern):
+    def test_ctypes(self, benchmark, size_name, pattern):
         layer_pair, _, spikes = self._make_layer_and_input(size_name, pattern)
         benchmark(layer_pair[1].forward, [spikes])
 
@@ -207,13 +229,13 @@ class TestLIBackward:
         times, sources = make_input_batch(n_in, n_out, spikes_per_neuron, pattern)
 
         pybind11_spikes = Spikes(times, sources)
-        native_spikes = NativeSpikes(times, sources)
+        native_spikes = (times, sources)
 
         pybind11_params = LiLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN)
-        native_params = NativeLiLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN)
+        native_params = LiLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN)
 
         pybind11_layer = LILayer(pybind11_params, w_in=w)
-        native_layer = NativeLILayer(native_params, w_in=w)
+        native_layer = LILayer(native_params, w_in=w)
 
         # Run forward pass for both
         pybind11_maxima = pybind11_layer.forward(SpikesVector([pybind11_spikes]))
@@ -233,7 +255,7 @@ class TestLIBackward:
         benchmark(layer_pair[0].backward)
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
-    def test_cffi(self, benchmark, size_name, pattern):
+    def test_ctypes(self, benchmark, size_name, pattern):
         layer_pair, _, maxima = self._make_layer_and_batch(size_name, pattern)
         benchmark(layer_pair[1].backward)
 
@@ -253,16 +275,16 @@ class TestTTFSForward:
         times, sources = make_input_batch(n_in, n_out, spikes_per_neuron, pattern)
 
         pybind11_spikes = Spikes(times, sources)
-        native_spikes = NativeSpikes(times, sources)
+        native_spikes = (times, sources)
 
         lif_params = LIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
         loss_params = type('TTFSCrossEntropyLossParameters', (), {'lif_parameters': lif_params, 'alpha': 1e-2})()
 
-        native_lif_params = NativeLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
+        native_lif_params = LIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
         native_loss_params = type('TTFSCrossEntropyLossParameters', (), {'lif_parameters': native_lif_params, 'alpha': 1e-2})()
 
         pybind11_layer = TTFSCrossEntropyLoss(loss_params, w_in=w)
-        native_layer = NativeTTFSCrossEntropyLoss(native_loss_params, w_in=w)
+        native_layer = TTFSCrossEntropyLoss(native_loss_params, w_in=w)
 
         return (pybind11_layer, native_layer), pybind11_spikes, native_spikes
 
@@ -272,7 +294,7 @@ class TestTTFSForward:
         benchmark(layer_pair[0].forward, SpikesVector([spikes]))
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
-    def test_cffi(self, benchmark, size_name, pattern):
+    def test_ctypes(self, benchmark, size_name, pattern):
         layer_pair, _, spikes = self._make_layer_and_input(size_name, pattern)
         benchmark(layer_pair[1].forward, [spikes])
 
@@ -288,16 +310,16 @@ class TestTTFSBackward:
         times, sources = make_input_batch(n_in, n_out, spikes_per_neuron, pattern)
 
         pybind11_spikes = Spikes(times, sources)
-        native_spikes = NativeSpikes(times, sources)
+        native_spikes = (times, sources)
 
         lif_params = LIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
         loss_params = type('TTFSCrossEntropyLossParameters', (), {'lif_parameters': lif_params, 'alpha': 1e-2})()
 
-        native_lif_params = NativeLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
+        native_lif_params = LIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
         native_loss_params = type('TTFSCrossEntropyLossParameters', (), {'lif_parameters': native_lif_params, 'alpha': 1e-2})()
 
         pybind11_layer = TTFSCrossEntropyLoss(loss_params, w_in=w)
-        native_layer = NativeTTFSCrossEntropyLoss(native_loss_params, w_in=w)
+        native_layer = TTFSCrossEntropyLoss(native_loss_params, w_in=w)
 
         # Run forward pass for both
         pybind11_layer.forward(SpikesVector([pybind11_spikes]))
@@ -315,7 +337,7 @@ class TestTTFSBackward:
         benchmark(layer_pair[0].backward, labels)
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
-    def test_cffi(self, benchmark, size_name, pattern):
+    def test_ctypes(self, benchmark, size_name, pattern):
         layer_pair, labels = self._make_layer_and_batch(size_name, pattern)
         benchmark(layer_pair[1].backward, labels)
 
@@ -331,13 +353,13 @@ class TestVMaxForward:
         times, sources = make_input_batch(n_in, n_out, spikes_per_neuron, pattern)
 
         pybind11_spikes = Spikes(times, sources)
-        native_spikes = NativeSpikes(times, sources)
+        native_spikes = (times, sources)
 
         lif_params = LiLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN)
-        native_lif_params = NativeLiLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN)
+        native_lif_params = LiLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN)
 
         pybind11_layer = VMaxCrossEntropyLoss(lif_params, w_in=w)
-        native_layer = NativeVMaxCrossEntropyLoss(native_lif_params, w_in=w)
+        native_layer = VMaxCrossEntropyLoss(native_lif_params, w_in=w)
 
         return (pybind11_layer, native_layer), pybind11_spikes, native_spikes
 
@@ -347,7 +369,7 @@ class TestVMaxForward:
         benchmark(layer_pair[0].forward, SpikesVector([spikes]))
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
-    def test_cffi(self, benchmark, size_name, pattern):
+    def test_ctypes(self, benchmark, size_name, pattern):
         layer_pair, _, spikes = self._make_layer_and_input(size_name, pattern)
         benchmark(layer_pair[1].forward, [spikes])
 
@@ -363,13 +385,13 @@ class TestVMaxBackward:
         times, sources = make_input_batch(n_in, n_out, spikes_per_neuron, pattern)
 
         pybind11_spikes = Spikes(times, sources)
-        native_spikes = NativeSpikes(times, sources)
+        native_spikes = (times, sources)
 
         lif_params = LiLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN)
-        native_lif_params = NativeLiLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN)
+        native_lif_params = LiLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN)
 
         pybind11_layer = VMaxCrossEntropyLoss(lif_params, w_in=w)
-        native_layer = NativeVMaxCrossEntropyLoss(native_lif_params, w_in=w)
+        native_layer = VMaxCrossEntropyLoss(native_lif_params, w_in=w)
 
         # Run forward pass for both
         pybind11_layer.forward(SpikesVector([pybind11_spikes]))
@@ -387,6 +409,6 @@ class TestVMaxBackward:
         benchmark(layer_pair[0].backward, labels)
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
-    def test_cffi(self, benchmark, size_name, pattern):
+    def test_ctypes(self, benchmark, size_name, pattern):
         layer_pair, labels = self._make_layer_and_batch(size_name, pattern)
         benchmark(layer_pair[1].backward, labels)

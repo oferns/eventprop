@@ -1,6 +1,6 @@
 """Shared fixtures and helpers for EventProp Python benchmarks.
 
-Compares pybind11 (EventProp.Python) vs CFFI (eventprop_cffi).
+Compares pybind11 (EventProp.Python) vs ctypes (eventprop).
 Problem sizes and spike patterns match the .NET/C benchmark suite for alignment.
 
 Usage:
@@ -17,11 +17,11 @@ from pathlib import Path
 _here = Path(__file__).resolve().parent
 _src = _here.parent
 
-# EventProp.Python (pybind11) — the "truth" library
-sys.path.insert(0, str(_src / "EventProp.Python"))
-
-# eventprop_cffi (CFFI) — renamed from 'eventprop' to avoid package clash
+# eventprop (ctypes) — new ctypes implementation (add first so it doesn't shadow pybind11)
 sys.path.insert(0, str(_src / "EventProp.Native.Python"))
+
+# EventProp.Python (pybind11) — the "truth" library (add second, after ctypes)
+sys.path.insert(0, str(_src / "EventProp.Python"))
 
 import numpy as np
 import pytest

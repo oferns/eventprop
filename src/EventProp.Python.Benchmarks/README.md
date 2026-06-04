@@ -1,6 +1,6 @@
 # EventProp Python Benchmarks
 
-Compares **pybind11** (`EventProp.Python`) vs **CFFI** (`eventprop_cffi`) across the Python public API surface.
+Compares **pybind11** (`EventProp.Python`) vs **ctypes** (`eventprop`) across the Python public API surface.
 
 ## What's Benchmarked
 
@@ -43,12 +43,12 @@ Both libraries must be built and importable:
 # Install EventProp.Python (pybind11) in editable mode
 cd src/EventProp.Python && pip install -e .
 
-# Install eventprop_cffi (CFFI) in editable mode
+# Install eventprop (ctypes) in editable mode
 cd src/EventProp.Native.Python && pip install -e .
 
 # Verify both import simultaneously
 PYTHONPATH="src/EventProp.Python:src/EventProp.Native.Python" python3 -c \
-  "from eventprop.eventprop_cpp import compute_spikes_batch_cpp; from eventprop_cffi.native import compute_spikes_batch_cpp; print('OK')"
+  "from eventprop.eventprop_cpp import compute_spikes_batch_cpp; from eventprop.native import load_library; print('OK')"
 ```
 
 ### Run all benchmarks
@@ -67,8 +67,8 @@ PYTHONPATH="EventProp.Python:EventProp.Native.Python" pytest test_benchmarks.py 
 # LIF forward only
 PYTHONPATH="EventProp.Python:EventProp.Native.Python" pytest test_benchmarks.py -v --benchmark-only -k "LIFForward"
 
-# CFFI backward only
-PYTHONPATH="EventProp.Python:EventProp.Native.Python" pytest test_benchmarks.py -v --benchmark-only -k "Backward and cffi"
+# ctypes backward only
+PYTHONPATH="EventProp.Python:EventProp.Native.Python" pytest test_benchmarks.py -v --benchmark-only -k "Backward and ctypes"
 ```
 
 ### Compare with .NET benchmarks
@@ -81,8 +81,8 @@ After running Python benchmarks, compare results against:
 ```
 EventProp.Python.Benchmarks/
 ├── conftest.py          # Shared fixtures: sizes, patterns, helpers
-├── test_benchmarks.py   # All benchmark classes (pybind11 vs CFFI)
+├── test_benchmarks.py   # All benchmark classes (pybind11 vs ctypes)
 └── README.md            # This file
 ```
 
-Both libraries are imported simultaneously via `sys.path` manipulation — no reinstall needed. The `eventprop_cffi` package was renamed from `eventprop` to avoid the top-level package name clash.
+Both libraries are imported simultaneously via `sys.path` manipulation — no reinstall needed.
