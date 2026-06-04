@@ -255,8 +255,9 @@ static int alloc_cmp_merged_desc(const void* a, const void* b) {
                     - sum0[i * n_post + target_nrn] * exp(-t * tau_syn_inv)); \
     for (int s = 0; s < spike_count; s++) { \
         double st = post_spike_times[neuron_offset + s]; \
-        if (st > t) break; \
-        mem -= v_th * exp(-(t - st) * tau_mem_inv); \
+        if (st <= t) {  /* Include all spikes where st <= t, don't break early */ \
+            mem -= v_th * exp(-(t - st) * tau_mem_inv); \
+        } \
     } \
     mem; \
 })
@@ -334,14 +335,12 @@ static double alloc_root_fn(void* ctx_ptr, double t) {
                      c->k_prefactor, c->tau_mem_inv, c->tau_syn_inv, c->v_th) - c->v_th;
 }
 
-static int alloc_rootfind_calls = 0;
+extern int alloc_rootfind_calls = 0;
 
 static double alloc_toms748_solve(void* ctx, alloc_root_fn_t fn, double a, double b) {
     alloc_rootfind_calls++;
 
     if (alloc_rootfind_calls % 10000 == 0) {
-        fprintf(stderr, "[DIAG] Alloc: root-finding call %d\n", alloc_rootfind_calls);
-        fflush(stderr);
     }
 
     double fa = fn(ctx, a), fb = fn(ctx, b);
@@ -415,8 +414,6 @@ SpikeOutput eventprop_compute_spikes_alloc(const double* w, int n_pre, int n_pos
     alloc_rootfind_calls = 0;
 
     /* Compute sums using alloc version */
-    fprintf(stderr, "[DIAG] Alloc: computing sums (n_spikes=%d)\n", n_spikes);
-    fflush(stderr);
 
     SumsOutput sums = eventprop_compute_sums_alloc(w, n_pre, n_post,
                                                     times, sources, n_spikes,
@@ -424,8 +421,6 @@ SpikeOutput eventprop_compute_spikes_alloc(const double* w, int n_pre, int n_pos
     const double* sum0 = sums.sum0;
     const double* sum1 = sums.sum1;
 
-    fprintf(stderr, "[DIAG] Alloc: sums computed\n");
-    fflush(stderr);
 
     /* Per-neuron dynamic buffers — growable to handle burst patterns */
     double** post_times_arr   = malloc(n_post * sizeof(double*));
@@ -446,8 +441,6 @@ SpikeOutput eventprop_compute_spikes_alloc(const double* w, int n_pre, int n_pos
 #endif
     for (int target_nrn = 0; target_nrn < n_post; target_nrn++) {
         if (target_nrn == 0) {
-            fprintf(stderr, "[DIAG] Alloc: starting per-neuron processing\n");
-            fflush(stderr);
         }
 
         double* p_times   = post_times_arr[target_nrn];
@@ -575,16 +568,12 @@ SpikeOutput eventprop_compute_spikes_alloc(const double* w, int n_pre, int n_pos
         spike_counts[target_nrn]     = count;
     }
 
-    fprintf(stderr, "[DIAG] Alloc: per-neuron processing complete\n");
-    fflush(stderr);
 
     /* Count total spikes and allocate exact-size output */
     result.n_spikes = 0;
     for (int n = 0; n < n_post; n++)
         result.n_spikes += spike_counts[n];
 
-    fprintf(stderr, "[DIAG] Alloc: processing complete, total spikes=%d\n", result.n_spikes);
-    fflush(stderr);
 
     if (result.n_spikes == 0) {
         result.times = NULL;
@@ -969,4 +958,118 @@ void eventprop_free_backward_maxima_output(BackwardMaximaOutput* output)
     if (!output) return;
     free(output->gradient);
     free(output->spike_errors);
+}
+
+/* ── Diagnostic: compute_voltage_trace_alloc ─────────────────────── */
+
+VoltageTraceOutput eventprop_compute_voltage_trace_alloc(double t_max, double dt,
+                                                         int target_nrn_idx,
+                                                         const double* w, int n_pre, int n_post,
+                                                         const double* times, const int32_t* sources, int n_spikes,
+                                                         const double* fwd_times, const int32_t* fwd_sources, int n_post_spikes,
+                                                         double v_th, double tau_mem, double tau_syn)
+{
+    VoltageTraceOutput result;
+    int n_t = (int)(t_max / dt);
+
+    result.n_t = n_t;
+    result.v_trace = calloc(n_t, sizeof(double));
+    result.ts = calloc(n_t, sizeof(double));
+
+    double k_prefactor = tau_syn / (tau_mem - tau_syn);
+
+    for (int ti = 0; ti < n_t; ti++) {
+        double t = dt * ti;
+        result.ts[ti] = t;
+        double mem = 0.0;
+
+        /* Pre-synaptic contribution */
+        for (int i = 0; i < n_spikes; i++) {
+            if (times[i] > t) break;
+            mem += w[sources[i] * n_post + target_nrn_idx] *
+                   k_prefactor * (exp(-(t - times[i]) / tau_mem) -
+                                  exp(-(t - times[i]) / tau_syn));
+        }
+
+        /* Post-synaptic contribution (spike reset) */
+        for (int i = 0; i < n_post_spikes; i++) {
+            if (fwd_times[i] > t) break;
+            if (fwd_sources[i] == target_nrn_idx)
+                mem -= v_th * exp(-(t - fwd_times[i]) / tau_mem);
+        }
+
+        result.v_trace[ti] = mem;
+    }
+
+    return result;
+}
+
+void eventprop_free_voltage_trace_output(VoltageTraceOutput* output)
+{
+    if (!output) return;
+    free(output->v_trace);
+    free(output->ts);
+}
+
+/* ── Diagnostic: compute_lambda_i_trace_alloc ─────────────────────── */
+
+LambdaITraceOutput eventprop_compute_lambda_i_trace_alloc(double t_max, double dt,
+                                                          int target_nrn_idx,
+                                                          const double* fwd_times, int n_post_spikes,
+                                                          double v_th, double tau_mem, double tau_syn)
+{
+    LambdaITraceOutput result;
+    int n_t = (int)(t_max / dt);
+
+    result.n_t = n_t;
+    result.lambda_trace = calloc(n_t, sizeof(double));
+    result.ts = calloc(n_t, sizeof(double));
+
+    for (int ti = 0; ti < n_t; ti++) {
+        double t = dt * ti;
+        result.ts[ti] = t;
+
+        if (n_post_spikes == 0) {
+            result.lambda_trace[ti] = 0.0;
+            continue;
+        }
+
+        double largest_time = fwd_times[n_post_spikes - 1];
+
+        /* Collect jumps from post-synaptic spikes after time t */
+        struct {
+            double mag;
+            double time_bwd;
+        } jumps[256];
+
+        int n_jumps = 0;
+        for (int i = n_post_spikes - 1; i >= 0; i--) {
+            if (fwd_times[i] < t) break;
+            double t_bwd = largest_time - fwd_times[i];
+            jumps[n_jumps].mag = 1.0 / (v_th + 0.001);
+            jumps[n_jumps].time_bwd = t_bwd;
+            n_jumps++;
+        }
+
+        double lambda_i = 0.0;
+        double t_bwd_from_t = largest_time - t;
+        double k_bwd_prefactor = tau_mem / (tau_mem - tau_syn);
+
+        for (int j = 0; j < n_jumps; j++) {
+            double dt_jump = t_bwd_from_t - jumps[j].time_bwd;
+            lambda_i += jumps[j].mag * k_bwd_prefactor *
+                        (exp(-dt_jump / tau_mem) - exp(-dt_jump / tau_syn));
+        }
+
+        result.lambda_trace[ti] = lambda_i;
+    }
+
+    return result;
+}
+
+void eventprop_free_lambda_i_trace_output(LambdaITraceOutput* output)
+{
+    if (!output) return;
+    free(output->lambda_trace);
+    free(output->ts);
 }
