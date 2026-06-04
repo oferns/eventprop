@@ -501,6 +501,23 @@ done
 
 ---
 
+## C Library Import Issues (2026-06-04)
+
+### Problem Identified
+The Python benchmarks are having trouble importing the C library. The ctypes module is not being found when running tests.
+
+### Current Status
+- C library is at `src/EventProp.C/build/libeventprop_c_api.dylib`
+- ctypes module should load it from this location
+- Import issues need to be resolved before running benchmarks
+
+### Next Steps
+1. Fix import issues in test_benchmarks_ctypes.py
+2. Test all benchmarks work correctly
+3. Run full benchmark suite
+
+---
+
 ## C Library Complementary API Design (2026-06-02)
 
 ### Problem Identified
