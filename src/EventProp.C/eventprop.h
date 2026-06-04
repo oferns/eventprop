@@ -16,6 +16,15 @@
 
 #include <stdint.h>
 
+/* Deprecation macros */
+#if defined(_MSC_VER)
+    #define EVENTPROP_DEPRECATED __declspec(deprecated("Use alloc version instead"))
+#elif defined(__GNUC__) || defined(__clang__)
+    #define EVENTPROP_DEPRECATED __attribute__((deprecated("Use alloc version instead")))
+#else
+    #define EVENTPROP_DEPRECATED
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -45,7 +54,7 @@ void eventprop_scratch_init(EventPropScratch* buf, int n_pre, int n_post, int n_
 void eventprop_compute_sums(const double* w, int n_pre, int n_post,
                             const double* times, const int32_t* sources, int n_spikes,
                             double tau_mem, double tau_syn,
-                            double* sum0, double* sum1);
+                            double* sum0, double* sum1) EVENTPROP_DEPRECATED;
 
 /**
  * Forward pass: predict post-synaptic spike times via root-finding.
@@ -58,7 +67,7 @@ void eventprop_compute_sums(const double* w, int n_pre, int n_post,
 int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
                              const double* times, const int32_t* sources, int n_spikes,
                              double v_th, double tau_mem, double tau_syn,
-                             double* out_times, int32_t* out_sources, double* out_currents);
+                             double* out_times, int32_t* out_sources, double* out_currents) EVENTPROP_DEPRECATED;
 
 /**
  * Compute first_spike per neuron from sorted spike output.
@@ -75,7 +84,7 @@ int eventprop_compute_spikes(const double* w, int n_pre, int n_post,
  */
 void eventprop_compute_first_spike(int n_post, const double* out_times,
                                     const int32_t* out_sources, int n_total_spikes,
-                                    double* first_spike_times, int32_t* first_spike_idxs);
+                                    double* first_spike_times, int32_t* first_spike_idxs) EVENTPROP_DEPRECATED;
 
 /**
  * Backward pass: adjoint method computing weight gradients and input spike errors.
@@ -92,7 +101,7 @@ void eventprop_backward_spikes(const double* times, const int32_t* sources, int 
                                const double* w, int n_pre, int n_post,
                                double v_th, double tau_mem, double tau_syn,
                                double* grad,
-                               double* spike_errors);
+                               double* spike_errors) EVENTPROP_DEPRECATED;
 
 /**
  * Find membrane potential maxima per neuron (for voltage-based loss).
@@ -103,7 +112,7 @@ void eventprop_backward_spikes(const double* times, const int32_t* sources, int 
 void eventprop_compute_maxima(const double* w, int n_pre, int n_post,
                               const double* times, const int32_t* sources, int n_spikes,
                               double tau_mem, double tau_syn,
-                              double* maxima_times, double* maxima_values);
+                              double* maxima_times, double* maxima_values) EVENTPROP_DEPRECATED;
 
 /**
  * Backward pass for maxima-based loss.
@@ -121,7 +130,7 @@ void eventprop_backward_maxima(const double* input_times, const int32_t* input_s
                                const double* w, int n_pre, int n_post,
                                double tau_mem, double tau_syn,
                                double* gradient,
-                               double* spike_errors);
+                               double* spike_errors) EVENTPROP_DEPRECATED;
 
 /* ── Diagnostic functions ─────────────────────────────────────────── */
 
