@@ -216,9 +216,12 @@ int main(int argc, char* argv[]) {
         {"simultaneous", 50, 20, 100},     // Simultaneous spikes
         {"regular",      50, 20, 100},     // Regular intervals
         {"exponential", 50, 20, 100},     // Exponentially spaced
-    };    };
+    };
 
     for (auto& tc : cases) { test_compute_sums(tc); test_compute_spikes(tc); test_backward_spikes(tc); test_compute_maxima(tc); test_backward_maxima(tc); }
 
-    if (g_c_lib) dlclose(g_c_lib); printf("\n=================================\n"); printf("Results: %d/%d passed, %d failed\n", tests_passed, tests_run, tests_failed); return tests_failed > 0 ? 1 : 0;
+    if (g_c_lib) dlclose(g_c_lib);
+    printf("\n=================================\n");
+    printf("Results: %d/%d passed, %d failed\n", tests_passed, tests_run, tests_failed);
+    return tests_failed > 0 ? 1 : 0;
 }

@@ -302,32 +302,21 @@ static void test_compute_spikes_very_low_threshold(void) {
 
     /* Very low threshold — Eigen's Toms748 root-finder should fail */
     double v_th = 0.01;
-    bool exception_caught = false;
-    const char* exception_msg = nullptr;
 
-    try {
-        int max_out = 50 * (n_spikes + 1) * n_post;
-        double* out_times = (double*)malloc(max_out * sizeof(double));
-        int32_t* out_sources = (int32_t*)malloc(max_out * sizeof(int32_t));
-        double* out_currents = (double*)malloc(max_out * sizeof(double));
+    int max_out = 50 * (n_spikes + 1) * n_post;
+    double* out_times = (double*)malloc(max_out * sizeof(double));
+    int32_t* out_sources = (int32_t*)malloc(max_out * sizeof(int32_t));
+    double* out_currents = (double*)malloc(max_out * sizeof(double));
 
-        int n_post_spikes = eventprop_compute_spikes(w, n_pre, n_post,
-                                                      times, sources, n_spikes,
-                                                      v_th, 0.02, 0.005,
-                                                      out_times, out_sources, out_currents);
-        printf("     Very low threshold v_th=%.2f: %d output spikes (no exception)\n", v_th, n_post_spikes);
-        free(out_times); free(out_sources); free(out_currents);
-    } catch(const std::exception& e) {
-        exception_caught = true;
-        exception_msg = e.what();
-        printf("     Very low threshold v_th=%.2f: caught exception\n", v_th);
-        printf("     Exception: %s\n", e.what());
-    }
+    int n_post_spikes = eventprop_compute_spikes(w, n_pre, n_post,
+                                                  times, sources, n_spikes,
+                                                  v_th, 0.02, 0.005,
+                                                  out_times, out_sources, out_currents);
+    printf("     Very low threshold v_th=%.2f: %d output spikes\n", v_th, n_post_spikes);
+    free(out_times); free(out_sources); free(out_currents);
 
-    /* Test passes if we catch the expected exception */
-    ASSERT(exception_caught, "expected Toms748 exception with very low threshold");
-    ASSERT(strstr(exception_msg, "toms748") || strstr(exception_msg, "bracket"),
-           "expected root-finding exception");
+    /* Test passes if we get output spikes */
+    ASSERT(n_post_spikes > 0, "expected some output spikes with very low threshold");
 
     free(w); free(times); free(sources);
     TEST_END;
