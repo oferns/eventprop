@@ -48,6 +48,10 @@ echo "  → libeventprop_cpp_wrapper.dylib"
 echo ""
 echo "[3/5] Building Python package (EventProp.Python)..."
 cd "$SCRIPT_DIR/src/EventProp.Python"
+
+# Install required Python dependencies
+python3 -m pip install --break-system-packages setuptools numpy pytest > /dev/null 2>&1 || true
+
 pip install -e . --quiet 2>&1 | grep -v "already satisfied" || true
 echo "  → eventprop.eventprop_cpp (editable install)"
 
