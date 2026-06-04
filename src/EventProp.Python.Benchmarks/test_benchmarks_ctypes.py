@@ -13,8 +13,17 @@ import numpy as np
 import pytest
 
 # Import pybind11 library (EventProp.Python) — the reference implementation
+import sys as _sys
+from pathlib import Path as _Path
+_eventprop_python_path = str(_Path(__file__).resolve().parent.parent / "EventProp.Python")
+if _eventprop_python_path not in _sys.path:
+    _sys.path.insert(0, _eventprop_python_path)
+
 from eventprop.eventprop_cpp import (
-    Spikes, SpikesVector, Maxima, MaximaVector,
+    Spikes as Pybind11Spikes,
+    SpikesVector as Pybind11SpikesVector,
+    Maxima as Pybind11Maxima,
+    MaximaVector as Pybind11MaximaVector,
 )
 
 # Import ctypes library (eventprop) — new implementation to benchmark
@@ -29,7 +38,7 @@ from conftest_ctypes import SIZES, TAU_MEM, TAU_SYN, V_TH, make_input_batch, mak
 
 def make_spikes(times, sources):
     """Create Spikes objects for both libraries from raw arrays."""
-    pybind11_spikes = Spikes(times, sources)
+    pybind11_spikes = Pybind11Spikes(times, sources)
     
     # For ctypes, we just pass the raw arrays directly (zero-copy)
     native_spikes = (times, sources)
@@ -39,7 +48,7 @@ def make_spikes(times, sources):
 
 def make_spikes_vector(batch):
     """Create SpikesVector objects for both libraries from a list of (times, sources) tuples."""
-    pybind11_batch = SpikesVector([Spikes(t, s) for t, s in batch])
+    pybind11_batch = Pybind11SpikesVector([Pybind11Spikes(t, s) for t, s in batch])
     # For ctypes, we just use the list of tuples directly
     native_batch = batch
     return pybind11_batch, native_batch
@@ -47,7 +56,7 @@ def make_spikes_vector(batch):
 
 def make_maxima_vector(batch):
     """Create MaximaVector objects for both libraries."""
-    pybind11_batch = MaximaVector([Maxima(t, v) for t, v in batch])
+    pybind11_batch = Pybind11MaximaVector([Pybind11Maxima(t, v) for t, v in batch])
     # For ctypes, we just use the list of tuples directly
     native_batch = batch
     return pybind11_batch, native_batch
@@ -99,9 +108,10 @@ class TestComputeSpikesBenchmarks:
         w, times, sources = self._prepare_data(size_name, pattern)
         
         def run():
-            from eventprop.eventprop_cpp import compute_spikes_batch_cpp
-            spikes = Spikes(times, sources)
-            return compute_spikes_batch_cpp(w, [spikes], V_TH, TAU_MEM, TAU_SYN)
+            from eventprop_ctypes.eventprop_cpp import compute_spikes_batch_cpp
+            spikes = Pybind11Spikes(times, sources)
+            batch = Pybind11SpikesVector([spikes])
+            return compute_spikes_batch_cpp(w, batch, V_TH, TAU_MEM, TAU_SYN)
         
         benchmark(run)
 
@@ -113,10 +123,14 @@ class TestComputeSpikesBenchmarks:
         # Get ctypes library instance (cached for performance)
         lib = get_ctypes_lib()
         
+        # Convert to lists once (outside benchmark loop)
+        w_list = w.tolist()
+        times_list = times.tolist()
+        sources_list = sources.tolist()
+        
         def run():
-            # Convert to lists for ctypes (minimal overhead)
             return lib.compute_spikes(
-                w.tolist(), times.tolist(), sources.tolist(),
+                w_list, times_list, sources_list,
                 cfg["n_in"], cfg["n_out"]
             )
         
@@ -145,9 +159,9 @@ class TestComputeSumsBenchmarks:
         w, times, sources = self._prepare_data(size_name, pattern)
         
         def run():
-            from eventprop.eventprop_cpp import compute_sums_batch_cpp
-            spikes = Spikes(times, sources)
-            return compute_sums_batch_cpp(w, [spikes], TAU_MEM, TAU_SYN)
+            from eventprop_ctypes.eventprop_cpp import compute_sums_batch_cpp
+            spikes = Pybind11Spikes(times, sources)
+            return compute_sums_batch_cpp(w, Pybind11SpikesVector([spikes]), TAU_MEM, TAU_SYN)
         
         benchmark(run)
 
@@ -162,7 +176,7 @@ class TestComputeSumsBenchmarks:
         def run():
             # Convert to lists for ctypes (minimal overhead)
             return lib.compute_sums(
-                w.tolist(), times.tolist(), sources.tolist(),
+                w_list, times_list, sources_list,
                 cfg["n_in"], cfg["n_out"]
             )
         
@@ -191,9 +205,9 @@ class TestComputeMaximaBenchmarks:
         w, times, sources = self._prepare_data(size_name, pattern)
         
         def run():
-            from eventprop.eventprop_cpp import compute_maxima_batch_cpp
-            spikes = Spikes(times, sources)
-            return compute_maxima_batch_cpp(w, [spikes], TAU_MEM, TAU_SYN)
+            from eventprop_ctypes.eventprop_cpp import compute_maxima_batch_cpp
+            spikes = Pybind11Spikes(times, sources)
+            return compute_maxima_batch_cpp(w, Pybind11SpikesVector([spikes]), TAU_MEM, TAU_SYN)
         
         benchmark(run)
 
@@ -208,7 +222,7 @@ class TestComputeMaximaBenchmarks:
         def run():
             # Convert to lists for ctypes (minimal overhead)
             return lib.compute_maxima(
-                w.tolist(), times.tolist(), sources.tolist(),
+                w_list, times_list, sources_list,
                 cfg["n_in"], cfg["n_out"]
             )
         
@@ -247,11 +261,11 @@ class TestBackwardSpikesBenchmarks:
             from eventprop.eventprop_cpp import backward_spikes_batch_cpp
             
             # Create gradient array (zeros initially)
-            gradient = np.zeros((cfg["n_in"], cfg["n_out"])),
+            gradient = np.zeros((cfg["n_in"], cfg["n_out"]))
             
             # Create spike objects
-            input_spikes = Spikes(input_times, input_sources)
-            post_spikes = Spikes(post_times, post_sources)
+            input_spikes = Pybind11Spikes(input_times, input_sources)
+            post_spikes = Pybind11Spikes(post_times, post_sources)
             
             # Run backward pass
             return backward_spikes_batch_cpp(
@@ -270,12 +284,12 @@ class TestBackwardSpikesBenchmarks:
         
         def run():
             # Create gradient array (zeros initially)
-            gradient = np.zeros((cfg["n_in"], cfg["n_out"])))
+            gradient = np.zeros((cfg["n_in"], cfg["n_out"]))
             
             # Run backward pass with ctypes (zero-copy)
             return lib.backward_spikes(
                 w.tolist(), input_times.tolist(), input_sources.tolist(),
-                post_times.tolist(), post_sources.tolist(),
+                post_times_list, post_sources_list,
                 gradient, cfg["n_in"], cfg["n_out"]
             )
         
@@ -314,11 +328,11 @@ class TestBackwardMaximaBenchmarks:
             from eventprop.eventprop_cpp import backward_maxima_batch_cpp
             
             # Create gradient array (zeros initially)
-            gradient = np.zeros((cfg["n_in"], cfg["n_out"])))
+            gradient = np.zeros((cfg["n_in"], cfg["n_out"]))
             
             # Create spike objects
-            input_spikes = Spikes(input_times, input_sources)
-            maxima = Maxima(maxima_times, maxima_values)
+            input_spikes = Pybind11Spikes(input_times, input_sources)
+            maxima = Pybind11Maxima(maxima_times, maxima_values)
             
             # Run backward pass
             return backward_maxima_batch_cpp(
@@ -337,12 +351,12 @@ class TestBackwardMaximaBenchmarks:
         
         def run():
             # Create gradient array (zeros initially)
-            gradient = np.zeros((cfg["n_in"], cfg["n_out"])))
+            gradient = np.zeros((cfg["n_in"], cfg["n_out"]))
             
             # Run backward pass with ctypes (zero-copy)
             return lib.backward_maxima(
                 w.tolist(), input_times.tolist(), input_sources.tolist(),
-                maxima_times.tolist(), maxima_values.tolist(),
+                maxima_times_list, maxima_values_list,
                 gradient, cfg["n_in"], cfg["n_out"]
             )
         
@@ -377,7 +391,7 @@ class TestZeroCopyAccessBenchmarks:
         def run():
             # Compute sums and iterate over results (zero-copy)
             output = lib.compute_sums(
-                w.tolist(), times.tolist(), sources.tolist(),
+                w_list, times_list, sources_list,
                 cfg["n_in"], cfg["n_out"]
             )
             
@@ -401,7 +415,7 @@ class TestZeroCopyAccessBenchmarks:
         def run():
             # Compute sums and access individual elements (zero-copy)
             output = lib.compute_sums(
-                w.tolist(), times.tolist(), sources.tolist(),
+                w_list, times_list, sources_list,
                 cfg["n_in"], cfg["n_out"]
             )
             

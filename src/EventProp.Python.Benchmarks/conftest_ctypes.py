@@ -150,7 +150,7 @@ def get_ctypes_lib():
     
     for path in lib_paths:
         if path.exists():
-            return eventprop.EventPropCtypes(str(path))
+            return eventprop.NativeApi(str(path))
     
     raise FileNotFoundError(
         "Could not find libeventprop_c_api.dylib/.so. Run ./build.sh c first, or "
