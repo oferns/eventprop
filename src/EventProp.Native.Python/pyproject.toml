@@ -1,17 +1,15 @@
 [build-system]
-requires = ["setuptools>=64", "numpy"]
+requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "eventprop-cffi"
+name = "eventprop"
 version = "0.1"
-description = "EventProp: Event-based backpropagation for Spiking Neural Networks (C library bindings via CFFI)"
+description = "EventProp: Event-based backpropagation for Spiking Neural Networks (C library bindings via ctypes)"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.8"
-dependencies = [
-    "numpy",
-]
+requires-python = ">=3.10"
+dependencies = []  # No external dependencies — pure ctypes
 
 [project.optional-dependencies]
 dev = [
@@ -19,7 +17,4 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["eventprop_cffi*"]
-
-[tool.setuptools.package-data]
-eventprop_cffi = ["*.dylib", "*.so"]
+include = ["eventprop*"]
