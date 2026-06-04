@@ -32,7 +32,7 @@ eventprop.net/
 │   │   ├── tests.cpp               # Eigen direct unit tests (23 tests)
 │   │   └── tests_capi.cpp          # C API wrapper unit tests (14 tests)
 │   ├── EventProp.C/            # Pure C implementation (libeventprop_c_api)
-│   ├── EventProp.Native.Python/  # Python bindings: CFFI (pure C → CPython)
+│   ├── EventProp.Native.Python/  # Python bindings: ctypes (pure C → CPython)
 │   └── EventProp.Python/       # Python bindings: pybind11 (git submodule)
 ├── coverage-report/            # Generated HTML coverage reports (gitignored)
 └── AGENTS.md                   # This file
@@ -251,27 +251,25 @@ cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
 ./raw_bench
 ```
 
-### Python Bindings (CFFI)
+### Python Bindings (ctypes)
 
 **Location**: `src/EventProp.Native.Python/`
 
-Pure C FFI bindings — no pybind11 dependency. The `eventprop_cffi.c` module uses standard CPython API to expose all C library functions (`compute_spikes_batch`, `backward_spikes`, `compute_voltage_trace`, etc.) to Python.
+Pure Python ctypes bindings — no pybind11 dependency, no compiled C extensions. The `eventprop/native.py` module uses ctypes to load `libeventprop_c_api.dylib` and exposes all C alloc functions (`compute_spikes_alloc`, `backward_spikes`, `compute_sums_alloc`, etc.) to Python.
 
-**Build**:
+**Usage**: No build required — just install the package:
 ```bash
-cd src/EventProp.Native.Python && rm -rf build eventprop_cffi/*.so
-python3 setup.py build_ext --inplace
+cd src/EventProp.Native.Python && pip install -e .
 ```
 
-**Key implementation notes for `eventprop_cffi.c`**:
-- All `PyArg_ParseTuple` format strings must match the exact number and types of arguments passed from Python
-- Format specifiers: `O` = PyObject* (numpy arrays, lists), `i` = int, `d` = double
-- Common pitfall: counting specifiers vs pointer arguments — mismatch causes segfaults or TypeError
-- Numpy arrays passed as `O` are accessed via `PyArray_DATA()` and `PyArray_SIZE()`, NOT `PyLong_AsSsize_t`
-- Memory: use `PyArray_SimpleNew` to create numpy-owned arrays, then copy data in — never `malloc` + `PyArray_SimpleNewFromData` (dangling pointers)
-- Empty spike arrays: use `ARR_D(dtype, 1, 0, NULL)` for 1-d empty arrays (NOT `ndim=0` scalars)
-- Rpath: use `install_name_tool -change @rpath/...` to fix shared library lookup at runtime
-- Architecture: build as `arm64` only (matches libomp on Apple Silicon), NOT universal2
+**Key implementation notes for `native.py`**:
+- Uses ctypes with zero-copy memory access via `DoubleArrayView` and `Int32ArrayView`
+- Library is loaded once globally via `_global_lib` singleton pattern
+- C struct definitions must match `eventprop_alloc.h` exactly (field order, types)
+- Function signatures set up via `.restype` and `.argtypes` for type safety
+- Memory cleanup handled automatically via `__del__` calling C free functions
+- Zero-copy iteration avoids numpy dependency — direct pointer access via ctypes
+- Library path discovery: tries relative paths first, then standard locations
 
 - **`tests_capi.cpp`** (`EventProp.Cpp.Wrapper/`) — C API wrapper unit tests mirroring the pure C suite. 14 tests covering all flat-array functions (compute_sums, compute_spikes, backward_spikes, compute_maxima, backward_maxima) plus edge cases (zero weights, linear scaling, zero/negative inputs) and large-scale validation (200×80, 500 spikes).
 
