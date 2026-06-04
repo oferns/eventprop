@@ -130,19 +130,19 @@ class TestComputeSpikesBenchmarks:
 class TestComputeSumsBenchmarks:
     """Benchmark compute_sums — sum computation (pybind11 vs ctypes)."""
 
-    def _prepare_data(self, size_name: str):
+    def _prepare_data(self, size_name: str, pattern: str):
         """Prepare test data for both libraries."""
         cfg = SIZES[size_name]
         n_in, n_out, spikes_per_neuron = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
 
         w = make_weights(n_in, n_out)
-        times, sources = make_input_batch(n_in, n_out, spikes_per_neuron, "uniform")
+        times, sources = make_input_batch(n_in, n_out, spikes_per_neuron, pattern)
         
         return w, times, sources
 
-    def test_compute_sums_pybind11(self, benchmark, size_name: str):
+    def test_compute_sums_pybind11(self, benchmark, size_name: str, pattern: str):
         """Benchmark pybind11 compute_sums (reference)."""
-        w, times, sources = self._prepare_data(size_name)
+        w, times, sources = self._prepare_data(size_name, pattern)
         
         def run():
             from eventprop.eventprop_cpp import compute_sums_batch_cpp
@@ -151,9 +151,9 @@ class TestComputeSumsBenchmarks:
         
         benchmark(run)
 
-    def test_compute_sums_ctypes(self, benchmark, size_name: str):
+    def test_compute_sums_ctypes(self, benchmark, size_name: str, pattern: str):
         """Benchmark ctypes compute_sums (zero-copy)."""
-        w, times, sources = self._prepare_data(size_name)
+        w, times, sources = self._prepare_data(size_name, pattern)
         cfg = SIZES[size_name]
         
         # Get ctypes library instance (cached for performance)
@@ -176,19 +176,19 @@ class TestComputeSumsBenchmarks:
 class TestComputeMaximaBenchmarks:
     """Benchmark compute_maxima — maxima computation (pybind11 vs ctypes)."""
 
-    def _prepare_data(self, size_name: str):
+    def _prepare_data(self, size_name: str, pattern: str):
         """Prepare test data for both libraries."""
         cfg = SIZES[size_name]
         n_in, n_out, spikes_per_neuron = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
 
         w = make_weights(n_in, n_out)
-        times, sources = make_input_batch(n_in, n_out, spikes_per_neuron, "uniform")
+        times, sources = make_input_batch(n_in, n_out, spikes_per_neuron, pattern)
         
         return w, times, sources
 
-    def test_compute_maxima_pybind11(self, benchmark, size_name: str):
+    def test_compute_maxima_pybind11(self, benchmark, size_name: str, pattern: str):
         """Benchmark pybind11 compute_maxima (reference)."""
-        w, times, sources = self._prepare_data(size_name)
+        w, times, sources = self._prepare_data(size_name, pattern)
         
         def run():
             from eventprop.eventprop_cpp import compute_maxima_batch_cpp
@@ -197,9 +197,9 @@ class TestComputeMaximaBenchmarks:
         
         benchmark(run)
 
-    def test_compute_maxima_ctypes(self, benchmark, size_name: str):
+    def test_compute_maxima_ctypes(self, benchmark, size_name: str, pattern: str):
         """Benchmark ctypes compute_maxima (zero-copy)."""
-        w, times, sources = self._prepare_data(size_name)
+        w, times, sources = self._prepare_data(size_name, pattern)
         cfg = SIZES[size_name]
         
         # Get ctypes library instance (cached for performance)
@@ -210,6 +210,140 @@ class TestComputeMaximaBenchmarks:
             return lib.compute_maxima(
                 w.tolist(), times.tolist(), sources.tolist(),
                 cfg["n_in"], cfg["n_out"]
+            )
+        
+        benchmark(run)
+
+
+# ============================================================
+# BackwardSpikes Benchmark — Backward Pass (Spike-based loss) Comparison
+# ============================================================
+
+class TestBackwardSpikesBenchmarks:
+    """Benchmark backward_spikes — backward pass for spike-based loss (pybind11 vs ctypes)."""
+
+    def _prepare_data(self, size_name: str, pattern: str):
+        """Prepare test data for backward pass benchmark."""
+        cfg = SIZES[size_name]
+        n_in, n_out, spikes_per_neuron = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
+
+        w = make_weights(n_in, n_out)
+        
+        # Generate input spikes
+        input_times, input_sources = make_input_batch(n_in, n_out, spikes_per_neuron, pattern)
+        
+        # Generate post-synaptic spikes (simulated output)
+        post_times = np.linspace(0, 1, n_out * 2)
+        post_sources = (np.arange(n_out * 2) % n_in).astype(np.int32)
+        
+        return w, input_times, input_sources, post_times, post_sources
+
+    def test_backward_spikes_pybind11(self, benchmark, size_name: str, pattern: str):
+        """Benchmark pybind11 backward_spikes (reference)."""
+        w, input_times, input_sources, post_times, post_sources = self._prepare_data(size_name, pattern)
+        cfg = SIZES[size_name]
+        
+        def run():
+            from eventprop.eventprop_cpp import backward_spikes_batch_cpp
+            
+            # Create gradient array (zeros initially)
+            gradient = np.zeros((cfg["n_in"], cfg["n_out"])),
+            
+            # Create spike objects
+            input_spikes = Spikes(input_times, input_sources)
+            post_spikes = Spikes(post_times, post_sources)
+            
+            # Run backward pass
+            return backward_spikes_batch_cpp(
+                w, [input_spikes], [post_spikes], gradient, V_TH, TAU_MEM, TAU_SYN
+            )
+        
+        benchmark(run)
+
+    def test_backward_spikes_ctypes(self, benchmark, size_name: str, pattern: str):
+        """Benchmark ctypes backward_spikes (zero-copy)."""
+        w, input_times, input_sources, post_times, post_sources = self._prepare_data(size_name, pattern)
+        cfg = SIZES[size_name]
+        
+        # Get ctypes library instance (cached for performance)
+        lib = get_ctypes_lib()
+        
+        def run():
+            # Create gradient array (zeros initially)
+            gradient = np.zeros((cfg["n_in"], cfg["n_out"])))
+            
+            # Run backward pass with ctypes (zero-copy)
+            return lib.backward_spikes(
+                w.tolist(), input_times.tolist(), input_sources.tolist(),
+                post_times.tolist(), post_sources.tolist(),
+                gradient, cfg["n_in"], cfg["n_out"]
+            )
+        
+        benchmark(run)
+
+
+# ============================================================
+# BackwardMaxima Benchmark — Backward Pass (Voltage-based loss) Comparison
+# ============================================================
+
+class TestBackwardMaximaBenchmarks:
+    """Benchmark backward_maxima — backward pass for voltage-based loss (pybind11 vs ctypes)."""
+
+    def _prepare_data(self, size_name: str, pattern: str):
+        """Prepare test data for backward pass benchmark."""
+        cfg = SIZES[size_name]
+        n_in, n_out, spikes_per_neuron = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
+
+        w = make_weights(n_in, n_out)
+        
+        # Generate input spikes
+        input_times, input_sources = make_input_batch(n_in, n_out, spikes_per_neuron, pattern)
+        
+        # Generate maxima data (simulated voltage-based loss)
+        maxima_times = np.linspace(0, 1, n_out * 2)
+        maxima_values = np.random.randn(n_out * 2).astype(np.float64)
+        
+        return w, input_times, input_sources, maxima_times, maxima_values
+
+    def test_backward_maxima_pybind11(self, benchmark, size_name: str, pattern: str):
+        """Benchmark pybind11 backward_maxima (reference)."""
+        w, input_times, input_sources, maxima_times, maxima_values = self._prepare_data(size_name, pattern)
+        cfg = SIZES[size_name]
+        
+        def run():
+            from eventprop.eventprop_cpp import backward_maxima_batch_cpp
+            
+            # Create gradient array (zeros initially)
+            gradient = np.zeros((cfg["n_in"], cfg["n_out"])))
+            
+            # Create spike objects
+            input_spikes = Spikes(input_times, input_sources)
+            maxima = Maxima(maxima_times, maxima_values)
+            
+            # Run backward pass
+            return backward_maxima_batch_cpp(
+                w, [input_spikes], [maxima], gradient, V_TH, TAU_MEM, TAU_SYN
+            )
+        
+        benchmark(run)
+
+    def test_backward_maxima_ctypes(self, benchmark, size_name: str, pattern: str):
+        """Benchmark ctypes backward_maxima (zero-copy)."""
+        w, input_times, input_sources, maxima_times, maxima_values = self._prepare_data(size_name, pattern)
+        cfg = SIZES[size_name]
+        
+        # Get ctypes library instance (cached for performance)
+        lib = get_ctypes_lib()
+        
+        def run():
+            # Create gradient array (zeros initially)
+            gradient = np.zeros((cfg["n_in"], cfg["n_out"])))
+            
+            # Run backward pass with ctypes (zero-copy)
+            return lib.backward_maxima(
+                w.tolist(), input_times.tolist(), input_sources.tolist(),
+                maxima_times.tolist(), maxima_values.tolist(),
+                gradient, cfg["n_in"], cfg["n_out"]
             )
         
         benchmark(run)

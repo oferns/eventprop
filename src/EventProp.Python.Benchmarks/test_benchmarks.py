@@ -129,11 +129,13 @@ class TestLIFForward:
         return (pybind11_layer, native_layer), pybind11_spikes, native_spikes
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_pybind11(self, benchmark, size_name, pattern):
         layer_pair, spikes, _ = self._make_layer_and_input(size_name, pattern)
         benchmark(layer_pair[0].forward, SpikesVector([spikes]))
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_ctypes(self, benchmark, size_name, pattern):
         layer_pair, _, spikes = self._make_layer_and_input(size_name, pattern)
         benchmark(layer_pair[1].forward, [spikes])
@@ -172,11 +174,13 @@ class TestLIFBackward:
         return (pybind11_layer, native_layer), pybind11_post, native_post
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_pybind11(self, benchmark, size_name, pattern):
         layer_pair, post_spikes, _ = self._make_layer_and_batch(size_name, pattern)
         benchmark(layer_pair[0].backward)
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_ctypes(self, benchmark, size_name, pattern):
         layer_pair, _, post_spikes = self._make_layer_and_batch(size_name, pattern)
         benchmark(layer_pair[1].backward)
@@ -208,11 +212,13 @@ class TestLIForward:
         return (pybind11_layer, native_layer), pybind11_spikes, native_spikes
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_pybind11(self, benchmark, size_name, pattern):
         layer_pair, spikes, _ = self._make_layer_and_input(size_name, pattern)
         benchmark(layer_pair[0].forward, SpikesVector([spikes]))
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_ctypes(self, benchmark, size_name, pattern):
         layer_pair, _, spikes = self._make_layer_and_input(size_name, pattern)
         benchmark(layer_pair[1].forward, [spikes])
@@ -250,11 +256,13 @@ class TestLIBackward:
         return (pybind11_layer, native_layer), pybind11_maxima, native_maxima
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_pybind11(self, benchmark, size_name, pattern):
         layer_pair, maxima, _ = self._make_layer_and_batch(size_name, pattern)
         benchmark(layer_pair[0].backward)
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_ctypes(self, benchmark, size_name, pattern):
         layer_pair, _, maxima = self._make_layer_and_batch(size_name, pattern)
         benchmark(layer_pair[1].backward)
@@ -289,11 +297,13 @@ class TestTTFSForward:
         return (pybind11_layer, native_layer), pybind11_spikes, native_spikes
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_pybind11(self, benchmark, size_name, pattern):
         layer_pair, spikes, _ = self._make_layer_and_input(size_name, pattern)
         benchmark(layer_pair[0].forward, SpikesVector([spikes]))
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_ctypes(self, benchmark, size_name, pattern):
         layer_pair, _, spikes = self._make_layer_and_input(size_name, pattern)
         benchmark(layer_pair[1].forward, [spikes])
@@ -332,11 +342,13 @@ class TestTTFSBackward:
         return (pybind11_layer, native_layer), labels
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_pybind11(self, benchmark, size_name, pattern):
         layer_pair, labels = self._make_layer_and_batch(size_name, pattern)
         benchmark(layer_pair[0].backward, labels)
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_ctypes(self, benchmark, size_name, pattern):
         layer_pair, labels = self._make_layer_and_batch(size_name, pattern)
         benchmark(layer_pair[1].backward, labels)
@@ -364,11 +376,13 @@ class TestVMaxForward:
         return (pybind11_layer, native_layer), pybind11_spikes, native_spikes
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_pybind11(self, benchmark, size_name, pattern):
         layer_pair, spikes, _ = self._make_layer_and_input(size_name, pattern)
         benchmark(layer_pair[0].forward, SpikesVector([spikes]))
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_ctypes(self, benchmark, size_name, pattern):
         layer_pair, _, spikes = self._make_layer_and_input(size_name, pattern)
         benchmark(layer_pair[1].forward, [spikes])
@@ -404,11 +418,13 @@ class TestVMaxBackward:
         return (pybind11_layer, native_layer), labels
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_pybind11(self, benchmark, size_name, pattern):
         layer_pair, labels = self._make_layer_and_batch(size_name, pattern)
         benchmark(layer_pair[0].backward, labels)
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_ctypes(self, benchmark, size_name, pattern):
         layer_pair, labels = self._make_layer_and_batch(size_name, pattern)
         benchmark(layer_pair[1].backward, labels)
