@@ -46,26 +46,35 @@ class LIFLayer(Layer):
         # Call C library directly via NativeApi
         lib = NativeApi()
         
-        # Process each sample in batch
+        # Concatenate all spikes from batch into single arrays
+        all_times = np.concatenate([spikes.times for spikes in input_batch])
+        all_sources = np.concatenate([spikes.sources for spikes in input_batch])
+        
+        # Track spike counts per sample
+        n_spikes_per_sample = [len(spikes.times) for spikes in input_batch]
+        
+        # Use batch function (single C call, parallel processing)
+        output = lib.compute_spikes_batch(
+            w=self.w_in_flat,  # Use pre-flattened view (zero-copy)
+            times=all_times,
+            sources=all_sources,
+            n_spikes_per_sample=n_spikes_per_sample,
+            batch_size=len(input_batch),
+            n_pre=self.parameters.n_in,
+            n_post=self.parameters.n,
+            v_th=self.parameters.v_th,
+            tau_mem=self.parameters.tau_mem,
+            tau_syn=self.parameters.tau_syn,
+        )
+        
+        # Collect per-sample results
         post_spikes_list = []
-        for spikes in input_batch:
-            output = lib.compute_spikes(
-                w=self.w_in_flat,  # Use pre-flattened view (zero-copy)
-                times=spikes.times,
-                sources=spikes.sources,
-                n_pre=self.parameters.n_in,
-                n_post=self.parameters.n,
-                v_th=self.parameters.v_th,
-                tau_mem=self.parameters.tau_mem,
-                tau_syn=self.parameters.tau_syn,
-            )
-            
-            # Zero-copy conversion to numpy arrays
-            post_times = output.times.to_numpy()
-            post_sources = output.sources.to_numpy()
-            
-            # Create Spikes object for this sample
-            post_spikes_list.append(Spikes(post_times, post_sources))
+        for i in range(output.batch_size):
+            sample = output[i]
+            post_spikes_list.append(Spikes(
+                times=sample.times.to_numpy(),
+                sources=sample.sources.to_numpy()
+            ))
         
         self.post_batch = SpikesVector(post_spikes_list)
         self._ran_forward = True

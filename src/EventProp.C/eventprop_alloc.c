@@ -1073,3 +1073,57 @@ void eventprop_free_lambda_i_trace_output(LambdaITraceOutput* output)
     free(output->lambda_trace);
     free(output->ts);
 }
+
+/* ── Batch operations (parallel processing) ───────────────────────────── */
+
+
+SpikeOutput* eventprop_compute_spikes_batch_alloc(
+    const double* w, int n_pre, int n_post,
+    const double* times, const int32_t* sources,
+    const int* n_spikes_per_sample, int batch_size,
+    double v_th, double tau_mem, double tau_syn)
+{
+    /* Allocate array of SpikeOutput structs */
+    SpikeOutput* result = (SpikeOutput*)calloc(batch_size, sizeof(SpikeOutput));
+    
+    /* Compute sample offsets */
+    int* offsets = (int*)malloc(batch_size * sizeof(int));
+    offsets[0] = 0;
+    for (int i = 1; i < batch_size; i++) {
+        offsets[i] = offsets[i-1] + n_spikes_per_sample[i-1];
+    }
+    
+    /* Process each sample in parallel */
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static) shared(w, n_pre, n_post, times, sources,\
+         offsets, n_spikes_per_sample, batch_size, v_th, tau_mem, tau_syn,\
+         result) if(batch_size >= 2 || batch_size * n_pre >= 50)
+#endif
+    for (int b = 0; b < batch_size; b++) {
+        int offset = offsets[b];
+        int n_spikes = n_spikes_per_sample[b];
+        
+        /* Call single-sample function for this batch element */
+        result[b] = eventprop_compute_spikes_alloc(
+            w, n_pre, n_post,
+            times + offset, sources + offset, n_spikes,
+            v_th, tau_mem, tau_syn
+        );
+    }
+    
+    free(offsets);
+    return result;
+}
+
+void eventprop_free_batch_spike_output(SpikeOutput* output, int batch_size)
+{
+    if (!output) return;
+    
+    /* Free each sample's data */
+    for (int i = 0; i < batch_size; i++) {
+        eventprop_free_spike_output(&output[i]);
+    }
+    
+    /* Free the array itself */
+    free(output);
+}

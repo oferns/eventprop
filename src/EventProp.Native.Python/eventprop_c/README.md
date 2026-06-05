@@ -105,3 +105,27 @@ sys.path.insert(0, "/path/to/eventprop_ctypes")
 
 from eventprop_ctypes import EventPropCtypes
 ```
+
+## Batch Operations
+
+The ctypes layer includes batch functions for efficient processing of multiple samples:
+
+```python
+from eventprop_c import LIFLayer, LIFLayerParameters, Spikes, NativeApi
+
+# Initialize library
+_ = NativeApi("/path/to/libeventprop_c_api.dylib")
+
+# Create layer and input batch
+layer = LIFLayer(params, w_in=weights)
+batch = [Spikes(times_i, sources_i) for i in range(batch_size)]
+
+# Forward pass - uses batch function internally
+output = layer.forward(batch)  # Single C call, parallel processing
+
+# Access per-sample results
+for i in range(len(output)):
+    print(f"Sample {i}: {len(output[i].times)} spikes")
+```
+
+Batch operations use OpenMP for parallel processing across samples.

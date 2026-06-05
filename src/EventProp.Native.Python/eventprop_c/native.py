@@ -373,6 +373,53 @@ class LambdaITraceOutput:
                 lib.eventprop_free_lambda_i_trace_output(byref(self._c))
 
 
+class BatchSpikeOutput:
+    """Wrapper for batch spike output (array of SpikeOutput structs).
+    
+    Provides per-sample access to output spikes from batch forward pass.
+    """
+    
+    def __init__(self, c_ptr: ctypes.POINTER(_SpikeOutput), batch_size: int):
+        self._c = c_ptr
+        self._batch_size = batch_size
+    
+    @property
+    def batch_size(self) -> int:
+        return self._batch_size
+    
+    @property
+    def outputs(self) -> list[SpikeOutput]:
+        """Access per-sample SpikeOutput objects."""
+        return [SpikeOutput(self._c[i]) for i in range(self.batch_size)]
+    
+    def __getitem__(self, idx: int) -> SpikeOutput:
+        """Get output for sample at index (doesn't own memory)."""
+        return _SpikeOutputView(self._c[idx])
+    
+    def __len__(self) -> int:
+        return self.batch_size
+    
+    @property
+    def n_spikes_per_sample(self) -> list[int]:
+        """Get spike count per sample."""
+        return [self._c[i].n_spikes for i in range(self.batch_size)]
+    
+    def __del__(self):
+        """Free C memory on garbage collection."""
+        if hasattr(self, '_c') and self._c:
+            lib = EventPropCtypes._get_global_lib()
+            if lib:
+                lib.eventprop_free_batch_spike_output(self._c, self._batch_size)
+
+
+class _SpikeOutputView(SpikeOutput):
+    """View of a SpikeOutput (doesn't free memory on deletion)."""
+    
+    def __del__(self):
+        """Don't free memory - owned by parent BatchSpikeOutput."""
+        pass
+
+
 # ── Library loader and function bindings ─────────────────────────────────
 
 def _get_array_pointer(arr, ctype=c_double):
@@ -558,6 +605,23 @@ class EventPropCtypes:
             POINTER(c_double), c_int,  # fwd_times, n_post_spikes
             c_double, c_double, c_double  # v_th, tau_mem, tau_syn
         ]
+        
+        # ── Batch operations ───────────────────────────────────────────────
+        
+        # compute_spikes_batch_alloc (returns pointer to array of SpikeOutput)
+        lib.eventprop_compute_spikes_batch_alloc.restype = POINTER(_SpikeOutput)
+        lib.eventprop_compute_spikes_batch_alloc.argtypes = [
+            POINTER(c_double), c_int, c_int,  # w, n_pre, n_post
+            POINTER(c_double), POINTER(c_int32),  # times, sources (flat arrays)
+            POINTER(c_int), c_int,  # n_spikes_per_sample, batch_size
+            c_double, c_double, c_double  # v_th, tau_mem, tau_syn
+        ]
+        
+        # free_batch_spike_output
+        lib.eventprop_free_batch_spike_output.restype = None
+        lib.eventprop_free_batch_spike_output.argtypes = [
+            POINTER(_SpikeOutput), c_int  # output array, batch_size
+        ]
     
     # ── High-level Python API ─────────────────────────────────────────────
     
@@ -594,6 +658,48 @@ class EventPropCtypes:
         )
         
         return SpikeOutput(c_struct)
+    
+    def compute_spikes_batch(self, w: list | tuple,
+                             times: list | tuple,
+                             sources: list | tuple,
+                             n_spikes_per_sample: list | tuple,
+                             batch_size: int,
+                             n_pre: int, n_post: int,
+                             v_th: float = 1.0, tau_mem: float = 0.02,
+                             tau_syn: float = 0.005) -> BatchSpikeOutput:
+        """Batch forward pass: predict post-synaptic spikes for multiple samples.
+        
+        Args:
+            w: Weight matrix (flat list, row-major)
+            times: Flat array of all input spike times (sorted per sample)
+            sources: Flat array of all source neurons
+            n_spikes_per_sample: Spike count per sample (length: batch_size)
+            batch_size: Number of samples in batch
+            n_pre: Number of pre-synaptic neurons
+            n_post: Number of post-synaptic neurons
+            v_th: Spike threshold voltage
+            tau_mem: Membrane time constant (seconds)
+            tau_syn: Synaptic time constant (seconds)
+            
+        Returns:
+            BatchSpikeOutput with per-sample access to times, sources, currents
+        """
+        
+        # Zero-copy access for numpy arrays
+        w_ptr = _get_array_pointer(w, c_double)
+        times_ptr = _get_array_pointer(times, c_double)
+        sources_ptr = _get_array_pointer(sources, c_int32)
+        n_spikes_ptr = _get_array_pointer(n_spikes_per_sample, c_int)
+        
+        # Call batch function (returns pointer to array of SpikeOutput)
+        c_ptr = self.lib.eventprop_compute_spikes_batch_alloc(
+            w_ptr, n_pre, n_post,
+            times_ptr, sources_ptr,
+            n_spikes_ptr, batch_size,
+            c_double(v_th), c_double(tau_mem), c_double(tau_syn)
+        )
+        
+        return BatchSpikeOutput(c_ptr, batch_size)
     
     def compute_sums(self, w: list | tuple, times: list | tuple,
                      sources: list | tuple,

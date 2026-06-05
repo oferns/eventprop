@@ -160,6 +160,38 @@ LambdaITraceOutput eventprop_compute_lambda_i_trace_alloc(double t_max, double d
 /** Free memory owned by a LambdaITraceOutput struct. */
 void eventprop_free_lambda_i_trace_output(LambdaITraceOutput* output);
 
+/* ── Batch operations (parallel processing) ──────────────────────────── */
+
+/**
+ * Batch forward pass with automatic memory allocation.
+ * Processes multiple samples in parallel using OpenMP.
+ *
+ * @param w           Weight matrix (flat, row-major)
+ * @param n_pre        Number of pre-synaptic neurons
+ * @param n_post       Number of post-synaptic neurons
+ * @param times        Flat array of all input spike times (sorted per sample)
+ * @param sources      Flat array of all source neurons
+ * @param n_spikes_per_sample  Spike count per sample (length: batch_size)
+ * @param batch_size   Number of samples in batch
+ * @param v_th          Spike threshold voltage
+ * @param tau_mem       Membrane time constant (seconds)
+ * @param tau_syn       Synaptic time constant (seconds)
+ *
+ * Returns: Array of SpikeOutput structs (malloc'd, length batch_size). Caller must free each via
+ *          eventprop_free_spike_output(), then free the array itself.
+ */
+SpikeOutput* eventprop_compute_spikes_batch_alloc(
+    const double* w, int n_pre, int n_post,
+    const double* times, const int32_t* sources,
+    const int* n_spikes_per_sample, int batch_size,
+    double v_th, double tau_mem, double tau_syn);
+
+/**
+ * Free batch spike output array.
+ * Frees each SpikeOutput struct's data, then the array itself.
+ */
+void eventprop_free_batch_spike_output(SpikeOutput* output, int batch_size);
+
 #ifdef __cplusplus
 }
 #endif
