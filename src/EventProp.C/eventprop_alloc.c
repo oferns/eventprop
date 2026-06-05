@@ -895,6 +895,73 @@ void eventprop_free_backward_spikes_output(BackwardSpikesOutput* output)
     free(output->spike_errors);
 }
 
+/* ── BackwardSpikes Batch Function ─────────────────────────────── */
+
+BackwardSpikesOutput* eventprop_backward_spikes_batch_alloc(
+    const double* times, const int32_t* sources,
+    const int* n_spikes_per_sample,
+    const double* fwd_times, const int32_t* fwd_sources,
+    const double* fwd_currents,
+    const double* post_errors,
+    const int* n_fwd_spikes_per_sample,
+    int batch_size,
+    const double* w, int n_pre, int n_post,
+    double v_th, double tau_mem, double tau_syn)
+{
+    /* Allocate array of BackwardSpikesOutput structs */
+    BackwardSpikesOutput* result = (BackwardSpikesOutput*)calloc(batch_size, sizeof(BackwardSpikesOutput));
+    
+    /* Compute sample offsets */
+    int* offsets = (int*)malloc(batch_size * sizeof(int));
+    int* fwd_offsets = (int*)malloc(batch_size * sizeof(int));
+    offsets[0] = 0;
+    fwd_offsets[0] = 0;
+    for (int i = 1; i < batch_size; i++) {
+        offsets[i] = offsets[i-1] + n_spikes_per_sample[i-1];
+        fwd_offsets[i] = fwd_offsets[i-1] + n_fwd_spikes_per_sample[i-1];
+    }
+    
+    /* Process each sample in parallel */
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static) shared(w, n_pre, n_post, times, sources,\
+         offsets, n_spikes_per_sample, batch_size, v_th, tau_mem, tau_syn,\
+         result, fwd_times, fwd_sources, fwd_currents, post_errors, \
+         n_fwd_spikes_per_sample, fwd_offsets) \
+    if(batch_size >= 2 || batch_size * n_pre >= 50)
+#endif
+    for (int b = 0; b < batch_size; b++) {
+        int offset = offsets[b];
+        int n_spikes = n_spikes_per_sample[b];
+        int n_fwd_spikes = n_fwd_spikes_per_sample[b];
+        
+        /* Call single-sample function for this batch element */
+        result[b] = eventprop_backward_spikes_alloc(
+            times + offset, sources + offset, n_spikes,
+            fwd_times + fwd_offsets[b], fwd_sources + fwd_offsets[b],
+            fwd_currents + fwd_offsets[b], post_errors + fwd_offsets[b], n_fwd_spikes,
+            w, n_pre, n_post,
+            v_th, tau_mem, tau_syn
+        );
+    }
+    
+    free(offsets);
+    free(fwd_offsets);
+    return result;
+}
+
+void eventprop_free_backward_spikes_batch_output(BackwardSpikesOutput* output, int batch_size)
+{
+    if (!output) return;
+    
+    /* Free each sample's data */
+    for (int i = 0; i < batch_size; i++) {
+        eventprop_free_backward_spikes_output(&output[i]);
+    }
+    
+    /* Free the array itself */
+    free(output);
+}
+
 /* ── BackwardMaximaOutput ───────────────────────────────────────────── */
 
 BackwardMaximaOutput eventprop_backward_maxima_alloc(const double* input_times, const int32_t* input_sources,

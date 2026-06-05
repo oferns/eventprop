@@ -99,6 +99,27 @@ BackwardSpikesOutput eventprop_backward_spikes_alloc(const double* times, const 
 /** Free memory owned by a BackwardSpikesOutput struct. */
 void eventprop_free_backward_spikes_output(BackwardSpikesOutput* output);
 
+/* ── Backward pass batch operations ─────────────────────────────── */
+
+/** Batch backward pass (spikes) with automatic memory allocation.
+ * 
+ * Processes multiple samples in parallel via OpenMP.
+ * Returns array of BackwardSpikesOutput structs (one per sample).
+ */
+BackwardSpikesOutput* eventprop_backward_spikes_batch_alloc(
+    const double* times, const int32_t* sources,
+    const int* n_spikes_per_sample,
+    const double* fwd_times, const int32_t* fwd_sources,
+    const double* fwd_currents,
+    const double* post_errors,
+    const int* n_fwd_spikes_per_sample,
+    int batch_size,
+    const double* w, int n_pre, int n_post,
+    double v_th, double tau_mem, double tau_syn);
+
+/** Free memory owned by batch BackwardSpikesOutput array. */
+void eventprop_free_backward_spikes_batch_output(BackwardSpikesOutput* output, int batch_size);
+
 typedef struct {
     int n_pre;               /* Number of pre-synaptic neurons */
     int n_post;              /* Number of post-synaptic neurons */

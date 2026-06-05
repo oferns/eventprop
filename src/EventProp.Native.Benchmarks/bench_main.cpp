@@ -16,8 +16,8 @@
 // C++ Eigen functions (bare header, no pybind11/Python dependency)
 #include "eventprop_cpp_bare.h"
 #else
-// C library alloc functions
-#include "eventprop_alloc.h"
+// C library functions (consolidated header)
+#include "eventprop.h"
 #endif
 
 // ============================================================
