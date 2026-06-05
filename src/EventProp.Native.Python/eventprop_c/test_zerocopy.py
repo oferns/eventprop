@@ -7,7 +7,7 @@ import os
 # Add parent directory to path for import
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from eventprop import NativeApi as EventPropCtypes
+from eventprop_c import NativeApi as EventPropCtypes
 
 
 def test_compute_spikes():

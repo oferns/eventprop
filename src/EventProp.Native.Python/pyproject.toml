@@ -9,7 +9,9 @@ description = "EventProp: Event-based backpropagation for Spiking Neural Network
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
-dependencies = []  # No external dependencies — pure ctypes
+dependencies = [
+    "numpy",
+]
 
 [project.optional-dependencies]
 dev = [

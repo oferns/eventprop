@@ -1,9 +1,11 @@
+"""Loss layers for ctypes library — calls C library directly via NativeApi."""
+
 from typing import NamedTuple
 import numpy as np
 
 from .li_layer import LILayer, LILayerParameters
 from .lif_layer import LIFLayer, LIFLayerParameters
-from .eventprop_cpp import SpikesVector
+
 
 # fmt: off
 class TTFSCrossEntropyLossParameters(NamedTuple):
@@ -27,7 +29,7 @@ class TTFSCrossEntropyLoss(LIFLayer):
         self.first_spike_times = None
         self.first_spike_idxs = None
 
-    def forward(self, input_batch: SpikesVector):
+    def forward(self, input_batch):
         super().forward(input_batch)
         self._batch_idxs = np.arange(len(self.post_batch))
         self.n_batch = len(self.post_batch)
@@ -125,7 +127,7 @@ class TTFSCrossEntropyLoss(LIFLayer):
 
 
 class VMaxCrossEntropyLoss(LILayer):
-    def forward(self, input_batch: SpikesVector):
+    def forward(self, input_batch):
         super().forward(input_batch)
         self.n_batch = len(self.input_batch)
         self.sum0 = [

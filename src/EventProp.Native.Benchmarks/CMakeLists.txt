@@ -65,7 +65,7 @@ endif()
 
 # ============================================================
 # C++ (Eigen) benchmark executable (bench_cpp)
-# Uses Eigen core built from EventProp.Python sources.
+# Calls Eigen functions directly from EventProp.Python
 # ============================================================
 
 # Build Eigen core as static lib (stripped copy without pybind11)
@@ -76,7 +76,7 @@ target_include_directories(eventprop_eigen_core PRIVATE
     ${BOOST_INCLUDE_DIR}
 )
 
-# OpenMP for parallelization (no CPU-specific flags — let compiler auto-detect)
+# OpenMP for parallelization
 if(APPLE AND _BREW_FAIL EQUAL 0)
     target_include_directories(eventprop_eigen_core PRIVATE ${OpenMP_CXX_INCLUDE_DIRS})
     target_link_libraries(eventprop_eigen_core PRIVATE ${OpenMP_CXX_LIBRARIES})
@@ -84,28 +84,11 @@ elseif(OpenMP_CXX_FOUND)
     target_link_libraries(eventprop_eigen_core PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
-# Build wrapper separately (avoid target name conflict with EventProp.Cpp.Wrapper's own CMake)
-add_library(eventprop_cpp_wrapper_lib SHARED ${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.Cpp.Wrapper/eventprop_c_api.cpp)
-set_target_properties(eventprop_cpp_wrapper_lib PROPERTIES OUTPUT_NAME "eventprop_cpp_wrapper")
-target_include_directories(eventprop_cpp_wrapper_lib PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.Cpp.Wrapper
-    ${EIGEN_DIR}
-    ${BOOST_INCLUDE_DIR}
-)
-target_link_libraries(eventprop_cpp_wrapper_lib PRIVATE eventprop_eigen_core)
-
 add_executable(bench_cpp bench_main.cpp)
 target_compile_definitions(bench_cpp PRIVATE USE_CPP_WRAPPER)
 target_include_directories(bench_cpp PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.Cpp.Wrapper
-    ${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.C)
-target_link_libraries(bench_cpp PRIVATE eventprop_cpp_wrapper_lib eventprop_c_api benchmark::benchmark benchmark::benchmark_main)
-
-# Copy C++ wrapper library to output
-if(APPLE)
-    add_custom_command(TARGET bench_cpp POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:eventprop_cpp_wrapper_lib>
-            $<TARGET_FILE_DIR:bench_cpp>
-    )
-endif()
+    ${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.Python/src
+    ${EIGEN_DIR}
+    ${BOOST_INCLUDE_DIR})
+target_link_libraries(bench_cpp PRIVATE eventprop_eigen_core benchmark::benchmark benchmark::benchmark_main)

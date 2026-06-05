@@ -14,13 +14,13 @@ import os
 from pathlib import Path
 
 # Add both library source directories to path so they can coexist.
-_here = Path(__file__).resolve().parent
-_src = _here.parent
+_here = Path(__file__).resolve().parent  # EventProp.Python.Benchmarks/
+_src = _here.parent                       # src/ (parent of directory)
 
 # EventProp.Python (pybind11) — the "truth" library
 sys.path.insert(0, str(_src / "EventProp.Python"))
 
-# eventprop (ctypes) — new ctypes implementation
+# eventprop_c (ctypes) — new ctypes implementation
 sys.path.insert(0, str(_src / "EventProp.Native.Python"))
 
 import numpy as np
@@ -133,9 +133,9 @@ def make_weights(n_in: int, n_out: int) -> np.ndarray:
 # Helper functions for ctypes library access
 # ============================================================
 
-def get_ctypes_lib():
-    """Get or create a ctypes library instance."""
-    import eventprop
+@pytest.fixture(scope="session", autouse=True)
+def init_ctypes_lib():
+    """Initialize ctypes library at session start."""
     from pathlib import Path
     
     # Try to find the library relative to project root
@@ -150,7 +150,10 @@ def get_ctypes_lib():
     
     for path in lib_paths:
         if path.exists():
-            return eventprop.NativeApi(str(path))
+            from eventprop_c import NativeApi
+            # Initialize global library instance
+            _ = NativeApi(str(path))
+            return
     
     raise FileNotFoundError(
         "Could not find libeventprop_c_api.dylib/.so. Run ./build.sh c first, or "

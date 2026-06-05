@@ -4,6 +4,7 @@ from __future__ import annotations
 import ctypes
 from ctypes import cdll, c_double, c_int32, c_int, Structure, POINTER
 from ctypes import byref, addressof
+import numpy as np
 
 
 # ── C struct definitions matching eventprop_alloc.h ───────────────────────
@@ -102,6 +103,16 @@ class DoubleArrayView:
         """Convert to Python list (copy)."""
         return [self[i] for i in range(self._length)]
     
+    def to_numpy(self) -> np.ndarray:
+        """Create numpy array directly from C memory (zero-copy view)."""
+        if self._ptr is None or self._length == 0:
+            return np.array([], dtype=np.float64)
+        return np.frombuffer(
+            ctypes.string_at(self._ptr, self._length * 8),
+            dtype=np.float64,
+            count=self._length
+        )
+    
     @property
     def memoryview_obj(self):
         """Return Python memoryview for zero-copy access."""
@@ -135,6 +146,16 @@ class Int32ArrayView:
     def to_list(self) -> list:
         """Convert to Python list (copy)."""
         return [self[i] for i in range(self._length)]
+    
+    def to_numpy(self) -> np.ndarray:
+        """Create numpy array directly from C memory (zero-copy view)."""
+        if self._ptr is None or self._length == 0:
+            return np.array([], dtype=np.int32)
+        return np.frombuffer(
+            ctypes.string_at(self._ptr, self._length * 4),
+            dtype=np.int32,
+            count=self._length
+        )
 
 
 # ── Output classes with zero-copy access and automatic cleanup ───────────
@@ -354,6 +375,22 @@ class LambdaITraceOutput:
 
 # ── Library loader and function bindings ─────────────────────────────────
 
+def _get_array_pointer(arr, ctype=c_double):
+    """Get ctypes pointer from numpy array (zero-copy) or create new ctypes array.
+    
+    Args:
+        arr: numpy array (zero-copy) or list/tuple (creates new ctypes array)
+        ctype: ctypes type (c_double for float64, c_int32 for int32)
+    
+    Returns:
+        ctypes pointer to array data
+    """
+    if hasattr(arr, 'ctypes'):  # numpy array - zero-copy
+        return arr.ctypes.data_as(ctypes.POINTER(ctype))
+    else:  # list/tuple - create ctypes array
+        return (ctype * len(arr))(*arr)
+
+
 class EventPropCtypes:
     """EventProp C library wrapper with ctypes.
     
@@ -545,13 +582,14 @@ class EventPropCtypes:
             SpikeOutput with zero-copy access to times, sources, currents
         """
         
-        w_arr = (c_double * len(w))(*w)
-        times_arr = (c_double * len(times))(*times)
-        sources_arr = (c_int32 * len(sources))(*sources)
+        # Zero-copy access for numpy arrays
+        w_ptr = _get_array_pointer(w, c_double)
+        times_ptr = _get_array_pointer(times, c_double)
+        sources_ptr = _get_array_pointer(sources, c_int32)
         
         c_struct = self.lib.eventprop_compute_spikes_alloc(
-            w_arr, n_pre, n_post,
-            times_arr, sources_arr, len(times),
+            w_ptr, n_pre, n_post,
+            times_ptr, sources_ptr, len(times),
             c_double(v_th), c_double(tau_mem), c_double(tau_syn)
         )
         
@@ -576,13 +614,14 @@ class EventPropCtypes:
             SumsOutput with zero-copy access to sum0, sum1 arrays
         """
         
-        w_arr = (c_double * len(w))(*w)
-        times_arr = (c_double * len(times))(*times)
-        sources_arr = (c_int32 * len(sources))(*sources)
+        # Zero-copy access for numpy arrays
+        w_ptr = _get_array_pointer(w, c_double)
+        times_ptr = _get_array_pointer(times, c_double)
+        sources_ptr = _get_array_pointer(sources, c_int32)
         
         c_struct = self.lib.eventprop_compute_sums_alloc(
-            w_arr, n_pre, n_post,
-            times_arr, sources_arr, len(times),
+            w_ptr, n_pre, n_post,
+            times_ptr, sources_ptr, len(times),
             c_double(tau_mem), c_double(tau_syn)
         )
         
@@ -607,13 +646,14 @@ class EventPropCtypes:
             MaximaOutput with zero-copy access to times, values
         """
         
-        w_arr = (c_double * len(w))(*w)
-        times_arr = (c_double * len(times))(*times)
-        sources_arr = (c_int32 * len(sources))(*sources)
+        # Zero-copy access for numpy arrays
+        w_ptr = _get_array_pointer(w, c_double)
+        times_ptr = _get_array_pointer(times, c_double)
+        sources_ptr = _get_array_pointer(sources, c_int32)
         
         c_struct = self.lib.eventprop_compute_maxima_alloc(
-            w_arr, n_pre, n_post,
-            times_arr, sources_arr, len(times),
+            w_ptr, n_pre, n_post,
+            times_ptr, sources_ptr, len(times),
             c_double(tau_mem), c_double(tau_syn)
         )
         
@@ -646,19 +686,20 @@ class EventPropCtypes:
         Returns:
             BackwardSpikesOutput with zero-copy access to grad and spike_errors
         """
-        times_arr = (c_double * len(times))(*times)
-        sources_arr = (c_int32 * len(sources))(*sources)
-        fwd_times_arr = (c_double * len(fwd_times))(*fwd_times)
-        fwd_sources_arr = (c_int32 * len(fwd_sources))(*fwd_sources)
-        fwd_currents_arr = (c_double * len(fwd_currents))(*fwd_currents)
-        post_errors_arr = (c_double * len(post_errors))(*post_errors)
-        w_arr = (c_double * len(w))(*w)
+        # Zero-copy access for numpy arrays
+        times_ptr = _get_array_pointer(times, c_double)
+        sources_ptr = _get_array_pointer(sources, c_int32)
+        fwd_times_ptr = _get_array_pointer(fwd_times, c_double)
+        fwd_sources_ptr = _get_array_pointer(fwd_sources, c_int32)
+        fwd_currents_ptr = _get_array_pointer(fwd_currents, c_double)
+        post_errors_ptr = _get_array_pointer(post_errors, c_double)
+        w_ptr = _get_array_pointer(w, c_double)
         
         c_struct = self.lib.eventprop_backward_spikes_alloc(
-            times_arr, sources_arr, len(times),
-            fwd_times_arr, fwd_sources_arr, fwd_currents_arr,
-            post_errors_arr, len(post_errors),
-            w_arr, n_pre, n_post,
+            times_ptr, sources_ptr, len(times),
+            fwd_times_ptr, fwd_sources_ptr, fwd_currents_ptr,
+            post_errors_ptr, len(post_errors),
+            w_ptr, n_pre, n_post,
             c_double(v_th), c_double(tau_mem), c_double(tau_syn)
         )
         
@@ -686,17 +727,18 @@ class EventPropCtypes:
         Returns:
             BackwardMaximaOutput with zero-copy access to gradient and spike_errors
         """
-        input_times_arr = (c_double * len(input_times))(*input_times)
-        input_sources_arr = (c_int32 * len(input_sources))(*input_sources)
-        maxima_times_arr = (c_double * len(maxima_times))(*maxima_times)
-        maxima_values_arr = (c_double * len(maxima_values))(*maxima_values)
-        maxima_errors_arr = (c_double * len(maxima_errors))(*maxima_errors)
-        w_arr = (c_double * len(w))(*w)
+        # Zero-copy access for numpy arrays
+        input_times_ptr = _get_array_pointer(input_times, c_double)
+        input_sources_ptr = _get_array_pointer(input_sources, c_int32)
+        maxima_times_ptr = _get_array_pointer(maxima_times, c_double)
+        maxima_values_ptr = _get_array_pointer(maxima_values, c_double)
+        maxima_errors_ptr = _get_array_pointer(maxima_errors, c_double)
+        w_ptr = _get_array_pointer(w, c_double)
         
         c_struct = self.lib.eventprop_backward_maxima_alloc(
-            input_times_arr, input_sources_arr, len(input_times),
-            maxima_times_arr, maxima_values_arr, maxima_errors_arr, len(maxima_times),
-            w_arr, n_pre, n_post,
+            input_times_ptr, input_sources_ptr, len(input_times),
+            maxima_times_ptr, maxima_values_ptr, maxima_errors_ptr, len(maxima_times),
+            w_ptr, n_pre, n_post,
             c_double(tau_mem), c_double(tau_syn)
         )
         

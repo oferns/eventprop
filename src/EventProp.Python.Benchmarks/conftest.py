@@ -14,14 +14,26 @@ import os
 from pathlib import Path
 
 # Add both library source directories to path so they can coexist.
-_here = Path(__file__).resolve().parent
-_src = _here.parent
+_here = Path(__file__).resolve().parent  # EventProp.Python.Benchmarks/
+_src = _here.parent                       # src/ (parent of directory)
 
-# eventprop (ctypes) — new ctypes implementation (add first so it doesn't shadow pybind11)
+# EventProp.Python (pybind11) — the "truth" library
+sys.path.insert(0, str(_src / "EventProp.Python"))
+
+# eventprop_c (ctypes) — new ctypes implementation
 sys.path.insert(0, str(_src / "EventProp.Native.Python"))
 
-# EventProp.Python (pybind11) — the "truth" library (add second, after ctypes)
-sys.path.insert(0, str(_src / "EventProp.Python"))
+# Initialize ctypes library at module load time
+import eventprop_c as native_lib
+_project_root = _src.parent  # eventprop.net/ (parent of src/)
+lib_paths = [
+    _project_root / "src" / "EventProp.C" / "build" / "libeventprop_c_api.dylib",
+    _project_root / "src" / "EventProp.C" / "build" / "libeventprop_c_api.so",
+]
+for path in lib_paths:
+    if path.exists():
+        _ = native_lib.NativeApi(str(path))  # Initialize global library
+        break
 
 import numpy as np
 import pytest

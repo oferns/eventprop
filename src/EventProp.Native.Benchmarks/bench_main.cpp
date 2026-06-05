@@ -1,5 +1,5 @@
 // C vs C++ EventProp benchmark — side-by-side comparison
-// Two separate executables: bench_c (links C library) and bench_cpp (links C++ wrapper)
+// Two separate executables: bench_c (links C library) and bench_cpp (calls Eigen directly)
 // Same code, different backend. Run both and compare.
 
 #include <benchmark/benchmark.h>
@@ -12,13 +12,13 @@
 #include <string>
 #include <vector>
 
-// Include the C API header — both libraries export the same extern "C" symbols
 #ifdef USE_CPP_WRAPPER
-#include "eventprop_c_api.h"
+// C++ Eigen functions (bare header, no pybind11/Python dependency)
+#include "eventprop_cpp_bare.h"
 #else
-#include "eventprop.h"
-#endif
+// C library alloc functions
 #include "eventprop_alloc.h"
+#endif
 
 // ============================================================
 // Data generation (same for both)
@@ -48,8 +48,6 @@ static void GeneratePoissonData(int n_pre, int n_post, int n_spikes,
     for (int i = 0; i < n_pre * n_post; i++)
         w[i] = w_dist(rng);
 
-    /* Poisson: exponential inter-spike intervals, ~200 Hz per neuron.
-       Matches .NET BenchPatterns.cs generation. */
     double rate = 200.0; // Hz
     double dt = 1.0 / (rate * n_spikes);
     std::uniform_real_distribution<double> u_dist(0.0, 1.0);
@@ -59,7 +57,6 @@ static void GeneratePoissonData(int n_pre, int n_post, int n_spikes,
         times[idx] = -std::log(1.0 - u) / rate;
         sources[idx] = std::uniform_int_distribution<int32_t>(0, n_pre - 1)(rng);
 
-        /* Ensure strictly increasing times */
         if (idx > 0 && times[idx] <= times[idx - 1])
             times[idx] = times[idx - 1] + dt;
     }
@@ -109,55 +106,6 @@ using DataGenerator = void(*)(int, int, int, double*, double*, int32_t*);
 static DataGenerator kGen[] = {GenerateUniformData, GeneratePoissonData, GenerateBurstData};
 
 // ============================================================
-// Benchmark: ComputeSums
-// ============================================================
-
-static void BM_ComputeSums(benchmark::State& state, const ProblemSize& sz, DataGenerator gen)
-{
-    std::vector<double> w(sz.n_pre * sz.n_post);
-    std::vector<double> times(sz.n_spikes);
-    std::vector<int32_t> sources(sz.n_spikes);
-    gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
-
-    int sum_rows = sz.n_spikes + 1;
-    std::vector<double> sum0(sum_rows * sz.n_post);
-    std::vector<double> sum1(sum_rows * sz.n_post);
-
-    for (auto _ : state) {
-        std::memset(sum0.data(), 0, sum0.size() * sizeof(double));
-        std::memset(sum1.data(), 0, sum1.size() * sizeof(double));
-
-#ifdef USE_CPP_WRAPPER
-        eventprop_compute_sums(w.data(), sz.n_pre, sz.n_post,
-            times.data(), sources.data(), sz.n_spikes, 0.02, 0.005, sum0.data(), sum1.data());
-#else
-        eventprop_compute_sums(w.data(), sz.n_pre, sz.n_post,
-            times.data(), sources.data(), sz.n_spikes, 0.02, 0.005, sum0.data(), sum1.data());
-#endif
-        benchmark::DoNotOptimize(sum0.data());
-        benchmark::DoNotOptimize(sum1.data());
-    }
-
-    state.SetItemsProcessed(state.iterations() * sz.n_spikes);
-}
-
-#define COMPUTESUMS_BENCH(SizeName, NP, NPO, NS)                                              \
-    BENCHMARK_CAPTURE(BM_ComputeSums, SizeName##_uniform,                                     \
-        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(                  \
-        "ComputeSums/" #SizeName "/uniform/default");                                          \
-    BENCHMARK_CAPTURE(BM_ComputeSums, SizeName##_poisson,                                     \
-        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(                  \
-        "ComputeSums/" #SizeName "/poisson/default");                                          \
-    BENCHMARK_CAPTURE(BM_ComputeSums, SizeName##_burst,                                       \
-        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(                    \
-        "ComputeSums/" #SizeName "/burst/default")
-
-COMPUTESUMS_BENCH(Tiny,    10,   5,   20);
-COMPUTESUMS_BENCH(Small,   50,   20,  100);
-COMPUTESUMS_BENCH(Medium,  200,  80,  500);
-COMPUTESUMS_BENCH(Large,   500,  200, 1000);
-
-// ============================================================
 // Benchmark: ComputeSpikes (forward pass)
 // ============================================================
 
@@ -168,24 +116,28 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
     std::vector<int32_t> sources(sz.n_spikes);
     gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
 
-    int max_out = sz.n_spikes * sz.n_post;
-    std::vector<double> out_times(max_out);
-    std::vector<int32_t> out_sources(max_out);
-    std::vector<double> out_currents(max_out);
-
     for (auto _ : state) {
 #ifdef USE_CPP_WRAPPER
-        eventprop_compute_spikes(w.data(), sz.n_pre, sz.n_post,
-            times.data(), sources.data(), sz.n_spikes,
-            1.0, 0.02, 0.005, out_times.data(), out_sources.data(), out_currents.data());
+        // C++ Eigen: compute_spikes(w, spikes, v_th, tau_mem, tau_syn)
+        // Create Spikes object from data
+        Eigen::ArrayXd e_times = Eigen::Map<Eigen::ArrayXd>(times.data(), sz.n_spikes);
+        Eigen::ArrayXi e_sources = Eigen::Map<Eigen::ArrayXi>(sources.data(), sz.n_spikes);
+        Spikes spikes(e_times, e_sources);
+        
+        Eigen::Map<RowMatrixXd const> w_map(w.data(), sz.n_pre, sz.n_post);
+        Spikes output = compute_spikes(w_map, spikes, 1.0, 0.02, 0.005);
+        
+        benchmark::DoNotOptimize(output.n_spikes);
 #else
-        eventprop_compute_spikes(w.data(), sz.n_pre, sz.n_post,
+        // C library: eventprop_compute_spikes_alloc(w, n_pre, n_post, times, sources, v_th, tau_mem, tau_syn)
+        SpikeOutput output = eventprop_compute_spikes_alloc(
+            w.data(), sz.n_pre, sz.n_post,
             times.data(), sources.data(), sz.n_spikes,
-            1.0, 0.02, 0.005, out_times.data(), out_sources.data(), out_currents.data());
+            1.0, 0.02, 0.005);
+        
+        benchmark::DoNotOptimize(output.n_spikes);
+        eventprop_free_spike_output(&output);
 #endif
-        benchmark::DoNotOptimize(out_times.data());
-        benchmark::DoNotOptimize(out_sources.data());
-        benchmark::DoNotOptimize(out_currents.data());
     }
 
     state.SetItemsProcessed(state.iterations() * sz.n_spikes);
@@ -210,7 +162,6 @@ COMPUTESPIKES_BENCH(Large,   500,  200, 1000);
 // ============================================================
 // Benchmark: BackwardSpikes (backward pass)
 // Requires post-spike data from a forward pass.
-// Forward pass is run once outside the timing loop; backward is benchmarked.
 // ============================================================
 
 static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, DataGenerator gen)
@@ -220,53 +171,56 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
     std::vector<int32_t> sources(sz.n_spikes);
     gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
 
-    // Run forward pass ONCE to get post-spike data (not benchmarked)
-    int max_out = sz.n_spikes * sz.n_post;
-    std::vector<double> fwd_times(max_out);
-    std::vector<int32_t> fwd_sources(max_out);
-    std::vector<double> fwd_currents(max_out);
-
 #ifdef USE_CPP_WRAPPER
-    int n_post_spikes = eventprop_compute_spikes(w.data(), sz.n_pre, sz.n_post,
-        times.data(), sources.data(), sz.n_spikes,
-        1.0, 0.02, 0.005, fwd_times.data(), fwd_sources.data(), fwd_currents.data());
-#else
-    int n_post_spikes = eventprop_compute_spikes(w.data(), sz.n_pre, sz.n_post,
-        times.data(), sources.data(), sz.n_spikes,
-        1.0, 0.02, 0.005, fwd_times.data(), fwd_sources.data(), fwd_currents.data());
-#endif
+    // C++ Eigen: Run forward pass to get post-spike data
+    Eigen::ArrayXd e_times = Eigen::Map<Eigen::ArrayXd>(times.data(), sz.n_spikes);
+    Eigen::ArrayXi e_sources = Eigen::Map<Eigen::ArrayXi>(sources.data(), sz.n_spikes);
+    Spikes input_spikes(e_times, e_sources);
+    
+    Eigen::Map<RowMatrixXd const> w_map(w.data(), sz.n_pre, sz.n_post);
+    Spikes post_spikes = compute_spikes(w_map, input_spikes, 1.0, 0.02, 0.005);
+    
+    // Set post-spike errors (all 1.0)
+    for (int i = 0; i < post_spikes.n_spikes; i++)
+        post_spikes.set_error(i, 1.0);
 
-    // Resize to actual spike count (trim unused capacity)
-    fwd_times.resize(n_post_spikes);
-    fwd_sources.resize(n_post_spikes);
-    fwd_currents.resize(n_post_spikes);
-
-    // Post-spike errors (all 1.0, matching .NET benchmark convention)
-    std::vector<double> post_errors(n_post_spikes, 1.0);
-
-    // Gradient output buffer
-    std::vector<double> grad(sz.n_pre * sz.n_post);
-    // Spike errors output buffer
-    std::vector<double> spike_errors(sz.n_spikes);
+    // Gradient output buffer (row-major)
+    RowMatrixXd gradient(sz.n_pre, sz.n_post);
 
     for (auto _ : state) {
-        std::memset(grad.data(), 0, grad.size() * sizeof(double));
-
-#ifdef USE_CPP_WRAPPER
-        eventprop_backward_spikes(times.data(), sources.data(), sz.n_spikes,
-            fwd_times.data(), fwd_sources.data(), fwd_currents.data(),
-            post_errors.data(), n_post_spikes,
-            w.data(), sz.n_pre, sz.n_post,
-            1.0, 0.02, 0.005, grad.data(), spike_errors.data());
-#else
-        eventprop_backward_spikes(times.data(), sources.data(), sz.n_spikes,
-            fwd_times.data(), fwd_sources.data(), fwd_currents.data(),
-            post_errors.data(), n_post_spikes,
-            w.data(), sz.n_pre, sz.n_post,
-            1.0, 0.02, 0.005, grad.data(), spike_errors.data());
-#endif
-        benchmark::DoNotOptimize(grad.data());
+        gradient.setZero();
+        
+        // C++ backward: returns (gradient, spike_errors)
+        std::pair<RowMatrixXd, Eigen::ArrayXd> result = backward(input_spikes, post_spikes, w_map, 1.0, 0.02, 0.005);
+        
+        benchmark::DoNotOptimize(result.first(0, 0));
     }
+#else
+    // C library: Run forward pass to get post-spike data
+    SpikeOutput fwd_result = eventprop_compute_spikes_alloc(
+        w.data(), sz.n_pre, sz.n_post,
+        times.data(), sources.data(), sz.n_spikes,
+        1.0, 0.02, 0.005);
+
+    int n_post_spikes = fwd_result.n_spikes;
+    
+    // Post-spike errors (all 1.0)
+    std::vector<double> post_errors(n_post_spikes, 1.0);
+
+    for (auto _ : state) {
+        BackwardSpikesOutput result = eventprop_backward_spikes_alloc(
+            times.data(), sources.data(), sz.n_spikes,
+            fwd_result.times, fwd_result.sources, fwd_result.currents,
+            post_errors.data(), n_post_spikes,
+            w.data(), sz.n_pre, sz.n_post,
+            1.0, 0.02, 0.005);
+
+        benchmark::DoNotOptimize(result.grad[0]);
+        eventprop_free_backward_spikes_output(&result);
+    }
+
+    eventprop_free_spike_output(&fwd_result);
+#endif
 
     state.SetItemsProcessed(state.iterations() * sz.n_spikes);
 }
@@ -286,138 +240,5 @@ BACKWARDSPIKES_BENCH(Tiny,    10,   5,   20);
 BACKWARDSPIKES_BENCH(Small,   50,   20,  100);
 BACKWARDSPIKES_BENCH(Medium,  200,  80,  500);
 BACKWARDSPIKES_BENCH(Large,   500,  200, 1000);
-
-// ============================================================
-// Benchmark: ComputeSums Alloc (automatic allocation)
-// ============================================================
-
-static void BM_ComputeSumsAlloc(benchmark::State& state, const ProblemSize& sz, DataGenerator gen)
-{
-    std::vector<double> w(sz.n_pre * sz.n_post);
-    std::vector<double> times(sz.n_spikes);
-    std::vector<int32_t> sources(sz.n_spikes);
-    gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
-
-    for (auto _ : state) {
-        SumsOutput result = eventprop_compute_sums_alloc(
-            w.data(), sz.n_pre, sz.n_post,
-            times.data(), sources.data(), sz.n_spikes,
-            0.02, 0.005);
-
-        benchmark::DoNotOptimize(result.sum0);
-        eventprop_free_sums_output(&result);
-    }
-
-    state.SetItemsProcessed(state.iterations() * sz.n_spikes);
-}
-
-#define COMPUTESUMS_ALLOC_BENCH(SizeName, NP, NPO, NS)                                          \
-    BENCHMARK_CAPTURE(BM_ComputeSumsAlloc, SizeName##_uniform,                                  \
-        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(                    \
-        "ComputeSumsAlloc/" #SizeName "/uniform/default");                                      \
-    BENCHMARK_CAPTURE(BM_ComputeSumsAlloc, SizeName##_poisson,                                  \
-        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(                    \
-        "ComputeSumsAlloc/" #SizeName "/poisson/default");                                      \
-    BENCHMARK_CAPTURE(BM_ComputeSumsAlloc, SizeName##_burst,                                    \
-        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(                      \
-        "ComputeSumsAlloc/" #SizeName "/burst/default")
-
-COMPUTESUMS_ALLOC_BENCH(Tiny,    10,   5,   20);
-COMPUTESUMS_ALLOC_BENCH(Small,   50,   20,  100);
-COMPUTESUMS_ALLOC_BENCH(Medium,  200,  80,  500);
-COMPUTESUMS_ALLOC_BENCH(Large,   500,  200, 1000);
-
-// ============================================================
-// Benchmark: ComputeSpikes Alloc (automatic allocation)
-// ============================================================
-
-static void BM_ComputeSpikesAlloc(benchmark::State& state, const ProblemSize& sz, DataGenerator gen)
-{
-    std::vector<double> w(sz.n_pre * sz.n_post);
-    std::vector<double> times(sz.n_spikes);
-    std::vector<int32_t> sources(sz.n_spikes);
-    gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
-
-    for (auto _ : state) {
-        SpikeOutput result = eventprop_compute_spikes_alloc(
-            w.data(), sz.n_pre, sz.n_post,
-            times.data(), sources.data(), sz.n_spikes,
-            1.0, 0.02, 0.005);
-
-        benchmark::DoNotOptimize(result.times);
-        eventprop_free_spike_output(&result);
-    }
-
-    state.SetItemsProcessed(state.iterations() * sz.n_spikes);
-}
-
-#define COMPUTESPIKES_ALLOC_BENCH(SizeName, NP, NPO, NS)                                        \
-    BENCHMARK_CAPTURE(BM_ComputeSpikesAlloc, SizeName##_uniform,                                \
-        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(                    \
-        "ComputeSpikesAlloc/" #SizeName "/uniform/default");                                    \
-    BENCHMARK_CAPTURE(BM_ComputeSpikesAlloc, SizeName##_poisson,                                \
-        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(                    \
-        "ComputeSpikesAlloc/" #SizeName "/poisson/default");                                    \
-    BENCHMARK_CAPTURE(BM_ComputeSpikesAlloc, SizeName##_burst,                                  \
-        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(                      \
-        "ComputeSpikesAlloc/" #SizeName "/burst/default")
-
-COMPUTESPIKES_ALLOC_BENCH(Tiny,    10,   5,   20);
-COMPUTESPIKES_ALLOC_BENCH(Small,   50,   20,  100);
-COMPUTESPIKES_ALLOC_BENCH(Medium,  200,  80,  500);
-COMPUTESPIKES_ALLOC_BENCH(Large,   500,  200, 1000);
-
-// ============================================================
-// Benchmark: BackwardSpikes Alloc (automatic allocation)
-// Requires post-spike data from a forward pass.
-// ============================================================
-
-static void BM_BackwardSpikesAlloc(benchmark::State& state, const ProblemSize& sz, DataGenerator gen)
-{
-    std::vector<double> w(sz.n_pre * sz.n_post);
-    std::vector<double> times(sz.n_spikes);
-    std::vector<int32_t> sources(sz.n_spikes);
-    gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
-
-    // Run forward pass ONCE to get post-spike data (not benchmarked)
-    SpikeOutput fwd_result = eventprop_compute_spikes_alloc(
-        w.data(), sz.n_pre, sz.n_post,
-        times.data(), sources.data(), sz.n_spikes,
-        1.0, 0.02, 0.005);
-
-    int n_post_spikes = fwd_result.n_spikes;
-    std::vector<double> post_errors(n_post_spikes, 1.0);
-
-    for (auto _ : state) {
-        BackwardSpikesOutput result = eventprop_backward_spikes_alloc(
-            times.data(), sources.data(), sz.n_spikes,
-            fwd_result.times, fwd_result.sources, fwd_result.currents,
-            post_errors.data(), n_post_spikes,
-            w.data(), sz.n_pre, sz.n_post,
-            1.0, 0.02, 0.005);
-
-        benchmark::DoNotOptimize(result.grad);
-        eventprop_free_backward_spikes_output(&result);
-    }
-
-    state.SetItemsProcessed(state.iterations() * sz.n_spikes);
-    eventprop_free_spike_output(&fwd_result);
-}
-
-#define BACKWARDSPIKES_ALLOC_BENCH(SizeName, NP, NPO, NS)                                      \
-    BENCHMARK_CAPTURE(BM_BackwardSpikesAlloc, SizeName##_uniform,                              \
-        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(                    \
-        "BackwardSpikesAlloc/" #SizeName "/uniform/default");                                  \
-    BENCHMARK_CAPTURE(BM_BackwardSpikesAlloc, SizeName##_poisson,                              \
-        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(                    \
-        "BackwardSpikesAlloc/" #SizeName "/poisson/default");                                  \
-    BENCHMARK_CAPTURE(BM_BackwardSpikesAlloc, SizeName##_burst,                                \
-        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(                      \
-        "BackwardSpikesAlloc/" #SizeName "/burst/default")
-
-BACKWARDSPIKES_ALLOC_BENCH(Tiny,    10,   5,   20);
-BACKWARDSPIKES_ALLOC_BENCH(Small,   50,   20,  100);
-BACKWARDSPIKES_ALLOC_BENCH(Medium,  200,  80,  500);
-BACKWARDSPIKES_ALLOC_BENCH(Large,   500,  200, 1000);
 
 BENCHMARK_MAIN();

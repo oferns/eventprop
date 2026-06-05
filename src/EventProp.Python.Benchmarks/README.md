@@ -47,28 +47,28 @@ cd src/EventProp.Python && pip install -e .
 cd src/EventProp.Native.Python && pip install -e .
 
 # Verify both import simultaneously
-PYTHONPATH="src/EventProp.Python:src/EventProp.Native.Python" python3 -c \
-  "from eventprop.eventprop_cpp import compute_spikes_batch_cpp; from eventprop.native import load_library; print('OK')"
+PYTHONPATH="../EventProp.Python:../EventProp.Native.Python" python3 -c \
+  "from eventprop.eventprop_cpp import compute_spikes_batch_cpp; from eventprop_c import NativeApi; print('OK')"
 ```
 
 ### Run all benchmarks
 ```bash
 cd src/EventProp.Python.Benchmarks
-PYTHONPATH="EventProp.Python:EventProp.Native.Python" pytest test_benchmarks.py -v --benchmark-only
+PYTHONPATH="../EventProp.Python:../EventProp.Native.Python" pytest test_benchmarks.py -v --benchmark-only
 ```
 
 ### Run subset (e.g., Tiny/Small only)
 ```bash
-PYTHONPATH="EventProp.Python:EventProp.Native.Python" pytest test_benchmarks.py -v --benchmark-only -k "Tiny or Small"
+PYTHONPATH="../EventProp.Python:../EventProp.Native.Python" pytest test_benchmarks.py -v --benchmark-only -k "Tiny or Small"
 ```
 
 ### Run specific operation
 ```bash
 # LIF forward only
-PYTHONPATH="EventProp.Python:EventProp.Native.Python" pytest test_benchmarks.py -v --benchmark-only -k "LIFForward"
+PYTHONPATH="../EventProp.Python:../EventProp.Native.Python" pytest test_benchmarks.py -v --benchmark-only -k "LIFForward"
 
 # ctypes backward only
-PYTHONPATH="EventProp.Python:EventProp.Native.Python" pytest test_benchmarks.py -v --benchmark-only -k "Backward and ctypes"
+PYTHONPATH="../EventProp.Python:../EventProp.Native.Python" pytest test_benchmarks.py -v --benchmark-only -k "Backward and ctypes"
 ```
 
 ### Compare with .NET benchmarks

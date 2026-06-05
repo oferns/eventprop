@@ -4,7 +4,7 @@ from typing import Union, Tuple
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from .eventprop_cpp import Spikes, SpikesVector
+from .spikes import Spikes, SpikesVector
 
 # fmt: off
 @dataclass
