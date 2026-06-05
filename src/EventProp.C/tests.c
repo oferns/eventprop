@@ -40,14 +40,14 @@ static void gen_data(int n_pre, int n_post, int n_spikes,
 
 /* ── Alloc function tests ─────────────────────────────────────── */
 
-static void test_compute_sums_alloc(void)
+static void test_compute_sums(void)
 {
     TEST("ComputeSums Alloc Tiny (10×5, 20 spikes)");
     int n_pre = 10, n_post = 5, n_spikes = 20;
     double w[10*5], times[20]; int32_t sources[20];
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
 
-    SumsOutput output = eventprop_compute_sums_alloc(w, n_pre, n_post,
+    SumsOutput output = eventprop_compute_sums(w, n_pre, n_post,
                                                       times, sources, n_spikes,
                                                       0.02, 0.005);
 
@@ -67,7 +67,7 @@ static void test_compute_sums_alloc(void)
 static void test_compute_sums_alloc_zero_spikes(void)
 {
     TEST("ComputeSums Alloc zero spikes");
-    SumsOutput output = eventprop_compute_sums_alloc(NULL, 10, 5,
+    SumsOutput output = eventprop_compute_sums(NULL, 10, 5,
                                                       NULL, NULL, 0,
                                                       0.02, 0.005);
     eventprop_free_sums_output(&output);
@@ -83,7 +83,7 @@ static void test_compute_sums_alloc_large(void)
     int32_t* sources = malloc(n_spikes * sizeof(int32_t));
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
 
-    SumsOutput output = eventprop_compute_sums_alloc(w, n_pre, n_post,
+    SumsOutput output = eventprop_compute_sums(w, n_pre, n_post,
                                                       times, sources, n_spikes,
                                                       0.02, 0.005);
 
@@ -94,14 +94,14 @@ static void test_compute_sums_alloc_large(void)
     TEST_END;
 }
 
-static void test_compute_spikes_alloc(void)
+static void test_compute_spikes(void)
 {
     TEST("ComputeSpikes Alloc Tiny (10x5, 20 spikes)");
     int n_pre = 10, n_post = 5, n_spikes = 20;
     double w[10*5], times[20]; int32_t sources[20];
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
 
-    SpikeOutput output = eventprop_compute_spikes_alloc(w, n_pre, n_post,
+    SpikeOutput output = eventprop_compute_spikes(w, n_pre, n_post,
                                                          times, sources, n_spikes,
                                                          1.0, 0.02, 0.005);
 
@@ -115,7 +115,7 @@ static void test_compute_spikes_alloc(void)
     TEST_END;
 }
 
-static void test_backward_spikes_alloc(void)
+static void test_backward_spikes(void)
 {
     TEST("BackwardSpikes Alloc Tiny (10x5, 20 spikes)");
     int n_pre = 10, n_post = 5, n_spikes = 20;
@@ -134,7 +134,7 @@ static void test_backward_spikes_alloc(void)
         post_errors[i] = -1.0;
     }
 
-    BackwardSpikesOutput output = eventprop_backward_spikes_alloc(
+    BackwardSpikesOutput output = eventprop_backward_spikes(
         times, sources, n_spikes,
         fwd_times, fwd_sources, fwd_currents, post_errors, n_spikes,
         w, n_pre, n_post, 1.0, 0.02, 0.005);
@@ -156,7 +156,7 @@ static void test_compute_spikes_alloc_burst_medium(void)
     int32_t* sources = malloc(n_spikes * sizeof(int32_t));
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
 
-    SpikeOutput output = eventprop_compute_spikes_alloc(w, n_pre, n_post,
+    SpikeOutput output = eventprop_compute_spikes(w, n_pre, n_post,
                                                          times, sources, n_spikes,
                                                          1.0, 0.02, 0.005);
 
@@ -167,14 +167,14 @@ static void test_compute_spikes_alloc_burst_medium(void)
     TEST_END;
 }
 
-static void test_compute_maxima_alloc(void)
+static void test_compute_maxima(void)
 {
     TEST("ComputeMaxima Alloc Tiny (10×5, 20 spikes)");
     int n_pre = 10, n_post = 5, n_spikes = 20;
     double w[10*5], times[20]; int32_t sources[20];
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
 
-    MaximaOutput output = eventprop_compute_maxima_alloc(w, n_pre, n_post,
+    MaximaOutput output = eventprop_compute_maxima(w, n_pre, n_post,
                                                           times, sources, n_spikes,
                                                           0.02, 0.005);
 
@@ -183,7 +183,7 @@ static void test_compute_maxima_alloc(void)
     TEST_END;
 }
 
-static void test_backward_maxima_alloc(void)
+static void test_backward_maxima(void)
 {
     TEST("BackwardMaxima Alloc Tiny (10×5, 20 spikes)");
     int n_pre = 10, n_post = 5, n_spikes = 20;
@@ -200,7 +200,7 @@ static void test_backward_maxima_alloc(void)
         maxima_errors[i] = -1.0;
     }
 
-    BackwardMaximaOutput output = eventprop_backward_maxima_alloc(
+    BackwardMaximaOutput output = eventprop_backward_maxima(
         times, sources, n_spikes,
         maxima_times, maxima_values, maxima_errors, n_post,
         w, n_pre, n_post, 0.02, 0.005);
@@ -220,22 +220,22 @@ int main(void)
     printf("==========================================\n\n");
 
     /* ComputeSums alloc tests */
-    test_compute_sums_alloc();
+    test_compute_sums();
     test_compute_sums_alloc_zero_spikes();
     test_compute_sums_alloc_large();
 
     /* ComputeSpikes alloc tests */
-    test_compute_spikes_alloc();
+    test_compute_spikes();
     test_compute_spikes_alloc_burst_medium();
 
     /* BackwardSpikes alloc tests */
-    test_backward_spikes_alloc();
+    test_backward_spikes();
 
     /* ComputeMaxima alloc tests */
-    test_compute_maxima_alloc();
+    test_compute_maxima();
 
     /* BackwardMaxima alloc tests */
-    test_backward_maxima_alloc();
+    test_backward_maxima();
 
     printf("\n==========================================\n");
     printf("Tests: %d passed, %d failed (of %d total)\n",

@@ -33,7 +33,7 @@ typedef struct {
  * Forward pass with automatic memory allocation.
  * Returns a SpikeOutput struct — caller must free via eventprop_free_spike_output().
  */
-SpikeOutput eventprop_compute_spikes_alloc(const double* w, int n_pre, int n_post,
+SpikeOutput eventprop_compute_spikes(const double* w, int n_pre, int n_post,
                                            const double* times, const int32_t* sources, int n_spikes,
                                            double v_th, double tau_mem, double tau_syn);
 
@@ -53,7 +53,7 @@ typedef struct {
  * Compute cumulative sums with automatic memory allocation.
  * Returns a SumsOutput struct — caller must free via eventprop_free_sums_output().
  */
-SumsOutput eventprop_compute_sums_alloc(const double* w, int n_pre, int n_post,
+SumsOutput eventprop_compute_sums(const double* w, int n_pre, int n_post,
                                         const double* times, const int32_t* sources, int n_spikes,
                                         double tau_mem, double tau_syn);
 
@@ -72,7 +72,7 @@ typedef struct {
  * Compute membrane potential maxima with automatic memory allocation.
  * Returns a MaximaOutput struct — caller must free via eventprop_free_maxima_output().
  */
-MaximaOutput eventprop_compute_maxima_alloc(const double* w, int n_pre, int n_post,
+MaximaOutput eventprop_compute_maxima(const double* w, int n_pre, int n_post,
                                            const double* times, const int32_t* sources, int n_spikes,
                                            double tau_mem, double tau_syn);
 
@@ -92,7 +92,7 @@ typedef struct {
  * Backward pass (spikes) with automatic memory allocation.
  * Returns a BackwardSpikesOutput struct — caller must free via eventprop_free_backward_spikes_output().
  */
-BackwardSpikesOutput eventprop_backward_spikes_alloc(const double* times, const int32_t* sources,
+BackwardSpikesOutput eventprop_backward_spikes(const double* times, const int32_t* sources,
                                                      int n_spikes,
                                                      const double* fwd_times, const int32_t* fwd_sources,
                                                      const double* fwd_currents,
@@ -114,7 +114,7 @@ typedef struct {
  * Backward pass (maxima) with automatic memory allocation.
  * Returns a BackwardMaximaOutput struct — caller must free via eventprop_free_backward_maxima_output().
  */
-BackwardMaximaOutput eventprop_backward_maxima_alloc(const double* input_times, const int32_t* input_sources,
+BackwardMaximaOutput eventprop_backward_maxima(const double* input_times, const int32_t* input_sources,
                                                      int n_input_spikes,
                                                      const double* maxima_times, const double* maxima_values,
                                                      const double* maxima_errors, int n_maxima,
@@ -136,7 +136,7 @@ typedef struct {
 /**
  * Compute membrane potential voltage trace with automatic memory allocation.
  */
-VoltageTraceOutput eventprop_compute_voltage_trace_alloc(double t_max, double dt,
+VoltageTraceOutput eventprop_compute_voltage_trace(double t_max, double dt,
                                                          int target_nrn_idx,
                                                          const double* w, int n_pre, int n_post,
                                                          const double* times, const int32_t* sources, int n_spikes,
@@ -156,7 +156,7 @@ typedef struct {
 /**
  * Compute lambda-I trace with automatic memory allocation.
  */
-LambdaITraceOutput eventprop_compute_lambda_i_trace_alloc(double t_max, double dt,
+LambdaITraceOutput eventprop_compute_lambda_i_trace(double t_max, double dt,
                                                           int target_nrn_idx,
                                                           const double* fwd_times, int n_post_spikes,
                                                           double v_th, double tau_mem, double tau_syn);
@@ -183,7 +183,7 @@ void eventprop_free_lambda_i_trace_output(LambdaITraceOutput* output);
  *
  * @return Array of SpikeOutput structs (one per sample), freed via eventprop_free_batch_spike_output()
  */
-SpikeOutput* eventprop_compute_spikes_batch_alloc(const double* w, int n_pre, int n_post,
+SpikeOutput* eventprop_compute_spikes_batch(const double* w, int n_pre, int n_post,
                                                   const double* times, const int32_t* sources,
                                                   const int* n_spikes_per_sample, int batch_size,
                                                   double v_th, double tau_mem, double tau_syn);
@@ -196,7 +196,7 @@ void eventprop_free_batch_spike_output(SpikeOutput* output, int batch_size);
  * Processes multiple samples in parallel using OpenMP.
  * Returns array of BackwardSpikesOutput structs (one per sample).
  */
-BackwardSpikesOutput* eventprop_backward_spikes_batch_alloc(
+BackwardSpikesOutput* eventprop_backward_spikes_batch(
     const double* times, const int32_t* sources,
     const int* n_spikes_per_sample,
     const double* fwd_times, const int32_t* fwd_sources,
@@ -209,34 +209,6 @@ BackwardSpikesOutput* eventprop_backward_spikes_batch_alloc(
 
 /** Free memory owned by batch BackwardSpikesOutput array. */
 void eventprop_free_backward_spikes_batch_output(BackwardSpikesOutput* output, int batch_size);
-
-/* ── Legacy diagnostic functions (pre-allocated buffers) ─────────────── */
-
-/**
- * Compute membrane potential voltage trace for a single post-synaptic neuron.
- * Legacy version with pre-allocated buffers — prefer alloc version for new code.
- */
-void eventprop_compute_voltage_trace(double t_max, double dt, int target_nrn_idx,
-                                     const double* w, int n_pre, int n_post,
-                                     const double* times, const int32_t* sources, int n_spikes,
-                                     const double* fwd_times, const int32_t* fwd_sources, int n_post_spikes,
-                                     double v_th, double tau_mem, double tau_syn,
-                                     double* v_trace, double* ts);
-
-/**
- * Compute λ_i (synaptic adjoint) at a specific time for a single neuron.
- */
-double eventprop_compute_lambda_i(double t, int target_nrn_idx,
-                                  const double* fwd_times, int n_post_spikes,
-                                  double v_th, double tau_mem, double tau_syn);
-
-/**
- * Compute λ_i trace over time for a single post-synaptic neuron.
- */
-void eventprop_compute_lambda_i_trace(double t_max, double dt, int target_nrn_idx,
-                                      const double* fwd_times, int n_post_spikes,
-                                      double v_th, double tau_mem, double tau_syn,
-                                      double* lambda_trace, double* ts);
 
 #ifdef __cplusplus
 }

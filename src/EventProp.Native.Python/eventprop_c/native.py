@@ -505,8 +505,8 @@ class EventPropCtypes:
         lib = self.lib
         
         # compute_spikes_alloc
-        lib.eventprop_compute_spikes_alloc.restype = _SpikeOutput
-        lib.eventprop_compute_spikes_alloc.argtypes = [
+        lib.eventprop_compute_spikes.restype = _SpikeOutput
+        lib.eventprop_compute_spikes.argtypes = [
             POINTER(c_double), c_int, c_int,  # w, n_pre, n_post
             POINTER(c_double), POINTER(c_int32), c_int,  # times, sources, n_spikes
             c_double, c_double, c_double  # v_th, tau_mem, tau_syn
@@ -517,8 +517,8 @@ class EventPropCtypes:
         lib.eventprop_free_spike_output.argtypes = [POINTER(_SpikeOutput)]
         
         # compute_sums_alloc
-        lib.eventprop_compute_sums_alloc.restype = _SumsOutput
-        lib.eventprop_compute_sums_alloc.argtypes = [
+        lib.eventprop_compute_sums.restype = _SumsOutput
+        lib.eventprop_compute_sums.argtypes = [
             POINTER(c_double), c_int, c_int,  # w, n_pre, n_post
             POINTER(c_double), POINTER(c_int32), c_int,  # times, sources, n_spikes
             c_double, c_double  # tau_mem, tau_syn
@@ -529,8 +529,8 @@ class EventPropCtypes:
         lib.eventprop_free_sums_output.argtypes = [POINTER(_SumsOutput)]
         
         # compute_maxima_alloc
-        lib.eventprop_compute_maxima_alloc.restype = _MaximaOutput
-        lib.eventprop_compute_maxima_alloc.argtypes = [
+        lib.eventprop_compute_maxima.restype = _MaximaOutput
+        lib.eventprop_compute_maxima.argtypes = [
             POINTER(c_double), c_int, c_int,  # w, n_pre, n_post
             POINTER(c_double), POINTER(c_int32), c_int,  # times, sources, n_spikes
             c_double, c_double  # tau_mem, tau_syn
@@ -541,8 +541,8 @@ class EventPropCtypes:
         lib.eventprop_free_maxima_output.argtypes = [POINTER(_MaximaOutput)]
         
         # backward_spikes_alloc
-        lib.eventprop_backward_spikes_alloc.restype = _BackwardSpikesOutput
-        lib.eventprop_backward_spikes_alloc.argtypes = [
+        lib.eventprop_backward_spikes.restype = _BackwardSpikesOutput
+        lib.eventprop_backward_spikes.argtypes = [
             POINTER(c_double), POINTER(c_int32), c_int,  # times, sources, n_spikes
             POINTER(c_double), POINTER(c_int32), POINTER(c_double),  # fwd_times, sources, currents
             POINTER(c_double), c_int,  # post_errors, n_post_spikes
@@ -555,8 +555,8 @@ class EventPropCtypes:
         lib.eventprop_free_backward_spikes_output.argtypes = [POINTER(_BackwardSpikesOutput)]
         
         # backward_maxima_alloc
-        lib.eventprop_backward_maxima_alloc.restype = _BackwardMaximaOutput
-        lib.eventprop_backward_maxima_alloc.argtypes = [
+        lib.eventprop_backward_maxima.restype = _BackwardMaximaOutput
+        lib.eventprop_backward_maxima.argtypes = [
             POINTER(c_double), POINTER(c_int32), c_int,  # input_times, sources, n_input_spikes
             POINTER(c_double), POINTER(c_double), POINTER(c_double), c_int,  # maxima_times, values, errors, n_maxima
             POINTER(c_double), c_int, c_int,  # w, n_pre, n_post
@@ -570,8 +570,8 @@ class EventPropCtypes:
         # ── Diagnostic functions (alloc versions) ───────────────────────
         
         # compute_voltage_trace_alloc
-        lib.eventprop_compute_voltage_trace_alloc.restype = _VoltageTraceOutput
-        lib.eventprop_compute_voltage_trace_alloc.argtypes = [
+        lib.eventprop_compute_voltage_trace.restype = _VoltageTraceOutput
+        lib.eventprop_compute_voltage_trace.argtypes = [
             c_double, c_double,  # t_max, dt
             c_int,  # target_nrn_idx
             POINTER(c_double), c_int, c_int,  # w, n_pre, n_post
@@ -585,8 +585,8 @@ class EventPropCtypes:
         lib.eventprop_free_voltage_trace_output.argtypes = [POINTER(_VoltageTraceOutput)]
         
         # compute_lambda_i_trace_alloc
-        lib.eventprop_compute_lambda_i_trace_alloc.restype = _LambdaITraceOutput
-        lib.eventprop_compute_lambda_i_trace_alloc.argtypes = [
+        lib.eventprop_compute_lambda_i_trace.restype = _LambdaITraceOutput
+        lib.eventprop_compute_lambda_i_trace.argtypes = [
             c_double, c_double,  # t_max, dt
             c_int,  # target_nrn_idx
             POINTER(c_double), c_int,  # fwd_times, n_post_spikes
@@ -597,20 +597,11 @@ class EventPropCtypes:
         lib.eventprop_free_lambda_i_trace_output.restype = None
         lib.eventprop_free_lambda_i_trace_output.argtypes = [POINTER(_LambdaITraceOutput)]
         
-        # compute_lambda_i (returns single double, no alloc needed)
-        lib.eventprop_compute_lambda_i.restype = c_double
-        lib.eventprop_compute_lambda_i.argtypes = [
-            c_double,  # t
-            c_int,     # target_nrn_idx
-            POINTER(c_double), c_int,  # fwd_times, n_post_spikes
-            c_double, c_double, c_double  # v_th, tau_mem, tau_syn
-        ]
-        
         # ── Batch operations ───────────────────────────────────────────────
         
         # compute_spikes_batch_alloc (returns pointer to array of SpikeOutput)
-        lib.eventprop_compute_spikes_batch_alloc.restype = POINTER(_SpikeOutput)
-        lib.eventprop_compute_spikes_batch_alloc.argtypes = [
+        lib.eventprop_compute_spikes_batch.restype = POINTER(_SpikeOutput)
+        lib.eventprop_compute_spikes_batch.argtypes = [
             POINTER(c_double), c_int, c_int,  # w, n_pre, n_post
             POINTER(c_double), POINTER(c_int32),  # times, sources (flat arrays)
             POINTER(c_int), c_int,  # n_spikes_per_sample, batch_size
@@ -621,6 +612,26 @@ class EventPropCtypes:
         lib.eventprop_free_batch_spike_output.restype = None
         lib.eventprop_free_batch_spike_output.argtypes = [
             POINTER(_SpikeOutput), c_int  # output array, batch_size
+        ]
+        
+        # backward_spikes_batch_alloc (returns pointer to array of BackwardSpikesOutput)
+        lib.eventprop_backward_spikes_batch.restype = POINTER(_BackwardSpikesOutput)
+        lib.eventprop_backward_spikes_batch.argtypes = [
+            POINTER(c_double), POINTER(c_int32),  # times, sources (flat arrays)
+            POINTER(c_int),  # n_spikes_per_sample
+            POINTER(c_double), POINTER(c_int32),  # fwd_times, fwd_sources
+            POINTER(c_double),  # fwd_currents
+            POINTER(c_double),  # post_errors
+            POINTER(c_int),  # n_fwd_spikes_per_sample
+            c_int,  # batch_size
+            POINTER(c_double), c_int, c_int,  # w, n_pre, n_post
+            c_double, c_double, c_double  # v_th, tau_mem, tau_syn
+        ]
+        
+        # free_backward_spikes_batch_output
+        lib.eventprop_free_backward_spikes_batch_output.restype = None
+        lib.eventprop_free_backward_spikes_batch_output.argtypes = [
+            POINTER(_BackwardSpikesOutput), c_int  # output array, batch_size
         ]
     
     # ── High-level Python API ─────────────────────────────────────────────
@@ -651,7 +662,7 @@ class EventPropCtypes:
         times_ptr = _get_array_pointer(times, c_double)
         sources_ptr = _get_array_pointer(sources, c_int32)
         
-        c_struct = self.lib.eventprop_compute_spikes_alloc(
+        c_struct = self.lib.eventprop_compute_spikes(
             w_ptr, n_pre, n_post,
             times_ptr, sources_ptr, len(times),
             c_double(v_th), c_double(tau_mem), c_double(tau_syn)
@@ -692,7 +703,7 @@ class EventPropCtypes:
         n_spikes_ptr = _get_array_pointer(n_spikes_per_sample, c_int)
         
         # Call batch function (returns pointer to array of SpikeOutput)
-        c_ptr = self.lib.eventprop_compute_spikes_batch_alloc(
+        c_ptr = self.lib.eventprop_compute_spikes_batch(
             w_ptr, n_pre, n_post,
             times_ptr, sources_ptr,
             n_spikes_ptr, batch_size,
@@ -725,7 +736,7 @@ class EventPropCtypes:
         times_ptr = _get_array_pointer(times, c_double)
         sources_ptr = _get_array_pointer(sources, c_int32)
         
-        c_struct = self.lib.eventprop_compute_sums_alloc(
+        c_struct = self.lib.eventprop_compute_sums(
             w_ptr, n_pre, n_post,
             times_ptr, sources_ptr, len(times),
             c_double(tau_mem), c_double(tau_syn)
@@ -757,7 +768,7 @@ class EventPropCtypes:
         times_ptr = _get_array_pointer(times, c_double)
         sources_ptr = _get_array_pointer(sources, c_int32)
         
-        c_struct = self.lib.eventprop_compute_maxima_alloc(
+        c_struct = self.lib.eventprop_compute_maxima(
             w_ptr, n_pre, n_post,
             times_ptr, sources_ptr, len(times),
             c_double(tau_mem), c_double(tau_syn)
@@ -801,7 +812,7 @@ class EventPropCtypes:
         post_errors_ptr = _get_array_pointer(post_errors, c_double)
         w_ptr = _get_array_pointer(w, c_double)
         
-        c_struct = self.lib.eventprop_backward_spikes_alloc(
+        c_struct = self.lib.eventprop_backward_spikes(
             times_ptr, sources_ptr, len(times),
             fwd_times_ptr, fwd_sources_ptr, fwd_currents_ptr,
             post_errors_ptr, len(post_errors),
@@ -810,6 +821,65 @@ class EventPropCtypes:
         )
         
         return BackwardSpikesOutput(c_struct)
+    
+    def backward_spikes_batch(self, times: list | tuple, sources: list | tuple,
+                              n_spikes_per_sample: list | tuple,
+                              fwd_times: list | tuple, fwd_sources: list | tuple,
+                              fwd_currents: list | tuple, post_errors: list | tuple,
+                              n_fwd_spikes_per_sample: list | tuple,
+                              batch_size: int,
+                              w: list | tuple, n_pre: int, n_post: int,
+                              v_th: float = 1.0, tau_mem: float = 0.02,
+                              tau_syn: float = 0.005) -> BackwardSpikesOutput:
+        """Batch backward pass: compute weight gradients for multiple samples.
+        
+        Args:
+            times: Flat array of all input spike times (sorted per sample)
+            sources: Flat array of all source neurons
+            n_spikes_per_sample: Input spike count per sample (length: batch_size)
+            fwd_times: Flat array of all forward pass post-synaptic spike times
+            fwd_sources: Flat array of all forward pass source neurons
+            fwd_currents: Flat array of all synaptic currents at spike times
+            post_errors: Flat array of all post-synaptic spike errors
+            n_fwd_spikes_per_sample: Forward pass spike count per sample (length: batch_size)
+            batch_size: Number of samples in batch
+            w: Weight matrix (flat list, row-major)
+            n_pre: Number of pre-synaptic neurons
+            n_post: Number of post-synaptic neurons
+            v_th: Spike threshold voltage
+            tau_mem: Membrane time constant (seconds)
+            tau_syn: Synaptic time constant (seconds)
+        
+        Returns:
+            BackwardSpikesOutput with zero-copy access to grad and spike_errors
+        """
+        # Zero-copy access for numpy arrays
+        times_ptr = _get_array_pointer(times, c_double)
+        sources_ptr = _get_array_pointer(sources, c_int32)
+        n_spikes_ptr = _get_array_pointer(n_spikes_per_sample, c_int)
+        fwd_times_ptr = _get_array_pointer(fwd_times, c_double)
+        fwd_sources_ptr = _get_array_pointer(fwd_sources, c_int32)
+        fwd_currents_ptr = _get_array_pointer(fwd_currents, c_double)
+        post_errors_ptr = _get_array_pointer(post_errors, c_double)
+        n_fwd_spikes_ptr = _get_array_pointer(n_fwd_spikes_per_sample, c_int)
+        w_ptr = _get_array_pointer(w, c_double)
+        
+        # Call batch function (returns pointer to array of BackwardSpikesOutput)
+        c_ptr = self.lib.eventprop_backward_spikes_batch(
+            times_ptr, sources_ptr,
+            n_spikes_ptr,
+            fwd_times_ptr, fwd_sources_ptr,
+            fwd_currents_ptr,
+            post_errors_ptr,
+            n_fwd_spikes_ptr,
+            batch_size,
+            w_ptr, n_pre, n_post,
+            c_double(v_th), c_double(tau_mem), c_double(tau_syn)
+        )
+        
+        # For now, return first element as a placeholder
+        # TODO: Implement BatchBackwardSpikesOutput class for proper batch access
+        return BackwardSpikesOutput(c_ptr[0])
     
     def backward_maxima(self, input_times: list | tuple, input_sources: list | tuple,
                         maxima_times: list | tuple, maxima_values: list | tuple,
@@ -841,7 +911,7 @@ class EventPropCtypes:
         maxima_errors_ptr = _get_array_pointer(maxima_errors, c_double)
         w_ptr = _get_array_pointer(w, c_double)
         
-        c_struct = self.lib.eventprop_backward_maxima_alloc(
+        c_struct = self.lib.eventprop_backward_maxima(
             input_times_ptr, input_sources_ptr, len(input_times),
             maxima_times_ptr, maxima_values_ptr, maxima_errors_ptr, len(maxima_times),
             w_ptr, n_pre, n_post,
@@ -891,7 +961,7 @@ class EventPropCtypes:
         fwd_times_arr = (c_double * len(fwd_times))(*fwd_times) if fwd_times else None
         fwd_sources_arr = (c_int32 * len(fwd_sources))(*fwd_sources) if fwd_sources else None
         
-        c_struct = self.lib.eventprop_compute_voltage_trace_alloc(
+        c_struct = self.lib.eventprop_compute_voltage_trace(
             c_double(t_max), c_double(dt), target_nrn_idx,
             w_arr, n_pre, n_post,
             times_arr, sources_arr, len(times),
@@ -923,7 +993,7 @@ class EventPropCtypes:
         """
         fwd_times_arr = (c_double * len(fwd_times))(*fwd_times)
         
-        c_struct = self.lib.eventprop_compute_lambda_i_trace_alloc(
+        c_struct = self.lib.eventprop_compute_lambda_i_trace(
             c_double(t_max), c_double(dt), target_nrn_idx,
             fwd_times_arr, len(fwd_times),
             c_double(v_th), c_double(tau_mem), c_double(tau_syn)
@@ -931,33 +1001,6 @@ class EventPropCtypes:
         
         return LambdaITraceOutput(c_struct)
     
-    def compute_lambda_i(self, t: float, target_nrn_idx: int,
-                        fwd_times: list | tuple, n_post_spikes: int,
-                        v_th: float = 1.0, tau_mem: float = 0.02,
-                        tau_syn: float = 0.005) -> float:
-        """Compute synaptic adjoint at a specific time.
-        
-        Args:
-            t: Time at which to compute lambda_i
-            target_nrn_idx: Post-synaptic neuron index
-            fwd_times: Post-synaptic spike times
-            n_post_spikes: Number of post-synaptic spikes
-            v_th: Spike threshold voltage
-            tau_mem: Membrane time constant (seconds)
-            tau_syn: Synaptic time constant (seconds)
-        
-        Returns:
-            Lambda-i value at the given time
-        """
-        fwd_times_arr = (c_double * len(fwd_times))(*fwd_times)
-        
-        return float(self.lib.eventprop_compute_lambda_i(
-            c_double(t), target_nrn_idx,
-            fwd_times_arr, n_post_spikes,
-            c_double(v_th), c_double(tau_mem), c_double(tau_syn)
-        ))
-
-
 # ── Convenience function for quick access ────────────────────────────────
 
 def load_library(lib_path: str | None = None) -> EventPropCtypes:

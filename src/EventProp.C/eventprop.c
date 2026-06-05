@@ -417,7 +417,7 @@ static double toms748_solve(void* ctx, root_fn_t fn, double a, double b) {
 
 /* ── SpikeOutput ─────────────────────────────────────────────────────── */
 
-SpikeOutput eventprop_compute_spikes_alloc(const double* w, int n_pre, int n_post,
+SpikeOutput eventprop_compute_spikes(const double* w, int n_pre, int n_post,
                                            const double* times, const int32_t* sources, int n_spikes,
                                            double v_th, double tau_mem, double tau_syn)
 {
@@ -435,7 +435,7 @@ SpikeOutput eventprop_compute_spikes_alloc(const double* w, int n_pre, int n_pos
 
     /* Compute sums using alloc version */
 
-    SumsOutput sums = eventprop_compute_sums_alloc(w, n_pre, n_post,
+    SumsOutput sums = eventprop_compute_sums(w, n_pre, n_post,
                                                     times, sources, n_spikes,
                                                     tau_mem, tau_syn);
     const double* sum0 = sums.sum0;
@@ -663,7 +663,7 @@ void eventprop_free_spike_output(SpikeOutput* output)
 
 /* ── SumsOutput ─────────────────────────────────────────────────────── */
 
-SumsOutput eventprop_compute_sums_alloc(const double* w, int n_pre, int n_post,
+SumsOutput eventprop_compute_sums(const double* w, int n_pre, int n_post,
                                         const double* times, const int32_t* sources, int n_spikes,
                                         double tau_mem, double tau_syn)
 {
@@ -713,7 +713,7 @@ void eventprop_free_sums_output(SumsOutput* output)
 
 /* ── MaximaOutput ───────────────────────────────────────────────────── */
 
-MaximaOutput eventprop_compute_maxima_alloc(const double* w, int n_pre, int n_post,
+MaximaOutput eventprop_compute_maxima(const double* w, int n_pre, int n_post,
                                            const double* times, const int32_t* sources, int n_spikes,
                                            double tau_mem, double tau_syn)
 {
@@ -731,7 +731,7 @@ MaximaOutput eventprop_compute_maxima_alloc(const double* w, int n_pre, int n_po
     }
 
     /* Use our own alloc function */
-    SumsOutput sums = eventprop_compute_sums_alloc(w, n_pre, n_post,
+    SumsOutput sums = eventprop_compute_sums(w, n_pre, n_post,
                                                     times, sources, n_spikes,
                                                     tau_mem, tau_syn);
 
@@ -793,7 +793,7 @@ void eventprop_free_maxima_output(MaximaOutput* output)
 
 /* ── BackwardSpikesOutput ───────────────────────────────────────────── */
 
-BackwardSpikesOutput eventprop_backward_spikes_alloc(const double* times, const int32_t* sources,
+BackwardSpikesOutput eventprop_backward_spikes(const double* times, const int32_t* sources,
                                                      int n_spikes,
                                                      const double* fwd_times, const int32_t* fwd_sources,
                                                      const double* fwd_currents,
@@ -917,7 +917,7 @@ void eventprop_free_backward_spikes_output(BackwardSpikesOutput* output)
 
 /* ── BackwardSpikes Batch Function ─────────────────────────────── */
 
-BackwardSpikesOutput* eventprop_backward_spikes_batch_alloc(
+BackwardSpikesOutput* eventprop_backward_spikes_batch(
     const double* times, const int32_t* sources,
     const int* n_spikes_per_sample,
     const double* fwd_times, const int32_t* fwd_sources,
@@ -955,7 +955,7 @@ BackwardSpikesOutput* eventprop_backward_spikes_batch_alloc(
         int n_fwd_spikes = n_fwd_spikes_per_sample[b];
         
         /* Call single-sample function for this batch element */
-        result[b] = eventprop_backward_spikes_alloc(
+        result[b] = eventprop_backward_spikes(
             times + offset, sources + offset, n_spikes,
             fwd_times + fwd_offsets[b], fwd_sources + fwd_offsets[b],
             fwd_currents + fwd_offsets[b], post_errors + fwd_offsets[b], n_fwd_spikes,
@@ -984,7 +984,7 @@ void eventprop_free_backward_spikes_batch_output(BackwardSpikesOutput* output, i
 
 /* ── BackwardMaximaOutput ───────────────────────────────────────────── */
 
-BackwardMaximaOutput eventprop_backward_maxima_alloc(const double* input_times, const int32_t* input_sources,
+BackwardMaximaOutput eventprop_backward_maxima(const double* input_times, const int32_t* input_sources,
                                                      int n_input_spikes,
                                                      const double* maxima_times, const double* maxima_values,
                                                      const double* maxima_errors, int n_maxima,
@@ -1049,7 +1049,7 @@ void eventprop_free_backward_maxima_output(BackwardMaximaOutput* output)
 
 /* ── Diagnostic: compute_voltage_trace_alloc ─────────────────────── */
 
-VoltageTraceOutput eventprop_compute_voltage_trace_alloc(double t_max, double dt,
+VoltageTraceOutput eventprop_compute_voltage_trace(double t_max, double dt,
                                                          int target_nrn_idx,
                                                          const double* w, int n_pre, int n_post,
                                                          const double* times, const int32_t* sources, int n_spikes,
@@ -1100,7 +1100,7 @@ void eventprop_free_voltage_trace_output(VoltageTraceOutput* output)
 
 /* ── Diagnostic: compute_lambda_i_trace_alloc ─────────────────────── */
 
-LambdaITraceOutput eventprop_compute_lambda_i_trace_alloc(double t_max, double dt,
+LambdaITraceOutput eventprop_compute_lambda_i_trace(double t_max, double dt,
                                                           int target_nrn_idx,
                                                           const double* fwd_times, int n_post_spikes,
                                                           double v_th, double tau_mem, double tau_syn)
@@ -1164,7 +1164,7 @@ void eventprop_free_lambda_i_trace_output(LambdaITraceOutput* output)
 /* ── Batch operations (parallel processing) ───────────────────────────── */
 
 
-SpikeOutput* eventprop_compute_spikes_batch_alloc(
+SpikeOutput* eventprop_compute_spikes_batch(
     const double* w, int n_pre, int n_post,
     const double* times, const int32_t* sources,
     const int* n_spikes_per_sample, int batch_size,
@@ -1191,7 +1191,7 @@ SpikeOutput* eventprop_compute_spikes_batch_alloc(
         int n_spikes = n_spikes_per_sample[b];
         
         /* Call single-sample function for this batch element */
-        result[b] = eventprop_compute_spikes_alloc(
+        result[b] = eventprop_compute_spikes(
             w, n_pre, n_post,
             times + offset, sources + offset, n_spikes,
             v_th, tau_mem, tau_syn
@@ -1213,94 +1213,4 @@ void eventprop_free_batch_spike_output(SpikeOutput* output, int batch_size)
     
     /* Free the array itself */
     free(output);
-}
-void eventprop_compute_voltage_trace(double t_max, double dt, int target_nrn_idx,
-                                     const double* w, int n_pre, int n_post,
-                                     const double* times, const int32_t* sources, int n_spikes,
-                                     const double* fwd_times, const int32_t* fwd_sources, int n_post_spikes,
-                                     double v_th, double tau_mem, double tau_syn,
-                                     double* v_trace, double* ts)
-{
-    double k_prefactor = tau_syn / (tau_mem - tau_syn);
-    int n_t = (int)(t_max / dt);
-
-    for (int ti = 0; ti < n_t; ti++) {
-        double t = dt * ti;
-        ts[ti] = t;
-        double mem = 0.0;
-
-        /* Pre-synaptic contribution */
-        for (int i = 0; i < n_spikes; i++) {
-            if (times[i] > t) break;
-            mem += w[sources[i] * n_post + target_nrn_idx] *
-                   k_prefactor * (exp(-(t - times[i]) / tau_mem) -
-                                  exp(-(t - times[i]) / tau_syn));
-        }
-
-        /* Post-synaptic contribution (spike reset) */
-        for (int i = 0; i < n_post_spikes; i++) {
-            if (fwd_times[i] > t) break;
-            if (fwd_sources[i] == target_nrn_idx)
-                mem -= v_th * exp(-(t - fwd_times[i]) / tau_mem);
-        }
-
-        v_trace[ti] = mem;
-    }
-}
-
-/* ── Diagnostic: compute_lambda_i ──────────────────────────────────── */
-
-double eventprop_compute_lambda_i(double t, int target_nrn_idx,
-                                  const double* fwd_times, int n_post_spikes,
-                                  double v_th, double tau_mem, double tau_syn)
-{
-    if (n_post_spikes == 0) return 0.0;
-
-    double largest_time = fwd_times[n_post_spikes - 1];
-    struct Jump {
-        double mag;
-        double time_bwd;
-    };
-
-    /* Collect jumps from post-synaptic spikes after time t */
-    int n_jumps = 0;
-    struct Jump jumps[256]; /* max spikes per neuron */
-
-    for (int i = n_post_spikes - 1; i >= 0; i--) {
-        if (fwd_times[i] < t) break;
-        double t_bwd = largest_time - fwd_times[i];
-        jumps[n_jumps].mag = 1.0 / (v_th + 0.001);
-        jumps[n_jumps].time_bwd = t_bwd;
-        n_jumps++;
-    }
-
-    double lambda_i = 0.0;
-    double t_bwd_from_t = largest_time - t;
-    double k_bwd_prefactor = tau_mem / (tau_mem - tau_syn);
-
-    for (int j = 0; j < n_jumps; j++) {
-        double dt_jump = t_bwd_from_t - jumps[j].time_bwd;
-        lambda_i += jumps[j].mag * k_bwd_prefactor *
-                    (exp(-dt_jump / tau_mem) - exp(-dt_jump / tau_syn));
-    }
-
-    return lambda_i;
-}
-
-/* ── Diagnostic: compute_lambda_i_trace ────────────────────────────── */
-
-void eventprop_compute_lambda_i_trace(double t_max, double dt, int target_nrn_idx,
-                                      const double* fwd_times, int n_post_spikes,
-                                      double v_th, double tau_mem, double tau_syn,
-                                      double* lambda_trace, double* ts)
-{
-    int n_t = (int)(t_max / dt);
-
-    for (int ti = 0; ti < n_t; ti++) {
-        double t = dt * ti;
-        ts[ti] = t;
-        lambda_trace[ti] = eventprop_compute_lambda_i(
-            t, target_nrn_idx, fwd_times, n_post_spikes,
-            v_th, tau_mem, tau_syn);
-    }
 }
