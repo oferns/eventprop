@@ -23,9 +23,9 @@ echo "============================================"
 echo " EventProp Build — $BUILD_TYPE mode"
 echo "============================================"
 
-# ── 1. C Library (EventProp.C) ─────────────────────────────
+# ── 1. C Library (EventProp.C)
 echo ""
-echo "[1/5] Building C library (EventProp.C)..."
+echo "[1/9] Building C library (EventProp.C)..."
 cd "$SCRIPT_DIR/src/EventProp.C"
 rm -rf "$CMAKE_BUILD_DIR"
 mkdir -p "$CMAKE_BUILD_DIR" && cd "$CMAKE_BUILD_DIR"
@@ -33,10 +33,9 @@ cmake .. -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE"
 make -j$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
 echo "  → libeventprop_c_api.dylib"
 
-# ── 2. C++ Wrapper Library (EventProp.Cpp.Wrapper) ─────────
-#    Builds Eigen core from stripped copy + wrapper on top.
+# ── 2. C++ Wrapper Library (EventProp.Cpp.Wrapper)
 echo ""
-echo "[2/5] Building C++ wrapper library (EventProp.Cpp.Wrapper)..."
+echo "[2/9] Building C++ wrapper library (EventProp.Cpp.Wrapper)..."
 cd "$SCRIPT_DIR/src/EventProp.Cpp.Wrapper"
 rm -rf "$CMAKE_BUILD_DIR"
 mkdir -p "$CMAKE_BUILD_DIR" && cd "$CMAKE_BUILD_DIR"
@@ -44,42 +43,61 @@ cmake .. -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE"
 make -j$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
 echo "  → libeventprop_cpp_wrapper.dylib"
 
-# ── 3. Python Package (EventProp.Python) ───────────────────
+# ── 3. Python Package (EventProp.Python) pybind11 bindings
 echo ""
-echo "[3/5] Building Python package (EventProp.Python)..."
+echo "[3/9] Building Python package (EventProp.Python)..."
 cd "$SCRIPT_DIR/src/EventProp.Python"
 
 # Install required Python dependencies
 python3 -m pip install --break-system-packages setuptools numpy pytest > /dev/null 2>&1 || true
-
-pip install -e . --quiet 2>&1 | grep -v "already satisfied" || true
+python3 -m pip install --break-system-packages -e . > /dev/null 2>&1 || true
 echo "  → eventprop.eventprop_cpp (editable install)"
 
-# ── 4. .NET Libraries (EventProp + EventProp.Native) ───────
+# ── 4. Python Benchmarks
 echo ""
-echo "[4/5] Building .NET libraries..."
+echo "[4/9] Building Python benchmarks (EventProp.Python.Benchmarks)..."
+cd "$SCRIPT_DIR/src/EventProp.Python.Benchmarks"
+if [ -f ".venv/bin/activate" ]; then
+  source .venv/bin/activate
+  pip install -e . --quiet > /dev/null 2>&1 || true
+  deactivate
+fi
+echo "  → eventprop-python-benchmarks (editable install)"
+
+# ── 5. Python ctypes bindings
+echo ""
+echo "[5/9] Building Python ctypes bindings (EventProp.Native.Python)..."
+cd "$SCRIPT_DIR/src/EventProp.Native.Python"
+if [ -f ".venv/bin/activate" ]; then
+  source .venv/bin/activate
+  pip install -e . --quiet > /dev/null 2>&1 || true
+  deactivate
+fi
+echo "  → eventprop_c (editable install)"
+
+# ── 6. .NET Libraries (EventProp + EventProp.Native)
+echo ""
+echo "[6/9] Building .NET libraries..."
 cd "$SCRIPT_DIR/src"
 rm -rf EventProp/bin EventProp/obj \
-       EventProp.Native/bin EventProp.Native/obj \
-       EventProp.Cpp.Native/bin EventProp.Cpp.Native/obj
+       EventProp.Native/bin EventProp.Native/obj
 
 dotnet build EventProp/EventProp.csproj -c "$DOTNET_CONFIG" --nologo
 dotnet build EventProp.Native/EventProp.Native.csproj -c "$DOTNET_CONFIG" --nologo
-dotnet build EventProp.Cpp.Native/EventProp.Cpp.Native.csproj -c "$DOTNET_CONFIG" --nologo
-echo "  → CW.EventProp.dll + EventProp.Native.dll + EventProp.Cpp.Native.dll"
+echo "  → CW.EventProp.dll + EventProp.Native.dll"
 
-# ── 5. .NET Tests (EventProp.Tests) ────────────────────────
+# ── 7. .NET Tests (EventProp.Tests)
 echo ""
-echo "[5/7] Building .NET tests..."
+echo "[7/9] Building .NET tests..."
 cd "$SCRIPT_DIR/src"
 rm -rf EventProp.Tests/bin EventProp.Tests/obj
 
 dotnet build EventProp.Tests/EventProp.Tests.csproj -c "$DOTNET_CONFIG" --nologo
 echo "  → CW.EventProp.Tests.dll"
 
-# ── 6. Parity Tests (C vs Eigen) ───────────────────────────
+# ── 8. Parity Tests (C vs Eigen)
 echo ""
-echo "[6/7] Building parity tests (C vs Eigen)..."
+echo "[8/9] Building parity tests (C vs Eigen)..."
 cd "$SCRIPT_DIR/src/EventProp.Native.ParityTests"
 rm -rf build
 mkdir -p build && cd build
@@ -87,9 +105,9 @@ cmake .. -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE"
 make -j$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
 echo "  → parity_test built"
 
-# ── 7. Native Benchmarks (C vs C++) ────────────────────────
+# ── 9. Native Benchmarks (C vs C++)
 echo ""
-echo "[7/7] Building native benchmarks (C vs C++)..."
+echo "[9/9] Building native benchmarks (C vs C++)..."
 cd "$SCRIPT_DIR/src/EventProp.Native.Benchmarks"
 rm -rf build
 mkdir -p build && cd build

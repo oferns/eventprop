@@ -129,8 +129,8 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
         
         benchmark::DoNotOptimize(output.n_spikes);
 #else
-        // C library: eventprop_compute_spikes_alloc(w, n_pre, n_post, times, sources, v_th, tau_mem, tau_syn)
-        SpikeOutput output = eventprop_compute_spikes_alloc(
+        // C library: eventprop_compute_spikes(w, n_pre, n_post, times, sources, v_th, tau_mem, tau_syn)
+        SpikeOutput output = eventprop_compute_spikes(
             w.data(), sz.n_pre, sz.n_post,
             times.data(), sources.data(), sz.n_spikes,
             1.0, 0.02, 0.005);
@@ -197,7 +197,7 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
     }
 #else
     // C library: Run forward pass to get post-spike data
-    SpikeOutput fwd_result = eventprop_compute_spikes_alloc(
+    SpikeOutput fwd_result = eventprop_compute_spikes(
         w.data(), sz.n_pre, sz.n_post,
         times.data(), sources.data(), sz.n_spikes,
         1.0, 0.02, 0.005);
@@ -208,7 +208,7 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
     std::vector<double> post_errors(n_post_spikes, 1.0);
 
     for (auto _ : state) {
-        BackwardSpikesOutput result = eventprop_backward_spikes_alloc(
+        BackwardSpikesOutput result = eventprop_backward_spikes(
             times.data(), sources.data(), sz.n_spikes,
             fwd_result.times, fwd_result.sources, fwd_result.currents,
             post_errors.data(), n_post_spikes,

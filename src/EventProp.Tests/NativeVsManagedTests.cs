@@ -182,9 +182,9 @@ public class NativeVsManagedTests
             new double[times.Length], new double[times.Length]);
 
         // C library via P/Invoke
-        var cSum0 = new double[(times.Length + 1) * nPost];
-        var cSum1 = new double[(times.Length + 1) * nPost];
-        NativeApi.ComputeSums(w, nPre, nPost, times, sources, 0.02, 0.005, cSum0, cSum1);
+        using var cOutput = NativeApi.ComputeSums(w, nPre, nPost, times, sources, 0.02, 0.005);
+        var cSum0 = cOutput.Sum0.ToArray();
+        var cSum1 = cOutput.Sum1.ToArray();
 
         // Assert: .NET matches C (scaled tolerance)
         for (int i = 0; i < csSum0.Length; i++)
@@ -255,11 +255,11 @@ public class NativeVsManagedTests
         var csResult = EventPropMath.ComputeSpikes(w, times, sources, nPost, 1.0, 0.02, 0.005, buffers);
 
         // C library via P/Invoke
-        int maxOutSpikes = times.Length * nPost;
-        var cTimes = new double[maxOutSpikes];
-        var cSources = new int[maxOutSpikes];
-        var cCurrents = new double[maxOutSpikes];
-        int nCSpikes = NativeApi.ComputeSpikes(w, nPre, nPost, times, sources, 1.0, 0.02, 0.005, cTimes, cSources, cCurrents);
+        using var cOutput = NativeApi.ComputeSpikes(w, nPre, nPost, times, sources, 1.0, 0.02, 0.005);
+        int nCSpikes = cOutput.NSpikes;
+        var cTimes = cOutput.Times.ToArray();
+        var cSources = cOutput.Sources.ToArray();
+        var cCurrents = cOutput.Currents.ToArray();
 
         // Assert: spike counts match
         await Assert.That(csResult.NSpikes).IsEqualTo(nCSpikes);
@@ -332,9 +332,9 @@ public class NativeVsManagedTests
         var csMaxima = EventPropMath.ComputeMaxima(w, times, sources, nPost, 0.02, 0.005, new ScratchBuffers());
 
         // C library via P/Invoke
-        var cTimes = new double[nPost];
-        var cValues = new double[nPost];
-        NativeApi.ComputeMaxima(w, nPre, nPost, times, sources, 0.02, 0.005, cTimes, cValues);
+        using var cOutput = NativeApi.ComputeMaxima(w, nPre, nPost, times, sources, 0.02, 0.005);
+        var cTimes = cOutput.Times.ToArray();
+        var cValues = cOutput.Values.ToArray();
 
         // Assert: C matches .NET (scaled tolerance)
         for (int i = 0; i < nPost; i++)
@@ -421,10 +421,11 @@ public class NativeVsManagedTests
             1.0, 0.02, 0.005, csGradient, buffers);
 
         // C library via P/Invoke
-        var cGradient = new double[nPre * nPost]; Array.Fill(cGradient, 0.0);
-        NativeApi.BackwardSpikes(times, sources,
-            postSpikes.Times, postSpikes.Sources, postSpikes.Currents, postSpikes.Errors,
-            w, nPre, nPost, 1.0, 0.02, 0.005, cGradient, new double[1024]);
+        using var cOutput = NativeApi.BackwardSpikes(times, sources,
+            postSpikes.Times[..postSpikes.NSpikes], postSpikes.Sources[..postSpikes.NSpikes],
+            postSpikes.Currents[..postSpikes.NSpikes], postSpikes.Errors[..postSpikes.NSpikes],
+            postSpikes.NSpikes, w, nPre, nPost, 1.0, 0.02, 0.005);
+        var cGradient = cOutput.Grad.ToArray();
 
         // Assert: .NET matches C (scaled tolerance)
         for (int i = 0; i < csGradient.Length; i++)
@@ -510,10 +511,10 @@ public class NativeVsManagedTests
             w, nPost, 0.02, 0.005, csGradient);
 
         // C library via P/Invoke
-        var cGradient = new double[nPre * nPost]; Array.Fill(cGradient, 0.0);
-        NativeApi.BackwardMaxima(times, sources,
-            maximaTimes, maximaValues, maximaErrors,
-            w, nPre, nPost, 0.02, 0.005, cGradient, new double[1024]);
+        using var cOutput = NativeApi.BackwardMaxima(times, sources,
+            maximaTimes, maximaValues, maximaErrors, nPost,
+            w, nPre, nPost, 0.02, 0.005);
+        var cGradient = cOutput.Gradient.ToArray();
 
         // Assert: .NET matches C (scaled tolerance)
         for (int i = 0; i < csGradient.Length; i++)

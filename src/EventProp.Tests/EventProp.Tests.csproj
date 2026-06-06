@@ -16,7 +16,6 @@
   <ItemGroup>
     <ProjectReference Include="../EventProp/EventProp.csproj" />
     <ProjectReference Include="../EventProp.Native/EventProp.Native.csproj" />
-    <ProjectReference Include="../EventProp.Cpp.Native/EventProp.Cpp.Native.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -4,16 +4,18 @@ using System.Runtime.InteropServices;
 namespace CW.EventProp;
 
 /// <summary>
-/// P/Invoke bindings for the EventProp native C library (libeventprop_c_api).
-/// Pure C implementation — no external dependencies, zero-allocation hot paths.
+/// Zero-allocation P/Invoke bindings for libeventprop_c_api.dylib.
+/// 
+/// All functions use the C library's alloc/free API for automatic memory management.
+/// Output provides zero-copy Span access via NativeMemory — no intermediate copies.
 /// </summary>
-public static partial class NativeApi
+public static unsafe partial class NativeApi
 {
     private const string LibName = "eventprop_c_api";
 
-    // ============================================================
-    // Alloc output structs (match C struct layouts)
-    // ============================================================
+    // ═══════════════════════════════════════════════════════════
+    // Native struct declarations (match C layout exactly)
+    // ═══════════════════════════════════════════════════════════
 
     [StructLayout(LayoutKind.Sequential)]
     public struct SpikeOutputNative
@@ -21,7 +23,7 @@ public static partial class NativeApi
         public int NSpikes;
         public IntPtr Times;      // double*
         public IntPtr Sources;    // int32_t*
-        public IntPtr Currents;   // double*
+        public IntPtr Currents;  // double*
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -46,8 +48,8 @@ public static partial class NativeApi
     {
         public int NPre;
         public int NPost;
-        public IntPtr Grad;       // double*
-        public IntPtr SpikeErrors;// double*
+        public IntPtr Grad;       // double* (n_pre * n_post)
+        public IntPtr SpikeErrors;// double* (n_spikes)
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -55,309 +57,458 @@ public static partial class NativeApi
     {
         public int NPre;
         public int NPost;
-        public IntPtr Gradient;   // double*
-        public IntPtr SpikeErrors;// double*
+        public IntPtr Gradient;   // double* (n_pre * n_post)
+        public IntPtr SpikeErrors;// double* (n_input_spikes)
     }
 
-    // ============================================================
-    // Alloc functions (new API)
-    // ============================================================
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VoltageTraceOutputNative
+    {
+        public int NT;            // number of time points
+        public IntPtr VTrace;     // double*
+        public IntPtr Ts;         // double*
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct LambdaITraceOutputNative
+    {
+        public int NT;            // number of time points
+        public IntPtr LambdaTrace;// double*
+        public IntPtr Ts;         // double*
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // Native function declarations
+    // ═══════════════════════════════════════════════════════════
 
     [LibraryImport(LibName)]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    private static partial SpikeOutputNative eventprop_compute_spikes_alloc(
-        double[] w, int nPre, int nPost,
-        double[] times, int[] sources, int nSpikes,
+    private static partial SpikeOutputNative eventprop_compute_spikes(
+        double* w, int nPre, int nPost,
+        double* times, int* sources, int nSpikes,
         double vTh, double tauMem, double tauSyn);
 
     [LibraryImport(LibName)]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     private static partial void eventprop_free_spike_output(ref SpikeOutputNative output);
 
     [LibraryImport(LibName)]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    private static partial SumsOutputNative eventprop_compute_sums_alloc(
-        double[] w, int nPre, int nPost,
-        double[] times, int[] sources, int nSpikes,
+    private static partial SumsOutputNative eventprop_compute_sums(
+        double* w, int nPre, int nPost,
+        double* times, int* sources, int nSpikes,
         double tauMem, double tauSyn);
 
     [LibraryImport(LibName)]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     private static partial void eventprop_free_sums_output(ref SumsOutputNative output);
 
     [LibraryImport(LibName)]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    private static partial MaximaOutputNative eventprop_compute_maxima_alloc(
-        double[] w, int nPre, int nPost,
-        double[] times, int[] sources, int nSpikes,
+    private static partial MaximaOutputNative eventprop_compute_maxima(
+        double* w, int nPre, int nPost,
+        double* times, int* sources, int nSpikes,
         double tauMem, double tauSyn);
 
     [LibraryImport(LibName)]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     private static partial void eventprop_free_maxima_output(ref MaximaOutputNative output);
 
     [LibraryImport(LibName)]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    private static partial BackwardSpikesOutputNative eventprop_backward_spikes_alloc(
-        double[] times, int[] sources, int nSpikes,
-        double[] fwdTimes, int[] fwdSources, double[] fwdCurrents,
-        double[] postErrors, int nPostSpikes,
-        double[] w, int nPre, int nPost,
+    private static partial BackwardSpikesOutputNative eventprop_backward_spikes(
+        double* times, int* sources, int nSpikes,
+        double* fwdTimes, int* fwdSources, double* fwdCurrents,
+        double* postErrors, int nPostSpikes,
+        double* w, int nPre, int nPost,
         double vTh, double tauMem, double tauSyn);
 
     [LibraryImport(LibName)]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     private static partial void eventprop_free_backward_spikes_output(ref BackwardSpikesOutputNative output);
 
     [LibraryImport(LibName)]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    private static partial BackwardMaximaOutputNative eventprop_backward_maxima_alloc(
-        double[] inputTimes, int[] inputSources, int nInputSpikes,
-        double[] maximaTimes, double[] maximaValues, double[] maximaErrors, int nMaxima,
-        double[] w, int nPre, int nPost,
+    private static partial BackwardMaximaOutputNative eventprop_backward_maxima(
+        double* inputTimes, int* inputSources, int nInputSpikes,
+        double* maximaTimes, double* maximaValues, double* maximaErrors, int nMaxima,
+        double* w, int nPre, int nPost,
         double tauMem, double tauSyn);
 
     [LibraryImport(LibName)]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     private static partial void eventprop_free_backward_maxima_output(ref BackwardMaximaOutputNative output);
 
-    // ============================================================
-    // Managed wrappers for alloc functions
-    // ============================================================
+    [LibraryImport(LibName)]
+    private static partial VoltageTraceOutputNative eventprop_compute_voltage_trace(
+        double tMax, double dt, int targetNrnIdx,
+        double* w, int nPre, int nPost,
+        double* times, int* sources, int nSpikes,
+        double* fwdTimes, int* fwdSources, int nPostSpikes,
+        double vTh, double tauMem, double tauSyn);
 
-    /// <summary>Call compute_spikes_alloc via native C library. Caller must free returned arrays.</summary>
-    public static void ComputeSpikesAlloc(
-        double[] w, int nPre, int _,
-        double[] times, int[] sources,
-        double vTh, double tauMem, double tauSyn,
-        out int nSpikes, out double[] timesOut, out int[] sourcesOut, out double[] currentsOut)
+    [LibraryImport(LibName)]
+    private static partial void eventprop_free_voltage_trace_output(ref VoltageTraceOutputNative output);
+
+    [LibraryImport(LibName)]
+    private static partial LambdaITraceOutputNative eventprop_compute_lambda_i_trace(
+        double tMax, double dt, int targetNrnIdx,
+        double* fwdTimes, int nPostSpikes,
+        double vTh, double tauMem, double tauSyn);
+
+    [LibraryImport(LibName)]
+    private static partial void eventprop_free_lambda_i_trace_output(ref LambdaITraceOutputNative output);
+
+    // Batch operations (return IntPtr to array of structs)
+    [LibraryImport(LibName)]
+    private static partial IntPtr eventprop_compute_spikes_batch(
+        double* w, int nPre, int nPost,
+        double* times, int* sources,
+        int* nSpikesPerSample, int batchSize,
+        double vTh, double tauMem, double tauSyn);
+
+    [LibraryImport(LibName)]
+    private static partial void eventprop_free_batch_spike_output(IntPtr output, int batchSize);
+
+    [LibraryImport(LibName)]
+    private static partial IntPtr eventprop_backward_spikes_batch(
+        double* times, int* sources,
+        int* nSpikesPerSample,
+        double* fwdTimes, int* fwdSources,
+        double* fwdCurrents,
+        double* postErrors,
+        int* nFwdSpikesPerSample,
+        int batchSize,
+        double* w, int nPre, int nPost,
+        double vTh, double tauMem, double tauSyn);
+
+    [LibraryImport(LibName)]
+    private static partial void eventprop_free_backward_spikes_batch_output(IntPtr output, int batchSize);
+
+    // ═══════════════════════════════════════════════════════════
+    // Public API — zero-allocation wrappers with Span access
+    // ═══════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Forward pass — predicts post-synaptic spike times.
+    /// Caller must call Dispose() to free native memory.
+    /// </summary>
+    public static SpikeOutput ComputeSpikes(
+        ReadOnlySpan<double> w, int nPre, int nPost,
+        ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
+        double vTh, double tauMem, double tauSyn)
     {
-        var output = eventprop_compute_spikes_alloc(w, nPre, _, times, sources, times.Length,
-            vTh, tauMem, tauSyn);
-        nSpikes = output.NSpikes;
-
-        timesOut = new double[nSpikes];
-        sourcesOut = new int[nSpikes];
-        currentsOut = new double[nSpikes];
-
-        if (nSpikes > 0)
+        fixed (double* pw = w)
+        fixed (double* pt = times)
+        fixed (int* ps = sources)
         {
-            Marshal.Copy(output.Times, timesOut, 0, nSpikes);
-            Marshal.Copy(output.Sources, sourcesOut, 0, nSpikes);
-            Marshal.Copy(output.Currents, currentsOut, 0, nSpikes);
+            var native = eventprop_compute_spikes(
+                pw, nPre, nPost, pt, ps, times.Length, vTh, tauMem, tauSyn);
+            return new SpikeOutput(native);
+        }
+    }
+
+    /// <summary>Compute cumulative exponential-weighted sums.</summary>
+    public static SumsOutput ComputeSums(
+        ReadOnlySpan<double> w, int nPre, int nPost,
+        ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
+        double tauMem, double tauSyn)
+    {
+        fixed (double* pw = w)
+        fixed (double* pt = times)
+        fixed (int* ps = sources)
+        {
+            var native = eventprop_compute_sums(
+                pw, nPre, nPost, pt, ps, times.Length, tauMem, tauSyn);
+            return new SumsOutput(native);
+        }
+    }
+
+    /// <summary>Compute membrane potential maxima per neuron.</summary>
+    public static MaximaOutput ComputeMaxima(
+        ReadOnlySpan<double> w, int nPre, int nPost,
+        ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
+        double tauMem, double tauSyn)
+    {
+        fixed (double* pw = w)
+        fixed (double* pt = times)
+        fixed (int* ps = sources)
+        {
+            var native = eventprop_compute_maxima(
+                pw, nPre, nPost, pt, ps, times.Length, tauMem, tauSyn);
+            return new MaximaOutput(native);
+        }
+    }
+
+    /// <summary>Backward pass — spike-based gradient computation.</summary>
+    public static BackwardSpikesOutput BackwardSpikes(
+        ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
+        ReadOnlySpan<double> fwdTimes, ReadOnlySpan<int> fwdSources,
+        ReadOnlySpan<double> fwdCurrents,
+        ReadOnlySpan<double> postErrors, int nPostSpikes,
+        ReadOnlySpan<double> w, int nPre, int nPost,
+        double vTh, double tauMem, double tauSyn)
+    {
+        fixed (double* pt = times)
+        fixed (int* ps = sources)
+        fixed (double* pft = fwdTimes)
+        fixed (int* pfs = fwdSources)
+        fixed (double* pfc = fwdCurrents)
+        fixed (double* pe = postErrors)
+        fixed (double* pw = w)
+        {
+            var native = eventprop_backward_spikes(
+                pt, ps, times.Length, pft, pfs, pfc, pe, nPostSpikes,
+                pw, nPre, nPost, vTh, tauMem, tauSyn);
+            return new BackwardSpikesOutput(native);
+        }
+    }
+
+    /// <summary>Backward pass — maxima-based gradient computation.</summary>
+    public static BackwardMaximaOutput BackwardMaxima(
+        ReadOnlySpan<double> inputTimes, ReadOnlySpan<int> inputSources,
+        ReadOnlySpan<double> maximaTimes, ReadOnlySpan<double> maximaValues,
+        ReadOnlySpan<double> maximaErrors, int nMaxima,
+        ReadOnlySpan<double> w, int nPre, int nPost,
+        double tauMem, double tauSyn)
+    {
+        fixed (double* pit = inputTimes)
+        fixed (int* isrc = inputSources)
+        fixed (double* mt = maximaTimes)
+        fixed (double* mv = maximaValues)
+        fixed (double* me = maximaErrors)
+        fixed (double* pw = w)
+        {
+            var native = eventprop_backward_maxima(
+                pit, isrc, inputTimes.Length, mt, mv, me, nMaxima,
+                pw, nPre, nPost, tauMem, tauSyn);
+            return new BackwardMaximaOutput(native);
+        }
+    }
+
+    /// <summary>Voltage trace diagnostic.</summary>
+    public static VoltageTraceOutput ComputeVoltageTrace(
+        double tMax, double dt, int targetNrnIdx,
+        ReadOnlySpan<double> w, int nPre, int nPost,
+        ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
+        ReadOnlySpan<double> fwdTimes, ReadOnlySpan<int> fwdSources, int nPostSpikes,
+        double vTh, double tauMem, double tauSyn)
+    {
+        fixed (double* pw = w)
+        fixed (double* pt = times)
+        fixed (int* ps = sources)
+        fixed (double* pft = fwdTimes)
+        fixed (int* pfs = fwdSources)
+        {
+            var native = eventprop_compute_voltage_trace(
+                tMax, dt, targetNrnIdx, pw, nPre, nPost,
+                pt, ps, times.Length, pft, pfs, nPostSpikes, vTh, tauMem, tauSyn);
+            return new VoltageTraceOutput(native);
+        }
+    }
+
+    /// <summary>Lambda-I trace diagnostic.</summary>
+    public static LambdaITraceOutput ComputeLambdaITrace(
+        double tMax, double dt, int targetNrnIdx,
+        ReadOnlySpan<double> fwdTimes, int nPostSpikes,
+        double vTh, double tauMem, double tauSyn)
+    {
+        fixed (double* pft = fwdTimes)
+        {
+            var native = eventprop_compute_lambda_i_trace(
+                tMax, dt, targetNrnIdx, pft, nPostSpikes, vTh, tauMem, tauSyn);
+            return new LambdaITraceOutput(native);
+        }
+    }
+
+    /// <summary>Batch forward pass — parallel processing via OpenMP.</summary>
+    public static BatchSpikeOutput ComputeSpikesBatch(
+        ReadOnlySpan<double> w, int nPre, int nPost,
+        ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
+        ReadOnlySpan<int> nSpikesPerSample, int batchSize,
+        double vTh, double tauMem, double tauSyn)
+    {
+        fixed (double* pw = w)
+        fixed (double* pt = times)
+        fixed (int* ps = sources)
+        fixed (int* pnsps = nSpikesPerSample)
+        {
+            var ptr = eventprop_compute_spikes_batch(
+                pw, nPre, nPost, pt, ps, pnsps, batchSize, vTh, tauMem, tauSyn);
+            return new BatchSpikeOutput(ptr, batchSize);
+        }
+    }
+
+    /// <summary>Batch backward pass — parallel processing via OpenMP.</summary>
+    public static BatchBackwardSpikesOutput BackwardSpikesBatch(
+        ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
+        ReadOnlySpan<int> nSpikesPerSample,
+        ReadOnlySpan<double> fwdTimes, ReadOnlySpan<int> fwdSources,
+        ReadOnlySpan<double> fwdCurrents,
+        ReadOnlySpan<double> postErrors,
+        ReadOnlySpan<int> nFwdSpikesPerSample,
+        int batchSize,
+        ReadOnlySpan<double> w, int nPre, int nPost,
+        double vTh, double tauMem, double tauSyn)
+    {
+        fixed (double* pt = times)
+        fixed (int* ps = sources)
+        fixed (int* pnsps = nSpikesPerSample)
+        fixed (double* pft = fwdTimes)
+        fixed (int* pfs = fwdSources)
+        fixed (double* pfc = fwdCurrents)
+        fixed (double* pe = postErrors)
+        fixed (int* pnfsps = nFwdSpikesPerSample)
+        fixed (double* pw = w)
+        {
+            var ptr = eventprop_backward_spikes_batch(
+                pt, ps, pnsps, pft, pfs, pfc, pe, pnfsps,
+                batchSize, pw, nPre, nPost, vTh, tauMem, tauSyn);
+            return new BatchBackwardSpikesOutput(ptr, batchSize);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // IDisposable output wrappers with zero-copy Span access
+    // ═══════════════════════════════════════════════════════════
+
+    public class SpikeOutput : IDisposable
+    {
+        private SpikeOutputNative _native;
+
+        public int NSpikes => _native.NSpikes;
+        public Span<double> Times => NativeSpan<double>(_native.Times, _native.NSpikes);
+        public Span<int> Sources => NativeSpan<int>(_native.Sources, _native.NSpikes);
+        public Span<double> Currents => NativeSpan<double>(_native.Currents, _native.NSpikes);
+
+        public SpikeOutput(SpikeOutputNative native) => _native = native;
+
+        public void Dispose() => eventprop_free_spike_output(ref _native);
+    }
+
+    public class SumsOutput : IDisposable
+    {
+        private SumsOutputNative _native;
+
+        public int NRows => _native.NRows;
+        public int NPost => _native.NPost;
+        public Span<double> Sum0 => NativeSpan<double>(_native.Sum0, _native.NRows * _native.NPost);
+        public Span<double> Sum1 => NativeSpan<double>(_native.Sum1, _native.NRows * _native.NPost);
+
+        public SumsOutput(SumsOutputNative native) => _native = native;
+
+        public void Dispose() => eventprop_free_sums_output(ref _native);
+    }
+
+    public class MaximaOutput : IDisposable
+    {
+        private MaximaOutputNative _native;
+
+        public int NPost => _native.NPost;
+        public Span<double> Times => NativeSpan<double>(_native.Times, _native.NPost);
+        public Span<double> Values => NativeSpan<double>(_native.Values, _native.NPost);
+
+        public MaximaOutput(MaximaOutputNative native) => _native = native;
+
+        public void Dispose() => eventprop_free_maxima_output(ref _native);
+    }
+
+    public class BackwardSpikesOutput : IDisposable
+    {
+        private BackwardSpikesOutputNative _native;
+
+        public int NPre => _native.NPre;
+        public int NPost => _native.NPost;
+        public Span<double> Grad => NativeSpan<double>(_native.Grad, _native.NPre * _native.NPost);
+        public Span<double> SpikeErrors => NativeSpan<double>(_native.SpikeErrors, _native.NPre);
+
+        public BackwardSpikesOutput(BackwardSpikesOutputNative native) => _native = native;
+
+        public void Dispose() => eventprop_free_backward_spikes_output(ref _native);
+    }
+
+    public class BackwardMaximaOutput : IDisposable
+    {
+        private BackwardMaximaOutputNative _native;
+
+        public int NPre => _native.NPre;
+        public int NPost => _native.NPost;
+        public Span<double> Gradient => NativeSpan<double>(_native.Gradient, _native.NPre * _native.NPost);
+        public Span<double> SpikeErrors => NativeSpan<double>(_native.SpikeErrors, _native.NPre);
+
+        public BackwardMaximaOutput(BackwardMaximaOutputNative native) => _native = native;
+
+        public void Dispose() => eventprop_free_backward_maxima_output(ref _native);
+    }
+
+    public class VoltageTraceOutput : IDisposable
+    {
+        private VoltageTraceOutputNative _native;
+
+        public int NT => _native.NT;
+        public Span<double> VTrace => NativeSpan<double>(_native.VTrace, _native.NT);
+        public Span<double> Ts => NativeSpan<double>(_native.Ts, _native.NT);
+
+        public VoltageTraceOutput(VoltageTraceOutputNative native) => _native = native;
+
+        public void Dispose() => eventprop_free_voltage_trace_output(ref _native);
+    }
+
+    public class LambdaITraceOutput : IDisposable
+    {
+        private LambdaITraceOutputNative _native;
+
+        public int NT => _native.NT;
+        public Span<double> LambdaTrace => NativeSpan<double>(_native.LambdaTrace, _native.NT);
+        public Span<double> Ts => NativeSpan<double>(_native.Ts, _native.NT);
+
+        public LambdaITraceOutput(LambdaITraceOutputNative native) => _native = native;
+
+        public void Dispose() => eventprop_free_lambda_i_trace_output(ref _native);
+    }
+
+    // Batch wrappers (own the array pointer)
+    public class BatchSpikeOutput : IDisposable
+    {
+        private readonly IntPtr _ptr;
+        private readonly int _batchSize;
+
+        public int BatchSize => _batchSize;
+
+        public BatchSpikeOutput(IntPtr ptr, int batchSize)
+        {
+            _ptr = ptr;
+            _batchSize = batchSize;
         }
 
-        eventprop_free_spike_output(ref output);
+        public SpikeOutput Get(int index)
+        {
+            SpikeOutputNative* elements = (SpikeOutputNative*)_ptr.ToPointer();
+            return new SpikeOutput(elements[index]);
+        }
+
+        public void Dispose() => eventprop_free_batch_spike_output(_ptr, _batchSize);
     }
 
-    /// <summary>Call compute_sums_alloc via native C library. Caller must free returned arrays.</summary>
-    public static void ComputeSumsAlloc(
-        double[] w, int nPre, int _,
-        double[] times, int[] sources,
-        double tauMem, double tauSyn,
-        out int nRows, out int nPostOut, out double[] sum0Out, out double[] sum1Out)
+    public class BatchBackwardSpikesOutput : IDisposable
     {
-        var output = eventprop_compute_sums_alloc(w, nPre, _, times, sources, times.Length,
-            tauMem, tauSyn);
-        nRows = output.NRows;
-        nPostOut = output.NPost;
+        private readonly IntPtr _ptr;
+        private readonly int _batchSize;
 
-        sum0Out = new double[nRows * nPostOut];
-        sum1Out = new double[nRows * nPostOut];
+        public int BatchSize => _batchSize;
 
-        Marshal.Copy(output.Sum0, sum0Out, 0, nRows * nPostOut);
-        Marshal.Copy(output.Sum1, sum1Out, 0, nRows * nPostOut);
+        public BatchBackwardSpikesOutput(IntPtr ptr, int batchSize)
+        {
+            _ptr = ptr;
+            _batchSize = batchSize;
+        }
 
-        eventprop_free_sums_output(ref output);
+        public BackwardSpikesOutput Get(int index)
+        {
+            BackwardSpikesOutputNative* elements = (BackwardSpikesOutputNative*)_ptr.ToPointer();
+            return new BackwardSpikesOutput(elements[index]);
+        }
+
+        public void Dispose() => eventprop_free_backward_spikes_batch_output(_ptr, _batchSize);
     }
 
-    /// <summary>Call compute_maxima_alloc via native C library. Caller must free returned arrays.</summary>
-    public static void ComputeMaximaAlloc(
-        double[] w, int nPre, int _,
-        double[] times, int[] sources,
-        double tauMem, double tauSyn,
-        out int nPostOut, out double[] maximaTimesOut, out double[] maximaValuesOut)
+    // ═══════════════════════════════════════════════════════════
+    // Helpers
+    // ═══════════════════════════════════════════════════════════
+
+    private static Span<T> NativeSpan<T>(IntPtr ptr, int length) where T : unmanaged
     {
-        var output = eventprop_compute_maxima_alloc(w, nPre, _, times, sources, times.Length,
-            tauMem, tauSyn);
-        nPostOut = output.NPost;
-
-        maximaTimesOut = new double[nPostOut];
-        maximaValuesOut = new double[nPostOut];
-
-        Marshal.Copy(output.Times, maximaTimesOut, 0, nPostOut);
-        Marshal.Copy(output.Values, maximaValuesOut, 0, nPostOut);
-
-        eventprop_free_maxima_output(ref output);
-    }
-
-    /// <summary>Call backward_spikes_alloc via native C library. Caller must free returned arrays.</summary>
-    public static void BackwardSpikesAlloc(
-        double[] times, int[] sources,
-        double[] fwdTimes, int[] fwdSources, double[] fwdCurrents,
-        double[] postErrors,
-        double[] w, int nPre, int _,
-        double vTh, double tauMem, double tauSyn,
-        out int nPreOut, out int nPostOut, out double[] gradOut, out double[] spikeErrorsOut)
-    {
-        var output = eventprop_backward_spikes_alloc(times, sources, times.Length,
-            fwdTimes, fwdSources, fwdCurrents, postErrors, postErrors.Length,
-            w, nPre, _, vTh, tauMem, tauSyn);
-        nPreOut = output.NPre;
-        nPostOut = output.NPost;
-
-        gradOut = new double[nPreOut * nPostOut];
-        spikeErrorsOut = new double[times.Length];
-
-        Marshal.Copy(output.Grad, gradOut, 0, nPreOut * nPostOut);
-        Marshal.Copy(output.SpikeErrors, spikeErrorsOut, 0, times.Length);
-
-        eventprop_free_backward_spikes_output(ref output);
-    }
-
-    /// <summary>Call backward_maxima_alloc via native C library. Caller must free returned arrays.</summary>
-    public static void BackwardMaximaAlloc(
-        double[] inputTimes, int[] inputSources,
-        double[] maximaTimes, double[] maximaValues, double[] maximaErrors,
-        double[] w, int nPre, int _,
-        double tauMem, double tauSyn,
-        out int nPreOut, out int nPostOut, out double[] gradientOut, out double[] spikeErrorsOut)
-    {
-        var output = eventprop_backward_maxima_alloc(inputTimes, inputSources, inputTimes.Length,
-            maximaTimes, maximaValues, maximaErrors, maximaTimes.Length,
-            w, nPre, _, tauMem, tauSyn);
-        nPreOut = output.NPre;
-        nPostOut = output.NPost;
-
-        gradientOut = new double[nPreOut * nPostOut];
-        spikeErrorsOut = new double[inputTimes.Length];
-
-        Marshal.Copy(output.Gradient, gradientOut, 0, nPreOut * nPostOut);
-        Marshal.Copy(output.SpikeErrors, spikeErrorsOut, 0, inputTimes.Length);
-
-        eventprop_free_backward_maxima_output(ref output);
-    }
-
-    // ============================================================
-    // compute_sums
-    // ============================================================
-    [LibraryImport(LibName)]
-    [UnmanagedCallConv( CallConvs = [ typeof(CallConvCdecl) ])]
-    private static partial void eventprop_compute_sums(
-        double[] w, int nPre, int nPost,
-        double[] times, int[] sources, int nSpikes,
-        double tauMem, double tauSyn,
-        double[] sum0Out, double[] sum1Out);
-
-    /// <summary>Call compute_sums via native C library.</summary>
-    public static void ComputeSums(
-        double[] w, int nPre, int nPost,
-        double[] times, int[] sources,
-        double tauMem, double tauSyn,
-        double[] sum0Out, double[] sum1Out)
-    {
-        eventprop_compute_sums(w, nPre, nPost, times, sources, times.Length, tauMem, tauSyn, sum0Out, sum1Out);
-    }
-
-    // ============================================================
-    // compute_spikes
-    // ============================================================
-    [LibraryImport(LibName)]
-    [UnmanagedCallConv(CallConvs = [ typeof(CallConvCdecl) ])]
-    private static partial int eventprop_compute_spikes(
-        double[] w, int nPre, int nPost,
-        double[] times, int[] sources, int nSpikes,
-        double vTh, double tauMem, double tauSyn,
-        double[] outTimes, int[] outSources, double[] outCurrents);
-
-    /// <summary>Call compute_spikes via native C library. Returns number of output spikes.</summary>
-    public static int ComputeSpikes(
-        double[] w, int nPre, int nPost,
-        double[] times, int[] sources,
-        double vTh, double tauMem, double tauSyn,
-        double[] outTimes, int[] outSources, double[] outCurrents)
-    {
-        return eventprop_compute_spikes(w, nPre, nPost, times, sources, times.Length, vTh, tauMem, tauSyn, outTimes, outSources, outCurrents);
-    }
-
-    // ============================================================
-    // compute_maxima
-    // ============================================================
-    [LibraryImport(LibName)]
-    [UnmanagedCallConv(CallConvs = [ typeof(CallConvCdecl) ])]
-    private static partial void eventprop_compute_maxima(
-        double[] w, int nPre, int nPost,
-        double[] times, int[] sources, int nSpikes,
-        double tauMem, double tauSyn,
-        double[] maximaTimesOut, double[] maximaValuesOut);
-
-    /// <summary>Call compute_maxima via native C library.</summary>
-    public static void ComputeMaxima(
-        double[] w, int nPre, int nPost,
-        double[] times, int[] sources,
-        double tauMem, double tauSyn,
-        double[] maximaTimesOut, double[] maximaValuesOut)
-    {
-        eventprop_compute_maxima(w, nPre, nPost, times, sources, times.Length, tauMem, tauSyn, maximaTimesOut, maximaValuesOut);
-    }
-
-    // ============================================================
-    // backward_spikes — zero-copy output for gradient + spike errors
-    // ============================================================
-    [LibraryImport(LibName)]
-    [UnmanagedCallConv(CallConvs = [ typeof(CallConvCdecl) ])]
-    private static partial void eventprop_backward_spikes(
-        double[] inputTimes, int[] inputSources, int nInputSpikes,
-        double[] postTimes, int[] postSources, double[] postCurrents,
-        double[] postErrors, int nPostSpikes,
-        double[] w, int nPre, int nPost,
-        double vTh, double tauMem, double tauSyn,
-        double[] gradient,      // zero-copy output: n_pre x n_post (row-major)
-        double[] spikeErrors);  // zero-copy output: n_input_spikes (mutated)
-
-    /// <summary>Call backward (Spikes loss) via native C library.
-    /// gradient must be zero-initialized (n_pre * n_post). spikeErrors is mutated in-place.</summary>
-    public static void BackwardSpikes(
-        double[] inputTimes, int[] inputSources,
-        double[] postTimes, int[] postSources, double[] postCurrents,
-        double[] postErrors, double[] w, int nPre, int nPost,
-        double vTh, double tauMem, double tauSyn,
-        double[] gradient,      // zero-initialized output: n_pre * n_post
-        double[] spikeErrors)   // mutated in-place: n_input_spikes
-    {
-        eventprop_backward_spikes(
-            inputTimes, inputSources, inputTimes.Length,
-            postTimes, postSources, postCurrents,
-            postErrors, postErrors.Length,
-            w, nPre, nPost,
-            vTh, tauMem, tauSyn, gradient, spikeErrors);
-    }
-
-    // ============================================================
-    // backward_maxima — zero-copy output for gradient + spike errors
-    // ============================================================
-    [LibraryImport(LibName)]
-    [UnmanagedCallConv(CallConvs = [ typeof(CallConvCdecl) ])]
-    private static partial void eventprop_backward_maxima(
-        double[] inputTimes, int[] inputSources, int nInputSpikes,
-        double[] maximaTimes, double[] maximaValues, double[] maximaErrors, int nMaxima,
-        double[] w, int nPre, int nPost,
-        double tauMem, double tauSyn,
-        double[] gradient,      // zero-copy output: n_pre x n_post (row-major)
-        double[] spikeErrors);  // zero-copy output: n_input_spikes (mutated)
-
-    /// <summary>Call backward (Maxima loss) via native C library.
-    /// gradient must be zero-initialized (n_pre * n_post). spikeErrors is mutated in-place.</summary>
-    public static void BackwardMaxima(
-        double[] inputTimes, int[] inputSources,
-        double[] maximaTimes, double[] maximaValues, double[] maximaErrors,
-        double[] w, int nPre, int nPost,
-        double tauMem, double tauSyn,
-        double[] gradient,      // zero-initialized output: n_pre * n_post
-        double[] spikeErrors)   // mutated in-place: n_input_spikes
-    {
-        eventprop_backward_maxima(inputTimes, inputSources, inputTimes.Length,
-            maximaTimes, maximaValues, maximaErrors, maximaTimes.Length,
-            w, nPre, nPost, tauMem, tauSyn, gradient, spikeErrors);
+        if (ptr == IntPtr.Zero || length == 0) return Span<T>.Empty;
+        return new Span<T>((T*)ptr.ToPointer(), length);
     }
 }
