@@ -111,10 +111,8 @@ public class Bench_ComputeSums_Small : BenchBase
     [Benchmark]
     public void Native()
     {
-        Array.Clear(Sum0Native);
-        Array.Clear(Sum1Native);
-        NativeApi.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn,
-            Sum0Native, Sum1Native);
+        using var output = NativeApi.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn);
+        var _ = output.Sum0[0]; // Access to prevent optimization
     }
 }
 
@@ -136,10 +134,8 @@ public class Bench_ComputeSums_Medium : BenchBase
     [Benchmark]
     public void Native()
     {
-        Array.Clear(Sum0Native);
-        Array.Clear(Sum1Native);
-        NativeApi.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn,
-            Sum0Native, Sum1Native);
+        using var output = NativeApi.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn);
+        var _ = output.Sum0[0]; // Access to prevent optimization
     }
 }
 
@@ -161,10 +157,8 @@ public class Bench_ComputeSums_Large : BenchBase
     [Benchmark]
     public void Native()
     {
-        Array.Clear(Sum0Native);
-        Array.Clear(Sum1Native);
-        NativeApi.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn,
-            Sum0Native, Sum1Native);
+        using var output = NativeApi.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn);
+        var _ = output.Sum0[0]; // Access to prevent optimization
     }
 }
 
@@ -180,11 +174,8 @@ public class Bench_ComputeSpikes_Small : BenchBase
     [Benchmark]
     public int Native()
     {
-        Array.Clear(OutTimesNative, 0, OutTimesNative.Length);
-        Array.Clear(OutSourcesNative, 0, OutSourcesNative.Length);
-        Array.Clear(OutCurrentsNative, 0, OutCurrentsNative.Length);
-        return NativeApi.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn,
-            OutTimesNative, OutSourcesNative, OutCurrentsNative);
+        using var output = NativeApi.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn);
+        return output.NSpikes;
     }
 }
 
@@ -200,11 +191,8 @@ public class Bench_ComputeSpikes_Medium : BenchBase
     [Benchmark]
     public int Native()
     {
-        Array.Clear(OutTimesNative, 0, OutTimesNative.Length);
-        Array.Clear(OutSourcesNative, 0, OutSourcesNative.Length);
-        Array.Clear(OutCurrentsNative, 0, OutCurrentsNative.Length);
-        return NativeApi.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn,
-            OutTimesNative, OutSourcesNative, OutCurrentsNative);
+        using var output = NativeApi.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn);
+        return output.NSpikes;
     }
 }
 
@@ -220,11 +208,8 @@ public class Bench_ComputeSpikes_Large : BenchBase
     [Benchmark]
     public int Native()
     {
-        Array.Clear(OutTimesNative, 0, OutTimesNative.Length);
-        Array.Clear(OutSourcesNative, 0, OutSourcesNative.Length);
-        Array.Clear(OutCurrentsNative, 0, OutCurrentsNative.Length);
-        return NativeApi.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn,
-            OutTimesNative, OutSourcesNative, OutCurrentsNative);
+        using var output = NativeApi.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn);
+        return output.NSpikes;
     }
 }
 
@@ -244,12 +229,11 @@ public class Bench_BackwardSpikes_Small : BenchBase
     [Benchmark]
     public void Native()
     {
-        Array.Clear(GradNative);
-        Array.Clear(SpikeErrorsNative, 0, SpikeErrorsNative.Length);
-        NativeApi.BackwardSpikes(Times, Sources,
+        using var output = NativeApi.BackwardSpikes(Times, Sources,
             PostTimesNative, PostSourcesNative, PostCurrentsNative,
-            PostErrorsNative, W, NPre, NPost,
-            VTh, TauMem, TauSyn, GradNative, SpikeErrorsNative);
+            PostErrorsNative, NSpikes, W, NPre, NPost,  // Use NSpikes as nPostSpikes
+            VTh, TauMem, TauSyn);
+        var _ = output.Grad[0]; // Access to prevent optimization
     }
 }
 
@@ -269,12 +253,11 @@ public class Bench_BackwardSpikes_Medium : BenchBase
     [Benchmark]
     public void Native()
     {
-        Array.Clear(GradNative);
-        Array.Clear(SpikeErrorsNative, 0, SpikeErrorsNative.Length);
-        NativeApi.BackwardSpikes(Times, Sources,
+        using var output = NativeApi.BackwardSpikes(Times, Sources,
             PostTimesNative, PostSourcesNative, PostCurrentsNative,
-            PostErrorsNative, W, NPre, NPost,
-            VTh, TauMem, TauSyn, GradNative, SpikeErrorsNative);
+            PostErrorsNative, NSpikes, W, NPre, NPost,  // Use NSpikes as nPostSpikes
+            VTh, TauMem, TauSyn);
+        var _ = output.Grad[0]; // Access to prevent optimization
     }
 }
 
@@ -294,11 +277,10 @@ public class Bench_BackwardSpikes_Large : BenchBase
     [Benchmark]
     public void Native()
     {
-        Array.Clear(GradNative);
-        Array.Clear(SpikeErrorsNative, 0, SpikeErrorsNative.Length);
-        NativeApi.BackwardSpikes(Times, Sources,
+        using var output = NativeApi.BackwardSpikes(Times, Sources,
             PostTimesNative, PostSourcesNative, PostCurrentsNative,
-            PostErrorsNative, W, NPre, NPost,
-            VTh, TauMem, TauSyn, GradNative, SpikeErrorsNative);
+            PostErrorsNative, NSpikes, W, NPre, NPost,  // Use NSpikes as nPostSpikes
+            VTh, TauMem, TauSyn);
+        var _ = output.Grad[0]; // Access to prevent optimization
     }
 }
