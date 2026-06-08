@@ -154,6 +154,7 @@ COMPUTESUMS_BENCH(Tiny,    10,   5,   20);
 COMPUTESUMS_BENCH(Small,   50,   20,  100);
 COMPUTESUMS_BENCH(Medium,  200,  80,  500);
 COMPUTESUMS_BENCH(Large,   500,  200, 1000);
+COMPUTESUMS_BENCH(XL,      2000, 500, 5000);
 
 // ============================================================
 // Benchmark: ComputeSpikes (raw C++)
@@ -196,6 +197,7 @@ COMPUTESPIKES_BENCH(Tiny,    10,   5,   20);
 COMPUTESPIKES_BENCH(Small,   50,   20,  100);
 COMPUTESPIKES_BENCH(Medium,  200,  80,  500);
 COMPUTESPIKES_BENCH(Large,   500,  200, 1000);
+COMPUTESPIKES_BENCH(XL,      2000, 500, 5000);
 
 // ============================================================
 // Benchmark: ComputeMaxima (raw C++)
@@ -238,5 +240,124 @@ COMPUTEMAXIMA_BENCH(Tiny,    10,   5,   20);
 COMPUTEMAXIMA_BENCH(Small,   50,   20,  100);
 COMPUTEMAXIMA_BENCH(Medium,  200,  80,  500);
 COMPUTEMAXIMA_BENCH(Large,   500,  200, 1000);
+COMPUTEMAXIMA_BENCH(XL,      2000, 500, 5000);
 
+// ============================================================
+// Benchmark: BackwardMaxima (raw C++)
+// Requires maxima data from ComputeMaxima forward pass.
+// ============================================================
+
+static void BM_BackwardMaxima(benchmark::State& state, const ProblemSize& sz, DataGenerator gen)
+{
+    std::vector<double> w(sz.n_pre * sz.n_post);
+    std::vector<double> times(sz.n_spikes);
+    std::vector<int32_t> sources(sz.n_spikes);
+    gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
+
+    RowMatrixXd w_mat(sz.n_pre, sz.n_post);
+    for (int i = 0; i < sz.n_pre * sz.n_post; i++) w_mat(i) = w[i];
+
+    Spikes input_spikes = MakeSpikes(times.data(), sources.data(), sz.n_spikes);
+    Maxima maxima = compute_maxima(w_mat, input_spikes, 0.02, 0.005);
+
+    // Set maxima errors (all -1.0 for gradient descent)
+    for (int i = 0; i < sz.n_post; i++)
+        maxima.set_error(i, -1.0);
+
+    for (auto _ : state) {
+        auto [gradient, spike_errors] = backward(input_spikes, maxima, w_mat, 0.02, 0.005);
+        benchmark::DoNotOptimize(gradient.data());
+    }
+
+    state.SetItemsProcessed(state.iterations() * sz.n_spikes);
+}
+
+#define BACKWARDMAXIMA_BENCH(SizeName, NP, NPO, NS)                                              \
+    BENCHMARK_CAPTURE(BM_BackwardMaxima, SizeName##_uniform,                                     \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(                    \
+        "BackwardMaxima/" #SizeName "/uniform/default");                                          \
+    BENCHMARK_CAPTURE(BM_BackwardMaxima, SizeName##_poisson,                                     \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(                    \
+        "BackwardMaxima/" #SizeName "/poisson/default");                                          \
+    BENCHMARK_CAPTURE(BM_BackwardMaxima, SizeName##_burst,                                       \
+        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(                      \
+        "BackwardMaxima/" #SizeName "/burst/default")
+
+BACKWARDMAXIMA_BENCH(Tiny,    10,   5,   20);
+BACKWARDMAXIMA_BENCH(Small,   50,   20,  100);
+BACKWARDMAXIMA_BENCH(Medium,  200,  80,  500);
+BACKWARDMAXIMA_BENCH(Large,   500,  200, 1000);
+BACKWARDMAXIMA_BENCH(XL,      2000, 500, 5000);
+
+// ============================================================
+// Threshold Voltage (v_th) Variation Benchmarks
+// Tests how different threshold settings affect performance
+// Lower v_th = more spikes = more root-finding work
+// Higher v_th = fewer spikes = less root-finding work
+// ============================================================
+
+// ComputeSpikes with v_th variation (Small size, uniform)
+static void BM_ComputeSpikesVth(benchmark::State& state)
+{
+    double v_th = static_cast<double>(state.range(0)) / 10.0; // 5→0.5, 10→1.0, 20→2.0
+    int n_pre = 50, n_post = 20, n_spikes = 100;
+
+    std::vector<double> w(n_pre * n_post);
+    std::vector<double> times(n_spikes);
+    std::vector<int32_t> sources(n_spikes);
+
+    GenerateUniformData(n_pre, n_post, n_spikes, w.data(), times.data(), sources.data());
+
+    for (auto _ : state) {
+        Eigen::Map<RowMatrixXd const> w_map(w.data(), n_pre, n_post);
+        Eigen::ArrayXd e_times = Eigen::Map<Eigen::ArrayXd>(times.data(), n_spikes);
+        Eigen::ArrayXi e_sources = Eigen::Map<Eigen::ArrayXi>(sources.data(), n_spikes);
+        Spikes output = compute_spikes(w_map, Spikes(e_times, e_sources), v_th, 0.02, 0.005);
+        benchmark::DoNotOptimize(output.n_spikes);
+    }
+
+    state.SetItemsProcessed(state.iterations() * n_spikes);
+}
+
+BENCHMARK(BM_ComputeSpikesVth)->ArgNames({"v_th"})
+    ->RangeMultiplier(1)
+    ->DenseRange(5, 20, 5);
+
+// BackwardSpikes with v_th variation (Small size, uniform)
+static void BM_BackwardSpikesVth(benchmark::State& state)
+{
+    double v_th = static_cast<double>(state.range(0)) / 10.0;
+    int n_pre = 50, n_post = 20, n_spikes = 100;
+
+    std::vector<double> w(n_pre * n_post);
+    std::vector<double> times(n_spikes);
+    std::vector<int32_t> sources(n_spikes);
+
+    GenerateUniformData(n_pre, n_post, n_spikes, w.data(), times.data(), sources.data());
+
+    Eigen::Map<RowMatrixXd const> w_map(w.data(), n_pre, n_post);
+    Eigen::ArrayXd e_times = Eigen::Map<Eigen::ArrayXd>(times.data(), n_spikes);
+    Eigen::ArrayXi e_sources = Eigen::Map<Eigen::ArrayXi>(sources.data(), n_spikes);
+    Spikes input = Spikes(e_times, e_sources);
+    
+    // Run forward pass with default v_th=1.0 for all tests
+    Spikes post = compute_spikes(w_map, input, 1.0, 0.02, 0.005);
+    
+    // Set errors for all post-synaptic spikes
+    for (int i = 0; i < post.n_spikes; i++)
+        post.set_error(i, -1.0);
+
+    std::pair<RowMatrixXd, Eigen::ArrayXd> gradient;
+
+    for (auto _ : state) {
+        gradient = backward(input, post, w_map, v_th, 0.02, 0.005);
+        benchmark::DoNotOptimize(gradient.first(0, 0));
+    }
+
+    state.SetItemsProcessed(state.iterations() * n_spikes);
+}
+
+BENCHMARK(BM_BackwardSpikesVth)->ArgNames({"v_th"})
+    ->RangeMultiplier(1)
+    ->DenseRange(5, 20, 5);
 BENCHMARK_MAIN();

@@ -158,6 +158,7 @@ COMPUTESPIKES_BENCH(Tiny,    10,   5,   20);
 COMPUTESPIKES_BENCH(Small,   50,   20,  100);
 COMPUTESPIKES_BENCH(Medium,  200,  80,  500);
 COMPUTESPIKES_BENCH(Large,   500,  200, 1000);
+COMPUTESPIKES_BENCH(XL,      2000, 500, 5000);
 
 // ============================================================
 // Benchmark: BackwardSpikes (backward pass)
@@ -240,5 +241,111 @@ BACKWARDSPIKES_BENCH(Tiny,    10,   5,   20);
 BACKWARDSPIKES_BENCH(Small,   50,   20,  100);
 BACKWARDSPIKES_BENCH(Medium,  200,  80,  500);
 BACKWARDSPIKES_BENCH(Large,   500,  200, 1000);
+// ============================================================
+// Threshold Voltage (v_th) Variation Benchmarks
+// Tests how different threshold settings affect performance
+// Lower v_th = more spikes = more root-finding work
+// Higher v_th = fewer spikes = less root-finding work
+// ============================================================
+
+// ComputeSpikes with v_th variation (Small size, uniform)
+static void BM_ComputeSpikesVth(benchmark::State& state)
+{
+    double v_th = static_cast<double>(state.range(0)) / 10.0; // 5→0.5, 10→1.0, 20→2.0
+    int n_pre = 50, n_post = 20, n_spikes = 100;
+
+    std::vector<double> w(n_pre * n_post);
+    std::vector<double> times(n_spikes);
+    std::vector<int32_t> sources(n_spikes);
+
+    GenerateUniformData(n_pre, n_post, n_spikes, w.data(), times.data(), sources.data());
+
+    for (auto _ : state) {
+#ifdef USE_CPP_WRAPPER
+        Eigen::Map<RowMatrixXd const> w_map(w.data(), n_pre, n_post);
+        Eigen::ArrayXd e_times = Eigen::Map<Eigen::ArrayXd>(times.data(), n_spikes);
+        Eigen::ArrayXi e_sources = Eigen::Map<Eigen::ArrayXi>(sources.data(), n_spikes);
+        Spikes output = compute_spikes(w_map, Spikes(e_times, e_sources), v_th, 0.02, 0.005);
+        benchmark::DoNotOptimize(output.n_spikes);
+#else
+        SpikeOutput output = eventprop_compute_spikes(
+            w.data(), n_pre, n_post,
+            times.data(), sources.data(), n_spikes,
+            v_th, 0.02, 0.005);
+        benchmark::DoNotOptimize(output.n_spikes);
+        eventprop_free_spike_output(&output);
+#endif
+    }
+
+    state.SetItemsProcessed(state.iterations() * n_spikes);
+}
+
+BENCHMARK(BM_ComputeSpikesVth)->ArgNames({"v_th"})
+    ->RangeMultiplier(1)
+    ->DenseRange(5, 20, 5);
+
+// BackwardSpikes with v_th variation (Small size, uniform)
+static void BM_BackwardSpikesVth(benchmark::State& state)
+{
+    double v_th = static_cast<double>(state.range(0)) / 10.0;
+    int n_pre = 50, n_post = 20, n_spikes = 100;
+
+    std::vector<double> w(n_pre * n_post);
+    std::vector<double> times(n_spikes);
+    std::vector<int32_t> sources(n_spikes);
+
+    GenerateUniformData(n_pre, n_post, n_spikes, w.data(), times.data(), sources.data());
+
+#ifdef USE_CPP_WRAPPER
+    Eigen::Map<RowMatrixXd const> w_map(w.data(), n_pre, n_post);
+    Eigen::ArrayXd e_times = Eigen::Map<Eigen::ArrayXd>(times.data(), n_spikes);
+    Eigen::ArrayXi e_sources = Eigen::Map<Eigen::ArrayXi>(sources.data(), n_spikes);
+    Spikes input = Spikes(e_times, e_sources);
+    
+    // Run forward pass with default v_th=1.0 for all tests
+    Spikes post = compute_spikes(w_map, input, 1.0, 0.02, 0.005);
+    
+    // Set errors for all post-synaptic spikes
+    for (int i = 0; i < post.n_spikes; i++)
+        post.set_error(i, -1.0);
+
+    std::pair<RowMatrixXd, Eigen::ArrayXd> gradient;
+#else
+    SpikeOutput fwd = eventprop_compute_spikes(
+        w.data(), n_pre, n_post,
+        times.data(), sources.data(), n_spikes,
+        1.0, 0.02, 0.005);
+
+    std::vector<double> post_errors(fwd.n_spikes, -1.0);
+#endif
+
+    for (auto _ : state) {
+#ifdef USE_CPP_WRAPPER
+        gradient = backward(input, post, w_map, v_th, 0.02, 0.005);
+        benchmark::DoNotOptimize(gradient.first(0, 0));
+#else
+        BackwardSpikesOutput result = eventprop_backward_spikes(
+            times.data(), sources.data(), n_spikes,
+            fwd.times, fwd.sources, fwd.currents,
+            post_errors.data(), fwd.n_spikes,
+            w.data(), n_pre, n_post,
+            v_th, 0.02, 0.005);
+        benchmark::DoNotOptimize(result.grad[0]);
+        eventprop_free_backward_spikes_output(&result);
+#endif
+    }
+
+#ifdef USE_CPP_WRAPPER
+    // Nothing to free for Eigen
+#else
+    eventprop_free_spike_output(&fwd);
+#endif
+
+    state.SetItemsProcessed(state.iterations() * n_spikes);
+}
+
+BENCHMARK(BM_BackwardSpikesVth)->ArgNames({"v_th"})
+    ->RangeMultiplier(1)
+    ->DenseRange(5, 20, 5);
 
 BENCHMARK_MAIN();
