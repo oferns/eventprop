@@ -288,7 +288,6 @@ BACKWARDMAXIMA_BENCH(Small,   50,   20,  100);
 BACKWARDMAXIMA_BENCH(Medium,  200,  80,  500);
 BACKWARDMAXIMA_BENCH(Large,   500,  200, 1000);
 BACKWARDMAXIMA_BENCH(XL,      2000, 500, 5000);
-
 // ============================================================
 // Threshold Voltage (v_th) Variation Benchmarks
 // Tests how different threshold settings affect performance

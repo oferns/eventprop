@@ -348,4 +348,176 @@ BENCHMARK(BM_BackwardSpikesVth)->ArgNames({"v_th"})
     ->RangeMultiplier(1)
     ->DenseRange(5, 20, 5);
 
+// ============================================================
+// Benchmark: ComputeSums (cumulative sums)
+// ============================================================
+
+static void BM_ComputeSums(benchmark::State& state, const ProblemSize& sz, DataGenerator gen)
+{
+    std::vector<double> w(sz.n_pre * sz.n_post);
+    std::vector<double> times(sz.n_spikes);
+    std::vector<int32_t> sources(sz.n_spikes);
+
+    gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
+
+    for (auto _ : state) {
+#ifdef USE_CPP_WRAPPER
+        Eigen::Map<RowMatrixXd const> w_map(w.data(), sz.n_pre, sz.n_post);
+        Eigen::ArrayXd e_times = Eigen::Map<Eigen::ArrayXd>(times.data(), sz.n_spikes);
+        Eigen::ArrayXi e_sources = Eigen::Map<Eigen::ArrayXi>(sources.data(), sz.n_spikes);
+        std::pair<RowMatrixXd, RowMatrixXd> sums = compute_sums(w_map, Spikes(e_times, e_sources), 0.02, 0.005);
+        benchmark::DoNotOptimize(sums.first(0, 0));
+#else
+        SumsOutput output = eventprop_compute_sums(
+            w.data(), sz.n_pre, sz.n_post,
+            times.data(), sources.data(), sz.n_spikes,
+            0.02, 0.005);
+        benchmark::DoNotOptimize(output.sum0[0]);
+        eventprop_free_sums_output(&output);
+#endif
+    }
+
+    state.SetItemsProcessed(state.iterations() * sz.n_spikes);
+}
+
+#define COMPUTESUMS_BENCH(SizeName, NP, NPO, NS)                                          \
+    BENCHMARK_CAPTURE(BM_ComputeSums, SizeName##_uniform,                                  \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Iterations(100)->Name(   \
+        "ComputeSums/" #SizeName "/uniform/default");                                      \
+    BENCHMARK_CAPTURE(BM_ComputeSums, SizeName##_poisson,                                  \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Iterations(100)->Name(   \
+        "ComputeSums/" #SizeName "/poisson/default");                                      \
+    BENCHMARK_CAPTURE(BM_ComputeSums, SizeName##_burst,                                    \
+        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Iterations(100)->Name(   \
+        "ComputeSums/" #SizeName "/burst/default")
+
+COMPUTESUMS_BENCH(Tiny,    10,   5,   20);
+COMPUTESUMS_BENCH(Small,   50,   20,  100);
+COMPUTESUMS_BENCH(Medium,  200,  80,  500);
+COMPUTESUMS_BENCH(Large,   500,  200, 1000);
+COMPUTESUMS_BENCH(XL,      2000, 500, 5000);
+
+// ============================================================
+// Benchmark: ComputeMaxima (membrane potential maxima)
+// ============================================================
+
+static void BM_ComputeMaxima(benchmark::State& state, const ProblemSize& sz, DataGenerator gen)
+{
+    std::vector<double> w(sz.n_pre * sz.n_post);
+    std::vector<double> times(sz.n_spikes);
+    std::vector<int32_t> sources(sz.n_spikes);
+
+    gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
+
+    for (auto _ : state) {
+#ifdef USE_CPP_WRAPPER
+        Eigen::Map<RowMatrixXd const> w_map(w.data(), sz.n_pre, sz.n_post);
+        Eigen::ArrayXd e_times = Eigen::Map<Eigen::ArrayXd>(times.data(), sz.n_spikes);
+        Eigen::ArrayXi e_sources = Eigen::Map<Eigen::ArrayXi>(sources.data(), sz.n_spikes);
+        Maxima maxima = compute_maxima(w_map, Spikes(e_times, e_sources), 0.02, 0.005);
+        benchmark::DoNotOptimize(maxima.times(0));
+#else
+        MaximaOutput output = eventprop_compute_maxima(
+            w.data(), sz.n_pre, sz.n_post,
+            times.data(), sources.data(), sz.n_spikes,
+            0.02, 0.005);
+        benchmark::DoNotOptimize(output.times[0]);
+        eventprop_free_maxima_output(&output);
+#endif
+    }
+
+    state.SetItemsProcessed(state.iterations() * sz.n_spikes);
+}
+
+#define COMPUTEMAXIMA_BENCH(SizeName, NP, NPO, NS)                                        \
+    BENCHMARK_CAPTURE(BM_ComputeMaxima, SizeName##_uniform,                                \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Iterations(100)->Name(   \
+        "ComputeMaxima/" #SizeName "/uniform/default");                                    \
+    BENCHMARK_CAPTURE(BM_ComputeMaxima, SizeName##_poisson,                                \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Iterations(100)->Name(   \
+        "ComputeMaxima/" #SizeName "/poisson/default");                                    \
+    BENCHMARK_CAPTURE(BM_ComputeMaxima, SizeName##_burst,                                  \
+        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Iterations(100)->Name(   \
+        "ComputeMaxima/" #SizeName "/burst/default")
+
+COMPUTEMAXIMA_BENCH(Tiny,    10,   5,   20);
+COMPUTEMAXIMA_BENCH(Small,   50,   20,  100);
+COMPUTEMAXIMA_BENCH(Medium,  200,  80,  500);
+COMPUTEMAXIMA_BENCH(Large,   500,  200, 1000);
+COMPUTEMAXIMA_BENCH(XL,      2000, 500, 5000);
+
+// ============================================================
+// Benchmark: BackwardMaxima (backward pass via maxima)
+// ============================================================
+
+static void BM_BackwardMaxima(benchmark::State& state, const ProblemSize& sz, DataGenerator gen)
+{
+    std::vector<double> w(sz.n_pre * sz.n_post);
+    std::vector<double> times(sz.n_spikes);
+    std::vector<int32_t> sources(sz.n_spikes);
+
+    gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
+
+#ifdef USE_CPP_WRAPPER
+    Eigen::Map<RowMatrixXd const> w_map(w.data(), sz.n_pre, sz.n_post);
+    Eigen::ArrayXd e_times = Eigen::Map<Eigen::ArrayXd>(times.data(), sz.n_spikes);
+    Eigen::ArrayXi e_sources = Eigen::Map<Eigen::ArrayXi>(sources.data(), sz.n_spikes);
+    Maxima maxima = compute_maxima(w_map, Spikes(e_times, e_sources), 0.02, 0.005);
+    
+    // Set errors for all maxima (gradient descent)
+    for (int i = 0; i < sz.n_post; i++)
+        maxima.set_error(i, -1.0);
+
+    Spikes input = Spikes(e_times, e_sources);
+    std::pair<RowMatrixXd, Eigen::ArrayXd> gradient;
+#else
+    MaximaOutput maxima = eventprop_compute_maxima(
+        w.data(), sz.n_pre, sz.n_post,
+        times.data(), sources.data(), sz.n_spikes,
+        0.02, 0.005);
+
+    std::vector<double> maxima_errors(sz.n_post, -1.0);
+#endif
+
+    for (auto _ : state) {
+#ifdef USE_CPP_WRAPPER
+        gradient = backward(input, maxima, w_map, 0.02, 0.005);
+        benchmark::DoNotOptimize(gradient.first(0, 0));
+#else
+        BackwardMaximaOutput result = eventprop_backward_maxima(
+            times.data(), sources.data(), sz.n_spikes,
+            maxima.times, maxima.values,
+            maxima_errors.data(), sz.n_post,
+            w.data(), sz.n_pre, sz.n_post,
+            0.02, 0.005);
+        benchmark::DoNotOptimize(result.gradient[0]);
+        eventprop_free_backward_maxima_output(&result);
+#endif
+    }
+
+#ifdef USE_CPP_WRAPPER
+    // Nothing to free for Eigen
+#else
+    eventprop_free_maxima_output(&maxima);
+#endif
+
+    state.SetItemsProcessed(state.iterations() * sz.n_spikes);
+}
+
+#define BACKWARDMAXIMA_BENCH(SizeName, NP, NPO, NS)                                        \
+    BENCHMARK_CAPTURE(BM_BackwardMaxima, SizeName##_uniform,                                \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Iterations(100)->Name(   \
+        "BackwardMaxima/" #SizeName "/uniform/default");                                    \
+    BENCHMARK_CAPTURE(BM_BackwardMaxima, SizeName##_poisson,                                \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Iterations(100)->Name(   \
+        "BackwardMaxima/" #SizeName "/poisson/default");                                    \
+    BENCHMARK_CAPTURE(BM_BackwardMaxima, SizeName##_burst,                                  \
+        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Iterations(100)->Name(   \
+        "BackwardMaxima/" #SizeName "/burst/default")
+
+BACKWARDMAXIMA_BENCH(Tiny,    10,   5,   20);
+BACKWARDMAXIMA_BENCH(Small,   50,   20,  100);
+BACKWARDMAXIMA_BENCH(Medium,  200,  80,  500);
+BACKWARDMAXIMA_BENCH(Large,   500,  200, 1000);
+BACKWARDMAXIMA_BENCH(XL,      2000, 500, 5000);
 BENCHMARK_MAIN();
