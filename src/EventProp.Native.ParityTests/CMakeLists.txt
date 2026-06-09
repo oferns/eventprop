@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
-project(EventPropParityTest LANGUAGES CXX C)
+project(EventPropParityTest LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# ── Eigen (from EventProp.Python submodule) ─────────────────────
+# ── Eigen (from EventProp.Python submodule, header-only) ─────────
 set(EIGEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.Python/src/eigen")
 if(NOT EXISTS "${EIGEN_DIR}")
     message(FATAL_ERROR "Eigen not found at ${EIGEN_DIR}. Run: git submodule update --init src/EventProp.Python/src/eigen")
@@ -16,54 +16,44 @@ if(NOT BOOST_INCLUDE_DIR)
     message(FATAL_ERROR "Boost not found at /opt/homebrew/include")
 endif()
 
-# ── OpenMP (optional, for parallelization) ─────────────────────
-if(APPLE)
-    execute_process(COMMAND brew --prefix libomp OUTPUT_STRIP_TRAILING_WHITESPACE
-                    OUTPUT_VARIABLE _OPENMP_PREFIX RESULT_VARIABLE _BREW_FAIL)
-    if(_BREW_FAIL EQUAL 0 AND EXISTS "${_OPENMP_PREFIX}/lib/libomp.dylib")
-        set(OpenMP_CXX_FOUND TRUE)
-        set(OpenMP_CXX_LIBRARIES "${_OPENMP_PREFIX}/lib/libomp.dylib")
-        set(OpenMP_CXX_INCLUDE_DIRS "${_OPENMP_PREFIX}/include")
-    endif()
-else()
-    find_package(OpenMP)
+# ── Pre-built C library (imported) ─────────────────────────────
+set(C_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.C/build/libeventprop_c_api.dylib")
+if(NOT EXISTS "${C_LIBRARY}")
+    message(FATAL_ERROR "C library not found at ${C_LIBRARY}. Build EventProp.C first.")
 endif()
 
-# ── Eigen core (stripped copy without pybind11) — build as static lib
-# DISABLED OpenMP to avoid memory allocator contention with C library
-add_library(eventprop_eigen_core STATIC ${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.Cpp.Wrapper/eventprop_eigen_core_stripped.cpp)
-target_include_directories(eventprop_eigen_core PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}"
-    ${EIGEN_DIR}
-    ${BOOST_INCLUDE_DIR}
+add_library(eventprop_c_api SHARED IMPORTED)
+set_target_properties(eventprop_c_api PROPERTIES
+    IMPORTED_LOCATION "${C_LIBRARY}"
 )
 
-# OpenMP disabled for parity tests - causes bus errors due to memory contention
-# if(APPLE AND _BREW_FAIL EQUAL 0)
-#     target_include_directories(eventprop_eigen_core PRIVATE ${OpenMP_CXX_INCLUDE_DIRS})
-#     target_link_libraries(eventprop_eigen_core PRIVATE ${OpenMP_CXX_LIBRARIES})
-# elseif(OpenMP_CXX_FOUND)
-#     target_link_libraries(eventprop_eigen_core PRIVATE OpenMP::OpenMP_CXX)
-# endif()
+# ── Pre-built Eigen core (imported from EventProp.Cpp.Wrapper) ─
+set(EIGEN_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.Cpp.Wrapper/build/libeventprop_eigen_core.a")
+if(NOT EXISTS "${EIGEN_LIBRARY}")
+    message(FATAL_ERROR "Eigen core library not found at ${EIGEN_LIBRARY}. Build EventProp.Cpp.Wrapper first.")
+endif()
 
-# ── Parity test executable (loads C library via dlopen at runtime)
+add_library(eventprop_eigen_core STATIC IMPORTED)
+set_target_properties(eventprop_eigen_core PROPERTIES
+    IMPORTED_LOCATION "${EIGEN_LIBRARY}"
+)
+
+# ── Parity test executable ─────────────────────────────────────
 add_executable(parity_test parity_main.cpp)
+
 target_include_directories(parity_test PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.Python/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.C"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.Cpp.Wrapper"
     ${EIGEN_DIR}
     ${BOOST_INCLUDE_DIR}
-    "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.C"
 )
 
-target_link_libraries(parity_test PRIVATE eventprop_eigen_core m dl)
+target_link_libraries(parity_test PRIVATE eventprop_c_api eventprop_eigen_core m)
 
-# Disable OpenMP in C library to avoid memory allocator contention
-target_compile_definitions(parity_test PRIVATE _OPENMP=0)
-
-# macOS rpath
-if(APPLE AND _BREW_FAIL EQUAL 0)
+# macOS rpath for runtime library loading
+if(APPLE)
     set_target_properties(parity_test PROPERTIES
-        INSTALL_RPATH "${_OPENMP_PREFIX}/lib"
+        INSTALL_RPATH "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.C/build"
         BUILD_WITH_INSTALL_RPATH TRUE
     )
 endif()
