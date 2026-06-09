@@ -129,13 +129,15 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
     for (auto _ : state) {
 #ifdef USE_CPP_WRAPPER
         Spikes output = compute_spikes(w_map, input_spikes, 1.0, 0.02, 0.005);
-        benchmark::DoNotOptimize(output.n_spikes);
+        benchmark::DoNotOptimize(output.times);
+        benchmark::DoNotOptimize(output.currents);
 #else
         SpikeOutput output = eventprop_compute_spikes(
             w.data(), sz.n_pre, sz.n_post,
             times.data(), sources.data(), sz.n_spikes,
             1.0, 0.02, 0.005);
-        benchmark::DoNotOptimize(output.n_spikes);
+        benchmark::DoNotOptimize(output.times);
+        benchmark::DoNotOptimize(output.currents);
         eventprop_free_spike_output(&output);
 #endif
     }
@@ -191,7 +193,7 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
     for (auto _ : state) {
         // backward() returns a new RowMatrixXd — no need to pre-allocate/zero
         std::pair<RowMatrixXd, Eigen::ArrayXd> result = backward(input_spikes, post_spikes, w_map, 1.0, 0.02, 0.005);
-        benchmark::DoNotOptimize(result.first(0, 0));
+        benchmark::DoNotOptimize(result.first.data());
     }
 #else
     // C library: Run forward pass to get post-spike data
@@ -213,7 +215,7 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
             w.data(), sz.n_pre, sz.n_post,
             1.0, 0.02, 0.005);
 
-        benchmark::DoNotOptimize(result.grad[0]);
+        benchmark::DoNotOptimize(result.grad);
         eventprop_free_backward_spikes_output(&result);
     }
 
@@ -263,13 +265,15 @@ static void BM_ComputeSpikesVth(benchmark::State& state)
         Eigen::ArrayXd e_times = Eigen::Map<Eigen::ArrayXd>(times.data(), n_spikes);
         Eigen::ArrayXi e_sources = Eigen::Map<Eigen::ArrayXi>(sources.data(), n_spikes);
         Spikes output = compute_spikes(w_map, Spikes(e_times, e_sources), v_th, 0.02, 0.005);
-        benchmark::DoNotOptimize(output.n_spikes);
+        benchmark::DoNotOptimize(output.times);
+        benchmark::DoNotOptimize(output.currents);
 #else
         SpikeOutput output = eventprop_compute_spikes(
             w.data(), n_pre, n_post,
             times.data(), sources.data(), n_spikes,
             v_th, 0.02, 0.005);
-        benchmark::DoNotOptimize(output.n_spikes);
+        benchmark::DoNotOptimize(output.times);
+        benchmark::DoNotOptimize(output.currents);
         eventprop_free_spike_output(&output);
 #endif
     }
@@ -319,7 +323,7 @@ static void BM_BackwardSpikesVth(benchmark::State& state)
     for (auto _ : state) {
 #ifdef USE_CPP_WRAPPER
         gradient = backward(input, post, w_map, v_th, 0.02, 0.005);
-        benchmark::DoNotOptimize(gradient.first(0, 0));
+        benchmark::DoNotOptimize(gradient.first.data());
 #else
         BackwardSpikesOutput result = eventprop_backward_spikes(
             times.data(), sources.data(), n_spikes,
@@ -327,7 +331,7 @@ static void BM_BackwardSpikesVth(benchmark::State& state)
             post_errors.data(), fwd.n_spikes,
             w.data(), n_pre, n_post,
             v_th, 0.02, 0.005);
-        benchmark::DoNotOptimize(result.grad[0]);
+        benchmark::DoNotOptimize(result.grad);
         eventprop_free_backward_spikes_output(&result);
 #endif
     }
@@ -367,13 +371,15 @@ static void BM_ComputeSums(benchmark::State& state, const ProblemSize& sz, DataG
     for (auto _ : state) {
 #ifdef USE_CPP_WRAPPER
         std::pair<RowMatrixXd, RowMatrixXd> sums = compute_sums(w_map, input_spikes, 0.02, 0.005);
-        benchmark::DoNotOptimize(sums.first(0, 0));
+        benchmark::DoNotOptimize(sums.first.data());
+        benchmark::DoNotOptimize(sums.second.data());
 #else
         SumsOutput output = eventprop_compute_sums(
             w.data(), sz.n_pre, sz.n_post,
             times.data(), sources.data(), sz.n_spikes,
             0.02, 0.005);
-        benchmark::DoNotOptimize(output.sum0[0]);
+        benchmark::DoNotOptimize(output.sum0);
+        benchmark::DoNotOptimize(output.sum1);
         eventprop_free_sums_output(&output);
 #endif
     }
@@ -383,13 +389,13 @@ static void BM_ComputeSums(benchmark::State& state, const ProblemSize& sz, DataG
 
 #define COMPUTESUMS_BENCH(SizeName, NP, NPO, NS)                                          \
     BENCHMARK_CAPTURE(BM_ComputeSums, SizeName##_uniform,                                  \
-        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Iterations(100)->Name(   \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(   \
         "ComputeSums/" #SizeName "/uniform/default");                                      \
     BENCHMARK_CAPTURE(BM_ComputeSums, SizeName##_poisson,                                  \
-        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Iterations(100)->Name(   \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(   \
         "ComputeSums/" #SizeName "/poisson/default");                                      \
     BENCHMARK_CAPTURE(BM_ComputeSums, SizeName##_burst,                                    \
-        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Iterations(100)->Name(   \
+        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(   \
         "ComputeSums/" #SizeName "/burst/default")
 
 COMPUTESUMS_BENCH(Tiny,    10,   5,   20);
@@ -420,13 +426,15 @@ static void BM_ComputeMaxima(benchmark::State& state, const ProblemSize& sz, Dat
     for (auto _ : state) {
 #ifdef USE_CPP_WRAPPER
         Maxima maxima = compute_maxima(w_map, input_spikes, 0.02, 0.005);
-        benchmark::DoNotOptimize(maxima.times(0));
+        benchmark::DoNotOptimize(maxima.times.data());
+        benchmark::DoNotOptimize(maxima.values.data());
 #else
         MaximaOutput output = eventprop_compute_maxima(
             w.data(), sz.n_pre, sz.n_post,
             times.data(), sources.data(), sz.n_spikes,
             0.02, 0.005);
-        benchmark::DoNotOptimize(output.times[0]);
+        benchmark::DoNotOptimize(output.times);
+        benchmark::DoNotOptimize(output.values);
         eventprop_free_maxima_output(&output);
 #endif
     }
@@ -436,13 +444,13 @@ static void BM_ComputeMaxima(benchmark::State& state, const ProblemSize& sz, Dat
 
 #define COMPUTEMAXIMA_BENCH(SizeName, NP, NPO, NS)                                        \
     BENCHMARK_CAPTURE(BM_ComputeMaxima, SizeName##_uniform,                                \
-        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Iterations(100)->Name(   \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(   \
         "ComputeMaxima/" #SizeName "/uniform/default");                                    \
     BENCHMARK_CAPTURE(BM_ComputeMaxima, SizeName##_poisson,                                \
-        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Iterations(100)->Name(   \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(   \
         "ComputeMaxima/" #SizeName "/poisson/default");                                    \
     BENCHMARK_CAPTURE(BM_ComputeMaxima, SizeName##_burst,                                  \
-        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Iterations(100)->Name(   \
+        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(   \
         "ComputeMaxima/" #SizeName "/burst/default")
 
 COMPUTEMAXIMA_BENCH(Tiny,    10,   5,   20);
@@ -487,7 +495,7 @@ static void BM_BackwardMaxima(benchmark::State& state, const ProblemSize& sz, Da
     for (auto _ : state) {
 #ifdef USE_CPP_WRAPPER
         gradient = backward(input, maxima, w_map, 0.02, 0.005);
-        benchmark::DoNotOptimize(gradient.first(0, 0));
+        benchmark::DoNotOptimize(gradient.first.data());
 #else
         BackwardMaximaOutput result = eventprop_backward_maxima(
             times.data(), sources.data(), sz.n_spikes,
@@ -511,13 +519,13 @@ static void BM_BackwardMaxima(benchmark::State& state, const ProblemSize& sz, Da
 
 #define BACKWARDMAXIMA_BENCH(SizeName, NP, NPO, NS)                                        \
     BENCHMARK_CAPTURE(BM_BackwardMaxima, SizeName##_uniform,                                \
-        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Iterations(100)->Name(   \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(   \
         "BackwardMaxima/" #SizeName "/uniform/default");                                    \
     BENCHMARK_CAPTURE(BM_BackwardMaxima, SizeName##_poisson,                                \
-        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Iterations(100)->Name(   \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(   \
         "BackwardMaxima/" #SizeName "/poisson/default");                                    \
     BENCHMARK_CAPTURE(BM_BackwardMaxima, SizeName##_burst,                                  \
-        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Iterations(100)->Name(   \
+        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(   \
         "BackwardMaxima/" #SizeName "/burst/default")
 
 BACKWARDMAXIMA_BENCH(Tiny,    10,   5,   20);
