@@ -20,6 +20,15 @@
 extern "C" {
 #endif
 
+/* ── Spike input (borrowed data, no allocation) ─────────────────────── */
+
+/** Input spike data — borrowed pointers, no memory management. */
+typedef struct {
+    const double* times;           /* Spike times (borrowed) */
+    const int32_t* sources;        /* Source neurons (borrowed) */
+    int n_spikes;                   /* Number of input spikes */
+} SpikeInput;
+
 /* ── Forward pass input structs (borrowed data, no allocation) ─────── */
 
 /** Base forward pass input — common parameters for sums/maxima/spikes. */
@@ -93,6 +102,35 @@ MaximaOutput eventprop_compute_maxima(const ForwardInputBase* input);
 /** Free memory owned by a MaximaOutput struct. */
 void eventprop_free_maxima_output(MaximaOutput* output);
 
+/* ── Backward pass input structs (borrowed data, no allocation) ─────── */
+
+/** Base backward pass input — common parameters for spikes/maxima. */
+typedef struct {
+    const SpikeInput* input;           /* Input spike data (borrowed) */
+    const ForwardInputBase* base;      /* Common forward pass parameters (borrowed) */
+    double v_th;                        /* Spike threshold voltage */
+} BackwardInputBase;
+
+/** Backward spikes input — extends base with forward spike data and errors. */
+typedef struct {
+    BackwardInputBase base;
+    const double* fwd_times;           /* Forward spike times (borrowed) */
+    const int32_t* fwd_sources;        /* Forward spike sources (borrowed) */
+    const double* fwd_currents;         /* Forward spike currents (borrowed) */
+    const double* post_errors;          /* Post-synaptic errors (borrowed) */
+    int n_post_spikes;                  /* Number of post-synaptic spikes */
+    double v_th;                        /* Spike threshold voltage */
+} BackwardSpikesInput;
+
+/** Backward maxima input — extends base with membrane potential maxima data. */
+typedef struct {
+    BackwardInputBase base;
+    const double* maxima_times;        /* Maxima times (borrowed) */
+    const double* maxima_values;         /* Maxima values (borrowed) */
+    const double* maxima_errors;          /* Maxima errors (borrowed) */
+    int n_maxima;                       /* Number of maxima */
+} BackwardMaximaInput;
+
 /* ── Backward pass outputs (owned memory) ───────────────────────────── */
 
 typedef struct {
@@ -106,11 +144,7 @@ typedef struct {
  * Backward pass (spikes) with automatic memory allocation.
  * Returns a BackwardSpikesOutput struct — caller must free via eventprop_free_backward_spikes_output().
  */
-BackwardSpikesOutput eventprop_backward_spikes(const SpikeInput* input,
-                                                     const double* fwd_times, const int32_t* fwd_sources,
-                                                     const double* fwd_currents,
-                                                     const double* post_errors, int n_post_spikes,
-                                                     const ForwardInputBase* base);
+BackwardSpikesOutput eventprop_backward_spikes(const BackwardSpikesInput* input);
 
 
 /** Free memory owned by a BackwardSpikesOutput struct. */
@@ -127,12 +161,7 @@ typedef struct {
  * Backward pass (maxima) with automatic memory allocation.
  * Returns a BackwardMaximaOutput struct — caller must free via eventprop_free_backward_maxima_output().
  */
-BackwardMaximaOutput eventprop_backward_maxima(const double* input_times, const int32_t* input_sources,
-                                                     int n_input_spikes,
-                                                     const double* maxima_times, const double* maxima_values,
-                                                     const double* maxima_errors, int n_maxima,
-                                                     const double* w, int n_pre, int n_post,
-                                                     double tau_mem, double tau_syn);
+BackwardMaximaOutput eventprop_backward_maxima(const BackwardMaximaInput* input);
 
 /** Free memory owned by a BackwardMaximaOutput struct. */
 void eventprop_free_backward_maxima_output(BackwardMaximaOutput* output);
@@ -208,13 +237,12 @@ void eventprop_free_batch_spike_output(SpikeOutput* output, int batch_size);
  * Returns array of BackwardSpikesOutput structs (one per sample).
  */
 BackwardSpikesOutput* eventprop_backward_spikes_batch(
-    const double* times, const int32_t* sources,
+    const BackwardInputBase* base,
     const int* n_spikes_per_sample,
     SpikeOutput* fwd_batch,        /* Forward spike outputs from compute_spikes_batch */
     const double* post_errors,
-    int batch_size,
-    const double* w, int n_pre, int n_post,
-    double v_th, double tau_mem, double tau_syn);
+    int batch_size);
+
 
 /** Free memory owned by batch BackwardSpikesOutput array. */
 void eventprop_free_backward_spikes_batch_output(BackwardSpikesOutput* output, int batch_size);
