@@ -143,10 +143,15 @@ static void test_backward_spikes(void)
         post_errors[i] = -1.0;
     }
 
-    BackwardSpikesOutput output = eventprop_backward_spikes(
-        times, sources, n_spikes,
-        fwd_times, fwd_sources, fwd_currents, post_errors, n_spikes,
-        w, n_pre, n_post, 1.0, 0.02, 0.005);
+    SpikeInput input = { .times=times, .sources=sources, .n_spikes=n_spikes };
+    ForwardInputBase base = { .w=w, .n_pre=n_pre, .n_post=n_post,
+                              .tau_mem=0.02, .tau_syn=0.005 };
+    BackwardSpikesInput backward_input = {
+        .base = {.input=&input, .base=&base},
+        .fwd_times=fwd_times, .fwd_sources=fwd_sources, .fwd_currents=fwd_currents,
+        .post_errors=post_errors, .n_post_spikes=n_spikes
+    };
+    BackwardSpikesOutput output = eventprop_backward_spikes(&backward_input);
 
     ASSERT(output.n_pre == n_pre, "wrong pre count");
     ASSERT(output.n_post == n_post, "wrong post count");
@@ -216,10 +221,15 @@ static void test_backward_maxima(void)
         maxima_errors[i] = -1.0;
     }
 
-    BackwardMaximaOutput output = eventprop_backward_maxima(
-        times, sources, n_spikes,
-        maxima_times, maxima_values, maxima_errors, n_post,
-        w, n_pre, n_post, 0.02, 0.005);
+    SpikeInput input = { .times=times, .sources=sources, .n_spikes=n_spikes };
+    ForwardInputBase base = { .w=w, .n_pre=n_pre, .n_post=n_post,
+                              .tau_mem=0.02, .tau_syn=0.005 };
+    BackwardMaximaInput backward_input = {
+        .base = {.input=&input, .base=&base},
+        .maxima_times=maxima_times, .maxima_values=maxima_values,
+        .maxima_errors=maxima_errors, .n_maxima=n_post
+    };
+    BackwardMaximaOutput output = eventprop_backward_maxima(&backward_input);
 
     ASSERT(output.n_pre == n_pre, "wrong pre count");
     eventprop_free_backward_maxima_output(&output);
