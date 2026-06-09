@@ -20,14 +20,25 @@
 extern "C" {
 #endif
 
-/* ── Input spikes (borrowed data, no allocation) ─────────────────────── */
+/* ── Forward pass input structs (borrowed data, no allocation) ─────── */
 
-/** Input spike data — borrowed pointers, no memory management. */
+/** Base forward pass input — common parameters for sums/maxima/spikes. */
 typedef struct {
-    const double* times;           /* Spike times (borrowed) */
-    const int32_t* sources;        /* Source neurons (borrowed) */
-    int n_spikes;                   /* Number of input spikes */
-} SpikeInput;
+    const double* w;           /* Weight matrix (row-major, borrowed) */
+    int n_pre;                 /* Pre-synaptic neurons */
+    int n_post;                /* Post-synaptic neurons */
+    const double* times;       /* Input spike times (borrowed) */
+    const int32_t* sources;   /* Input source neurons (borrowed) */
+    int n_spikes;              /* Number of input spikes */
+    double tau_mem;            /* Membrane time constant (seconds) */
+    double tau_syn;             /* Synaptic time constant (seconds) */
+} ForwardInputBase;
+
+/** Extended forward pass input for spike computation (adds threshold). */
+typedef struct {
+    ForwardInputBase base;   /* Base parameters (must be first member) */
+    double v_th;             /* Spike threshold voltage */
+} ForwardInputSpikes;
 
 /* ── Spike output (owned memory) ─────────────────────────────────────── */
 
