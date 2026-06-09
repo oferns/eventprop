@@ -247,12 +247,16 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
     std::vector<double> post_errors(n_post_spikes, 1.0);
 
     for (auto _ : state) {
-        BackwardSpikesOutput result = eventprop_backward_spikes(
-            times.data(), sources.data(), sz.n_spikes,
-            fwd_result.times, fwd_result.sources, fwd_result.currents,
-            post_errors.data(), n_post_spikes,
-            w.data(), sz.n_pre, sz.n_post,
-            1.0, 0.02, 0.005);
+        SpikeInput input = { .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes };
+        ForwardInputBase base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+                                  .tau_mem=0.02, .tau_syn=0.005 };
+        BackwardSpikesInput backward_input = {
+            .base = {.input=&input, .base=&base},
+            .fwd_times=fwd_result.times, .fwd_sources=fwd_result.sources,
+            .fwd_currents=fwd_result.currents, .post_errors=post_errors.data(),
+            .n_post_spikes=n_post_spikes
+        };
+        BackwardSpikesOutput result = eventprop_backward_spikes(&backward_input);
 
         benchmark::DoNotOptimize(result.grad);
         eventprop_free_backward_spikes_output(&result);
@@ -355,12 +359,16 @@ static void BM_FullTrainingStep(benchmark::State& state, const ProblemSize& sz, 
         std::vector<double> post_errors(fwd.n_spikes, -1.0);
 
         // Backward: gradient computation
-        BackwardSpikesOutput result = eventprop_backward_spikes(
-            times.data(), sources.data(), sz.n_spikes,
-            fwd.times, fwd.sources, fwd.currents,
-            post_errors.data(), fwd.n_spikes,
-            w.data(), sz.n_pre, sz.n_post,
-            1.0, 0.02, 0.005);
+        SpikeInput input = { .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes };
+        ForwardInputBase base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+                                  .tau_mem=0.02, .tau_syn=0.005 };
+        BackwardSpikesInput backward_input = {
+            .base = {.input=&input, .base=&base},
+            .fwd_times=fwd.times, .fwd_sources=fwd.sources,
+            .fwd_currents=fwd.currents, .post_errors=post_errors.data(),
+            .n_post_spikes=fwd.n_spikes
+        };
+        BackwardSpikesOutput result = eventprop_backward_spikes(&backward_input);
 
         benchmark::DoNotOptimize(result.grad);
         benchmark::DoNotOptimize(sums.sum0);
@@ -498,12 +506,14 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
         std::vector<double> post_errors(total_fwd, -1.0);
 
         // Backward: batch gradient computation (pass fwd_batch directly, no copying)
+        SpikeInput input = { .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes };
+        ForwardInputBase base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+                                  .tau_mem=0.02, .tau_syn=0.005 };
+        BackwardInputBase backward_base = { .input=&input, .base=&base };
         BackwardSpikesOutput* result_batch = eventprop_backward_spikes_batch(
-            times.data(), sources.data(), n_spikes_per_sample.data(),
+            &backward_base, n_spikes_per_sample.data(),
             fwd_batch,  /* Pass forward outputs directly */
-            post_errors.data(), batch_size,
-            w.data(), sz.n_pre, sz.n_post,
-            1.0, 0.02, 0.005);
+            post_errors.data(), batch_size);
         
         benchmark::DoNotOptimize(result_batch[0].grad);
         
@@ -614,12 +624,16 @@ static void BM_BackwardSpikesVth(benchmark::State& state)
         gradient = backward(input, post, w_map, v_th, 0.02, 0.005);
         benchmark::DoNotOptimize(gradient.first.data());
 #else
-        BackwardSpikesOutput result = eventprop_backward_spikes(
-            times.data(), sources.data(), n_spikes,
-            fwd.times, fwd.sources, fwd.currents,
-            post_errors.data(), fwd.n_spikes,
-            w.data(), n_pre, n_post,
-            v_th, 0.02, 0.005);
+        SpikeInput input = { .times=times.data(), .sources=sources.data(), .n_spikes=n_spikes };
+        ForwardInputBase base = { .w=w.data(), .n_pre=n_pre, .n_post=n_post,
+                                  .tau_mem=0.02, .tau_syn=0.005 };
+        BackwardSpikesInput backward_input = {
+            .base = {.input=&input, .base=&base},
+            .fwd_times=fwd.times, .fwd_sources=fwd.sources,
+            .fwd_currents=fwd.currents, .post_errors=post_errors.data(),
+            .n_post_spikes=fwd.n_spikes
+        };
+        BackwardSpikesOutput result = eventprop_backward_spikes(&backward_input);
         benchmark::DoNotOptimize(result.grad);
         eventprop_free_backward_spikes_output(&result);
 #endif
@@ -826,12 +840,15 @@ static void BM_BackwardMaxima(benchmark::State& state, const ProblemSize& sz, Da
         gradient = backward(input, maxima, w_map, 0.02, 0.005);
         benchmark::DoNotOptimize(gradient.first.data());
 #else
-        BackwardMaximaOutput result = eventprop_backward_maxima(
-            times.data(), sources.data(), sz.n_spikes,
-            maxima.times, maxima.values,
-            maxima_errors.data(), sz.n_post,
-            w.data(), sz.n_pre, sz.n_post,
-            0.02, 0.005);
+        SpikeInput input = { .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes };
+        ForwardInputBase base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+                                  .tau_mem=0.02, .tau_syn=0.005 };
+        BackwardMaximaInput backward_input = {
+            .base = {.input=&input, .base=&base},
+            .maxima_times=maxima.times, .maxima_values=maxima.values,
+            .maxima_errors=maxima_errors.data(), .n_maxima=sz.n_post
+        };
+        BackwardMaximaOutput result = eventprop_backward_maxima(&backward_input);
         benchmark::DoNotOptimize(result.gradient[0]);
         eventprop_free_backward_maxima_output(&result);
 #endif
