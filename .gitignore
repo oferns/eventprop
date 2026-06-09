@@ -100,3 +100,4 @@ src/cpp_benchmarks/test_omp*
 src/cpp_benchmarks/test_spike_count
 src/cpp_benchmarks/test_threshold
 src/cpp_benchmarks/verify_poisson*
+src/benchmark_results_5x/

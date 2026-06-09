@@ -11,6 +11,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
+#include <errno.h>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -365,6 +366,14 @@ static double toms748_solve(void* ctx, root_fn_t fn, double a, double b) {
 
     double fa = fn(ctx, a), fb = fn(ctx, b);
     if (!isfinite(fa) || !isfinite(fb)) return a;
+
+    /* Precondition: bracket must contain sign change */
+    if (fa * fb > 0) {
+        fprintf(stderr, "toms748_solve: invalid bracket at a=%.10f, b=%.10f (fa=%.2e, fb=%.2e)\n",
+                a, b, fa, fb);
+        errno = EDOM;  // Domain error - root not bracketed
+        return NAN;
+    }
 
     if (a > b) { double tmp=a; a=b; b=tmp; tmp=fa; fa=fb; fb=tmp; }
 

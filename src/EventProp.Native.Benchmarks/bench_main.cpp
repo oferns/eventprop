@@ -73,14 +73,16 @@ static void GenerateBurstData(int n_pre, int n_post, int n_spikes,
 
     int spike_idx = 0;
     for (int nrn = 0; nrn < n_pre && spike_idx < n_spikes; nrn++) {
-        double burst_start = 0.05 + nrn * 0.1;
+        /* Increased spacing between bursts to allow voltage decay */
+        double burst_start = 0.05 + nrn * 0.15; /* Was 0.1 */
         for (int b = 0; burst_start < 1.0 && spike_idx < n_spikes; b++) {
             for (int s = 0; s < 5 && spike_idx < n_spikes; s++) {
                 times[spike_idx] = burst_start + s * 0.002;
                 sources[spike_idx] = nrn;
                 spike_idx++;
             }
-            burst_start += 0.12;
+            /* Increased inter-burst gap to ensure voltage decay */
+            burst_start += 0.2; /* Was 0.12 - need >5*tau_mem = 0.1s */
         }
     }
 }

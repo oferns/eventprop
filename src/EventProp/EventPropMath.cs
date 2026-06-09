@@ -206,7 +206,7 @@ public static class EventPropMath
                         {
                             double vmax = ComputeV(tmax, i, neuronSpikeCount,
                                 buffers.PostSpikeTimes, neuronOffset, buffers.Sum0, buffers.Sum1,
-                                targetNrn, nPost, kPrefactor, tauMem, tauSyn, vTh);
+                                targetNrn, nPost, kPrefactor, 1.0 / tauMem, 1.0 / tauSyn, vTh);
                             if (vmax > vTh + 1e-14)
                             {
                                 double tLower = GetTLower(neuronSpikeCount, buffers.PostSpikeTimes, neuronOffset, tmax);
@@ -214,7 +214,7 @@ public static class EventPropMath
                                 double tPost = Toms748.Solve(
                                     t => ComputeV(t, i, solveSpikeCount,
                                         buffers.PostSpikeTimes, neuronOffset, buffers.Sum0, buffers.Sum1,
-                                        targetNrn, nPost, kPrefactor, tauMem, tauSyn, vTh) - vTh,
+                                        targetNrn, nPost, kPrefactor, 1.0 / tauMem, 1.0 / tauSyn, vTh) - vTh,
                                     tLower, tmax);
                                 if (tPost > tLower && tPost < tmax)
                                 {
@@ -244,7 +244,7 @@ public static class EventPropMath
                             // Check if max voltage exceeds threshold
                             double vmax = ComputeV(tmax, i, neuronSpikeCount,
                                 buffers.PostSpikeTimes, neuronOffset, buffers.Sum0, buffers.Sum1,
-                                targetNrn, nPost, kPrefactor, tauMem, tauSyn, vTh);
+                                targetNrn, nPost, kPrefactor, 1.0 / tauMem, 1.0 / tauSyn, vTh);
                             if (vmax > vTh + 1e-14)
                             {
                                 double tBefore = (i > 0) ? times[i - 1] : 0.0;
@@ -260,7 +260,7 @@ public static class EventPropMath
                                 double tPost = Toms748.Solve(
                                     t => ComputeV(t, i, solveSpikeCount,
                                         buffers.PostSpikeTimes, neuronOffset, buffers.Sum0, buffers.Sum1,
-                                        targetNrn, nPost, kPrefactor, tauMem, tauSyn, vTh) - vTh,
+                                        targetNrn, nPost, kPrefactor, 1.0 / tauMem, 1.0 / tauSyn, vTh) - vTh,
                                     tBefore, tmax);
 
                                 double current = ComputeI(tPost, nSpikes, times,
@@ -280,7 +280,7 @@ public static class EventPropMath
                         // Also check at the input spike time itself
                         double vAtInput = ComputeV(tInput, i, neuronSpikeCount,
                             buffers.PostSpikeTimes, neuronOffset, buffers.Sum0, buffers.Sum1,
-                            targetNrn, nPost, kPrefactor, tauMem, tauSyn, vTh);
+                            targetNrn, nPost, kPrefactor, 1.0 / tauMem, 1.0 / tauSyn, vTh);
                         if (vAtInput > vTh + 1e-14)
                         {
                             double tBefore = (i > 0) ? times[i - 1] : 0.0;
@@ -296,7 +296,7 @@ public static class EventPropMath
                             double tPost = Toms748.Solve(
                                 t => ComputeV(t, i, solveSpikeCount,
                                     buffers.PostSpikeTimes, neuronOffset, buffers.Sum0, buffers.Sum1,
-                                    targetNrn, nPost, kPrefactor, tauMem, tauSyn, vTh) - vTh,
+                                    targetNrn, nPost, kPrefactor, 1.0 / tauMem, 1.0 / tauSyn, vTh) - vTh,
                                 tBefore, tInput);
 
                             double current = ComputeI(tPost, nSpikes, times,
@@ -574,15 +574,15 @@ public static class EventPropMath
         double[] postSpikeTimes, int neuronOffset,
         double[] sum0, double[] sum1,
         int targetNrn, int nPost,
-        double kPrefactor, double tauMem, double tauSyn, double vTh)
+        double kPrefactor, double tauMemInv, double tauSynInv, double vTh)
     {
-        double mem = kPrefactor * (sum1[i * nPost + targetNrn] * Math.Exp(-t / tauMem)
-                        - sum0[i * nPost + targetNrn] * Math.Exp(-t / tauSyn));
+        double mem = kPrefactor * (sum1[i * nPost + targetNrn] * Math.Exp(-t * tauMemInv)
+                        - sum0[i * nPost + targetNrn] * Math.Exp(-t * tauSynInv));
         for (int s = 0; s < spikeCount; s++)
         {
             double spikeTime = postSpikeTimes[neuronOffset + s];
             if (spikeTime > t) break;
-            mem -= vTh * Math.Exp(-(t - spikeTime) / tauMem);
+            mem -= vTh * Math.Exp(-(t - spikeTime) * tauMemInv);
         }
         return mem;
     }

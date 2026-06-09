@@ -1,1 +1,8 @@
 build/
+
+# Binary files
+diagnose_*
+*.dylib
+*.so
+*.a
+*.o

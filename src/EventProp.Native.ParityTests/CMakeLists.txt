@@ -30,6 +30,7 @@ else()
 endif()
 
 # ── Eigen core (stripped copy without pybind11) — build as static lib
+# DISABLED OpenMP to avoid memory allocator contention with C library
 add_library(eventprop_eigen_core STATIC ${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.Cpp.Wrapper/eventprop_eigen_core_stripped.cpp)
 target_include_directories(eventprop_eigen_core PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -37,13 +38,13 @@ target_include_directories(eventprop_eigen_core PRIVATE
     ${BOOST_INCLUDE_DIR}
 )
 
-# OpenMP for parallelization (no CPU-specific flags — let compiler auto-detect)
-if(APPLE AND _BREW_FAIL EQUAL 0)
-    target_include_directories(eventprop_eigen_core PRIVATE ${OpenMP_CXX_INCLUDE_DIRS})
-    target_link_libraries(eventprop_eigen_core PRIVATE ${OpenMP_CXX_LIBRARIES})
-elseif(OpenMP_CXX_FOUND)
-    target_link_libraries(eventprop_eigen_core PRIVATE OpenMP::OpenMP_CXX)
-endif()
+# OpenMP disabled for parity tests - causes bus errors due to memory contention
+# if(APPLE AND _BREW_FAIL EQUAL 0)
+#     target_include_directories(eventprop_eigen_core PRIVATE ${OpenMP_CXX_INCLUDE_DIRS})
+#     target_link_libraries(eventprop_eigen_core PRIVATE ${OpenMP_CXX_LIBRARIES})
+# elseif(OpenMP_CXX_FOUND)
+#     target_link_libraries(eventprop_eigen_core PRIVATE OpenMP::OpenMP_CXX)
+# endif()
 
 # ── Parity test executable (loads C library via dlopen at runtime)
 add_executable(parity_test parity_main.cpp)
@@ -55,6 +56,9 @@ target_include_directories(parity_test PRIVATE
 )
 
 target_link_libraries(parity_test PRIVATE eventprop_eigen_core m dl)
+
+# Disable OpenMP in C library to avoid memory allocator contention
+target_compile_definitions(parity_test PRIVATE _OPENMP=0)
 
 # macOS rpath
 if(APPLE AND _BREW_FAIL EQUAL 0)

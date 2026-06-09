@@ -83,54 +83,104 @@ class LIFLayer(Layer):
     def backward(self):
         lib = NativeApi()
         
-        # Use numpy for fast concatenation (avoids slow Python lists)
+        # Initialize gradient to zero
+        self.gradient[:] = 0.0
+        
+        # Process each sample separately and accumulate gradients
+        n_samples = len(self.input_batch)
+        
+        # Prepare data for batch processing
         all_times = np.concatenate([inp.times for inp in self.input_batch])
         all_sources = np.concatenate([inp.sources for inp in self.input_batch])
+        n_spikes_per_sample = [len(inp.times) for inp in self.input_batch]
+        
         all_fwd_times = np.concatenate([post.times for post in self.post_batch])
         all_fwd_sources = np.concatenate([post.sources for post in self.post_batch])
         
-        # Get currents and errors as numpy arrays (with defaults)
-        fwd_currents_list = []
-        errors_list = []
+        # Get currents and errors as numpy arrays
+        all_fwd_currents = []
+        all_errors = []
         for post in self.post_batch:
             n_spikes = len(post.times)
-            # Get currents (default to zeros if not available)
             currents = getattr(post, 'currents', None)
             if currents is None or len(currents) == 0:
-                fwd_currents_list.append(np.zeros(n_spikes))
+                all_fwd_currents.append(np.zeros(n_spikes, dtype=np.float64))
             else:
-                fwd_currents_list.append(np.asarray(currents, dtype=np.float64))
+                all_fwd_currents.append(np.asarray(currents, dtype=np.float64))
             
-            # Get errors (default to ones if not available)
             errors = getattr(post, 'errors', None)
             if errors is None or len(errors) == 0:
-                errors_list.append(np.ones(n_spikes))
+                all_errors.append(np.ones(n_spikes, dtype=np.float64))
             else:
-                errors_list.append(np.asarray(errors, dtype=np.float64))
+                all_errors.append(np.asarray(errors, dtype=np.float64))
         
-        all_fwd_currents = np.concatenate(fwd_currents_list)
-        all_errors = np.concatenate(errors_list)
+        all_fwd_currents = np.concatenate(all_fwd_currents)
+        all_errors = np.concatenate(all_errors)
         
-        # Call C library directly with numpy arrays (zero-copy via ctypes)
-        output = lib.backward_spikes(
-            times=all_times,
-            sources=all_sources,
-            fwd_times=all_fwd_times,
-            fwd_sources=all_fwd_sources,
-            fwd_currents=all_fwd_currents,
-            post_errors=all_errors,
-            w=self.w_in_flat,  # Use pre-flattened view (zero-copy)
-            n_pre=self.parameters.n_in,
-            n_post=self.parameters.n,
-            v_th=self.parameters.v_th,
-            tau_mem=self.parameters.tau_mem,
-            tau_syn=self.parameters.tau_syn,
-        )
+        # Use batch function if available, otherwise process sequentially
+        n_fwd_spikes_per_sample = [len(post.times) for post in self.post_batch]
         
-        # Zero-copy gradient conversion
-        self.gradient[:] = output.grad.to_numpy().reshape(
-            self.parameters.n_in, self.parameters.n
-        )
+        try:
+            output = lib.backward_spikes_batch(
+                times=all_times,
+                sources=all_sources,
+                n_spikes_per_sample=n_spikes_per_sample,
+                fwd_times=all_fwd_times,
+                fwd_sources=all_fwd_sources,
+                fwd_currents=all_fwd_currents,
+                post_errors=all_errors,
+                n_fwd_spikes_per_sample=n_fwd_spikes_per_sample,
+                batch_size=n_samples,
+                w=self.w_in_flat,
+                n_pre=self.parameters.n_in,
+                n_post=self.parameters.n,
+                v_th=self.parameters.v_th,
+                tau_mem=self.parameters.tau_mem,
+                tau_syn=self.parameters.tau_syn,
+            )
+            
+            # Accumulate gradients from batch output
+            self.gradient[:] = output.grad.to_numpy().reshape(
+                self.parameters.n_in, self.parameters.n
+            )
+        except Exception:
+            # Fallback: process samples sequentially
+            for i in range(n_samples):
+                inp = self.input_batch[i]
+                post = self.post_batch[i]
+                
+                n_spikes = len(inp.times)
+                currents = getattr(post, 'currents', None)
+                if currents is None or len(currents) == 0:
+                    currents = np.zeros(n_spikes, dtype=np.float64)
+                else:
+                    currents = np.asarray(currents, dtype=np.float64)
+                
+                errors = getattr(post, 'errors', None)
+                if errors is None or len(errors) == 0:
+                    errors = np.ones(n_spikes, dtype=np.float64)
+                else:
+                    errors = np.asarray(errors, dtype=np.float64)
+                
+                output = lib.backward_spikes(
+                    times=inp.times,
+                    sources=inp.sources,
+                    fwd_times=post.times,
+                    fwd_sources=post.sources,
+                    fwd_currents=currents,
+                    post_errors=errors,
+                    w=self.w_in_flat,
+                    n_pre=self.parameters.n_in,
+                    n_post=self.parameters.n,
+                    v_th=self.parameters.v_th,
+                    tau_mem=self.parameters.tau_mem,
+                    tau_syn=self.parameters.tau_syn,
+                )
+                
+                # Accumulate gradient
+                self.gradient += output.grad.to_numpy().reshape(
+                    self.parameters.n_in, self.parameters.n
+                )
         
         self._ran_backward = True
         super().backward()

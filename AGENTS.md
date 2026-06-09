@@ -383,6 +383,7 @@ The C library and Eigen core **both use OpenMP** (`#pragma omp parallel for` in 
 - `OMP_NUM_THREADS=1` reduces but doesn't eliminate the issue (still ~10% failure rate)
 - Each library passes large-scale tests **in isolation** (C: 17/17, Eigen direct: 23/23, C API wrapper: 14/14)
 - The parity test was also fixed to use **independent data copies** instead of `Eigen::Map` views onto C-owned buffers — this eliminated buffer aliasing but the race persists
+- **Does NOT affect native benchmarks** (`bench_c` and `bench_cpp` are separate processes, each using only one library)
 
 **Workaround**: Keep parity tests at ≤50×20 scale. Validate large-scale correctness via isolated unit test suites:
 - **C library** — `src/EventProp.C/tests.c` (17 tests, includes 4 large-scale at 200×80)
