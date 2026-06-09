@@ -707,10 +707,12 @@ static void BM_ComputeMaxima(benchmark::State& state, const ProblemSize& sz, Dat
         auto warmup = compute_maxima(w_map, input_spikes, 0.02, 0.005);
         benchmark::DoNotOptimize(warmup.times.data());
 #else
-        MaximaOutput warmup = eventprop_compute_maxima(
-            w.data(), sz.n_pre, sz.n_post,
-            times.data(), sources.data(), sz.n_spikes,
-            0.02, 0.005);
+        ForwardInputBase base_input = {
+            .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+            .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
+            .tau_mem=0.02, .tau_syn=0.005
+        };
+        MaximaOutput warmup = eventprop_compute_maxima(&base_input);
         benchmark::DoNotOptimize(warmup.times);
         eventprop_free_maxima_output(&warmup);
 #endif
@@ -722,10 +724,12 @@ static void BM_ComputeMaxima(benchmark::State& state, const ProblemSize& sz, Dat
         benchmark::DoNotOptimize(maxima.times.data());
         benchmark::DoNotOptimize(maxima.values.data());
 #else
-        MaximaOutput output = eventprop_compute_maxima(
-            w.data(), sz.n_pre, sz.n_post,
-            times.data(), sources.data(), sz.n_spikes,
-            0.02, 0.005);
+        ForwardInputBase base_input = {
+            .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+            .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
+            .tau_mem=0.02, .tau_syn=0.005
+        };
+        MaximaOutput output = eventprop_compute_maxima(&base_input);
         benchmark::DoNotOptimize(output.times);
         benchmark::DoNotOptimize(output.values);
         eventprop_free_maxima_output(&output);
@@ -777,10 +781,12 @@ static void BM_BackwardMaxima(benchmark::State& state, const ProblemSize& sz, Da
     Spikes input = Spikes(e_times, e_sources);
     std::pair<RowMatrixXd, Eigen::ArrayXd> gradient;
 #else
-    MaximaOutput maxima = eventprop_compute_maxima(
-        w.data(), sz.n_pre, sz.n_post,
-        times.data(), sources.data(), sz.n_spikes,
-        0.02, 0.005);
+    ForwardInputBase base_input = {
+        .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+        .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
+        .tau_mem=0.02, .tau_syn=0.005
+    };
+    MaximaOutput maxima = eventprop_compute_maxima(&base_input);
 
     std::vector<double> maxima_errors(sz.n_post, -1.0);
 #endif

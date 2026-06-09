@@ -179,9 +179,12 @@ static void test_compute_maxima(void)
     double w[10*5], times[20]; int32_t sources[20];
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
 
-    MaximaOutput output = eventprop_compute_maxima(w, n_pre, n_post,
-                                                          times, sources, n_spikes,
-                                                          0.02, 0.005);
+    ForwardInputBase base_input = {
+        .w=w, .n_pre=n_pre, .n_post=n_post,
+        .times=times, .sources=sources, .n_spikes=n_spikes,
+        .tau_mem=0.02, .tau_syn=0.005
+    };
+    MaximaOutput output = eventprop_compute_maxima(&base_input);
 
     ASSERT(output.n_post == n_post, "wrong post count");
     eventprop_free_maxima_output(&output);
