@@ -90,9 +90,7 @@ typedef struct {
  * Compute membrane potential maxima with automatic memory allocation.
  * Returns a MaximaOutput struct — caller must free via eventprop_free_maxima_output().
  */
-MaximaOutput eventprop_compute_maxima(const double* w, int n_pre, int n_post,
-                                           const double* times, const int32_t* sources, int n_spikes,
-                                           double tau_mem, double tau_syn);
+MaximaOutput eventprop_compute_maxima(const ForwardInputBase* input);
 
 /** Free memory owned by a MaximaOutput struct. */
 void eventprop_free_maxima_output(MaximaOutput* output);

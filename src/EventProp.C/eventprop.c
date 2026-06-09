@@ -759,53 +759,50 @@ void eventprop_free_sums_output(SumsOutput* output)
 
 /* ── MaximaOutput ───────────────────────────────────────────────────── */
 
-MaximaOutput eventprop_compute_maxima(const double* w, int n_pre, int n_post,
-                                           const double* times, const int32_t* sources, int n_spikes,
-                                           double tau_mem, double tau_syn)
+MaximaOutput eventprop_compute_maxima(const ForwardInputBase* input)
 {
     MaximaOutput result;
-    result.n_post = n_post;
+    result.n_post = input->n_post;
 
     /* Allocate output — always exactly n_post elements */
-    result.times   = calloc(n_post, sizeof(double));
-    result.values  = calloc(n_post, sizeof(double));
+    result.times   = calloc(input->n_post, sizeof(double));
+    result.values  = calloc(input->n_post, sizeof(double));
 
     /* Initialize maxima to "not found" */
-    for (int i = 0; i < n_post; i++) {
+    for (int i = 0; i < input->n_post; i++) {
         result.times[i]   = NAN;
         result.values[i]  = -INFINITY;
     }
 
     /* Use our own alloc function */
-    SumsOutput sums = eventprop_compute_sums(&((ForwardInputBase){.w=w, .n_pre=n_pre, .n_post=n_post,
-    .times=times, .sources=sources, .n_spikes=n_spikes, .tau_mem=tau_mem, .tau_syn=tau_syn}));
+    SumsOutput sums = eventprop_compute_sums(input);
 
     int n_rows = sums.n_rows;
     double* sum0 = sums.sum0;
     double* sum1 = sums.sum1;
 
     /* Find maxima for each post-synaptic neuron */
-    double k_pref = tau_syn / (tau_mem - tau_syn);
-    double tmax_pref = 1.0 / (1.0/tau_mem - 1.0/tau_syn);
-    double tmax_sum = log(tau_syn / tau_mem);
+    double k_pref = input->tau_syn / (input->tau_mem - input->tau_syn);
+    double tmax_pref = 1.0 / (1.0/input->tau_mem - 1.0/input->tau_syn);
+    double tmax_sum = log(input->tau_syn / input->tau_mem);
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) 
 #endif
-    for (int target_nrn = 0; target_nrn < n_post; target_nrn++) {
-        for (int i = 0; i <= n_spikes; i++) {
-            double t_input = (i == n_spikes) ? INFINITY : times[i];
-            double s0 = sum0[i * n_post + target_nrn];
-            double s1 = sum1[i * n_post + target_nrn];
+    for (int target_nrn = 0; target_nrn < input->n_post; target_nrn++) {
+        for (int i = 0; i <= input->n_spikes; i++) {
+            double t_input = (i == input->n_spikes) ? INFINITY : input->times[i];
+            double s0 = sum0[i * input->n_post + target_nrn];
+            double s1 = sum1[i * input->n_post + target_nrn];
 
             /* Analytical tmax from log(s1/s0) */
             if (s0 > 0 && s1 > 0) {
                 double tmax = tmax_pref * (tmax_sum + log(s1 / s0));
 
-                if (!isinf(tmax) && (i == 0 || times[i-1] <= tmax) &&
-                    (i == n_spikes || tmax <= t_input)) {
-                    double vmax = k_pref * (s1 * exp(-tmax/tau_mem) -
-                                            s0 * exp(-tmax/tau_syn));
+                if (!isinf(tmax) && (i == 0 || input->times[i-1] <= tmax) &&
+                    (i == input->n_spikes || tmax <= t_input)) {
+                    double vmax = k_pref * (s1 * exp(-tmax/input->tau_mem) -
+                                            s0 * exp(-tmax/input->tau_syn));
                     if (vmax > result.values[target_nrn]) {
                         result.values[target_nrn] = vmax;
                         result.times[target_nrn]  = tmax;
@@ -815,8 +812,8 @@ MaximaOutput eventprop_compute_maxima(const double* w, int n_pre, int n_post,
 
             /* Also check voltage at input spike time */
             if (t_input < INFINITY) {
-                double v_at_input = k_pref * (s1 * exp(-t_input/tau_mem) -
-                                              s0 * exp(-t_input/tau_syn));
+                double v_at_input = k_pref * (s1 * exp(-t_input/input->tau_mem) -
+                                              s0 * exp(-t_input/input->tau_syn));
                 if (v_at_input > result.values[target_nrn]) {
                     result.values[target_nrn] = v_at_input;
                     result.times[target_nrn]  = t_input;
