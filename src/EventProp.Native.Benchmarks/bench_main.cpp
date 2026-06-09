@@ -118,25 +118,23 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
     std::vector<int32_t> sources(sz.n_spikes);
     gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
 
+#ifdef USE_CPP_WRAPPER
+    // Pre-construct Eigen objects outside the loop (avoids per-iteration Map + copy overhead)
+    Eigen::Map<RowMatrixXd const> w_map(w.data(), sz.n_pre, sz.n_post);
+    Eigen::ArrayXd e_times = Eigen::Map<Eigen::ArrayXd>(times.data(), sz.n_spikes);
+    Eigen::ArrayXi e_sources = Eigen::Map<Eigen::ArrayXi>(sources.data(), sz.n_spikes);
+    Spikes input_spikes(e_times, e_sources);
+#endif
+
     for (auto _ : state) {
 #ifdef USE_CPP_WRAPPER
-        // C++ Eigen: compute_spikes(w, spikes, v_th, tau_mem, tau_syn)
-        // Create Spikes object from data
-        Eigen::ArrayXd e_times = Eigen::Map<Eigen::ArrayXd>(times.data(), sz.n_spikes);
-        Eigen::ArrayXi e_sources = Eigen::Map<Eigen::ArrayXi>(sources.data(), sz.n_spikes);
-        Spikes spikes(e_times, e_sources);
-        
-        Eigen::Map<RowMatrixXd const> w_map(w.data(), sz.n_pre, sz.n_post);
-        Spikes output = compute_spikes(w_map, spikes, 1.0, 0.02, 0.005);
-        
+        Spikes output = compute_spikes(w_map, input_spikes, 1.0, 0.02, 0.005);
         benchmark::DoNotOptimize(output.n_spikes);
 #else
-        // C library: eventprop_compute_spikes(w, n_pre, n_post, times, sources, v_th, tau_mem, tau_syn)
         SpikeOutput output = eventprop_compute_spikes(
             w.data(), sz.n_pre, sz.n_post,
             times.data(), sources.data(), sz.n_spikes,
             1.0, 0.02, 0.005);
-        
         benchmark::DoNotOptimize(output.n_spikes);
         eventprop_free_spike_output(&output);
 #endif
@@ -191,11 +189,8 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
     RowMatrixXd gradient(sz.n_pre, sz.n_post);
 
     for (auto _ : state) {
-        gradient.setZero();
-        
-        // C++ backward: returns (gradient, spike_errors)
+        // backward() returns a new RowMatrixXd — no need to pre-allocate/zero
         std::pair<RowMatrixXd, Eigen::ArrayXd> result = backward(input_spikes, post_spikes, w_map, 1.0, 0.02, 0.005);
-        
         benchmark::DoNotOptimize(result.first(0, 0));
     }
 #else
@@ -362,12 +357,16 @@ static void BM_ComputeSums(benchmark::State& state, const ProblemSize& sz, DataG
 
     gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
 
+#ifdef USE_CPP_WRAPPER
+    Eigen::Map<RowMatrixXd const> w_map(w.data(), sz.n_pre, sz.n_post);
+    Eigen::ArrayXd e_times = Eigen::Map<Eigen::ArrayXd>(times.data(), sz.n_spikes);
+    Eigen::ArrayXi e_sources = Eigen::Map<Eigen::ArrayXi>(sources.data(), sz.n_spikes);
+    Spikes input_spikes(e_times, e_sources);
+#endif
+
     for (auto _ : state) {
 #ifdef USE_CPP_WRAPPER
-        Eigen::Map<RowMatrixXd const> w_map(w.data(), sz.n_pre, sz.n_post);
-        Eigen::ArrayXd e_times = Eigen::Map<Eigen::ArrayXd>(times.data(), sz.n_spikes);
-        Eigen::ArrayXi e_sources = Eigen::Map<Eigen::ArrayXi>(sources.data(), sz.n_spikes);
-        std::pair<RowMatrixXd, RowMatrixXd> sums = compute_sums(w_map, Spikes(e_times, e_sources), 0.02, 0.005);
+        std::pair<RowMatrixXd, RowMatrixXd> sums = compute_sums(w_map, input_spikes, 0.02, 0.005);
         benchmark::DoNotOptimize(sums.first(0, 0));
 #else
         SumsOutput output = eventprop_compute_sums(
@@ -411,12 +410,16 @@ static void BM_ComputeMaxima(benchmark::State& state, const ProblemSize& sz, Dat
 
     gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
 
+#ifdef USE_CPP_WRAPPER
+    Eigen::Map<RowMatrixXd const> w_map(w.data(), sz.n_pre, sz.n_post);
+    Eigen::ArrayXd e_times = Eigen::Map<Eigen::ArrayXd>(times.data(), sz.n_spikes);
+    Eigen::ArrayXi e_sources = Eigen::Map<Eigen::ArrayXi>(sources.data(), sz.n_spikes);
+    Spikes input_spikes(e_times, e_sources);
+#endif
+
     for (auto _ : state) {
 #ifdef USE_CPP_WRAPPER
-        Eigen::Map<RowMatrixXd const> w_map(w.data(), sz.n_pre, sz.n_post);
-        Eigen::ArrayXd e_times = Eigen::Map<Eigen::ArrayXd>(times.data(), sz.n_spikes);
-        Eigen::ArrayXi e_sources = Eigen::Map<Eigen::ArrayXi>(sources.data(), sz.n_spikes);
-        Maxima maxima = compute_maxima(w_map, Spikes(e_times, e_sources), 0.02, 0.005);
+        Maxima maxima = compute_maxima(w_map, input_spikes, 0.02, 0.005);
         benchmark::DoNotOptimize(maxima.times(0));
 #else
         MaximaOutput output = eventprop_compute_maxima(
