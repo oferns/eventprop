@@ -53,9 +53,7 @@ typedef struct {
  * Forward pass with automatic memory allocation.
  * Returns a SpikeOutput struct — caller must free via eventprop_free_spike_output().
  */
-SpikeOutput eventprop_compute_spikes(const double* w, int n_pre, int n_post,
-                                           const double* times, const int32_t* sources, int n_spikes,
-                                           double v_th, double tau_mem, double tau_syn);
+SpikeOutput eventprop_compute_spikes(const ForwardInputSpikes* input);
 
 /** Free memory owned by a SpikeOutput struct. */
 void eventprop_free_spike_output(SpikeOutput* output);

@@ -1227,11 +1227,15 @@ SpikeOutput* eventprop_compute_spikes_batch(
         int n_spikes = n_spikes_per_sample[b];
         
         /* Call single-sample function for this batch element */
-        result[b] = eventprop_compute_spikes(
-            w, n_pre, n_post,
-            times + offset, sources + offset, n_spikes,
-            v_th, tau_mem, tau_syn
-        );
+        ForwardInputSpikes spikes_input = {
+            .base = {
+                .w=w, .n_pre=n_pre, .n_post=n_post,
+                .times=times + offset, .sources=sources + offset, .n_spikes=n_spikes,
+                .tau_mem=tau_mem, .tau_syn=tau_syn
+            },
+            .v_th = v_th
+        };
+        result[b] = eventprop_compute_spikes(&spikes_input);
     }
     
     free(offsets);
