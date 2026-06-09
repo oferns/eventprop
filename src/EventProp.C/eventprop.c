@@ -257,6 +257,46 @@ static double dot_product_simd(const double* a, const double* b, int n)
     return sum;
 }
 
+/* Vector subtraction: dest[j] = a[j] - b[j] */
+static void vsub_simd(double* dest, const double* a, const double* b, int n)
+{
+    if (!simd_available() || n < 2) {
+        for (int j = 0; j < n; j++)
+            dest[j] = a[j] - b[j];
+        return;
+    }
+
+    int vec = simd_vec_width();
+    int vec_count = n / vec;
+
+#if defined(HAVE_AVX512F) || defined(HAVE_AVX2)
+    {
+        for (int i = 0; i < vec_count; i++) {
+#if defined(HAVE_AVX512F)
+            __m512d va = _mm512_loadu_pd(a + i * vec);
+            __m512d vb = _mm512_loadu_pd(b + i * vec);
+            _mm512_storeu_pd(dest + i * vec, _mm512_sub_pd(va, vb));
+#else
+            __m256d va = _mm256_loadu_pd(a + i * vec);
+            __m256d vb = _mm256_loadu_pd(b + i * vec);
+            _mm256_storeu_pd(dest + i * vec, _mm256_sub_pd(va, vb));
+#endif
+        }
+    }
+#elif defined(__ARM_NEON)
+    {
+        for (int i = 0; i < vec_count; i++) {
+            float64x2_t va = vld1q_f64(a + i * vec);
+            float64x2_t vb = vld1q_f64(b + i * vec);
+            vst1q_f64(dest + i * vec, vsubq_f64(va, vb));
+        }
+    }
+#endif
+
+    for (int j = vec_count * vec; j < n; j++)
+        dest[j] = a[j] - b[j];
+}
+
 /* Merge spike comparison for qsort (descending by time) */
 typedef struct { double time; int idx; int is_input; } AllocMergedSpike;
 
@@ -466,7 +506,7 @@ SpikeOutput eventprop_compute_spikes(const double* w, int n_pre, int n_post,
     }
 
 #ifdef _OPENMP
-#pragma omp parallel for schedule(static) if(n_post >= 20)
+#pragma omp parallel for schedule(static) 
 #endif
     for (int target_nrn = 0; target_nrn < n_post; target_nrn++) {
         if (target_nrn == 0) {
@@ -754,7 +794,7 @@ MaximaOutput eventprop_compute_maxima(const double* w, int n_pre, int n_post,
     double tmax_sum = log(tau_syn / tau_mem);
 
 #ifdef _OPENMP
-#pragma omp parallel for schedule(static) if(n_post >= 20)
+#pragma omp parallel for schedule(static) 
 #endif
     for (int target_nrn = 0; target_nrn < n_post; target_nrn++) {
         for (int i = 0; i <= n_spikes; i++) {
@@ -878,8 +918,7 @@ BackwardSpikesOutput eventprop_backward_spikes(const double* times, const int32_
             int use_stack = (n_post <= BACKWARD_DIFF_STACK_SIZE);
             double* diff = use_stack ? stack_diff : malloc(n_post * sizeof(double));
 
-            for (int j = 0; j < n_post; j++)
-                diff[j] = lambda_v[j] - lambda_i[j];
+            vsub_simd(diff, lambda_v, lambda_i, n_post);
             double outbound = dot_product_simd(w + spike_source * n_post, diff, n_post);
             all_errors[spike_idx] += outbound;
 
