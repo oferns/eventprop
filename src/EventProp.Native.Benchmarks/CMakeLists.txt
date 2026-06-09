@@ -79,6 +79,7 @@ target_include_directories(eventprop_eigen_core PRIVATE
 # OpenMP for parallelization
 if(APPLE AND _BREW_FAIL EQUAL 0)
     target_include_directories(eventprop_eigen_core PRIVATE ${OpenMP_CXX_INCLUDE_DIRS})
+    target_compile_options(eventprop_eigen_core PRIVATE -Xpreprocessor -fopenmp)
     target_link_libraries(eventprop_eigen_core PRIVATE ${OpenMP_CXX_LIBRARIES})
 elseif(OpenMP_CXX_FOUND)
     target_link_libraries(eventprop_eigen_core PRIVATE OpenMP::OpenMP_CXX)

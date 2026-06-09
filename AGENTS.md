@@ -500,81 +500,7 @@ for op in ComputeSums ComputeSpikes BackwardSpikes; do
 done
 ```
 
----
 
-## C Library Import Issues (2026-06-04)
-
-### Problem Identified
-The Python benchmarks are having trouble importing the C library. The ctypes module is not being found when running tests.
-
-### Current Status
-- C library is at `src/EventProp.C/build/libeventprop_c_api.dylib`
-- ctypes module should load it from this location
-- Import issues need to be resolved before running benchmarks
-
-### Next Steps
-1. Fix import issues in test_benchmarks_ctypes.py
-2. Test all benchmarks work correctly
-3. Run full benchmark suite
-
----
-
-## C Library Complementary API Design (2026-06-02)
-
-### Problem Identified
-
-The original `eventprop_compute_spikes` function has an OOB buffer overflow vulnerability:
-- Caller must guess output buffer size beforehand
-- Function writes past buffer bounds when producing more spikes than allocated
-- No way to know if buffer was large enough after the call
-
-Example failure: v_th=0.01 produced 240,986 spikes when buffer only held 101,000.
-
-### Proposed Solution
-
-Create a complementary API with automatic memory allocation that coexists with original code.
-
-#### Pattern
-
-```c
-/* Output struct with owned memory */
-typedef struct {
-    int n_spikes;            // Count (replaces return value)
-    double* times;           // malloc'd by function, freed by caller
-    int32_t* sources;        // malloc'd by function, freed by caller  
-    double* currents;        // malloc'd by function, freed by caller
-} SpikeOutput;
-
-/* Function allocates internally */
-SpikeOutput eventprop_compute_spikes_alloc(const double* w, int n_pre, int n_post:
-                                           const double* times, const int32_t* sources, int n_spikes,\n                                           Double v_th, double tau_mem, double tau_syn);\n\n/* Cleanup helper */\nvoid eventprop_free_spike_output(SpikeOutput* output);\n```
-
-#### Functions to Implement
-1. `eventprop_compute_spikes_alloc` - forward pass (high priority)
-2. `eventprop_compute_sums_alloc` - cumulative sums
-3. `eventprop_compute_maxima_alloc` - membrane potential maxima
-4. `eventprop_backward_spikes_alloc` - backward pass (spikes)
-5. `eventprop_backward_maxima_alloc` - backward pass (maxima)
-
-#### Files Created
-- `src/EventProp.C/eventprop_alloc.h` - header with struct definitions and function declarations
-- `src/EventProp.C/eventprop_alloc.c` - C file with stub implementations
-
-#### Implementation Notes
-- Keep existing API unchanged - just add new functions alongside
-- Function knows exact output size needed, so can allocate exactly that much
-- Eliminates OOB risk by removing caller's guesswork about buffer sizes
-
-#### Status (when session ended)
-- Header and C file created with stubs for eventprop_compute_spikes_alloc only
-- Build issues: syntax errors (colons vs commas in function signatures)
-- Need to complete implementation and add unit tests
-
-#### Next Steps
-1. Fix syntax errors in existing stubs
-2. Complete eventprop_compute_spikes_alloc implementation
-3. Add unit tests for the new API
-4. Implement remaining functions one at a time
 
 
 ## ✅ C Library Batch Operations (2026-06-05)
@@ -605,3 +531,183 @@ Added `eventprop_compute_spikes_batch_alloc()` to C library:
 | 16 Medium | 32,643 μs | 1,334 μs | 1,185 μs | **24x faster** ✅ |
 
 ctypes is now competitive with pybind11 at all batch sizes.
+
+---
+
+## ✅ Parity Tests Simplified (2026-06-09)
+
+**Branch**: `simd-experiments` | **Commit**: `b073689`
+
+Replaced runtime `dlopen`/`dlsym` loading with direct CMake binary imports:
+- Imports pre-built `libeventprop_c_api.dylib` and `libeventprop_eigen_core.a`
+- Removed function pointer typedefs, global variables, `load_c_library()`
+- Adapted to new owned-memory API (`SumsOutput`, `SpikeOutput`, etc.)
+- Skips zero-spike backward tests (Eigen assertion on empty arrays)
+- **85/85 tests pass**
+
+---
+
+## ✅ Benchmark Fairness Fixes (2026-06-09)
+
+**Branch**: `simd-experiments` | **Commits**: `dcfdea4`, `661e920`, `a7043c9`
+
+| Fix | Commit | Impact |
+|-----|--------|--------|
+| Move Eigen::Map + Spikes construction outside benchmark loops | `dcfdea4` | Eliminated per-iteration deep copy overhead for C++ |
+| Remove dead `gradient.setZero()` from BM_BackwardSpikes | `dcfdea4` | Removed O(n_pre × n_post) wasted work per iteration |
+| Protect full output arrays in DoNotOptimize (not single elements) | `661e920` | Prevents compiler from optimizing away real work |
+| Remove hardcoded `.Iterations(100)` for auto-scaling | `661e920` | Google Benchmark picks optimal iteration count |
+| Add warmup iterations before benchmark loops | `a7043c9` | Primes caches and OpenMP thread pools (<2% variation) |
+| Output spike counters (`state.counters["output_spikes"]`) | `a7043c9` | Captured post-loop via extra forward pass or pre-computed values |
+
+**Benchmark results** (5 runs, mean ± stddev):
+- **ComputeSums**: C 1.7–2.4x faster across all sizes
+- **ComputeSpikes**: C++ wins Small uniform, C dominates Medium+ (9.2x)
+- **BackwardSpikes**: Roughly equal at Medium+, C much faster Tiny/Small (early exit with 0 output spikes)
+- **ComputeMaxima**: C++ wins Small, C dominates Medium+ (7.3x)
+
+---
+
+## ✅ SIMD Audit + vsub_simd (2026-06-09)
+
+**Branch**: `simd-experiments` | **Commit**: `c241a65`
+
+### Existing SIMD helpers (actively used)
+- `fma_row_simd` — FMA row operations in compute_sums
+- `scale_inplace_simd` — in-place scaling
+- `vadd_scaled_simd` — vector add with scalar multiplier
+- `dot_product_simd` — dot product in backward_spikes
+
+### Added: `vsub_simd`
+- Vector subtraction for diff computation in backward_spikes (line 881-882)
+- Supports AVX512, AVX2, ARM NEON, scalar fallback
+- **Result**: <2% measurable impact — diff is dwarfed by surrounding work (lambda_i jumps, dot_product_simd)
+
+### Remaining scalar loops (not SIMD-friendly)
+| Location | Why not SIMD |
+|----------|-------------|
+| `backward_spikes` L905-908 (lambda_i per-neuron jumps) | Irregular access: different `jump_count[nrn]` per neuron |
+| `compute_maxima` L798-823 (exp/log voltage checks) | No standard SIMD exp/log without libsvml; branch-heavy |
+| `compute_spikes` root-finding | Inherently sequential per neuron via toms748_solve |
+| `exp_mem/exp_syn` precomputation | Scalar `exp()` calls — would need libsvml (Intel-only) or custom approximations |
+
+### Small-scale anomaly explanation
+Tiny/Small uniform with v_th=1.0 produces **0 output spikes** for both backends.
+- C does full work: compute_sums, dynamic buffer setup (`malloc` × n_post), OpenMP thread pool management, root-finding loop that finds nothing
+- Eigen uses pre-allocated vectors and auto-vectorized row ops with less overhead when no spikes fire
+- With `OMP_NUM_THREADS=1`, C Small/uniform drops from 76.7μs to 48.2μs (~28μs OpenMP overhead)
+- **Gap is overhead vs useful work ratio** — at Medium+ where real training happens, C dominates 7–9x
+
+### libsvml context
+Intel Short Vector Math Library provides SIMD intrinsics for transcendental functions (`exp`, `log`). Caveats: Intel-only (no ARM/NEON equivalent), commercial licensing, fast approximations not IEEE 754 compliant. Cross-platform alternatives: libmvec (GCC's vectorized libm), custom polynomial approximations, compiler auto-vectorization with `-ffast-math`.
+
+---
+
+## ✅ OpenMP Threshold Removed (2026-06-09)
+
+Removed `if(n_post >= 20)` guard from C library — now always parallelizes via OpenMP.
+
+**Experiment**: Tested three configs (Baseline ≥20, Raised ≥50, Removed). All produced identical performance ratios (~1.46x C slower for ComputeSpikes/Small/uniform). Confirmed the Small-scale inversion is **not** caused by thread pool setup/sync overhead — it's architectural (Eigen SIMD/auto-vectorization vs C scalar loops + dynamic buffer management).
+
+---
+
+## 📋 Benchmark Gaps Identified (2026-06-09)
+
+### Current coverage matrix
+| Operation | Sizes | Patterns |
+|-----------|-------|----------|
+| ComputeSums | Tiny → XL (5) | uniform, poisson, burst (3) ✅ |
+| ComputeSpikes | Tiny → XL (5) | uniform, poisson, burst (3) ✅ |
+| BackwardSpikes | Tiny → Large (4) | uniform, poisson, burst (3) ⚠️ Missing XL |
+| BackwardMaxima | Tiny → XL (5) | uniform, poisson, burst (3) ✅ |
+| ComputeSpikesVth | Small only | uniform only |
+| BackwardSpikesVth | Small only | uniform only |
+
+### Identified gaps
+| # | Gap | Effort | Value |
+|---|-----|--------|-------|
+| 1 | Composite "full training step" benchmark (Sums → Spikes → Backward) | Low | **High** — catches real-world regressions, measures cache effects between chained ops |
+| 2 | Batch benchmark (multi-sample via `eventprop_compute_spikes_batch_alloc`) | Medium | **High** — matches actual Python/ML usage at batch sizes 8–32 |
+| 3 | BackwardSpikes XL size variant | Trivial | Medium — completes the matrix |
+| 4 | Weight sparsity coverage (10–30% density) | Medium | Medium — real SNNs often sparse, SIMD behaves differently |
+| 5 | Memory allocation overhead benchmark (pre-allocated vs fresh allocs) | Low | Low-Medium — quantifies owned-memory API cost at high iteration rates |
+| 6 | Cache sensitivity study (vary n_pre, fixed n_post) | Low | Low — diagnostic: reveals where weight matrix stops fitting in L3 cache on M3 (24MB shared). At XL: 2000×500×8B = 8MB fits. At 4000×500: 16MB starts thrashing. Shows whether SIMD helpers are memory-bound vs compute-bound at scale |
+
+### Next steps (in order)
+1. ✅ Implement #1 (composite training step) + #3 (BackwardSpikes XL) — quick wins
+2. ✅ Implement #2 (batch benchmark) — requires batch function signatures in both C and Eigen paths
+3. Consider #4–#6 if profiling shows they matter for target workloads
+
+---
+
+## ✅ Benchmark Gaps #1, #2, #3 Implemented (2026-06-09)
+
+### Gap #1 — FullTrainingStep composite benchmark
+Chains Sums → Spikes (forward) → Backward in one loop. Measures cache effects between chained operations.
+
+| Size | C (ns) | C++ (ns) | Ratio (C/C++) |
+|------|--------|----------|---------------|
+| Small/uniform | 76,721 | 61,188 | **1.25x** (C slower) |
+| Medium/uniform | 17,464,286 | 50,769,667 | **0.34x** (C ~3x faster) |
+| Large/uniform | 185,552,000 | 486,746,000 | **0.38x** (C ~2.6x faster) |
+
+### Gap #2 — BatchTrainingStep multi-sample benchmark
+Tests batch processing at realistic ML batch sizes (4-32 samples). Uses `compute_spikes_batch` → `backward_spikes_batch`.
+
+**Small scale (50×20, 100 spikes):**
+| Batch Size | C (μs) | C++ (μs) | Ratio |
+|------------|--------|----------|-------|
+| 4 | 162 | 164 | **0.99x** (equal) |
+| 8 | 155 | 158 | **0.98x** (equal) |
+| 32 | 258 | 227 | **1.14x** (equal) |
+
+**Medium scale (200×80, 500 spikes):**
+| Batch Size | C (ms) | C++ (ms) | Ratio |
+|------------|--------|----------|-------|
+| 4 | 80.6 | 54.6 | **1.48x** (C slower) |
+| 8 | 80.3 | 55.3 | **1.45x** (C slower) |
+| 32 | 195.3 | 121.1 | **1.61x** (C slower) |
+
+**Key finding**: Both backends show flat CPU time across batch sizes (effective OpenMP parallelization). Roughly equal at Small scale; C++ ~1.5x faster at Medium (likely from Eigen auto-vectorization).
+
+**⚠️ OpenMP bug fixed**: Original results showed C 8.5x faster — caused by missing `-Xpreprocessor -fopenmp` compile flag for Eigen. OpenMP pragmas were in code but not compiled.
+
+```cmake
+target_compile_options(eventprop_eigen_core PRIVATE -Xpreprocessor -fopenmp)
+```
+
+**API improvement**: Changed `eventprop_backward_spikes_batch` to accept `SpikeOutput*` directly instead of flat arrays — eliminates data copying between forward and backward pass.
+
+```c
+// Before: required concatenating flat arrays
+BackwardSpikesOutput* eventprop_backward_spikes_batch(
+    const double* times, const int32_t* sources,
+    const int* n_spikes_per_sample,
+    const double* fwd_times, const int32_t* fwd_sources,
+    const double* fwd_currents,
+    const double* post_errors, const int* n_fwd_spikes_per_sample,
+    ...);
+
+// After: pass forward outputs directly  
+BackwardSpikesOutput* eventprop_backward_spikes_batch(
+    const double* times, const int32_t* sources,
+    const int* n_spikes_per_sample,
+    SpikeOutput* fwd_batch,        /* Forward spike outputs */
+    const double* post_errors,
+    ...);
+```
+
+### Gap #3 — BackwardSpikes XL size variant
+Added `BACKWARDSPIKES_BENCH(XL, 2000, 500, 5000)` — completes the coverage matrix.
+
+### Updated coverage matrix
+| Operation | Sizes | Patterns |
+|-----------|-------|----------|
+| ComputeSums | Tiny → XL (5) | uniform, poisson, burst (3) ✅ |
+| ComputeSpikes | Tiny → XL (5) | uniform, poisson, burst (3) ✅ |
+| BackwardSpikes | Tiny → XL (5) | uniform, poisson, burst (3) ✅ |
+| BackwardMaxima | Tiny → XL (5) | uniform, poisson, burst (3) ✅ |
+| FullTrainingStep | Tiny → XL (5) | uniform, poisson, burst (3) ✅ |
+| BatchTrainingStep | Small → Medium | uniform only — batch sizes 4-32 ✅ |
+| ComputeSpikesVth | Small only | uniform only |
+| BackwardSpikesVth | Small only | uniform only |

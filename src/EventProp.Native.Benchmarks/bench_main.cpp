@@ -268,6 +268,235 @@ BACKWARDSPIKES_BENCH(Tiny,    10,   5,   20);
 BACKWARDSPIKES_BENCH(Small,   50,   20,  100);
 BACKWARDSPIKES_BENCH(Medium,  200,  80,  500);
 BACKWARDSPIKES_BENCH(Large,   500,  200, 1000);
+BACKWARDSPIKES_BENCH(XL,      2000, 500, 5000);
+// ============================================================
+// Benchmark: FullTrainingStep (composite — Sums → Spikes → Backward)
+// Measures the full forward + backward training pipeline end-to-end.
+// Catches real-world regressions and measures cache effects between chained ops.
+// ============================================================
+
+static void BM_FullTrainingStep(benchmark::State& state, const ProblemSize& sz, DataGenerator gen)
+{
+    std::vector<double> w(sz.n_pre * sz.n_post);
+    std::vector<double> times(sz.n_spikes);
+    std::vector<int32_t> sources(sz.n_spikes);
+    gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
+
+#ifdef USE_CPP_WRAPPER
+    Eigen::Map<RowMatrixXd const> w_map(w.data(), sz.n_pre, sz.n_post);
+    Eigen::ArrayXd e_times = Eigen::Map<Eigen::ArrayXd>(times.data(), sz.n_spikes);
+    Eigen::ArrayXi e_sources = Eigen::Map<Eigen::ArrayXi>(sources.data(), sz.n_spikes);
+    Spikes input_spikes(e_times, e_sources);
+
+    // Warmup: full pipeline to prime caches and OpenMP thread pools
+    {
+        auto sums = compute_sums(w_map, input_spikes, 0.02, 0.005);
+        benchmark::DoNotOptimize(sums.first.data());
+        Spikes post = compute_spikes(w_map, input_spikes, 1.0, 0.02, 0.005);
+        benchmark::DoNotOptimize(post.times);
+    }
+
+    for (auto _ : state) {
+        // Forward: sums + spikes
+        auto sums = compute_sums(w_map, input_spikes, 0.02, 0.005);
+        Spikes post = compute_spikes(w_map, input_spikes, 1.0, 0.02, 0.005);
+
+        // Set errors for backward pass
+        for (int i = 0; i < post.n_spikes; i++)
+            post.set_error(i, -1.0);
+
+        // Backward: gradient computation
+        auto result = backward(input_spikes, post, w_map, 1.0, 0.02, 0.005);
+        benchmark::DoNotOptimize(result.first.data());
+        benchmark::DoNotOptimize(sums.first.data());
+    }
+#else
+    // C library: warmup forward pass to get post-spike data
+    SpikeOutput fwd_warmup = eventprop_compute_spikes(
+        w.data(), sz.n_pre, sz.n_post,
+        times.data(), sources.data(), sz.n_spikes,
+        1.0, 0.02, 0.005);
+    benchmark::DoNotOptimize(fwd_warmup.times);
+    eventprop_free_spike_output(&fwd_warmup);
+
+    for (auto _ : state) {
+        // Forward: sums + spikes
+        SumsOutput sums = eventprop_compute_sums(
+            w.data(), sz.n_pre, sz.n_post,
+            times.data(), sources.data(), sz.n_spikes,
+            0.02, 0.005);
+
+        SpikeOutput fwd = eventprop_compute_spikes(
+            w.data(), sz.n_pre, sz.n_post,
+            times.data(), sources.data(), sz.n_spikes,
+            1.0, 0.02, 0.005);
+
+        // Set errors for backward pass (all -1.0)
+        std::vector<double> post_errors(fwd.n_spikes, -1.0);
+
+        // Backward: gradient computation
+        BackwardSpikesOutput result = eventprop_backward_spikes(
+            times.data(), sources.data(), sz.n_spikes,
+            fwd.times, fwd.sources, fwd.currents,
+            post_errors.data(), fwd.n_spikes,
+            w.data(), sz.n_pre, sz.n_post,
+            1.0, 0.02, 0.005);
+
+        benchmark::DoNotOptimize(result.grad);
+        benchmark::DoNotOptimize(sums.sum0);
+
+        eventprop_free_backward_spikes_output(&result);
+        eventprop_free_spike_output(&fwd);
+        eventprop_free_sums_output(&sums);
+    }
+#endif
+
+    state.SetItemsProcessed(state.iterations() * sz.n_spikes);
+}
+
+#define FULLTRAINING_BENCH(SizeName, NP, NPO, NS)                                              \
+    BENCHMARK_CAPTURE(BM_FullTrainingStep, SizeName##_uniform,                                 \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(                    \
+        "FullTrainingStep/" #SizeName "/uniform/default");                                      \
+    BENCHMARK_CAPTURE(BM_FullTrainingStep, SizeName##_poisson,                                 \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(                    \
+        "FullTrainingStep/" #SizeName "/poisson/default");                                      \
+    BENCHMARK_CAPTURE(BM_FullTrainingStep, SizeName##_burst,                                   \
+        {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(                      \
+        "FullTrainingStep/" #SizeName "/burst/default")
+
+FULLTRAINING_BENCH(Tiny,    10,   5,   20);
+FULLTRAINING_BENCH(Small,   50,   20,  100);
+FULLTRAINING_BENCH(Medium,  200,  80,  500);
+FULLTRAINING_BENCH(Large,   500,  200, 1000);
+FULLTRAINING_BENCH(XL,      2000, 500, 5000);
+
+// ============================================================
+// Benchmark: BatchTrainingStep (multi-sample forward + backward)
+// Tests batch processing at realistic ML batch sizes (4-32 samples).
+// Matches actual Python/ML usage patterns.
+// ============================================================
+
+static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz, DataGenerator gen)
+{
+    int batch_size = state.range(0); // batch size from benchmark args
+    
+    std::vector<double> w(sz.n_pre * sz.n_post);
+    gen(sz.n_pre, sz.n_post, 0, w.data(), nullptr, nullptr); // weights only
+    
+#ifdef USE_CPP_WRAPPER
+    Eigen::Map<RowMatrixXd const> w_map(w.data(), sz.n_pre, sz.n_post);
+    
+    // Generate per-sample data
+    std::vector<Spikes> input_batch(batch_size);
+    for (int b = 0; b < batch_size; b++) {
+        std::vector<double> times(sz.n_spikes);
+        std::vector<int32_t> sources(sz.n_spikes);
+        // Vary RNG seed per sample
+        std::mt19937 rng(42 + b);
+        std::uniform_real_distribution<double> w_dist(0.5, 2.0);
+        for (int i = 0; i < sz.n_spikes; i++) {
+            times[i] = (i + 1) / static_cast<double>(sz.n_spikes + 1);
+            sources[i] = std::uniform_int_distribution<int32_t>(0, sz.n_pre - 1)(rng);
+        }
+        input_batch[b] = Spikes(Eigen::Map<Eigen::ArrayXd>(times.data(), sz.n_spikes),
+                               Eigen::Map<Eigen::ArrayXi>(sources.data(), sz.n_spikes));
+    }
+
+    for (auto _ : state) {
+        // Forward: batch compute spikes
+        std::vector<Spikes> post_batch = compute_spikes_batch(w_map, input_batch, 1.0, 0.02, 0.005);
+        
+        // Set errors for backward pass
+        for (int b = 0; b < batch_size; b++) {
+            for (int i = 0; i < post_batch[b].n_spikes; i++)
+                post_batch[b].set_error(i, -1.0);
+        }
+
+        // Backward: batch gradient computation (accumulates into shared buffer)
+        RowMatrixXd gradient(sz.n_pre, sz.n_post);
+        backward_spikes_batch(input_batch, post_batch, w_map, gradient, 1.0, 0.02, 0.005);
+        benchmark::DoNotOptimize(gradient.data());
+    }
+#else
+    // C library: flat arrays + per-sample spike counts
+    std::vector<double> times(batch_size * sz.n_spikes);
+    std::vector<int32_t> sources(batch_size * sz.n_spikes);
+    std::vector<int> n_spikes_per_sample(batch_size, sz.n_spikes);
+    
+    for (int b = 0; b < batch_size; b++) {
+        std::mt19937 rng(42 + b);
+        for (int i = 0; i < sz.n_spikes; i++) {
+            times[b * sz.n_spikes + i] = (i + 1) / static_cast<double>(sz.n_spikes + 1);
+            sources[b * sz.n_spikes + i] = std::uniform_int_distribution<int32_t>(0, sz.n_pre - 1)(rng);
+        }
+    }
+
+    // Warmup: run forward pass to determine max output sizes
+    {
+        SpikeOutput* warmup = eventprop_compute_spikes_batch(
+            w.data(), sz.n_pre, sz.n_post,
+            times.data(), sources.data(),
+            n_spikes_per_sample.data(), batch_size,
+            1.0, 0.02, 0.005);
+        int total_fwd = 0;
+        for (int b = 0; b < batch_size; b++)
+            total_fwd += warmup[b].n_spikes;
+        // Pre-allocate buffers large enough for all samples
+        std::vector<double> fwd_times(total_fwd);
+        std::vector<int32_t> fwd_sources(total_fwd);
+        std::vector<double> fwd_currents(total_fwd);
+        std::vector<double> post_errors(total_fwd, -1.0);
+        eventprop_free_batch_spike_output(warmup, batch_size);
+    }
+
+    // Pre-allocate buffers outside loop (reuse each iteration)
+    std::vector<double> fwd_times(batch_size * sz.n_spikes);
+    std::vector<int32_t> fwd_sources(batch_size * sz.n_spikes);
+    std::vector<double> fwd_currents(batch_size * sz.n_spikes);
+    std::vector<double> post_errors(batch_size * sz.n_spikes, -1.0);
+    std::vector<int> n_fwd_spikes_per_sample(batch_size);
+
+    for (auto _ : state) {
+        // Forward: batch compute spikes
+        SpikeOutput* fwd_batch = eventprop_compute_spikes_batch(
+            w.data(), sz.n_pre, sz.n_post,
+            times.data(), sources.data(),
+            n_spikes_per_sample.data(), batch_size,
+            1.0, 0.02, 0.005);
+        
+        // Set errors for backward pass
+        int total_fwd = 0;
+        for (int b = 0; b < batch_size; b++)
+            total_fwd += fwd_batch[b].n_spikes;
+        std::vector<double> post_errors(total_fwd, -1.0);
+
+        // Backward: batch gradient computation (pass fwd_batch directly, no copying)
+        BackwardSpikesOutput* result_batch = eventprop_backward_spikes_batch(
+            times.data(), sources.data(), n_spikes_per_sample.data(),
+            fwd_batch,  /* Pass forward outputs directly */
+            post_errors.data(), batch_size,
+            w.data(), sz.n_pre, sz.n_post,
+            1.0, 0.02, 0.005);
+        
+        benchmark::DoNotOptimize(result_batch[0].grad);
+        
+        eventprop_free_backward_spikes_batch_output(result_batch, batch_size);
+        eventprop_free_batch_spike_output(fwd_batch, batch_size);
+    }
+#endif
+
+    state.SetItemsProcessed(state.iterations() * batch_size * sz.n_spikes);
+}
+
+#define BATCHTRAINING_BENCH(SizeName, NP, NPO, NS)                                              \
+    BENCHMARK_CAPTURE(BM_BatchTrainingStep, SizeName##_uniform,                                 \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->ArgNames({"batch_size"}) \
+        ->RangeMultiplier(1)->DenseRange(4, 32, 4)->Name("BatchTrainingStep/" #SizeName "/uniform/default")
+
+BATCHTRAINING_BENCH(Small,   50,   20,  100);
+BATCHTRAINING_BENCH(Medium,  200,  80,  500);
+
 // ============================================================
 // Threshold Voltage (v_th) Variation Benchmarks
 // Tests how different threshold settings affect performance

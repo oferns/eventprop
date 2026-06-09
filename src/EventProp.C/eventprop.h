@@ -199,10 +199,8 @@ void eventprop_free_batch_spike_output(SpikeOutput* output, int batch_size);
 BackwardSpikesOutput* eventprop_backward_spikes_batch(
     const double* times, const int32_t* sources,
     const int* n_spikes_per_sample,
-    const double* fwd_times, const int32_t* fwd_sources,
-    const double* fwd_currents,
+    SpikeOutput* fwd_batch,        /* Forward spike outputs from compute_spikes_batch */
     const double* post_errors,
-    const int* n_fwd_spikes_per_sample,
     int batch_size,
     const double* w, int n_pre, int n_post,
     double v_th, double tau_mem, double tau_syn);
