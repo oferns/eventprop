@@ -1003,13 +1003,17 @@ BackwardSpikesOutput* eventprop_backward_spikes_batch(
         int n_fwd_spikes = fwd_batch[b].n_spikes;
         
         /* Call single-sample function for this batch element */
-        result[b] = eventprop_backward_spikes(
-            times + offset, sources + offset, n_spikes,
+        SpikeInput input = {
+            .times=times + offset, .sources=sources + offset, .n_spikes=n_spikes
+        };
+        ForwardInputBase base = {
+            .w=w, .n_pre=n_pre, .n_post=n_post,
+            .tau_mem=tau_mem, .tau_syn=tau_syn
+        };
+        result[b] = eventprop_backward_spikes(&input,
             fwd_batch[b].times, fwd_batch[b].sources, fwd_batch[b].currents,
             post_errors + offsets[b], n_fwd_spikes,
-            w, n_pre, n_post,
-            v_th, tau_mem, tau_syn
-        );
+            &base);
     }
     
     free(offsets);

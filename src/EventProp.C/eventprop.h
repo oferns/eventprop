@@ -106,13 +106,12 @@ typedef struct {
  * Backward pass (spikes) with automatic memory allocation.
  * Returns a BackwardSpikesOutput struct — caller must free via eventprop_free_backward_spikes_output().
  */
-BackwardSpikesOutput eventprop_backward_spikes(const double* times, const int32_t* sources,
-                                                     int n_spikes,
+BackwardSpikesOutput eventprop_backward_spikes(const SpikeInput* input,
                                                      const double* fwd_times, const int32_t* fwd_sources,
                                                      const double* fwd_currents,
                                                      const double* post_errors, int n_post_spikes,
-                                                     const double* w, int n_pre, int n_post,
-                                                     double v_th, double tau_mem, double tau_syn);
+                                                     const ForwardInputBase* base);
+
 
 /** Free memory owned by a BackwardSpikesOutput struct. */
 void eventprop_free_backward_spikes_output(BackwardSpikesOutput* output);
@@ -197,10 +196,8 @@ void eventprop_free_lambda_i_trace_output(LambdaITraceOutput* output);
  *
  * @return Array of SpikeOutput structs (one per sample), freed via eventprop_free_batch_spike_output()
  */
-SpikeOutput* eventprop_compute_spikes_batch(const double* w, int n_pre, int n_post,
-                                                  const double* times, const int32_t* sources,
-                                                  const int* n_spikes_per_sample, int batch_size,
-                                                  double v_th, double tau_mem, double tau_syn);
+SpikeOutput* eventprop_compute_spikes_batch(const ForwardInputSpikes* input,
+                                                  const int* n_spikes_per_sample, int batch_size);
 
 /** Free memory owned by batch SpikeOutput array. */
 void eventprop_free_batch_spike_output(SpikeOutput* output, int batch_size);
