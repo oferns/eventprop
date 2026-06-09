@@ -1212,10 +1212,8 @@ void eventprop_free_lambda_i_trace_output(LambdaITraceOutput* output)
 
 
 SpikeOutput* eventprop_compute_spikes_batch(
-    const double* w, int n_pre, int n_post,
-    const double* times, const int32_t* sources,
-    const int* n_spikes_per_sample, int batch_size,
-    double v_th, double tau_mem, double tau_syn)
+    const ForwardInputSpikes* input,
+    const int* n_spikes_per_sample, int batch_size)
 {
     /* Allocate array of SpikeOutput structs */
     SpikeOutput* result = (SpikeOutput*)calloc(batch_size, sizeof(SpikeOutput));
@@ -1229,9 +1227,8 @@ SpikeOutput* eventprop_compute_spikes_batch(
     
     /* Process each sample in parallel */
 #ifdef _OPENMP
-#pragma omp parallel for schedule(static) shared(w, n_pre, n_post, times, sources,\
-         offsets, n_spikes_per_sample, batch_size, v_th, tau_mem, tau_syn,\
-         result) if(batch_size >= 2 || batch_size * n_pre >= 50)
+#pragma omp parallel for schedule(static) shared(input, offsets, n_spikes_per_sample, \
+         batch_size, result) if(batch_size >= 2 || batch_size * input->base.n_pre >= 50)
 #endif
     for (int b = 0; b < batch_size; b++) {
         int offset = offsets[b];
@@ -1240,15 +1237,13 @@ SpikeOutput* eventprop_compute_spikes_batch(
         /* Call single-sample function for this batch element */
         ForwardInputSpikes spikes_input = {
             .base = {
-                .w=w, .n_pre=n_pre, .n_post=n_post,
-                .times=times + offset, .sources=sources + offset, .n_spikes=n_spikes,
-                .tau_mem=tau_mem, .tau_syn=tau_syn
+                .w=input->base.w, .n_pre=input->base.n_pre, .n_post=input->base.n_post,
+                .times=input->base.times + offset, .sources=input->base.sources + offset, .n_spikes=n_spikes,
+                .tau_mem=input->base.tau_mem, .tau_syn=input->base.tau_syn
             },
-            .v_th = v_th
+            .v_th = input->v_th
         };
-        result[b] = eventprop_compute_spikes(&spikes_input);
     }
-    
     free(offsets);
     return result;
 }

@@ -454,11 +454,14 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
 
     // Warmup: run forward pass to determine max output sizes
     {
-        SpikeOutput* warmup = eventprop_compute_spikes_batch(
-            w.data(), sz.n_pre, sz.n_post,
-            times.data(), sources.data(),
-            n_spikes_per_sample.data(), batch_size,
-            1.0, 0.02, 0.005);
+        ForwardInputSpikes spikes_input = {
+            .base = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+                    .times=times.data(), .sources=sources.data(),
+                    .tau_mem=0.02, .tau_syn=0.005},
+            .v_th = 1.0
+        };
+        SpikeOutput* warmup = eventprop_compute_spikes_batch(&spikes_input,
+            n_spikes_per_sample.data(), batch_size);
         int total_fwd = 0;
         for (int b = 0; b < batch_size; b++)
             total_fwd += warmup[b].n_spikes;
@@ -479,11 +482,14 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
 
     for (auto _ : state) {
         // Forward: batch compute spikes
-        SpikeOutput* fwd_batch = eventprop_compute_spikes_batch(
-            w.data(), sz.n_pre, sz.n_post,
-            times.data(), sources.data(),
-            n_spikes_per_sample.data(), batch_size,
-            1.0, 0.02, 0.005);
+        ForwardInputSpikes spikes_input = {
+            .base = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+                    .times=times.data(), .sources=sources.data(),
+                    .tau_mem=0.02, .tau_syn=0.005},
+            .v_th = 1.0
+        };
+        SpikeOutput* fwd_batch = eventprop_compute_spikes_batch(&spikes_input,
+            n_spikes_per_sample.data(), batch_size);
         
         // Set errors for backward pass
         int total_fwd = 0;
