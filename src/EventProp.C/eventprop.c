@@ -308,7 +308,21 @@ static int cmp_merged_desc(const void* a, const void* b) {
 
 /* ── Helper functions for compute_spikes_alloc (mirroring original) ─── */
 
-#define ALLOC_COMPUTE_V_INLINE(t, i, spike_count, post_spike_times, neuron_offset, \
+#define ALLOC_COMPUTE_V_INLINE(t, i, spike_count, post_spike_times, neuron_offset, \                                                        
+                        sum0, sum1, target_nrn, input, k_prefactor) \                                                                      
+({ \                                                                                                                                        
+    double mem = k_prefactor * (sum1[i * input->base.n_post + target_nrn] * exp(-t / input->base.tau_mem) \                                 
+                    - sum0[i * input->base.n_post + target_nrn] * exp(-t / input->base.tau_syn)); \                                         
+    for (int s = 0; s < spike_count; s++) { \                                                                                               
+        double st = post_spike_times[neuron_offset + s]; \                                                                                  
+        if (st <= t) {  /* Include all spikes where st <= t, don't break early */ \                                                         
+            mem -= input->v_th * exp(-(t - st) / input->base.tau_mem); \                                                                    
+        } \                                                                                                                                 
+    } \                                                                                                                                     
+    mem; \                                                                                                                                  
+}) 
+
+#define ALLOC_COMPUTE_V_INLINE2(t, i, spike_count, post_spike_times, neuron_offset, \
                          sum0, sum1, target_nrn, n_post, k_prefactor, tau_mem_inv, \
                          tau_syn_inv, v_th) \
 ({ \
@@ -391,7 +405,7 @@ typedef struct {
 
 static double root_fn(void* ctx_ptr, double t) {
     alloc_root_ctx_t* c = (alloc_root_ctx_t*)ctx_ptr;
-    return ALLOC_COMPUTE_V_INLINE(t, c->i, c->spike_count, c->post_spike_times, c->neuron_offset,
+    return ALLOC_COMPUTE_V_INLINE2(t, c->i, c->spike_count, c->post_spike_times, c->neuron_offset,
                      c->sum0, c->sum1, c->target_nrn, c->n_post,
                      c->k_prefactor, c->tau_mem_inv, c->tau_syn_inv, c->v_th) - c->v_th;
 }
@@ -466,39 +480,36 @@ static double toms748_solve(void* ctx, root_fn_t fn, double a, double b) {
 
 /* ── SpikeOutput ─────────────────────────────────────────────────────── */
 
-SpikeOutput eventprop_compute_spikes(const double* w, int n_pre, int n_post,
-                                           const double* times, const int32_t* sources, int n_spikes,
-                                           double v_th, double tau_mem, double tau_syn)
+SpikeOutput eventprop_compute_spikes(const ForwardInputSpikes* input)
 {
     SpikeOutput result;
 
     /* Use dynamic arrays internally, then copy to exact-size output */
-    double k_prefactor = tau_syn / (tau_mem - tau_syn);
-    double tmax_prefactor = 1.0 / (1.0 / tau_mem - 1.0 / tau_syn);
-    double tmax_summand = log(tau_syn / tau_mem);
-    double tau_mem_inv = 1.0 / tau_mem;
-    double tau_syn_inv = 1.0 / tau_syn;
+    double k_prefactor = input->base.tau_syn / (input->base.tau_mem - input->base.tau_syn);
+    double tmax_prefactor = 1.0 / (1.0 / input->base.tau_mem - 1.0 / input->base.tau_syn);
+    double tmax_summand = log(input->base.tau_syn / input->base.tau_mem);
+    double tau_mem_inv = 1.0 / input->base.tau_mem;
+    double tau_syn_inv = 1.0 / input->base.tau_syn;
 
     /* Initialize diagnostic counters */
     rootfind_calls = 0;
 
     /* Compute sums using alloc version */
 
-    SumsOutput sums = eventprop_compute_sums(&((ForwardInputBase){.w=w, .n_pre=n_pre, .n_post=n_post,
-    .times=times, .sources=sources, .n_spikes=n_spikes, .tau_mem=tau_mem, .tau_syn=tau_syn}));
+    SumsOutput sums = eventprop_compute_sums(&input->base);
     const double* sum0 = sums.sum0;
     const double* sum1 = sums.sum1;
 
 
     /* Per-neuron dynamic buffers — growable to handle burst patterns */
-    double** post_times_arr   = malloc(n_post * sizeof(double*));
-    double** post_currents_arr = malloc(n_post * sizeof(double*));
-    int* spike_caps  = calloc(n_post, sizeof(int));
-    int* spike_counts = calloc(n_post, sizeof(int));
+    double** post_times_arr   = malloc(input->base.n_post * sizeof(double*));
+    double** post_currents_arr = malloc(input->base.n_post * sizeof(double*));
+    int* spike_caps  = calloc(input->base.n_post, sizeof(int));
+    int* spike_counts = calloc(input->base.n_post, sizeof(int));
 
     /* Start with 3× estimated spikes to reduce realloc overhead */
-    int initial_cap = n_spikes * 3 + 1;
-    for (int n = 0; n < n_post; n++) {
+    int initial_cap = input->base.n_spikes * 3 + 1;
+    for (int n = 0; n < input->base.n_post; n++) {
         post_times_arr[n]   = calloc(initial_cap, sizeof(double));
         post_currents_arr[n] = calloc(initial_cap, sizeof(double));
         spike_caps[n]       = initial_cap;
@@ -507,7 +518,7 @@ SpikeOutput eventprop_compute_spikes(const double* w, int n_pre, int n_post,
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) 
 #endif
-    for (int target_nrn = 0; target_nrn < n_post; target_nrn++) {
+    for (int target_nrn = 0; target_nrn < input->base.n_post; target_nrn++) {
         if (target_nrn == 0) {
         }
 
@@ -519,26 +530,26 @@ SpikeOutput eventprop_compute_spikes(const double* w, int n_pre, int n_post,
 
         while (!finished) {
             int found = 0;
-            for (int i = processed; i <= n_spikes; i++) {
-                if (i == n_spikes) {
+            for (int i = processed; i <= input->base.n_spikes; i++) {
+                if (i == input->base.n_spikes) {
                     /* Last interval */
-                    double s0 = sum0[n_spikes * n_post + target_nrn];
-                    double s1 = sum1[n_spikes * n_post + target_nrn];
+                    double s0 = sum0[input->base.n_spikes * input->base.n_post + target_nrn];
+                    double s1 = sum1[input->base.n_spikes * input->base.n_post + target_nrn];
                     for (int s = 0; s < count; s++)
-                        s1 += -v_th * exp(p_times[s] / tau_mem);
+                        s1 += -input->v_th * exp(p_times[s] / input->base.tau_mem);
 
                     double tmax = tmax_prefactor * (tmax_summand + log(s1 / s0));
                     if (!isinf(tmax)) {
                         double v = ALLOC_COMPUTE_V_INLINE(tmax, i, count, p_times, 0, sum0, sum1,
-                                             target_nrn, n_post, k_prefactor, tau_mem_inv, tau_syn_inv, v_th);
-                        if (v > v_th + 1e-14) {
+                                             target_nrn, input, k_prefactor);
+                        if (v > input->v_th + 1e-14) {
                             double t_lower = count > 0 ? p_times[count - 1] : 0.0;
                             alloc_root_ctx_t rctx; memset(&rctx, 0, sizeof(rctx));
                             rctx.sum0=sum0; rctx.sum1=sum1; rctx.i=i; rctx.spike_count=count;
                             rctx.post_spike_times=p_times; rctx.neuron_offset=0;
-                            rctx.target_nrn=target_nrn; rctx.n_post=n_post;
+                            rctx.target_nrn=target_nrn; rctx.n_post=input->base.n_post;
                             rctx.k_prefactor=k_prefactor; rctx.tau_mem_inv=tau_mem_inv;
-                            rctx.tau_syn_inv=tau_syn_inv; rctx.v_th=v_th;
+                            rctx.tau_syn_inv=tau_syn_inv; rctx.v_th=input->v_th;
                             double t_post = toms748_solve(&rctx, root_fn, t_lower, tmax);
                             if (t_post > t_lower && t_post < tmax) {
                                 if (count >= cap) {
@@ -547,25 +558,25 @@ SpikeOutput eventprop_compute_spikes(const double* w, int n_pre, int n_post,
                                     p_currents = realloc(p_currents, cap * sizeof(double));
                                 }
                                 p_times[count]   = t_post;
-                                p_currents[count] = compute_i(t_post, n_spikes, times, sum0,
-                                                              target_nrn, n_post, tau_syn);
+                                p_currents[count] = compute_i(t_post, input->base.n_spikes, input->base.times, sum0,
+                                                              target_nrn, input->base.n_post, input->base.tau_syn);
                                 count++; found = 1;
                             }
                         }
                     }
                     if (!found) finished = 1;
-                    else processed = n_spikes;
+                    else processed = input->base.n_spikes;
                 } else {
-                    double t_input = times[i];
-                    double tmax = compute_tmax(i, n_spikes, times, count, p_times, 0,
-                                               sum0, sum1, target_nrn, n_post,
-                                               tmax_prefactor, tmax_summand, tau_mem, v_th);
+                    double t_input = input->base.times[i];
+                    double tmax = compute_tmax(i, input->base.n_spikes, input->base.times, count, p_times, 0,
+                                               sum0, sum1, target_nrn, input->base.n_post,
+                                               tmax_prefactor, tmax_summand, input->base.tau_mem, input->v_th);
 
                     if (!isinf(tmax)) {
                         double v = ALLOC_COMPUTE_V_INLINE(tmax, i, count, p_times, 0, sum0, sum1,
-                                             target_nrn, n_post, k_prefactor, tau_mem_inv, tau_syn_inv, v_th);
-                        if (v > v_th + 1e-14) {
-                            double t_before = (i > 0) ? times[i-1] : 0.0;
+                                             target_nrn, input, k_prefactor);
+                        if (v > input->v_th + 1e-14) {
+                            double t_before = (i > 0) ? input->base.times[i-1] : 0.0;
                             for (int s = 0; s < count; s++) {
                                 double st = p_times[s];
                                 if (st > t_input) break;
@@ -574,9 +585,9 @@ SpikeOutput eventprop_compute_spikes(const double* w, int n_pre, int n_post,
                             alloc_root_ctx_t rctx; memset(&rctx, 0, sizeof(rctx));
                             rctx.sum0=sum0; rctx.sum1=sum1; rctx.i=i; rctx.spike_count=count;
                             rctx.post_spike_times=p_times; rctx.neuron_offset=0;
-                            rctx.target_nrn=target_nrn; rctx.n_post=n_post;
+                            rctx.target_nrn=target_nrn; rctx.n_post=input->base.n_post;
                             rctx.k_prefactor=k_prefactor; rctx.tau_mem_inv=tau_mem_inv;
-                            rctx.tau_syn_inv=tau_syn_inv; rctx.v_th=v_th;
+                            rctx.tau_syn_inv=tau_syn_inv; rctx.v_th=input->v_th;
                             double t_post = toms748_solve(&rctx, root_fn, t_before, tmax);
                             if (t_post > t_before && t_post < tmax) {
                                 if (count >= cap) {
@@ -585,8 +596,8 @@ SpikeOutput eventprop_compute_spikes(const double* w, int n_pre, int n_post,
                                     p_currents = realloc(p_currents, cap * sizeof(double));
                                 }
                                 p_times[count]   = t_post;
-                                p_currents[count] = compute_i(t_post, n_spikes, times, sum0,
-                                                              target_nrn, n_post, tau_syn);
+                                p_currents[count] = compute_i(t_post, input->base.n_spikes, input->base.times, sum0,
+                                                              target_nrn, input->base.n_post, input->base.tau_syn);
                                 count++; found = 1;
                             }
                             processed = i; break;
@@ -595,10 +606,10 @@ SpikeOutput eventprop_compute_spikes(const double* w, int n_pre, int n_post,
 
                     /* Check at input spike time */
                     double v_at_input = ALLOC_COMPUTE_V_INLINE(t_input, i, count, p_times, 0,
-                                                          sum0, sum1, target_nrn, n_post,
-                                                          k_prefactor, tau_mem_inv, tau_syn_inv, v_th);
-                    if (v_at_input > v_th + 1e-14) {
-                        double t_before = (i > 0) ? times[i-1] : 0.0;
+                                                          sum0, sum1, target_nrn, input,
+                                                          k_prefactor);
+                    if (v_at_input > input->v_th + 1e-14) {
+                        double t_before = (i > 0) ? input->base.times[i-1] : 0.0;
                         for (int s = 0; s < count; s++) {
                             double st = p_times[s];
                             if (st > t_input) break;
@@ -607,9 +618,9 @@ SpikeOutput eventprop_compute_spikes(const double* w, int n_pre, int n_post,
                         alloc_root_ctx_t rctx; memset(&rctx, 0, sizeof(rctx));
                         rctx.sum0=sum0; rctx.sum1=sum1; rctx.i=i; rctx.spike_count=count;
                         rctx.post_spike_times=p_times; rctx.neuron_offset=0;
-                        rctx.target_nrn=target_nrn; rctx.n_post=n_post;
+                        rctx.target_nrn=target_nrn; rctx.n_post=input->base.n_post;
                         rctx.k_prefactor=k_prefactor; rctx.tau_mem_inv=tau_mem_inv;
-                        rctx.tau_syn_inv=tau_syn_inv; rctx.v_th=v_th;
+                        rctx.tau_syn_inv=tau_syn_inv; rctx.v_th=input->v_th;
                         double t_post = toms748_solve(&rctx, root_fn, t_before, t_input);
                         if (t_post > t_before && t_post < t_input) {
                             if (count >= cap) {
@@ -618,15 +629,15 @@ SpikeOutput eventprop_compute_spikes(const double* w, int n_pre, int n_post,
                                 p_currents = realloc(p_currents, cap * sizeof(double));
                             }
                             p_times[count]   = t_post;
-                            p_currents[count] = compute_i(t_post, n_spikes, times, sum0,
-                                                          target_nrn, n_post, tau_syn);
+                            p_currents[count] = compute_i(t_post, input->base.n_spikes, input->base.times, sum0,
+                                                          target_nrn, input->base.n_post, input->base.tau_syn);
                             count++; found = 1;
                         }
                         processed = i; break;
                     }
                 }
             }
-            if (!found) processed = (processed + 1 < n_spikes) ? processed + 1 : n_spikes;
+            if (!found) processed = (processed + 1 < input->base.n_spikes) ? processed + 1 : input->base.n_spikes;
         }
 
         /* Write back updated pointers */
@@ -639,7 +650,7 @@ SpikeOutput eventprop_compute_spikes(const double* w, int n_pre, int n_post,
 
     /* Count total spikes and allocate exact-size output */
     result.n_spikes = 0;
-    for (int n = 0; n < n_post; n++)
+    for (int n = 0; n < input->base.n_post; n++)
         result.n_spikes += spike_counts[n];
 
 
@@ -648,7 +659,7 @@ SpikeOutput eventprop_compute_spikes(const double* w, int n_pre, int n_post,
         result.sources = NULL;
         result.currents = NULL;
 
-        for (int n = 0; n < n_post; n++) {
+        for (int n = 0; n < input->base.n_post; n++) {
             free(post_times_arr[n]);
             free(post_currents_arr[n]);
         }
@@ -661,7 +672,7 @@ SpikeOutput eventprop_compute_spikes(const double* w, int n_pre, int n_post,
     /* Collect all spikes into sortable array */
     AllocSpikeEntry* entries = malloc(result.n_spikes * sizeof(AllocSpikeEntry));
     int idx = 0;
-    for (int n = 0; n < n_post; n++) {
+    for (int n = 0; n < input->base.n_post; n++) {
         int cnt = spike_counts[n];
         double* pt   = post_times_arr[n];
         double* pc   = post_currents_arr[n];
@@ -688,7 +699,7 @@ SpikeOutput eventprop_compute_spikes(const double* w, int n_pre, int n_post,
     }
 
     /* Cleanup */
-    for (int n = 0; n < n_post; n++) {
+    for (int n = 0; n < input->base.n_post; n++) {
         free(post_times_arr[n]);
         free(post_currents_arr[n]);
     }
