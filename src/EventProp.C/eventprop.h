@@ -20,6 +20,15 @@
 extern "C" {
 #endif
 
+/* ── Input spikes (borrowed data, no allocation) ─────────────────────── */
+
+/** Input spike data — borrowed pointers, no memory management. */
+typedef struct {
+    const double* times;           /* Spike times (borrowed) */
+    const int32_t* sources;        /* Source neurons (borrowed) */
+    int n_spikes;                   /* Number of input spikes */
+} SpikeInput;
+
 /* ── Spike output (owned memory) ─────────────────────────────────────── */
 
 typedef struct {
