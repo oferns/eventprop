@@ -126,6 +126,21 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
     Spikes input_spikes(e_times, e_sources);
 #endif
 
+    // Warmup iteration to prime caches and OpenMP thread pools
+{
+#ifdef USE_CPP_WRAPPER
+        Spikes warmup = compute_spikes(w_map, input_spikes, 1.0, 0.02, 0.005);
+        benchmark::DoNotOptimize(warmup.times);
+#else
+        SpikeOutput warmup = eventprop_compute_spikes(
+            w.data(), sz.n_pre, sz.n_post,
+            times.data(), sources.data(), sz.n_spikes,
+            1.0, 0.02, 0.005);
+        benchmark::DoNotOptimize(warmup.times);
+        eventprop_free_spike_output(&warmup);
+#endif
+    }
+
     for (auto _ : state) {
 #ifdef USE_CPP_WRAPPER
         Spikes output = compute_spikes(w_map, input_spikes, 1.0, 0.02, 0.005);
@@ -141,6 +156,16 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
         eventprop_free_spike_output(&output);
 #endif
     }
+
+#ifdef USE_CPP_WRAPPER
+    Spikes last = compute_spikes(w_map, input_spikes, 1.0, 0.02, 0.005);
+#else
+    SpikeOutput last = eventprop_compute_spikes(
+        w.data(), sz.n_pre, sz.n_post,
+        times.data(), sources.data(), sz.n_spikes,
+        1.0, 0.02, 0.005);
+#endif
+    state.counters["output_spikes"] = benchmark::Counter(last.n_spikes);
 
     state.SetItemsProcessed(state.iterations() * sz.n_spikes);
 }
@@ -195,6 +220,8 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
         std::pair<RowMatrixXd, Eigen::ArrayXd> result = backward(input_spikes, post_spikes, w_map, 1.0, 0.02, 0.005);
         benchmark::DoNotOptimize(result.first.data());
     }
+
+    state.counters["output_spikes"] = benchmark::Counter(post_spikes.n_spikes);
 #else
     // C library: Run forward pass to get post-spike data
     SpikeOutput fwd_result = eventprop_compute_spikes(
@@ -219,6 +246,7 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
         eventprop_free_backward_spikes_output(&result);
     }
 
+    state.counters["output_spikes"] = benchmark::Counter(n_post_spikes);
     eventprop_free_spike_output(&fwd_result);
 #endif
 
@@ -368,6 +396,21 @@ static void BM_ComputeSums(benchmark::State& state, const ProblemSize& sz, DataG
     Spikes input_spikes(e_times, e_sources);
 #endif
 
+    // Warmup iteration to prime caches and OpenMP thread pools
+{
+#ifdef USE_CPP_WRAPPER
+        auto warmup = compute_sums(w_map, input_spikes, 0.02, 0.005);
+        benchmark::DoNotOptimize(warmup.first.data());
+#else
+        SumsOutput warmup = eventprop_compute_sums(
+            w.data(), sz.n_pre, sz.n_post,
+            times.data(), sources.data(), sz.n_spikes,
+            0.02, 0.005);
+        benchmark::DoNotOptimize(warmup.sum0);
+        eventprop_free_sums_output(&warmup);
+#endif
+    }
+
     for (auto _ : state) {
 #ifdef USE_CPP_WRAPPER
         std::pair<RowMatrixXd, RowMatrixXd> sums = compute_sums(w_map, input_spikes, 0.02, 0.005);
@@ -422,6 +465,21 @@ static void BM_ComputeMaxima(benchmark::State& state, const ProblemSize& sz, Dat
     Eigen::ArrayXi e_sources = Eigen::Map<Eigen::ArrayXi>(sources.data(), sz.n_spikes);
     Spikes input_spikes(e_times, e_sources);
 #endif
+
+    // Warmup iteration to prime caches and OpenMP thread pools
+{
+#ifdef USE_CPP_WRAPPER
+        auto warmup = compute_maxima(w_map, input_spikes, 0.02, 0.005);
+        benchmark::DoNotOptimize(warmup.times.data());
+#else
+        MaximaOutput warmup = eventprop_compute_maxima(
+            w.data(), sz.n_pre, sz.n_post,
+            times.data(), sources.data(), sz.n_spikes,
+            0.02, 0.005);
+        benchmark::DoNotOptimize(warmup.times);
+        eventprop_free_maxima_output(&warmup);
+#endif
+    }
 
     for (auto _ : state) {
 #ifdef USE_CPP_WRAPPER
