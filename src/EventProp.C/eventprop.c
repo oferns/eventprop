@@ -484,9 +484,8 @@ SpikeOutput eventprop_compute_spikes(const double* w, int n_pre, int n_post,
 
     /* Compute sums using alloc version */
 
-    SumsOutput sums = eventprop_compute_sums(w, n_pre, n_post,
-                                                    times, sources, n_spikes,
-                                                    tau_mem, tau_syn);
+    SumsOutput sums = eventprop_compute_sums(&((ForwardInputBase){.w=w, .n_pre=n_pre, .n_post=n_post,
+    .times=times, .sources=sources, .n_spikes=n_spikes, .tau_mem=tau_mem, .tau_syn=tau_syn}));
     const double* sum0 = sums.sum0;
     const double* sum1 = sums.sum1;
 
@@ -712,39 +711,37 @@ void eventprop_free_spike_output(SpikeOutput* output)
 
 /* ── SumsOutput ─────────────────────────────────────────────────────── */
 
-SumsOutput eventprop_compute_sums(const double* w, int n_pre, int n_post,
-                                        const double* times, const int32_t* sources, int n_spikes,
-                                        double tau_mem, double tau_syn)
+SumsOutput eventprop_compute_sums(const ForwardInputBase* input)
 {
     SumsOutput result;
-    int n_rows = n_spikes + 1;
+    int n_rows = input->n_spikes + 1;
     result.n_rows = n_rows;
-    result.n_post = n_post;
+    result.n_post = input->n_post;
 
     /* Allocate output — exact size known upfront */
-    result.sum0 = calloc(n_rows * n_post, sizeof(double));
-    result.sum1 = calloc(n_rows * n_post, sizeof(double));
+    result.sum0 = calloc(n_rows * input->n_post, sizeof(double));
+    result.sum1 = calloc(n_rows * input->n_post, sizeof(double));
 
-    if (n_spikes == 0) return result;
+    if (input->n_spikes == 0) return result;
 
     /* Pre-compute exponential lookup tables */
-    double* exp_mem = calloc(n_spikes, sizeof(double));
-    double* exp_syn = calloc(n_spikes, sizeof(double));
+    double* exp_mem = calloc(input->n_spikes, sizeof(double));
+    double* exp_syn = calloc(input->n_spikes, sizeof(double));
 
-    for (int i = 0; i < n_spikes; i++) {
-        exp_mem[i] = exp(times[i] / tau_mem);
-        exp_syn[i] = exp(times[i] / tau_syn);
+    for (int i = 0; i < input->n_spikes; i++) {
+        exp_mem[i] = exp(input->times[i] / input->tau_mem);
+        exp_syn[i] = exp(input->times[i] / input->tau_syn);
     }
 
     /* Accumulate sums using SIMD-accelerated FMA */
-    for (int i = 0; i < n_spikes; i++) {
-        int src = sources[i];
-        fma_row_simd(result.sum0 + (i + 1) * n_post,
-                           result.sum0 + i * n_post,
-                           w + src * n_post, exp_syn[i], n_post);
-        fma_row_simd(result.sum1 + (i + 1) * n_post,
-                           result.sum1 + i * n_post,
-                           w + src * n_post, exp_mem[i], n_post);
+    for (int i = 0; i < input->n_spikes; i++) {
+        int src = input->sources[i];
+        fma_row_simd(result.sum0 + (i + 1) * input->n_post,
+                           result.sum0 + i * input->n_post,
+                           input->w + src * input->n_post, exp_syn[i], input->n_post);
+        fma_row_simd(result.sum1 + (i + 1) * input->n_post,
+                           result.sum1 + i * input->n_post,
+                           input->w + src * input->n_post, exp_mem[i], input->n_post);
     }
 
     free(exp_mem);
@@ -780,9 +777,8 @@ MaximaOutput eventprop_compute_maxima(const double* w, int n_pre, int n_post,
     }
 
     /* Use our own alloc function */
-    SumsOutput sums = eventprop_compute_sums(w, n_pre, n_post,
-                                                    times, sources, n_spikes,
-                                                    tau_mem, tau_syn);
+    SumsOutput sums = eventprop_compute_sums(&((ForwardInputBase){.w=w, .n_pre=n_pre, .n_post=n_post,
+    .times=times, .sources=sources, .n_spikes=n_spikes, .tau_mem=tau_mem, .tau_syn=tau_syn}));
 
     int n_rows = sums.n_rows;
     double* sum0 = sums.sum0;

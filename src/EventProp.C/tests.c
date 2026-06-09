@@ -47,9 +47,12 @@ static void test_compute_sums(void)
     double w[10*5], times[20]; int32_t sources[20];
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
 
-    SumsOutput output = eventprop_compute_sums(w, n_pre, n_post,
-                                                      times, sources, n_spikes,
-                                                      0.02, 0.005);
+    ForwardInputBase base_input = {
+        .w=w, .n_pre=n_pre, .n_post=n_post,
+        .times=times, .sources=sources, .n_spikes=n_spikes,
+        .tau_mem=0.02, .tau_syn=0.005
+    };
+    SumsOutput output = eventprop_compute_sums(&base_input);
 
     ASSERT(output.n_rows == n_spikes + 1, "wrong row count");
     ASSERT(output.n_post == n_post, "wrong post count");
@@ -67,9 +70,8 @@ static void test_compute_sums(void)
 static void test_compute_sums_alloc_zero_spikes(void)
 {
     TEST("ComputeSums Alloc zero spikes");
-    SumsOutput output = eventprop_compute_sums(NULL, 10, 5,
-                                                      NULL, NULL, 0,
-                                                      0.02, 0.005);
+    SumsOutput output = eventprop_compute_sums(&((ForwardInputBase){.w=NULL, .n_pre=10, .n_post=5,
+    .times=NULL, .sources=NULL, .n_spikes=0, .tau_mem=0.02, .tau_syn=0.005}));
     eventprop_free_sums_output(&output);
     TEST_END;
 }
@@ -83,9 +85,12 @@ static void test_compute_sums_alloc_large(void)
     int32_t* sources = malloc(n_spikes * sizeof(int32_t));
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
 
-    SumsOutput output = eventprop_compute_sums(w, n_pre, n_post,
-                                                      times, sources, n_spikes,
-                                                      0.02, 0.005);
+    ForwardInputBase base_input = {
+        .w=w, .n_pre=n_pre, .n_post=n_post,
+        .times=times, .sources=sources, .n_spikes=n_spikes,
+        .tau_mem=0.02, .tau_syn=0.005
+    };
+    SumsOutput output = eventprop_compute_sums(&base_input);
 
     ASSERT(output.n_rows == n_spikes + 1, "wrong row count");
     eventprop_free_sums_output(&output);

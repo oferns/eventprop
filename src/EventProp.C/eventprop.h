@@ -73,9 +73,7 @@ typedef struct {
  * Compute cumulative sums with automatic memory allocation.
  * Returns a SumsOutput struct — caller must free via eventprop_free_sums_output().
  */
-SumsOutput eventprop_compute_sums(const double* w, int n_pre, int n_post,
-                                        const double* times, const int32_t* sources, int n_spikes,
-                                        double tau_mem, double tau_syn);
+SumsOutput eventprop_compute_sums(const ForwardInputBase* input);
 
 /** Free memory owned by a SumsOutput struct. */
 void eventprop_free_sums_output(SumsOutput* output);

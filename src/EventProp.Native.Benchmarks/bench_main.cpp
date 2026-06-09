@@ -321,10 +321,12 @@ static void BM_FullTrainingStep(benchmark::State& state, const ProblemSize& sz, 
 
     for (auto _ : state) {
         // Forward: sums + spikes
-        SumsOutput sums = eventprop_compute_sums(
-            w.data(), sz.n_pre, sz.n_post,
-            times.data(), sources.data(), sz.n_spikes,
-            0.02, 0.005);
+        ForwardInputBase base_input = {
+            .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+            .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
+            .tau_mem=0.02, .tau_syn=0.005
+        };
+        SumsOutput sums = eventprop_compute_sums(&base_input);
 
         SpikeOutput fwd = eventprop_compute_spikes(
             w.data(), sz.n_pre, sz.n_post,
@@ -631,10 +633,12 @@ static void BM_ComputeSums(benchmark::State& state, const ProblemSize& sz, DataG
         auto warmup = compute_sums(w_map, input_spikes, 0.02, 0.005);
         benchmark::DoNotOptimize(warmup.first.data());
 #else
-        SumsOutput warmup = eventprop_compute_sums(
-            w.data(), sz.n_pre, sz.n_post,
-            times.data(), sources.data(), sz.n_spikes,
-            0.02, 0.005);
+        ForwardInputBase base_input = {
+            .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+            .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
+            .tau_mem=0.02, .tau_syn=0.005
+        };
+        SumsOutput warmup = eventprop_compute_sums(&base_input);
         benchmark::DoNotOptimize(warmup.sum0);
         eventprop_free_sums_output(&warmup);
 #endif
@@ -646,10 +650,12 @@ static void BM_ComputeSums(benchmark::State& state, const ProblemSize& sz, DataG
         benchmark::DoNotOptimize(sums.first.data());
         benchmark::DoNotOptimize(sums.second.data());
 #else
-        SumsOutput output = eventprop_compute_sums(
-            w.data(), sz.n_pre, sz.n_post,
-            times.data(), sources.data(), sz.n_spikes,
-            0.02, 0.005);
+        ForwardInputBase base_input = {
+            .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+            .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
+            .tau_mem=0.02, .tau_syn=0.005
+        };
+        SumsOutput output = eventprop_compute_sums(&base_input);
         benchmark::DoNotOptimize(output.sum0);
         benchmark::DoNotOptimize(output.sum1);
         eventprop_free_sums_output(&output);
