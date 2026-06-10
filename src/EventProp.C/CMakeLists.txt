@@ -30,16 +30,8 @@ find_package(OpenMP QUIET)
 add_library(eventprop_c_api SHARED
     eventprop.c
 )
-# Performance optimizations
-if(CMAKE_C_COMPILER_ID MATCHES "AppleClang|Clang")
-    # macOS Clang flags
-    target_compile_options(eventprop_c_api PRIVATE -O3 -ffast-math -march=native
-                           -fvectorize -fslp-vectorize)
-else()
-    # GCC flags
-    target_compile_options(eventprop_c_api PRIVATE -O3 -ffast-math -march=native
-                           -fvectorize -fslp-vectorize)
-endif()
+# CPU-specific optimization (kept for performance)
+target_compile_options(eventprop_c_api PRIVATE -march=native)
 target_compile_options(eventprop_c_api PRIVATE -ffp-contract=fast)
 target_link_libraries(eventprop_c_api PRIVATE m)
 if(OpenMP_C_FOUND)
