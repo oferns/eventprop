@@ -415,9 +415,6 @@ extern int rootfind_calls = 0;
 static double toms748_solve(void* ctx, root_fn_t fn, double a, double b) {
     rootfind_calls++;
 
-    if (rootfind_calls % 10000 == 0) {
-    }
-
     double fa = fn(ctx, a), fb = fn(ctx, b);
     if (!isfinite(fa) || !isfinite(fb)) return a;
 
