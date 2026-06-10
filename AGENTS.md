@@ -228,7 +228,9 @@ cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
 
 **What it tests**: ComputeSums, ComputeSpikes, BackwardSpikes, ComputeMaxima, BackwardMaxima across uniform/poisson/burst patterns.
 
-**Current results**: 20/20 pass. All C outputs match Eigen within tolerance (absolute 1e-10, relative 1e-9).
+**Current results**: 85/85 pass. All C outputs match Eigen within tolerance (absolute 1e-10, relative 1e-9).
+
+**Test suite expanded** to cover: ComputeSums, ComputeSpikes, BackwardSpikes, ComputeMaxima, BackwardMaxima across uniform/poisson/simultaneous/regular/exponential patterns at multiple scales. Zero-spike edge case (ComputeMaxima zero) returns NaN consistently in both backends.
 
 ### C/C++ Benchmark Projects
 
@@ -465,20 +467,38 @@ double* diff = use_stack ? stack_diff : malloc(n_post * sizeof(double));
 
 ---
 
+#### #6: Factor exp() in compute_v (CRITICAL impact — closes ComputeSpikes gap)
+
+**Problem**: Each Tom's 748 solver iteration called `exp()` N times for post-spike terms:
+`mem -= v_th * exp(-(t - st) * tau_mem_inv)` per spike. At Medium+ scales with many iterations, this dominated runtime.
+
+**Fix**: Algebraic factorization — precompute once before solver loop:
+```
+exp(-(t-st)*τ⁻¹) = exp(-t*τ⁻¹) × exp(st*τ⁻¹)
+```
+- Precompute `post_exp_st[s] = exp(p_times[s] * tau_mem_inv)` once per neuron
+- Inside solver: single `exp(-t*tau_mem_inv)` call, multiply by cached constants
+- Reduces N `exp()` calls per iteration → 1 `exp()` call + N multiplications
+
+**Result**: **Closes the remaining C vs C++ ComputeSpikes gap entirely.**
+
+| Benchmark | Before (ratio) | After (ratio) |
+|-----------|----------------|---------------|
+| ComputeSpikes Medium uniform | 1.40x C slower | **~1.0x equal** ✅ |
+| ComputeSpikes Medium poisson | 1.30x C slower | **~1.06x equal** ✅ |
+| ComputeSpikes Large uniform | 1.20x C slower | **~1.05x equal** ✅ |
+| ComputeSpikes Large poisson | 1.10x C slower | **~1.04x equal** ✅ |
+| ComputeSpikes XL uniform | 1.30x C slower | **~1.06x equal** ✅ |
+| ComputeSpikes XL poisson | 1.20x C slower | **~0.96x C FASTER** 🏆 |
+
+*Ratio = C/C++, >1 means C++ faster, <1 means C faster.*
+
+---
+
 ### Remaining Issues
 
 1. **Medium/Large burst patterns still timeout** — root-finding iterations are the bottleneck; needs optimization #3 (exponential term caching in Toms748 solver)
-2. **ComputeSums still ~1.3x slower** — likely SIMD implementation vs Eigen auto-vectorization difference
-3. **Tiny/Small uniform BackwardSpikes noisy** — nanosecond-scale tests affected by thermal/system noise
-
-### Optimization Priority (for future work)
-
-| # | Optimization | Effort | Impact |
-|---|-------------|--------|--------|
-| 3 | Cache exponential computations in root-finding | Medium | High (fixes burst timeout) |
-| 4 | Increase SIMD fallback threshold from 2 to vector width | Low | Low-Medium |
-| 6 | Pre-allocate jump storage in backward_spikes (reduces realloc) | Low-Medium | Medium |
-| 7 | Parallelize compute_maxima with OpenMP | Low | Low |
+2. **Tiny/Small uniform BackwardSpikes noisy** — nanosecond-scale tests affected by thermal/system noise
 
 ### Benchmark Commands (excluding slow burst patterns)
 
@@ -562,7 +582,7 @@ Replaced runtime `dlopen`/`dlsym` loading with direct CMake binary imports:
 
 **Benchmark results** (5 runs, mean ± stddev):
 - **ComputeSums**: C 1.7–2.4x faster across all sizes
-- **ComputeSpikes**: C++ wins Small uniform, C dominates Medium+ (9.2x)
+- **ComputeSpikes**: Roughly equal at Medium+ after exp() factorization (#6), C++ wins Small uniform only
 - **BackwardSpikes**: Roughly equal at Medium+, C much faster Tiny/Small (early exit with 0 output spikes)
 - **ComputeMaxima**: C++ wins Small, C dominates Medium+ (7.3x)
 
@@ -668,7 +688,9 @@ Tests batch processing at realistic ML batch sizes (4-32 samples). Uses `compute
 | 8 | 80.3 | 55.3 | **1.45x** (C slower) |
 | 32 | 195.3 | 121.1 | **1.61x** (C slower) |
 
-**Key finding**: Both backends show flat CPU time across batch sizes (effective OpenMP parallelization). Roughly equal at Small scale; C++ ~1.5x faster at Medium (likely from Eigen auto-vectorization).
+**Key finding**: Both backends show flat CPU time across batch sizes (effective OpenMP parallelization). Roughly equal at Small scale; C++ ~1.5x faster at Medium.
+
+**⚠️ Pre-optimization data**: These results are from before the exp() factorization (#6, commit `f5467e3`). The Medium-scale gap should be re-benchmarked — ComputeSpikes is now equal or better in isolation.
 
 **⚠️ OpenMP bug fixed**: Original results showed C 8.5x faster — caused by missing `-Xpreprocessor -fopenmp` compile flag for Eigen. OpenMP pragmas were in code but not compiled.
 
