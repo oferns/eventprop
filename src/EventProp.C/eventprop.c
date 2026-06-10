@@ -799,6 +799,12 @@ MaximaOutput eventprop_compute_maxima(const ForwardInputBase* input)
     double tmax_pref = 1.0 / (1.0/input->tau_mem - 1.0/input->tau_syn);
     double tmax_sum = log(input->tau_syn / input->tau_mem);
 
+    /* No spikes → nothing to compute, return NaN/-INF (matches Eigen) */
+    if (input->n_spikes == 0) {
+        eventprop_free_sums_output(&sums);
+        return result;
+    }
+
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) 
 #endif
