@@ -76,6 +76,10 @@ target_include_directories(eventprop_eigen_core PRIVATE
     ${BOOST_INCLUDE_DIR}
 )
 
+# Performance optimizations (same as C library for fair comparison)
+target_compile_options(eventprop_eigen_core PRIVATE -O3 -ffast-math -march=native
+                                                     -fvectorize -fslp-vectorize)
+
 # OpenMP for parallelization
 if(APPLE AND _BREW_FAIL EQUAL 0)
     target_include_directories(eventprop_eigen_core PRIVATE ${OpenMP_CXX_INCLUDE_DIRS})
@@ -93,3 +97,14 @@ target_include_directories(bench_cpp PRIVATE
     ${EIGEN_DIR}
     ${BOOST_INCLUDE_DIR})
 target_link_libraries(bench_cpp PRIVATE eventprop_eigen_core benchmark::benchmark benchmark::benchmark_main)
+
+# ============================================================
+# Root-finder micro-benchmark (bench_rootfind)
+# Compares C custom toms748 vs Boost.Math toms748
+# ============================================================
+add_executable(bench_rootfind bench_rootfind.cpp)
+target_include_directories(bench_rootfind PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.Cpp.Wrapper
+    ${EIGEN_DIR}
+    ${BOOST_INCLUDE_DIR})
+target_link_libraries(bench_rootfind PRIVATE eventprop_eigen_core benchmark::benchmark benchmark::benchmark_main)

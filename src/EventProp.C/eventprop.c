@@ -462,15 +462,17 @@ static double toms748_solve(void* ctx, root_fn_t fn, double a, double b) {
 
         if (useBisection) s = a + m;
 
+        double f_oldB = fb;   // save before updating — avoids redundant fn call below
         double prevB = b; b = s; fb = fn(ctx, b);
         if (!isfinite(fb)) return prevB;
 
         if (fabs(fb) <= ALLOC_TOMS748_TOL || fabs(b - prevB) <= ALLOC_TOMS748_TOL * fmax(1.0, fabs(prevB)))
             return b;
 
-        if (fa * fb < 0.0) { c = prevB; fc = fn(ctx, prevB); }
-        else if (fb * fc < 0.0) { a = prevB; fa = fn(ctx, prevB); }
-        else { a = prevB; fa = fn(ctx, prevB); }
+        /* Reuse known value instead of re-evaluating fn(ctx, prevB) */
+        if (fa * fb < 0.0) { c = prevB; fc = f_oldB; }
+        else if (fb * fc < 0.0) { a = prevB; fa = f_oldB; }
+        else { a = prevB; fa = f_oldB; }
 
         if (!isfinite(fa) || !isfinite(fc)) return prevB;
         d = b - prevB;
