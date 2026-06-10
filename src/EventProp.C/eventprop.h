@@ -166,45 +166,7 @@ BackwardMaximaOutput eventprop_backward_maxima(const BackwardMaximaInput* input)
 /** Free memory owned by a BackwardMaximaOutput struct. */
 void eventprop_free_backward_maxima_output(BackwardMaximaOutput* output);
 
-/* ── Diagnostic functions (owned memory) ─────────────────────────────── */
-
-/** Voltage trace output structure. */
-typedef struct {
-    int n_t;                     /* Number of time points (t_max/dt) */
-    double* v_trace;             /* Voltage trace values (malloc'd, n_t) */
-    double* ts;                   /* Time array (malloc'd, n_t) */
-} VoltageTraceOutput;
-
-/**
- * Compute membrane potential voltage trace with automatic memory allocation.
- */
-VoltageTraceOutput eventprop_compute_voltage_trace(double t_max, double dt,
-                                                         int target_nrn_idx,
-                                                         const double* w, int n_pre, int n_post,
-                                                         const double* times, const int32_t* sources, int n_spikes,
-                                                         const double* fwd_times, const int32_t* fwd_sources, int n_post_spikes,
-                                                         double v_th, double tau_mem, double tau_syn);
-
-/** Free memory owned by a VoltageTraceOutput struct. */
-void eventprop_free_voltage_trace_output(VoltageTraceOutput* output);
-
-/** Lambda-I trace output structure. */
-typedef struct {
-    int n_t;                     /* Number of time points (t_max/dt) */
-    double* lambda_trace;        /* Lambda-I trace values (malloc'd, n_t) */
-    double* ts;                   /* Time array (malloc'd, n_t) */
-} LambdaITraceOutput;
-
-/**
- * Compute lambda-I trace with automatic memory allocation.
- */
-LambdaITraceOutput eventprop_compute_lambda_i_trace(double t_max, double dt,
-                                                          int target_nrn_idx,
-                                                          const double* fwd_times, int n_post_spikes,
-                                                          double v_th, double tau_mem, double tau_syn);
-
-/** Free memory owned by a LambdaITraceOutput struct. */
-void eventprop_free_lambda_i_trace_output(LambdaITraceOutput* output);
+/* ── Diagnostic functions are in eventprop_diag.h ───────────────────── */
 
 /* ── Batch operations (parallel processing) ──────────────────────────── */
 
