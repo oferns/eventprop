@@ -76,28 +76,15 @@ LambdaITraceOutput eventprop_compute_lambda_i_trace(const LambdaITraceInput* inp
 
         double largest_time = input->fwd_times[input->n_post_spikes - 1];
 
-        /* Collect jumps from post-synaptic spikes after time t */
-        struct {
-            double mag;
-            double time_bwd;
-        } jumps[256];
-
-        int n_jumps = 0;
-        for (int i = input->n_post_spikes - 1; i >= 0; i--) {
-            if (input->fwd_times[i] < t) break;
-            double t_bwd = largest_time - input->fwd_times[i];
-            jumps[n_jumps].mag     = 1.0 / (input->v_th + 0.001);
-            jumps[n_jumps].time_bwd = t_bwd;
-            n_jumps++;
-        }
-
         double lambda_i = 0.0;
         double t_bwd_from_t = largest_time - t;
         double k_bwd_prefactor = input->tau_mem / (input->tau_mem - input->tau_syn);
 
-        for (int j = 0; j < n_jumps; j++) {
-            double dt_jump = t_bwd_from_t - jumps[j].time_bwd;
-            lambda_i += jumps[j].mag * k_bwd_prefactor *
+        /* Collect jumps from post-synaptic spikes after time t */
+        for (int i = input->n_post_spikes - 1; i >= 0; i--) {
+            if (input->fwd_times[i] < t) break;
+            double dt_jump = t_bwd_from_t - (largest_time - input->fwd_times[i]);
+            lambda_i += (1.0 / (input->v_th + 0.001)) * k_bwd_prefactor *
                         (exp(-dt_jump / input->tau_mem) - exp(-dt_jump / input->tau_syn));
         }
 

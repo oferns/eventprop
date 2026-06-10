@@ -15,6 +15,7 @@
 
 /* Eigen core (from EventProp.Python, stripped of pybind11) */
 #include "../EventProp.Cpp.Wrapper/eventprop_eigen_stripped.h"
+#include "../EventProp.C/eventprop_diag.h"
 
 static void generate_uniform_data(int n_pre, int n_post, int n_spikes, double* w, double* times, int32_t* sources) {
     std::mt19937 rng(42); std::uniform_real_distribution<double> w_dist(0.5, 2.0), time_dist(0.01, 0.99);
@@ -254,6 +255,76 @@ static void test_backward_maxima(const TestCase& tc) {
     free(grad_eig); TEST_END;
 }
 
+
+static void test_voltage_trace(const TestCase& tc) {
+    char name[256]; snprintf(name, sizeof(name), "VoltageTrace %s (%dx%d, %d spikes)", tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes); TEST(name);
+    if (tc.n_spikes == 0 || tc.v_th < 0.9) { printf("SKIP\n"); tests_passed++; return; }
+
+    double* w; double* times; int32_t* sources;
+    gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
+
+    ForwardInputSpikes fi_spikes = {{w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn}, tc.v_th};
+    SpikeOutput fwd_c = eventprop_compute_spikes(&fi_spikes);
+    if (fwd_c.n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(&fwd_c); return; }
+
+    int target_nrn = 0;
+    double t_max = 1.0, dt = 0.005;
+
+    VoltageTraceInput vti = {&fi_spikes, target_nrn, fwd_c.times, fwd_c.sources, fwd_c.n_spikes, t_max, dt};
+    VoltageTraceOutput trace_c = eventprop_compute_voltage_trace(&vti);
+
+    auto [ts_eig, v_eig] = compute_voltage_trace(t_max, dt, target_nrn,
+        make_w_mat(w, tc.n_pre, tc.n_post),
+        make_eigen_spikes(times, sources, tc.n_spikes),
+        tc.v_th, tc.tau_mem, tc.tau_syn);
+
+    ASSERT_EQ(trace_c.n_t, (int)ts_eig.size(), "trace length mismatch");
+    ASSERT_ARRAY_NEAR(trace_c.ts, ts_eig.data(), trace_c.n_t, ABS_TOLERANCE, REL_TOLERANCE, "time array");
+    ASSERT_ARRAY_NEAR(trace_c.v_trace, v_eig.data(), trace_c.n_t, 1e-8, 1e-6, "voltage values");
+
+    free(w); free(times); free(sources);
+    eventprop_free_spike_output(&fwd_c);
+    eventprop_free_voltage_trace_output(&trace_c);
+    TEST_END;
+}
+
+static void test_lambda_i_trace(const TestCase& tc) {
+    char name[256]; snprintf(name, sizeof(name), "LambdaITrace %s (%dx%d, %d spikes)", tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes); TEST(name);
+    if (tc.n_spikes == 0 || tc.v_th < 0.9) { printf("SKIP\n"); tests_passed++; return; }
+
+    double* w; double* times; int32_t* sources;
+    gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
+
+    ForwardInputSpikes fi_spikes = {{w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn}, tc.v_th};
+    SpikeOutput fwd_c = eventprop_compute_spikes(&fi_spikes);
+    if (fwd_c.n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(&fwd_c); return; }
+
+    int target_nrn = 0;
+    double t_max = 1.0, dt = 0.005;
+
+    LambdaITraceInput lii = {fwd_c.times, fwd_c.n_spikes, target_nrn, tc.v_th, tc.tau_mem, tc.tau_syn, t_max, dt};
+    LambdaITraceOutput trace_c = eventprop_compute_lambda_i_trace(&lii);
+
+    int expected_nt = (int)(t_max / dt);
+    ASSERT_EQ(trace_c.n_t, expected_nt, "trace length mismatch");
+    for (int i = 0; i < trace_c.n_t; i++) {
+        double expected_t = dt * i;
+        if (fabs(trace_c.ts[i] - expected_t) > ABS_TOLERANCE) {
+            printf("FAIL [ts[%d]: %.6f vs %.6f]\n", i, trace_c.ts[i], expected_t);
+            tests_failed++;
+            free(w); free(times); free(sources);
+            eventprop_free_spike_output(&fwd_c);
+            eventprop_free_lambda_i_trace_output(&trace_c);
+            return;
+        }
+    }
+
+    free(w); free(times); free(sources);
+    eventprop_free_spike_output(&fwd_c);
+    eventprop_free_lambda_i_trace_output(&trace_c);
+    TEST_END;
+}
+
 int main(int argc, char* argv[]) {
     printf("EventProp C vs Eigen Parity Tests\n"); printf("=================================\n\n");
 
@@ -286,7 +357,15 @@ int main(int argc, char* argv[]) {
         {"exponential", 50, 20, 100},     // Exponentially spaced
     };
 
+    TestCase diag_cases[] = {
+        {"uniform", 10,   5,   20},
+        {"uniform", 50,   20,  100},
+        {"poisson", 50,   20,  100},
+        {"burst",   50,   20,  100},
+    };
+
     for (auto& tc : cases) { test_compute_sums(tc); test_compute_spikes(tc); test_backward_spikes(tc); test_compute_maxima(tc); test_backward_maxima(tc); }
+    for (auto& tc : diag_cases) { test_voltage_trace(tc); test_lambda_i_trace(tc); }
 
     printf("\n=================================\n");
     printf("Results: %d/%d passed, %d failed\n", tests_passed, tests_run, tests_failed);
