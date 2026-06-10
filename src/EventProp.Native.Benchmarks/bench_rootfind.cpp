@@ -77,7 +77,9 @@ static double toms748_c(const VoltageCtx& ctx, double a, double b) {
 }
 
 // Track max iterations for Boost too
-int g_boost_fn_calls = 0;(const VoltageCtx& ctx, double a, double b) {
+int g_boost_fn_calls = 0;
+
+double toms748_boost(const VoltageCtx& ctx, double a, double b) {
     boost::math::tools::eps_tolerance<double> tol(std::numeric_limits<double>::digits);
     boost::uintmax_t max_iter = boost::math::policies::get_max_root_iterations<boost::math::policies::policy<>>();
     auto fn = [&](double t) { return v_delta(ctx, t); };
