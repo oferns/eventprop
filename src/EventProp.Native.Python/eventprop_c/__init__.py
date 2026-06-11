@@ -42,11 +42,38 @@ from .loss_layer import (
     VMaxCrossEntropyLoss
 )
 
+# Optimizer classes
+from .optimizer import (
+    GradientDescentParameters,
+    Optimizer,
+    GradientDescent,
+    Adam,
+)
+
+# Training base classes
+from .training import (
+    dropout_spikes,
+    AbstractTraining,
+    AbstractTwoLayer,
+)
+
+# TTFS training
+from .ttfs_training import (
+    TTFSMixin,
+    TwoLayerTTFS,
+)
+
+# VMax training
+from .vmax_training import (
+    OneLayerVMax,
+    TwoLayerVMax,
+)
+
 __all__ = [
     # Native API and output wrappers
     'NativeApi',
     'SpikeOutput',
-    'SumsOutput', 
+    'SumsOutput',
     'MaximaOutput',
     'BackwardOutput',
     'VoltageTraceOutput',
@@ -72,5 +99,20 @@ __all__ = [
     'TTFSCrossEntropyLossParameters',
     'VMaxCrossEntropyLossParameters',
     'TTFSCrossEntropyLoss',
-    'VMaxCrossEntropyLoss'
+    'VMaxCrossEntropyLoss',
+    # Optimizer classes
+    'GradientDescentParameters',
+    'Optimizer',
+    'GradientDescent',
+    'Adam',
+    # Training utilities
+    'dropout_spikes',
+    'AbstractTraining',
+    'AbstractTwoLayer',
+    # TTFS training
+    'TTFSMixin',
+    'TwoLayerTTFS',
+    # VMax training
+    'OneLayerVMax',
+    'TwoLayerVMax',
 ]

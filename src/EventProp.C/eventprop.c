@@ -1119,7 +1119,7 @@ SpikeOutput* eventprop_compute_spikes_batch(const BatchEventPropInput* input)
     /* Allocate array of SpikeOutput structs */
     SpikeOutput* result = (SpikeOutput*)calloc(batch_size, sizeof(SpikeOutput));
 
-    /* Compute sample offsets */
+    /* Compute sample offsets into flat concatenated arrays */
     int* offsets = (int*)malloc(batch_size * sizeof(int));
     offsets[0] = 0;
     for (int i = 1; i < batch_size; i++) {

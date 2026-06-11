@@ -1,7 +1,7 @@
 """LIF layer for ctypes library — calls C library directly via NativeApi."""
 
 import numpy as np
-from typing import NamedTuple, Tuple, List
+from typing import NamedTuple, Tuple
 
 from .layer import GaussianDistribution, Layer, WeightDistribution
 from .native import EventPropCtypes as NativeApi
@@ -33,155 +33,92 @@ class LIFLayer(Layer):
             self.w_in = self.parameters.w_dist.get_weights(
                 self.parameters.n_in, self.parameters.n
             )
-        
+
         # Cache flattened view for zero-copy access (avoids flatten() per call)
         self.w_in_flat = np.ascontiguousarray(self.w_in).ravel()
-        
+
         self.post_batch = None
         self.gradient = np.zeros_like(self.w_in)
 
-    def forward(self, input_batch: List[Spikes]) -> SpikesVector:
+    def forward(self, input_batch: SpikesVector) -> SpikesVector:
         super().forward(input_batch)
-        
-        # Call C library directly via NativeApi
+
+        # Collect per-sample spike data as numpy arrays (kept alive for C call)
+        times_list = [np.asarray(s.times, dtype=np.float64) for s in input_batch]
+        sources_list = [np.asarray(s.sources, dtype=np.int32) for s in input_batch]
+
+        # Batch forward pass via convenience wrapper
         lib = NativeApi()
-        
-        # Concatenate all spikes from batch into single arrays
-        all_times = np.concatenate([spikes.times for spikes in input_batch])
-        all_sources = np.concatenate([spikes.sources for spikes in input_batch])
-        
-        # Track spike counts per sample
-        n_spikes_per_sample = [len(spikes.times) for spikes in input_batch]
-        
-        # Use batch function (single C call, parallel processing)
-        output = lib.compute_spikes_batch(
-            w=self.w_in_flat,  # Use pre-flattened view (zero-copy)
-            times=all_times,
-            sources=all_sources,
-            n_spikes_per_sample=n_spikes_per_sample,
-            batch_size=len(input_batch),
+        output = lib.compute_spikes_batch_kw(
+            w=self.w_in_flat,
             n_pre=self.parameters.n_in,
             n_post=self.parameters.n,
+            times_list=times_list,
+            sources_list=sources_list,
             v_th=self.parameters.v_th,
             tau_mem=self.parameters.tau_mem,
             tau_syn=self.parameters.tau_syn,
         )
-        
-        # Collect per-sample results
+
+        # Collect per-sample results — store numpy copies (C memory freed on del)
         post_spikes_list = []
         for i in range(output.batch_size):
             sample = output[i]
             post_spikes_list.append(Spikes(
                 times=sample.times.to_numpy(),
-                sources=sample.sources.to_numpy()
+                sources=sample.sources.to_numpy(),
             ))
-        
+
         self.post_batch = SpikesVector(post_spikes_list)
         self._ran_forward = True
         return self.post_batch
 
     def backward(self):
         lib = NativeApi()
-        
+
         # Initialize gradient to zero
         self.gradient[:] = 0.0
-        
-        # Process each sample separately and accumulate gradients
+
         n_samples = len(self.input_batch)
-        
-        # Prepare data for batch processing
-        all_times = np.concatenate([inp.times for inp in self.input_batch])
-        all_sources = np.concatenate([inp.sources for inp in self.input_batch])
-        n_spikes_per_sample = [len(inp.times) for inp in self.input_batch]
-        
-        all_fwd_times = np.concatenate([post.times for post in self.post_batch])
-        all_fwd_sources = np.concatenate([post.sources for post in self.post_batch])
-        
-        # Get currents and errors as numpy arrays
-        all_fwd_currents = []
-        all_errors = []
-        for post in self.post_batch:
-            n_spikes = len(post.times)
-            currents = getattr(post, 'currents', None)
-            if currents is None or len(currents) == 0:
-                all_fwd_currents.append(np.zeros(n_spikes, dtype=np.float64))
-            else:
-                all_fwd_currents.append(np.asarray(currents, dtype=np.float64))
-            
+
+        # Process each sample individually (avoids complex batch struct construction)
+        for i in range(n_samples):
+            inp = self.input_batch[i]
+            post = self.post_batch[i]
+
+            times = np.asarray(inp.times, dtype=np.float64)
+            sources = np.asarray(inp.sources, dtype=np.int32)
+            fwd_times = np.asarray(post.times, dtype=np.float64)
+            fwd_sources = np.asarray(post.sources, dtype=np.int32)
+
+            n_fwd = len(fwd_times)
+            currents = np.zeros(n_fwd, dtype=np.float64)
+
             errors = getattr(post, 'errors', None)
             if errors is None or len(errors) == 0:
-                all_errors.append(np.ones(n_spikes, dtype=np.float64))
+                post_errors = np.ones(n_fwd, dtype=np.float64)
             else:
-                all_errors.append(np.asarray(errors, dtype=np.float64))
-        
-        all_fwd_currents = np.concatenate(all_fwd_currents)
-        all_errors = np.concatenate(all_errors)
-        
-        # Use batch function if available, otherwise process sequentially
-        n_fwd_spikes_per_sample = [len(post.times) for post in self.post_batch]
-        
-        try:
-            output = lib.backward_spikes_batch(
-                times=all_times,
-                sources=all_sources,
-                n_spikes_per_sample=n_spikes_per_sample,
-                fwd_times=all_fwd_times,
-                fwd_sources=all_fwd_sources,
-                fwd_currents=all_fwd_currents,
-                post_errors=all_errors,
-                n_fwd_spikes_per_sample=n_fwd_spikes_per_sample,
-                batch_size=n_samples,
+                post_errors = np.asarray(errors, dtype=np.float64)
+
+            output = lib.backward_spikes_kw(
                 w=self.w_in_flat,
                 n_pre=self.parameters.n_in,
                 n_post=self.parameters.n,
+                times=times,
+                sources=sources,
+                fwd_times=fwd_times,
+                fwd_sources=fwd_sources,
+                fwd_currents=currents,
+                post_errors=post_errors,
                 v_th=self.parameters.v_th,
                 tau_mem=self.parameters.tau_mem,
                 tau_syn=self.parameters.tau_syn,
             )
-            
-            # Accumulate gradients from batch output
-            self.gradient[:] = output.grad.to_numpy().reshape(
+
+            self.gradient += output.grad.to_numpy().reshape(
                 self.parameters.n_in, self.parameters.n
-            )
-        except Exception:
-            # Fallback: process samples sequentially
-            for i in range(n_samples):
-                inp = self.input_batch[i]
-                post = self.post_batch[i]
-                
-                n_spikes = len(inp.times)
-                currents = getattr(post, 'currents', None)
-                if currents is None or len(currents) == 0:
-                    currents = np.zeros(n_spikes, dtype=np.float64)
-                else:
-                    currents = np.asarray(currents, dtype=np.float64)
-                
-                errors = getattr(post, 'errors', None)
-                if errors is None or len(errors) == 0:
-                    errors = np.ones(n_spikes, dtype=np.float64)
-                else:
-                    errors = np.asarray(errors, dtype=np.float64)
-                
-                output = lib.backward_spikes(
-                    times=inp.times,
-                    sources=inp.sources,
-                    fwd_times=post.times,
-                    fwd_sources=post.sources,
-                    fwd_currents=currents,
-                    post_errors=errors,
-                    w=self.w_in_flat,
-                    n_pre=self.parameters.n_in,
-                    n_post=self.parameters.n,
-                    v_th=self.parameters.v_th,
-                    tau_mem=self.parameters.tau_mem,
-                    tau_syn=self.parameters.tau_syn,
-                )
-                
-                # Accumulate gradient
-                self.gradient += output.grad.to_numpy().reshape(
-                    self.parameters.n_in, self.parameters.n
-                )
-        
+            ) / n_samples
+
         self._ran_backward = True
         super().backward()
 
@@ -194,26 +131,28 @@ class LIFLayer(Layer):
     ) -> Tuple[np.ndarray, np.ndarray]:
         if not self._ran_forward:
             raise RuntimeError("Run forward first!")
-        
+
         lib = NativeApi()
         input_spikes = self.input_batch[batch_idx]
-        
-        output = lib.compute_voltage_trace(
-            t_max=t_max, dt=dt, target_nrn_idx=target_nrn_idx,
-            w=self.w_in_flat,  # Use pre-flattened view (zero-copy)
+        post_spikes = self.post_batch[batch_idx]
+
+        output = lib.compute_voltage_trace_kw(
+            w=self.w_in_flat,
             n_pre=self.parameters.n_in,
             n_post=self.parameters.n,
             times=input_spikes.times,
             sources=input_spikes.sources,
+            target_nrn_idx=target_nrn_idx,
+            fwd_times=post_spikes.times,
+            fwd_sources=post_spikes.sources,
             v_th=self.parameters.v_th,
             tau_mem=self.parameters.tau_mem,
             tau_syn=self.parameters.tau_syn,
+            t_max=t_max,
+            dt=dt,
         )
-        
-        ts = output.ts.to_numpy()
-        v_trace = output.v_trace.to_numpy()
-        
-        return ts, v_trace
+
+        return output.ts.to_numpy(), output.v_trace.to_numpy()
 
     def zero_grad(self):
         self.gradient[:] = 0
@@ -227,32 +166,15 @@ class LIFLayer(Layer):
     ) -> Tuple[np.ndarray, np.ndarray]:
         lib = NativeApi()
         post_spikes = self.post_batch[batch_idx]
-        
-        output = lib.compute_lambda_i_trace(
-            t_max=t_max, dt=dt, target_nrn_idx=target_nrn_idx,
-            post_times=post_spikes.times,
-            post_sources=post_spikes.sources,
-            v_th=self.parameters.v_th,
-            tau_mem=self.parameters.tau_mem,
-            tau_syn=self.parameters.tau_syn,
-        )
-        
-        ts = output.ts.to_numpy()
-        lambda_i = output.lambda_trace.to_numpy()  # Note: corrected attribute name
-        
-        return ts, lambda_i
 
-    def get_lambda_i_for_neuron(
-        self, batch_idx: int, target_nrn_idx: int, t: float
-    ) -> float:
-        lib = NativeApi()
-        post_spikes = self.post_batch[batch_idx]
-        
-        return lib.compute_lambda_i(
-            t=t, target_nrn_idx=target_nrn_idx,
-            post_times=post_spikes.times,
-            post_sources=post_spikes.sources,
+        output = lib.compute_lambda_i_trace_kw(
+            fwd_times=post_spikes.times,
+            target_nrn_idx=target_nrn_idx,
             v_th=self.parameters.v_th,
             tau_mem=self.parameters.tau_mem,
             tau_syn=self.parameters.tau_syn,
+            t_max=t_max,
+            dt=dt,
         )
+
+        return output.ts.to_numpy(), output.lambda_trace.to_numpy()

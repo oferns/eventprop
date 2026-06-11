@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 import ctypes
-from ctypes import cdll, c_double, c_int, c_int, Structure, POINTER, byref
+from ctypes import cdll, c_double, c_int, Structure, POINTER, byref, cast, pointer
 import numpy as np
 
 
@@ -20,6 +20,7 @@ class _EventPropInput(Structure):
         ('n_spikes', c_int),
         ('tau_mem', c_double),
         ('tau_syn', c_double),
+        ('v_th', c_double),
     ]
 
 
@@ -426,9 +427,10 @@ class EventPropCtypes:
         """Set up ctypes function signatures."""
         lib = self.lib
 
-        # Forward pass (struct input)
+        # Forward pass (struct input) — uses toms748 root-finder which sets errno=EDOM
         lib.eventprop_compute_spikes.restype = _SpikeOutput
         lib.eventprop_compute_spikes.argtypes = [POINTER(_EventPropInput)]
+        lib.eventprop_compute_spikes.use_errno = True
 
         lib.eventprop_free_spike_output.restype = None
         lib.eventprop_free_spike_output.argtypes = [POINTER(_SpikeOutput)]
@@ -471,11 +473,12 @@ class EventPropCtypes:
         lib.eventprop_free_lambda_i_trace_output.restype = None
         lib.eventprop_free_lambda_i_trace_output.argtypes = [POINTER(_LambdaITraceOutput)]
 
-        # Batch operations
+        # Batch operations — compute_spikes_batch uses toms748 per sample
         lib.eventprop_compute_spikes_batch.restype = POINTER(_SpikeOutput)
         lib.eventprop_compute_spikes_batch.argtypes = [
             POINTER(_BatchEventPropInput),
         ]
+        lib.eventprop_compute_spikes_batch.use_errno = True
 
         lib.eventprop_free_batch_spike_output.restype = None
         lib.eventprop_free_batch_spike_output.argtypes = [POINTER(_SpikeOutput), c_int]
@@ -577,6 +580,189 @@ class EventPropCtypes:
     def free_backward_spikes_batch_output(self, output: POINTER(_BackwardOutput), batch_size: int):
         """Free a batch BackwardOutput returned by backward_spikes_batch()."""
         self.lib.eventprop_free_backward_batch_output(output, batch_size)
+
+    # ── Convenience wrappers (keyword-argument API) ────────────────
+    # These construct the ctypes Structures internally so callers can pass
+    # numpy arrays directly instead of manually building structs.
+
+    @staticmethod
+    def _np_to_ptr(array):
+        """Convert a numpy array to a ctypes pointer (no copy)."""
+        if array is None or len(array) == 0:
+            return None
+        return np.asarray(array, dtype=np.float64).ctypes.data_as(POINTER(c_double))
+
+    @staticmethod
+    def _np_to_int_ptr(array):
+        """Convert a numpy int array to a ctypes pointer (no copy)."""
+        if array is None or len(array) == 0:
+            return None
+        return np.asarray(array, dtype=np.int32).ctypes.data_as(POINTER(c_int))
+
+    def _make_input(self, w, n_pre, n_post, times, sources, v_th=1.0,
+                    tau_mem=20e-3, tau_syn=5e-3):
+        """Construct an _EventPropInput from keyword arguments."""
+        inp = _EventPropInput()
+        inp.w = self._np_to_ptr(w)
+        inp.n_pre = int(n_pre)
+        inp.n_post = int(n_post)
+        inp.times = self._np_to_ptr(times)
+        inp.sources = self._np_to_int_ptr(sources)
+        inp.n_spikes = len(times) if times is not None else 0
+        inp.tau_mem = float(tau_mem)
+        inp.tau_syn = float(tau_syn)
+        inp.v_th = float(v_th)
+        return inp
+
+    def compute_spikes_kw(self, w, n_pre, n_post, times, sources,
+                          v_th=1.0, tau_mem=20e-3, tau_syn=5e-3) -> SpikeOutput:
+        """Forward pass with keyword arguments."""
+        return self.compute_spikes(self._make_input(w, n_pre, n_post, times, sources,
+                                                     v_th, tau_mem, tau_syn))
+
+    def compute_maxima_kw(self, w, n_pre, n_post, times, sources,
+                          tau_mem=20e-3, tau_syn=5e-3) -> MaximaOutput:
+        """Compute maxima with keyword arguments (v_th unused for LI layer)."""
+        return self.compute_maxima(self._make_input(w, n_pre, n_post, times, sources,
+                                                     v_th=np.inf, tau_mem=tau_mem, tau_syn=tau_syn))
+
+    def backward_spikes_kw(self, w, n_pre, n_post, times, sources,
+                           fwd_times, fwd_sources, fwd_currents, post_errors,
+                           v_th=1.0, tau_mem=20e-3, tau_syn=5e-3) -> BackwardOutput:
+        """Backward pass with keyword arguments."""
+        inp = self._make_input(w, n_pre, n_post, times, sources, v_th, tau_mem, tau_syn)
+        backward_inp = _BackwardSpikesInput()
+        backward_inp.input = pointer(inp)
+        backward_inp.fwd_times = self._np_to_ptr(fwd_times)
+        backward_inp.fwd_sources = self._np_to_int_ptr(fwd_sources)
+        backward_inp.fwd_currents = self._np_to_ptr(fwd_currents)
+        backward_inp.post_errors = self._np_to_ptr(post_errors)
+        backward_inp.n_post_spikes = len(fwd_times) if fwd_times is not None else 0
+        return self.backward_spikes(backward_inp)
+
+    def backward_maxima_kw(self, w, n_pre, n_post, times, sources,
+                           maxima_times, maxima_values, maxima_errors,
+                           tau_mem=20e-3, tau_syn=5e-3) -> BackwardOutput:
+        """Backward maxima with keyword arguments."""
+        inp = self._make_input(w, n_pre, n_post, times, sources,
+                               v_th=np.inf, tau_mem=tau_mem, tau_syn=tau_syn)
+        backward_inp = _BackwardMaximaInput()
+        backward_inp.input = pointer(inp)
+        backward_inp.maxima_times = self._np_to_ptr(maxima_times)
+        backward_inp.maxima_values = self._np_to_ptr(maxima_values)
+        backward_inp.maxima_errors = self._np_to_ptr(maxima_errors)
+        backward_inp.n_maxima = len(maxima_times) if maxima_times is not None else 0
+        return self.backward_maxima(backward_inp)
+
+    def compute_spikes_batch_kw(self, w, n_pre, n_post,
+                                times_list, sources_list,
+                                v_th=1.0, tau_mem=20e-3, tau_syn=5e-3) -> BatchSpikeOutput:
+        """Batch forward pass with keyword arguments.
+
+        Concatenates per-sample times/sources into flat arrays for the C library,
+        which expects a single EventPropInput with offset-based sample access.
+
+        Parameters
+        ----------
+        times_list, sources_list : list of np.ndarray
+            One (times, sources) pair per sample.
+        """
+        batch_size = len(times_list)
+        n_spikes_per_sample = (c_int * batch_size)(*[len(t) for t in times_list])
+
+        # C library expects flat concatenated arrays — it computes offsets internally
+        all_times = np.concatenate(times_list) if times_list else np.array([], dtype=np.float64)
+        all_sources = np.concatenate(sources_list) if sources_list else np.array([], dtype=np.int32)
+
+        inp = self._make_input(
+            w, n_pre, n_post,
+            all_times, all_sources,
+            v_th=v_th, tau_mem=tau_mem, tau_syn=tau_syn,
+        )
+
+        batch_inp = _BatchEventPropInput()
+        batch_inp.input = pointer(inp)
+        batch_inp.n_spikes_per_sample = n_spikes_per_sample
+        batch_inp.batch_size = batch_size
+
+        output = self.compute_spikes_batch(batch_inp)
+        # Keep references alive so C pointers remain valid during OpenMP execution
+        output._refs = (inp, all_times, all_sources, n_spikes_per_sample, batch_inp)
+        return output
+
+    def backward_spikes_batch_kw(self, w, n_pre, n_post,
+                                 times_list, sources_list,
+                                 fwd_batch, post_errors_list,
+                                 v_th=1.0, tau_mem=20e-3, tau_syn=5e-3) -> BatchBackwardOutput:
+        """Batch backward pass with keyword arguments.
+
+        Concatenates per-sample times/sources into flat arrays for the C library.
+
+        Parameters
+        ----------
+        fwd_batch : BatchSpikeOutput
+            Forward outputs from compute_spikes_batch_kw.
+        post_errors_list : list of np.ndarray
+            Error values per forward spike, one array per sample.
+        """
+        batch_size = len(times_list)
+        n_spikes_per_sample = (c_int * batch_size)(*[len(t) for t in times_list])
+
+        # C library expects flat concatenated arrays
+        all_times = np.concatenate(times_list) if times_list else np.array([], dtype=np.float64)
+        all_sources = np.concatenate(sources_list) if sources_list else np.array([], dtype=np.int32)
+
+        inp = self._make_input(
+            w, n_pre, n_post,
+            all_times, all_sources,
+            v_th=v_th, tau_mem=tau_mem, tau_syn=tau_syn,
+        )
+
+        batch_inp = _BatchEventPropInput()
+        batch_inp.input = pointer(inp)
+        batch_inp.n_spikes_per_sample = n_spikes_per_sample
+        batch_inp.batch_size = batch_size
+
+        # Flatten post_errors into single array for C
+        all_errors = np.concatenate(post_errors_list) if post_errors_list else np.array([], dtype=np.float64)
+        errors_ptr = self._np_to_ptr(all_errors)
+
+        # Keep references alive so C pointers remain valid during OpenMP execution
+        output = self.backward_spikes_batch(batch_inp, fwd_batch._c, errors_ptr)
+        output._refs = (inp, all_times, all_sources, n_spikes_per_sample, batch_inp, all_errors)
+        return output
+
+    def compute_voltage_trace_kw(self, w, n_pre, n_post,
+                                 times, sources,
+                                 target_nrn_idx, fwd_times, fwd_sources,
+                                 v_th=1.0, tau_mem=20e-3, tau_syn=5e-3,
+                                 t_max=1.0, dt=1e-4) -> VoltageTraceOutput:
+        """Voltage trace with keyword arguments."""
+        inp = self._make_input(w, n_pre, n_post, times, sources, v_th, tau_mem, tau_syn)
+        trace_inp = _VoltageTraceInput()
+        trace_inp.input = pointer(inp)
+        trace_inp.target_nrn_idx = int(target_nrn_idx)
+        trace_inp.fwd_times = self._np_to_ptr(fwd_times)
+        trace_inp.fwd_sources = self._np_to_int_ptr(fwd_sources)
+        trace_inp.n_post_spikes = len(fwd_times) if fwd_times is not None else 0
+        trace_inp.t_max = float(t_max)
+        trace_inp.dt = float(dt)
+        return self.compute_voltage_trace(trace_inp)
+
+    def compute_lambda_i_trace_kw(self, fwd_times, target_nrn_idx,
+                                  v_th=1.0, tau_mem=20e-3, tau_syn=5e-3,
+                                  t_max=1.0, dt=1e-4) -> LambdaITraceOutput:
+        """Lambda-I trace with keyword arguments."""
+        trace_inp = _LambdaITraceInput()
+        trace_inp.fwd_times = self._np_to_ptr(fwd_times)
+        trace_inp.n_post_spikes = len(fwd_times) if fwd_times is not None else 0
+        trace_inp.target_nrn_idx = int(target_nrn_idx)
+        trace_inp.v_th = float(v_th)
+        trace_inp.tau_mem = float(tau_mem)
+        trace_inp.tau_syn = float(tau_syn)
+        trace_inp.t_max = float(t_max)
+        trace_inp.dt = float(dt)
+        return self.compute_lambda_i_trace(trace_inp)
 
 
 # ── Convenience function for quick access ────────────────────────────────
