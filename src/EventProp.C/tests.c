@@ -149,12 +149,12 @@ static void test_backward_spikes(void)
         .fwd_times=fwd_times, .fwd_sources=fwd_sources, .fwd_currents=fwd_currents,
         .post_errors=post_errors, .n_post_spikes=n_spikes
     };
-    BackwardSpikesOutput output = eventprop_backward_spikes(&backward_input);
+    BackwardOutput output = eventprop_backward_spikes(&backward_input);
 
     ASSERT(output.n_pre == n_pre, "wrong pre count");
     ASSERT(output.n_post == n_post, "wrong post count");
 
-    eventprop_free_backward_spikes_output(&output);
+    eventprop_free_backward_output(&output);
     free(fwd_times); free(fwd_sources); free(fwd_currents); free(post_errors);
     TEST_END;
 }
@@ -225,10 +225,10 @@ static void test_backward_maxima(void)
         .maxima_times=maxima_times, .maxima_values=maxima_values,
         .maxima_errors=maxima_errors, .n_maxima=n_post
     };
-    BackwardMaximaOutput output = eventprop_backward_maxima(&backward_input);
+    BackwardOutput output = eventprop_backward_maxima(&backward_input);
 
     ASSERT(output.n_pre == n_pre, "wrong pre count");
-    eventprop_free_backward_maxima_output(&output);
+    eventprop_free_backward_output(&output);
 
     free(maxima_times); free(maxima_values); free(maxima_errors);
     TEST_END;
@@ -269,7 +269,7 @@ static void test_backward_spikes_batch_single_sample(void)
         .fwd_currents=fwd.currents,
         .post_errors=post_errors_single, .n_post_spikes=fwd.n_spikes
     };
-    BackwardSpikesOutput grad_single = eventprop_backward_spikes(&bsi_single);
+    BackwardOutput grad_single = eventprop_backward_spikes(&bsi_single);
 
     /* Batch backward with batch_size=1 */
     int n_per_sample[] = { n_spikes };
@@ -280,7 +280,7 @@ static void test_backward_spikes_batch_single_sample(void)
     double* post_errors_batch = malloc(fwd.n_spikes * sizeof(double));
     for (int i = 0; i < fwd.n_spikes; i++) post_errors_batch[i] = -1.0;
 
-    BackwardSpikesOutput* grad_batch = eventprop_backward_spikes_batch(
+    BackwardOutput* grad_batch = eventprop_backward_spikes_batch(
         &base_b, n_per_sample, fwd_batch, post_errors_batch, 1);
 
     /* Compare gradients element-wise */
@@ -297,8 +297,8 @@ static void test_backward_spikes_batch_single_sample(void)
     for (int i = 0; i < n_pre * n_post; i++) grad_sum += fabs(grad_single.grad[i]);
     ASSERT(grad_sum > EPSILON, "all gradients are zero");
 
-    eventprop_free_backward_spikes_output(&grad_single);
-    eventprop_free_backward_spikes_batch_output(grad_batch, 1);
+    eventprop_free_backward_output(&grad_single);
+    eventprop_free_backward_batch_output(grad_batch, 1);
     eventprop_free_spike_output(&fwd);
     free(fwd_batch); free(post_errors_single); free(post_errors_batch);
     free(w); free(times); free(sources);
@@ -352,7 +352,7 @@ static void test_backward_spikes_batch_multi_sample(void)
     };
     BackwardInputBase base_b = { .base=&base };
 
-    BackwardSpikesOutput* grad_batch = eventprop_backward_spikes_batch(
+    BackwardOutput* grad_batch = eventprop_backward_spikes_batch(
         &base_b, n_per_sample, fwd_batch, post_errors, batch_size);
 
     /* Verify each sample has correct dimensions */
@@ -386,7 +386,7 @@ static void test_backward_spikes_batch_multi_sample(void)
             .post_errors=post_errors + offset_err,
             .n_post_spikes=fwd_batch[b].n_spikes
         };
-        BackwardSpikesOutput grad_single = eventprop_backward_spikes(&bsi);
+        BackwardOutput grad_single = eventprop_backward_spikes(&bsi);
 
         int mismatch = 0;
         for (int i = 0; i < n_pre * n_post; i++) {
@@ -396,13 +396,13 @@ static void test_backward_spikes_batch_multi_sample(void)
         }
         ASSERT(!mismatch, "multi-sample batch gradient mismatch");
 
-        eventprop_free_backward_spikes_output(&grad_single);
+        eventprop_free_backward_output(&grad_single);
         offset_in += n_per_sample[b];
         offset_err += fwd_batch[b].n_spikes;
     }
 
     /* Cleanup */
-    eventprop_free_backward_spikes_batch_output(grad_batch, batch_size);
+    eventprop_free_backward_batch_output(grad_batch, batch_size);
     eventprop_free_batch_spike_output(fwd_batch, batch_size);
     free(w); free(all_times); free(all_sources); free(post_errors);
     TEST_END;

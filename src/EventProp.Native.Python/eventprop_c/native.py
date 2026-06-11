@@ -103,20 +103,11 @@ class _MaximaOutput(Structure):
     ]
 
 
-class _BackwardSpikesOutput(Structure):
+class _BackwardOutput(Structure):
     _fields_ = [
         ('n_pre', c_int),
         ('n_post', c_int),
         ('grad', POINTER(c_double)),
-        ('spike_errors', POINTER(c_double)),
-    ]
-
-
-class _BackwardMaximaOutput(Structure):
-    _fields_ = [
-        ('n_pre', c_int),
-        ('n_post', c_int),
-        ('gradient', POINTER(c_double)),
         ('spike_errors', POINTER(c_double)),
     ]
 
@@ -266,10 +257,10 @@ class MaximaOutput:
             EventPropCtypes._global_lib.eventprop_free_maxima_output(byref(self._c))
 
 
-class BackwardSpikesOutput:
-    """Wrapper for C BackwardSpikesOutput with zero-copy array access."""
+class BackwardOutput:
+    """Wrapper for C BackwardOutput with zero-copy array access."""
 
-    def __init__(self, c_struct: _BackwardSpikesOutput):
+    def __init__(self, c_struct: _BackwardOutput):
         self._c = c_struct
 
     @property
@@ -290,34 +281,7 @@ class BackwardSpikesOutput:
 
     def __del__(self):
         if EventPropCtypes._global_lib is not None:
-            EventPropCtypes._global_lib.eventprop_free_backward_spikes_output(byref(self._c))
-
-
-class BackwardMaximaOutput:
-    """Wrapper for C BackwardMaximaOutput with zero-copy array access."""
-
-    def __init__(self, c_struct: _BackwardMaximaOutput):
-        self._c = c_struct
-
-    @property
-    def n_pre(self) -> int:
-        return self._c.n_pre
-
-    @property
-    def n_post(self) -> int:
-        return self._c.n_post
-
-    @property
-    def gradient(self) -> DoubleArrayView:
-        return DoubleArrayView(self._c.gradient, self.n_pre * self.n_post)
-
-    @property
-    def spike_errors(self) -> DoubleArrayView:
-        return DoubleArrayView(self._c.spike_errors, self.n_pre)
-
-    def __del__(self):
-        if EventPropCtypes._global_lib is not None:
-            EventPropCtypes._global_lib.eventprop_free_backward_maxima_output(byref(self._c))
+            EventPropCtypes._global_lib.eventprop_free_backward_output(byref(self._c))
 
 
 class VoltageTraceOutput:
@@ -394,30 +358,30 @@ class SpikeOutputView(SpikeOutput):
     def __del__(self):
         pass
 
-class BatchBackwardSpikesOutput:
-    """Wrapper for batch backward spikes output (array of BackwardSpikesOutput structs)."""
+class BatchBackwardOutput:
+    """Wrapper for batch backward spikes output (array of BackwardOutput structs)."""
 
-    def __init__(self, c_ptr: ctypes.POINTER(_BackwardSpikesOutput), batch_size: int):
+    def __init__(self, c_ptr: ctypes.POINTER(_BackwardOutput), batch_size: int):
         self._c = c_ptr
         self.batch_size = batch_size
 
-    def __getitem__(self, idx: int) -> 'BackwardSpikesOutputView':
+    def __getitem__(self, idx: int) -> 'BackwardOutputView':
         if not 0 <= idx < self.batch_size:
             raise IndexError(f"index {idx} out of range [0, {self.batch_size})")
-        return BackwardSpikesOutputView(self._c[idx])
+        return BackwardOutputView(self._c[idx])
 
     def __len__(self) -> int:
         return self.batch_size
 
     def __del__(self):
         if EventPropCtypes._global_lib is not None and self._c:
-            EventPropCtypes._global_lib.eventprop_free_backward_spikes_batch_output(
+            EventPropCtypes._global_lib.eventprop_free_backward_batch_output(
                 self._c, self.batch_size
             )
 
 
-class BackwardSpikesOutputView(BackwardSpikesOutput):
-    """View of a BackwardSpikesOutput — doesn't free memory on deletion."""
+class BackwardOutputView(BackwardOutput):
+    """View of a BackwardOutput — doesn't free memory on deletion."""
 
     def __del__(self):
         pass
@@ -478,17 +442,17 @@ class EventPropCtypes:
         lib.eventprop_free_maxima_output.argtypes = [POINTER(_MaximaOutput)]
 
         # Backward pass (struct input)
-        lib.eventprop_backward_spikes.restype = _BackwardSpikesOutput
+        lib.eventprop_backward_spikes.restype = _BackwardOutput
         lib.eventprop_backward_spikes.argtypes = [POINTER(_BackwardSpikesInput)]
 
-        lib.eventprop_free_backward_spikes_output.restype = None
-        lib.eventprop_free_backward_spikes_output.argtypes = [POINTER(_BackwardSpikesOutput)]
+        lib.eventprop_free_backward_output.restype = None
+        lib.eventprop_free_backward_output.argtypes = [POINTER(_BackwardOutput)]
 
-        lib.eventprop_backward_maxima.restype = _BackwardMaximaOutput
+        lib.eventprop_backward_maxima.restype = _BackwardOutput
         lib.eventprop_backward_maxima.argtypes = [POINTER(_BackwardMaximaInput)]
 
-        lib.eventprop_free_backward_maxima_output.restype = None
-        lib.eventprop_free_backward_maxima_output.argtypes = [POINTER(_BackwardMaximaOutput)]
+        lib.eventprop_free_backward_output.restype = None
+        lib.eventprop_free_backward_output.argtypes = [POINTER(_BackwardOutput)]
 
         # Diagnostic functions (struct input)
         lib.eventprop_compute_voltage_trace.restype = _VoltageTraceOutput
@@ -514,7 +478,7 @@ class EventPropCtypes:
         lib.eventprop_free_batch_spike_output.restype = None
         lib.eventprop_free_batch_spike_output.argtypes = [POINTER(_SpikeOutput), c_int]
 
-        lib.eventprop_backward_spikes_batch.restype = POINTER(_BackwardSpikesOutput)
+        lib.eventprop_backward_spikes_batch.restype = POINTER(_BackwardOutput)
         lib.eventprop_backward_spikes_batch.argtypes = [
             POINTER(_BackwardInputBase),
             POINTER(c_int),
@@ -523,8 +487,8 @@ class EventPropCtypes:
             c_int,
         ]
 
-        lib.eventprop_free_backward_spikes_batch_output.restype = None
-        lib.eventprop_free_backward_spikes_batch_output.argtypes = [POINTER(_BackwardSpikesOutput), c_int]
+        lib.eventprop_free_backward_batch_output.restype = None
+        lib.eventprop_free_backward_batch_output.argtypes = [POINTER(_BackwardOutput), c_int]
    # ── Forward pass ────────────────────────────────────────────────
 
     def compute_spikes(self, input: _ForwardInputBase) -> SpikeOutput:
@@ -553,21 +517,21 @@ class EventPropCtypes:
 
     # ── Backward pass ───────────────────────────────────────────────
 
-    def backward_spikes(self, input: _BackwardSpikesInput) -> BackwardSpikesOutput:
+    def backward_spikes(self, input: _BackwardSpikesInput) -> BackwardOutput:
         """Backward pass: compute weight gradients from post-synaptic spike errors."""
-        return BackwardSpikesOutput(self.lib.eventprop_backward_spikes(byref(input)))
+        return BackwardOutput(self.lib.eventprop_backward_spikes(byref(input)))
 
-    def free_backward_spikes_output(self, output: POINTER(_BackwardSpikesOutput)):
-        """Free a BackwardSpikesOutput returned by backward_spikes()."""
-        self.lib.eventprop_free_backward_spikes_output(output)
+    def free_backward_spikes_output(self, output: POINTER(_BackwardOutput)):
+        """Free a BackwardOutput returned by backward_spikes()."""
+        self.lib.eventprop_free_backward_output(output)
 
-    def backward_maxima(self, input: _BackwardMaximaInput) -> BackwardMaximaOutput:
+    def backward_maxima(self, input: _BackwardMaximaInput) -> BackwardOutput:
         """Backward pass: compute weight gradients from membrane potential maxima."""
-        return BackwardMaximaOutput(self.lib.eventprop_backward_maxima(byref(input)))
+        return BackwardOutput(self.lib.eventprop_backward_maxima(byref(input)))
 
-    def free_backward_maxima_output(self, output: POINTER(_BackwardMaximaOutput)):
-        """Free a BackwardMaximaOutput returned by backward_maxima()."""
-        self.lib.eventprop_free_backward_maxima_output(output)
+    def free_backward_maxima_output(self, output: POINTER(_BackwardOutput)):
+        """Free a BackwardOutput returned by backward_maxima()."""
+        self.lib.eventprop_free_backward_output(output)
 
     # ── Diagnostic functions ────────────────────────────────────────
 
@@ -603,16 +567,16 @@ class EventPropCtypes:
     def backward_spikes_batch(
         self, base: _BackwardInputBase, n_spikes_per_sample: POINTER(c_int),
         fwd_batch: POINTER(_SpikeOutput), post_errors: POINTER(c_double), batch_size: int
-    ) -> BatchBackwardSpikesOutput:
+    ) -> BatchBackwardOutput:
         """Batch backward pass: compute weight gradients for multiple samples."""
         c_ptr = self.lib.eventprop_backward_spikes_batch(
             byref(base), n_spikes_per_sample, fwd_batch, post_errors, batch_size
         )
-        return BatchBackwardSpikesOutput(c_ptr, batch_size)
+        return BatchBackwardOutput(c_ptr, batch_size)
 
-    def free_backward_spikes_batch_output(self, output: POINTER(_BackwardSpikesOutput), batch_size: int):
-        """Free a batch BackwardSpikesOutput returned by backward_spikes_batch()."""
-        self.lib.eventprop_free_backward_spikes_batch_output(output, batch_size)
+    def free_backward_spikes_batch_output(self, output: POINTER(_BackwardOutput), batch_size: int):
+        """Free a batch BackwardOutput returned by backward_spikes_batch()."""
+        self.lib.eventprop_free_backward_batch_output(output, batch_size)
 
 
 # ── Convenience function for quick access ────────────────────────────────

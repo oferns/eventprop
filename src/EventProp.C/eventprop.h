@@ -114,40 +114,30 @@ typedef struct {
     int n_maxima;                       /* Number of maxima */
 } BackwardMaximaInput;
 
-/* ── Backward pass outputs (owned memory) ───────────────────────────── */
+/* ── Backward pass output (owned memory) ───────────────────────────── */
 
+/** Backward pass output — weight gradient + input spike errors. */
 typedef struct {
     int n_pre;               /* Number of pre-synaptic neurons */
     int n_post;              /* Number of post-synaptic neurons */
     double* grad;            /* Weight gradient (malloc'd, n_pre * n_post) */
     double* spike_errors;   /* Input spike errors (malloc'd, n_spikes) */
-} BackwardSpikesOutput;
+} BackwardOutput;
 
 /**
  * Backward pass (spikes) with automatic memory allocation.
- * Returns a BackwardSpikesOutput struct — caller must free via eventprop_free_backward_spikes_output().
+ * Returns a BackwardOutput struct — caller must free via eventprop_free_backward_output().
  */
-BackwardSpikesOutput eventprop_backward_spikes(const BackwardSpikesInput* input);
+BackwardOutput eventprop_backward_spikes(const BackwardSpikesInput* input);
 
-
-/** Free memory owned by a BackwardSpikesOutput struct. */
-void eventprop_free_backward_spikes_output(BackwardSpikesOutput* output);
-
-typedef struct {
-    int n_pre;               /* Number of pre-synaptic neurons */
-    int n_post;              /* Number of post-synaptic neurons */
-    double* gradient;        /* Weight gradient (malloc'd, n_pre * n_post) */
-    double* spike_errors;   /* Input spike errors (malloc'd, n_input_spikes) */
-} BackwardMaximaOutput;
+/** Free memory owned by a BackwardOutput struct. */
+void eventprop_free_backward_output(BackwardOutput* output);
 
 /**
  * Backward pass (maxima) with automatic memory allocation.
- * Returns a BackwardMaximaOutput struct — caller must free via eventprop_free_backward_maxima_output().
+ * Returns a BackwardOutput struct — caller must free via eventprop_free_backward_output().
  */
-BackwardMaximaOutput eventprop_backward_maxima(const BackwardMaximaInput* input);
-
-/** Free memory owned by a BackwardMaximaOutput struct. */
-void eventprop_free_backward_maxima_output(BackwardMaximaOutput* output);
+BackwardOutput eventprop_backward_maxima(const BackwardMaximaInput* input);
 
 /* ── Diagnostic functions are in eventprop_diag.h ───────────────────── */
 
@@ -181,16 +171,15 @@ void eventprop_free_batch_spike_output(SpikeOutput* output, int batch_size);
  * Processes multiple samples in parallel using OpenMP.
  * Returns array of BackwardSpikesOutput structs (one per sample).
  */
-BackwardSpikesOutput* eventprop_backward_spikes_batch(
+BackwardOutput* eventprop_backward_spikes_batch(
     const BackwardInputBase* base,
     const int* n_spikes_per_sample,
     SpikeOutput* fwd_batch,        /* Forward spike outputs from compute_spikes_batch */
     const double* post_errors,
     int batch_size);
 
-
-/** Free memory owned by batch BackwardSpikesOutput array. */
-void eventprop_free_backward_spikes_batch_output(BackwardSpikesOutput* output, int batch_size);
+/** Free memory owned by batch BackwardOutput array. */
+void eventprop_free_backward_batch_output(BackwardOutput* output, int batch_size);
 
 #ifdef __cplusplus
 }

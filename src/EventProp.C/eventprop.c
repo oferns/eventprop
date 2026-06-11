@@ -909,11 +909,11 @@ void eventprop_free_maxima_output(MaximaOutput* output)
     free(output->values);
 }
 
-/* ── BackwardSpikesOutput ───────────────────────────────────────────── */
+/* ── BackwardOutput ───────────────────────────────────────────── */
 
-BackwardSpikesOutput eventprop_backward_spikes(const BackwardSpikesInput* input)
+BackwardOutput eventprop_backward_spikes(const BackwardSpikesInput* input)
 {
-    BackwardSpikesOutput result;
+    BackwardOutput result;
 
     /* Allocate output - exact sizes known upfront */
     result.n_pre = input->base.base->n_pre;
@@ -1019,7 +1019,7 @@ BackwardSpikesOutput eventprop_backward_spikes(const BackwardSpikesInput* input)
     return result;
 }
 
-void eventprop_free_backward_spikes_output(BackwardSpikesOutput* output)
+void eventprop_free_backward_output(BackwardOutput* output)
 {
     if (!output) return;
     free(output->grad);
@@ -1028,15 +1028,15 @@ void eventprop_free_backward_spikes_output(BackwardSpikesOutput* output)
 
 /* ── BackwardSpikes Batch Function ─────────────────────────────── */
 
-BackwardSpikesOutput* eventprop_backward_spikes_batch(
+BackwardOutput* eventprop_backward_spikes_batch(
     const BackwardInputBase* base,
     const int* n_spikes_per_sample,
     SpikeOutput* fwd_batch,        /* Forward spike outputs from compute_spikes_batch */
     const double* post_errors,
     int batch_size)
 {
-    /* Allocate array of BackwardSpikesOutput structs */
-    BackwardSpikesOutput* result = (BackwardSpikesOutput*)calloc(batch_size, sizeof(BackwardSpikesOutput));
+    /* Allocate array of BackwardOutput structs */
+    BackwardOutput* result = (BackwardOutput*)calloc(batch_size, sizeof(BackwardOutput));
 
     /* Compute input sample offsets and forward error offsets */
     int* offsets = (int*)malloc(batch_size * sizeof(int));
@@ -1082,30 +1082,30 @@ BackwardSpikesOutput* eventprop_backward_spikes_batch(
     return result;
 }
 
-void eventprop_free_backward_spikes_batch_output(BackwardSpikesOutput* output, int batch_size)
+void eventprop_free_backward_batch_output(BackwardOutput* output, int batch_size)
 {
     if (!output) return;
 
     /* Free each sample's data */
     for (int i = 0; i < batch_size; i++) {
-        eventprop_free_backward_spikes_output(&output[i]);
+        eventprop_free_backward_output(&output[i]);
     }
 
     /* Free the array itself */
     free(output);
 }
 
-/* ── BackwardMaximaOutput ───────────────────────────────────────────── */
+/* ── BackwardOutput ───────────────────────────────────────────── */
 
-BackwardMaximaOutput eventprop_backward_maxima(const BackwardMaximaInput* input)
+BackwardOutput eventprop_backward_maxima(const BackwardMaximaInput* input)
 {
-    BackwardMaximaOutput result;
+    BackwardOutput result;
 
     result.n_pre = input->base.base->n_pre;
     result.n_post = input->base.base->n_post;
 
     /* Allocate output - exact sizes known upfront */
-    result.gradient = calloc(input->base.base->n_pre * input->base.base->n_post, sizeof(double));
+    result.grad = calloc(input->base.base->n_pre * input->base.base->n_post, sizeof(double));
     result.spike_errors = calloc(input->base.base->n_spikes, sizeof(double));
 
     if (input->base.base->n_spikes == 0 || input->n_maxima == 0)
@@ -1138,20 +1138,13 @@ BackwardMaximaOutput eventprop_backward_maxima(const BackwardMaximaInput* input)
             double lambda_i = -k_bwd_val * input->maxima_errors[max_idx] * tau_mem_inv;
 
             int source_nrn = input->base.base->sources[spike_idx];
-            result.gradient[source_nrn * input->base.base->n_post + max_idx] -= input->base.base->tau_syn * lambda_i;
+            result.grad[source_nrn * input->base.base->n_post + max_idx] -= input->base.base->tau_syn * lambda_i;
 
             result.spike_errors[spike_idx] += lambda_v - lambda_i;
         }
     }
 
     return result;
-}
-
-void eventprop_free_backward_maxima_output(BackwardMaximaOutput* output)
-{
-    if (!output) return;
-    free(output->gradient);
-    free(output->spike_errors);
 }
 
 /* ── Diagnostic functions moved to eventprop_diag.c ──────────────────── */

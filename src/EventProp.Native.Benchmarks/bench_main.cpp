@@ -243,10 +243,10 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
             .fwd_currents=fwd_result.currents, .post_errors=post_errors.data(),
             .n_post_spikes=n_post_spikes
         };
-        BackwardSpikesOutput result = eventprop_backward_spikes(&backward_input);
+        BackwardOutput result = eventprop_backward_spikes(&backward_input);
 
         benchmark::DoNotOptimize(result.grad);
-        eventprop_free_backward_spikes_output(&result);
+        eventprop_free_backward_output(&result);
     }
 
     state.counters["output_spikes"] = benchmark::Counter(n_post_spikes);
@@ -348,12 +348,12 @@ static void BM_FullTrainingStep(benchmark::State& state, const ProblemSize& sz, 
             .fwd_currents=fwd.currents, .post_errors=post_errors.data(),
             .n_post_spikes=fwd.n_spikes
         };
-        BackwardSpikesOutput result = eventprop_backward_spikes(&backward_input);
+        BackwardOutput result = eventprop_backward_spikes(&backward_input);
 
         benchmark::DoNotOptimize(result.grad);
         benchmark::DoNotOptimize(sums.sum0);
 
-        eventprop_free_backward_spikes_output(&result);
+        eventprop_free_backward_output(&result);
         eventprop_free_spike_output(&fwd);
         eventprop_free_sums_output(&sums);
     }
@@ -483,14 +483,14 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
         ForwardInputBase base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                                   .tau_mem=0.02, .tau_syn=0.005 };
         BackwardInputBase backward_base = { .base=&base };
-        BackwardSpikesOutput* result_batch = eventprop_backward_spikes_batch(
+        BackwardOutput* result_batch = eventprop_backward_spikes_batch(
             &backward_base, n_spikes_per_sample.data(),
             fwd_batch,  /* Pass forward outputs directly */
             post_errors.data(), batch_size);
         
         benchmark::DoNotOptimize(result_batch[0].grad);
         
-        eventprop_free_backward_spikes_batch_output(result_batch, batch_size);
+        eventprop_free_backward_batch_output(result_batch, batch_size);
         eventprop_free_batch_spike_output(fwd_batch, batch_size);
     }
 #endif
@@ -599,9 +599,9 @@ static void BM_BackwardSpikesVth(benchmark::State& state)
             .fwd_currents=fwd.currents, .post_errors=post_errors.data(),
             .n_post_spikes=fwd.n_spikes
         };
-        BackwardSpikesOutput result = eventprop_backward_spikes(&backward_input);
+        BackwardOutput result = eventprop_backward_spikes(&backward_input);
         benchmark::DoNotOptimize(result.grad);
-        eventprop_free_backward_spikes_output(&result);
+        eventprop_free_backward_output(&result);
 #endif
     }
 
@@ -813,9 +813,9 @@ static void BM_BackwardMaxima(benchmark::State& state, const ProblemSize& sz, Da
             .maxima_times=maxima.times, .maxima_values=maxima.values,
             .maxima_errors=maxima_errors.data(), .n_maxima=sz.n_post
         };
-        BackwardMaximaOutput result = eventprop_backward_maxima(&backward_input);
-        benchmark::DoNotOptimize(result.gradient[0]);
-        eventprop_free_backward_maxima_output(&result);
+        BackwardOutput result = eventprop_backward_maxima(&backward_input);
+        benchmark::DoNotOptimize(result.grad[0]);
+        eventprop_free_backward_output(&result);
 #endif
     }
 

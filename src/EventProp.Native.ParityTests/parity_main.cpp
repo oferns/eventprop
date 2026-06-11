@@ -169,7 +169,7 @@ static void test_backward_spikes(const TestCase& tc) {
     
     ForwardInputBase fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
     BackwardSpikesInput bsi = {{&fi_base}, fwd_c.times, fwd_c.sources, fwd_c.currents, post_errors_c, fwd_c.n_spikes};
-    BackwardSpikesOutput backward_c = eventprop_backward_spikes(&bsi);
+    BackwardOutput backward_c = eventprop_backward_spikes(&bsi);
     
     RowMatrixXd w_mat = make_w_mat(w, tc.n_pre, tc.n_post); 
     Eigen::ArrayXd e_itimes = Eigen::Map<Eigen::ArrayXd const>(times, tc.n_spikes); 
@@ -189,7 +189,7 @@ static void test_backward_spikes(const TestCase& tc) {
     free(w); free(times); free(sources); 
     eventprop_free_spike_output(&fwd_c);
     free(post_errors_c); 
-    eventprop_free_backward_spikes_output(&backward_c);
+    eventprop_free_backward_output(&backward_c);
     free(grad_eig); 
     TEST_END;
 }
@@ -229,7 +229,7 @@ static void test_backward_maxima(const TestCase& tc) {
     for (int i = 0; i < tc.n_post; i++) max_errors_c[i] = 1.0; 
     
     BackwardMaximaInput bmi = {{&fi_base}, maxima_c.times, maxima_c.values, max_errors_c, tc.n_post};
-    BackwardMaximaOutput backward_c = eventprop_backward_maxima(&bmi);
+    BackwardOutput backward_c = eventprop_backward_maxima(&bmi);
     
     RowMatrixXd w_mat = make_w_mat(w, tc.n_pre, tc.n_post); 
     Eigen::ArrayXd e_itimes = Eigen::Map<Eigen::ArrayXd const>(times, tc.n_spikes); 
@@ -243,13 +243,13 @@ static void test_backward_maxima(const TestCase& tc) {
     double* grad_eig = (double*)malloc(tc.n_pre * tc.n_post * sizeof(double)); 
     for (int i = 0; i < tc.n_pre * tc.n_post; i++) grad_eig[i] = grad_eig_map(i);
     
-    ASSERT_ARRAY_NEAR(backward_c.gradient, grad_eig, tc.n_pre * tc.n_post, ABS_TOLERANCE, REL_TOLERANCE, "gradient"); 
+    ASSERT_ARRAY_NEAR(backward_c.grad, grad_eig, tc.n_pre * tc.n_post, ABS_TOLERANCE, REL_TOLERANCE, "gradient"); 
     
     free(w);
     free(times); free(sources); 
     eventprop_free_maxima_output(&maxima_c);
     free(max_errors_c); 
-    eventprop_free_backward_maxima_output(&backward_c);
+    eventprop_free_backward_output(&backward_c);
     free(grad_eig); TEST_END;
 }
 

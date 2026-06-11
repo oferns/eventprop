@@ -20,7 +20,7 @@ Example:
 """
 
 from .native import EventPropCtypes as NativeApi, SpikeOutput, SumsOutput, MaximaOutput
-from .native import BackwardSpikesOutput, BackwardMaximaOutput
+from .native import BackwardOutput
 from .native import VoltageTraceOutput, LambdaITraceOutput
 from .spikes import Spikes, SpikesVector, Maxima, MaximaVector
 
@@ -48,8 +48,7 @@ __all__ = [
     'SpikeOutput',
     'SumsOutput', 
     'MaximaOutput',
-    'BackwardSpikesOutput',
-    'BackwardMaximaOutput',
+    'BackwardOutput',
     'VoltageTraceOutput',
     'LambdaITraceOutput',
     # Python data classes (matching pybind11 interface)
