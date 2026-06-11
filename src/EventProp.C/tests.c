@@ -145,11 +145,13 @@ static void test_backward_spikes(void)
 
     SpikeInput input = { .times=times, .sources=sources, .n_spikes=n_spikes };
     ForwardInputBase base = { .w=w, .n_pre=n_pre, .n_post=n_post,
+                              .times=times, .sources=sources, .n_spikes=n_spikes,
                               .tau_mem=0.02, .tau_syn=0.005 };
     BackwardSpikesInput backward_input = {
         .base = {.input=&input, .base=&base},
         .fwd_times=fwd_times, .fwd_sources=fwd_sources, .fwd_currents=fwd_currents,
-        .post_errors=post_errors, .n_post_spikes=n_spikes
+        .post_errors=post_errors, .n_post_spikes=n_spikes,
+        .v_th=1.0
     };
     BackwardSpikesOutput output = eventprop_backward_spikes(&backward_input);
 
@@ -269,6 +271,7 @@ static void test_backward_spikes_batch_single_sample(void)
 
     SpikeInput input = { .times=times, .sources=sources, .n_spikes=n_spikes };
     ForwardInputBase base = { .w=w, .n_pre=n_pre, .n_post=n_post,
+                              .times=times, .sources=sources, .n_spikes=n_spikes,
                               .tau_mem=0.02, .tau_syn=0.005 };
     BackwardSpikesInput bsi_single = {
         .base = {.input=&input, .base=&base},
@@ -300,8 +303,10 @@ static void test_backward_spikes_batch_single_sample(void)
     }
     ASSERT(!mismatch, "batch single-sample gradient mismatch");
 
-    /* NOTE: backward_spikes returns zero gradients for this data — pre-existing bug.
-     * The test verifies batch≡single consistency, not absolute correctness. */
+    /* Verify gradients are non-zero (catches v_th=0 or missing input spikes bugs) */
+    double grad_sum = 0;
+    for (int i = 0; i < n_pre * n_post; i++) grad_sum += fabs(grad_single.grad[i]);
+    ASSERT(grad_sum > EPSILON, "all gradients are zero");
 
     eventprop_free_backward_spikes_output(&grad_single);
     eventprop_free_backward_spikes_batch_output(grad_batch, 1);
@@ -357,6 +362,7 @@ static void test_backward_spikes_batch_multi_sample(void)
     SpikeInput input = { .times=all_times, .sources=all_sources, .n_spikes=total_spikes };
     ForwardInputBase base = {
         .w=w, .n_pre=n_pre, .n_post=n_post,
+        .times=all_times, .sources=all_sources, .n_spikes=total_spikes,
         .tau_mem=0.02, .tau_syn=0.005
     };
     BackwardInputBase base_b = { .input=&input, .base=&base, .v_th=1.0 };
@@ -376,8 +382,7 @@ static void test_backward_spikes_batch_multi_sample(void)
         for (int i = 0; i < n_pre * n_post; i++)
             total_grad += fabs(grad_batch[b].grad[i]);
     }
-    /* NOTE: backward_spikes returns zero gradients — pre-existing bug.
-     * Test verifies structural correctness and batch≡single consistency. */
+    ASSERT(total_grad > 0, "all gradients are zero");
 
     /* Compare batch results against single-sample for each sample */
     int offset_in = 0;
@@ -387,10 +392,16 @@ static void test_backward_spikes_batch_multi_sample(void)
             .times=all_times + offset_in, .sources=all_sources + offset_in,
             .n_spikes=n_per_sample[b]
         };
+        ForwardInputBase sample_base = {
+            .w=w, .n_pre=n_pre, .n_post=n_post,
+            .times=all_times + offset_in, .sources=all_sources + offset_in,
+            .n_spikes=n_per_sample[b],
+            .tau_mem=0.02, .tau_syn=0.005
+        };
         BackwardSpikesInput bsi = {
-            .base = {.input=&si, .base=&base},
+            .base = {.input=&si, .base=&sample_base},
             .fwd_times=fwd_batch[b].times, .fwd_sources=fwd_batch[b].sources,
-.fwd_currents=fwd_batch[b].currents,
+            .fwd_currents=fwd_batch[b].currents,
             .post_errors=post_errors + offset_err,
             .n_post_spikes=fwd_batch[b].n_spikes,
             .v_th = 1.0

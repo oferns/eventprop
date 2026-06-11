@@ -1064,6 +1064,7 @@ BackwardSpikesOutput* eventprop_backward_spikes_batch(
         };
         ForwardInputBase fwbase = {
             .w=base->base->w, .n_pre=base->base->n_pre, .n_post=base->base->n_post,
+            .times=base->base->times + offset, .sources=base->base->sources + offset, .n_spikes=n_spikes,
             .tau_mem=base->base->tau_mem, .tau_syn=base->base->tau_syn
         };
         BackwardSpikesInput backward_input = {
@@ -1072,7 +1073,8 @@ BackwardSpikesOutput* eventprop_backward_spikes_batch(
             .fwd_sources=fwd_batch[b].sources,
             .fwd_currents=fwd_batch[b].currents,
             .post_errors=post_errors + offsets[b],
-            .n_post_spikes=n_fwd_spikes
+            .n_post_spikes=n_fwd_spikes,
+            .v_th=base->v_th
         };
         result[b] = eventprop_backward_spikes(&backward_input);
     }
@@ -1190,6 +1192,7 @@ SpikeOutput* eventprop_compute_spikes_batch(
             },
             .v_th = input->v_th
         };
+        result[b] = eventprop_compute_spikes(&spikes_input);
     }
     free(offsets);
     return result;
