@@ -11,7 +11,7 @@
 
 VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput* input)
 {
-    const ForwardInputBase* fwd = input->base;
+    const EventPropInput* fwd = input->input;
     int n_t = (int)(input->t_max / input->dt);
 
     VoltageTraceOutput result;

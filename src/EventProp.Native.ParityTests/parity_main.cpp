@@ -106,7 +106,7 @@ static void test_compute_sums(const TestCase& tc) {
     char name[256]; snprintf(name, sizeof(name), "ComputeSums %s (%dx%d, %d spikes)", tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes); TEST(name);
     double* w; double* times; int32_t* sources; gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
     
-    ForwardInputBase fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn};
+    EventPropInput fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn};
     SumsOutput sums_c = eventprop_compute_sums(&fi_base);
     auto [sum0_eig, sum1_eig] = compute_sums(make_w_mat(w, tc.n_pre, tc.n_post), make_eigen_spikes(times, sources, tc.n_spikes), tc.tau_mem, tc.tau_syn);
     
@@ -128,7 +128,7 @@ static void test_compute_spikes(const TestCase& tc) {
     char name[256]; snprintf(name, sizeof(name), "ComputeSpikes %s (%dx%d, %d spikes)", tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes); TEST(name);
     double* w; double* times; int32_t* sources; gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
     
-    ForwardInputBase fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
+    EventPropInput fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
     SpikeOutput spikes_c = eventprop_compute_spikes(&fi_spikes);
     auto result_eig = compute_spikes(make_w_mat(w, tc.n_pre, tc.n_post), make_eigen_spikes(times, sources, tc.n_spikes), tc.v_th, tc.tau_mem, tc.tau_syn);
     int n_post_spikes_eig = (int)result_eig.times.size();
@@ -160,14 +160,14 @@ static void test_backward_spikes(const TestCase& tc) {
     
     double* w; double* times; int32_t* sources; gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
     
-    ForwardInputBase fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
+    EventPropInput fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
     SpikeOutput fwd_c = eventprop_compute_spikes(&fi_spikes);
     if (fwd_c.n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(&fwd_c); return; }
     
     double* post_errors_c = (double*)calloc(fwd_c.n_spikes, sizeof(double)); 
     for (int i = 0; i < fwd_c.n_spikes; i++) post_errors_c[i] = 1.0;
     
-    ForwardInputBase fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
+    EventPropInput fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
     BackwardSpikesInput bsi = {{&fi_base}, fwd_c.times, fwd_c.sources, fwd_c.currents, post_errors_c, fwd_c.n_spikes};
     BackwardOutput backward_c = eventprop_backward_spikes(&bsi);
     
@@ -198,7 +198,7 @@ static void test_compute_maxima(const TestCase& tc) {
     char name[256]; snprintf(name, sizeof(name), "ComputeMaxima %s (%dx%d, %d spikes)", tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes); TEST(name);
     double* w; double* times; int32_t* sources; gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
     
-    ForwardInputBase fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn};
+    EventPropInput fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn};
     MaximaOutput maxima_c = eventprop_compute_maxima(&fi_base);
     auto maxima_eig = compute_maxima(make_w_mat(w, tc.n_pre, tc.n_post), make_eigen_spikes(times, sources, tc.n_spikes), tc.tau_mem, tc.tau_syn); 
     double* max_times_e = (double*)malloc(tc.n_post * sizeof(double)); 
@@ -223,7 +223,7 @@ static void test_backward_maxima(const TestCase& tc) {
     
     double* w; double* times; int32_t* sources; gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
     
-    ForwardInputBase fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn};
+    EventPropInput fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn};
     MaximaOutput maxima_c = eventprop_compute_maxima(&fi_base);
     double* max_errors_c = (double*)malloc(tc.n_post * sizeof(double)); 
     for (int i = 0; i < tc.n_post; i++) max_errors_c[i] = 1.0; 
@@ -261,7 +261,7 @@ static void test_voltage_trace(const TestCase& tc) {
     double* w; double* times; int32_t* sources;
     gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
 
-    ForwardInputBase fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
+    EventPropInput fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
     SpikeOutput fwd_c = eventprop_compute_spikes(&fi_spikes);
     if (fwd_c.n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(&fwd_c); return; }
 
@@ -293,7 +293,7 @@ static void test_lambda_i_trace(const TestCase& tc) {
     double* w; double* times; int32_t* sources;
     gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
 
-    ForwardInputBase fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
+    EventPropInput fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
     SpikeOutput fwd_c = eventprop_compute_spikes(&fi_spikes);
     if (fwd_c.n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(&fwd_c); return; }
 

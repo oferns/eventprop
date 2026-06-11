@@ -47,7 +47,7 @@ static void test_compute_sums(void)
     double w[10*5], times[20]; int32_t sources[20];
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
 
-    ForwardInputBase base_input = {
+    EventPropInput base_input = {
         .w=w, .n_pre=n_pre, .n_post=n_post,
         .times=times, .sources=sources, .n_spikes=n_spikes,
         .tau_mem=0.02, .tau_syn=0.005
@@ -70,7 +70,7 @@ static void test_compute_sums(void)
 static void test_compute_sums_alloc_zero_spikes(void)
 {
     TEST("ComputeSums Alloc zero spikes");
-    SumsOutput output = eventprop_compute_sums(&((ForwardInputBase){.w=NULL, .n_pre=10, .n_post=5,
+    SumsOutput output = eventprop_compute_sums(&((EventPropInput){.w=NULL, .n_pre=10, .n_post=5,
     .times=NULL, .sources=NULL, .n_spikes=0, .tau_mem=0.02, .tau_syn=0.005}));
     eventprop_free_sums_output(&output);
     TEST_END;
@@ -85,7 +85,7 @@ static void test_compute_sums_alloc_large(void)
     int32_t* sources = malloc(n_spikes * sizeof(int32_t));
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
 
-    ForwardInputBase base_input = {
+    EventPropInput base_input = {
         .w=w, .n_pre=n_pre, .n_post=n_post,
         .times=times, .sources=sources, .n_spikes=n_spikes,
         .tau_mem=0.02, .tau_syn=0.005
@@ -106,7 +106,7 @@ static void test_compute_spikes(void)
     double w[10*5], times[20]; int32_t sources[20];
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
 
-    ForwardInputBase fi = {
+    EventPropInput fi = {
         .w=w, .n_pre=n_pre, .n_post=n_post,
                  .times=times, .sources=sources, .n_spikes=n_spikes,
                  .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
@@ -141,11 +141,11 @@ static void test_backward_spikes(void)
         post_errors[i] = -1.0;
     }
 
-    ForwardInputBase base = { .w=w, .n_pre=n_pre, .n_post=n_post,
+    EventPropInput base = { .w=w, .n_pre=n_pre, .n_post=n_post,
                               .times=times, .sources=sources, .n_spikes=n_spikes,
                               .tau_mem=0.02, .tau_syn=0.005 };
     BackwardSpikesInput backward_input = {
-        .base = {.base=&base},
+        .input = &base,
         .fwd_times=fwd_times, .fwd_sources=fwd_sources, .fwd_currents=fwd_currents,
         .post_errors=post_errors, .n_post_spikes=n_spikes
     };
@@ -168,7 +168,7 @@ static void test_compute_spikes_alloc_burst_medium(void)
     int32_t* sources = malloc(n_spikes * sizeof(int32_t));
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
 
-    ForwardInputBase fi = {
+    EventPropInput fi = {
         .w=w, .n_pre=n_pre, .n_post=n_post,
                  .times=times, .sources=sources, .n_spikes=n_spikes,
                  .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
@@ -188,7 +188,7 @@ static void test_compute_maxima(void)
     double w[10*5], times[20]; int32_t sources[20];
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
 
-    ForwardInputBase base_input = {
+    EventPropInput base_input = {
         .w=w, .n_pre=n_pre, .n_post=n_post,
         .times=times, .sources=sources, .n_spikes=n_spikes,
         .tau_mem=0.02, .tau_syn=0.005
@@ -217,11 +217,11 @@ static void test_backward_maxima(void)
         maxima_errors[i] = -1.0;
     }
 
-    ForwardInputBase base = { .w=w, .n_pre=n_pre, .n_post=n_post,
+    EventPropInput base = { .w=w, .n_pre=n_pre, .n_post=n_post,
                               .times=times, .sources=sources, .n_spikes=n_spikes,
                               .tau_mem=0.02, .tau_syn=0.005 };
     BackwardMaximaInput backward_input = {
-        .base = {.base=&base},
+        .input = &base,
         .maxima_times=maxima_times, .maxima_values=maxima_values,
         .maxima_errors=maxima_errors, .n_maxima=n_post
     };
@@ -246,7 +246,7 @@ static void test_backward_spikes_batch_single_sample(void)
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
 
     /* Forward pass */
-    ForwardInputBase fi = {.w=w, .n_pre=n_pre, .n_post=n_post,
+    EventPropInput fi = {.w=w, .n_pre=n_pre, .n_post=n_post,
                  .times=times, .sources=sources, .n_spikes=n_spikes,
                  .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
     SpikeOutput fwd = eventprop_compute_spikes(&fi);
@@ -260,11 +260,11 @@ static void test_backward_spikes_batch_single_sample(void)
     double* post_errors_single = malloc(fwd.n_spikes * sizeof(double));
     for (int i = 0; i < fwd.n_spikes; i++) post_errors_single[i] = -1.0;
 
-    ForwardInputBase base = { .w=w, .n_pre=n_pre, .n_post=n_post,
+    EventPropInput base = { .w=w, .n_pre=n_pre, .n_post=n_post,
                               .times=times, .sources=sources, .n_spikes=n_spikes,
                               .tau_mem=0.02, .tau_syn=0.005 };
     BackwardSpikesInput bsi_single = {
-        .base = {.base=&base},
+        .input = &base,
         .fwd_times=fwd.times, .fwd_sources=fwd.sources,
         .fwd_currents=fwd.currents,
         .post_errors=post_errors_single, .n_post_spikes=fwd.n_spikes
@@ -276,12 +276,11 @@ static void test_backward_spikes_batch_single_sample(void)
     SpikeOutput* fwd_batch = malloc(sizeof(SpikeOutput));
     *fwd_batch = fwd;  // copy struct (pointers still valid)
 
-    BackwardInputBase base_b = { .base=&base };
     double* post_errors_batch = malloc(fwd.n_spikes * sizeof(double));
     for (int i = 0; i < fwd.n_spikes; i++) post_errors_batch[i] = -1.0;
 
     BackwardOutput* grad_batch = eventprop_backward_spikes_batch(
-        &base_b, n_per_sample, fwd_batch, post_errors_batch, 1);
+        &base, n_per_sample, fwd_batch, post_errors_batch, 1);
 
     /* Compare gradients element-wise */
     int mismatch = 0;
@@ -325,7 +324,7 @@ static void test_backward_spikes_batch_multi_sample(void)
     }
 
     /* Batch forward */
-    ForwardInputBase fi = {.w=w, .n_pre=n_pre, .n_post=n_post,
+    EventPropInput fi = {.w=w, .n_pre=n_pre, .n_post=n_post,
                  .times=all_times, .sources=all_sources, .n_spikes=0,
                  .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
     SpikeOutput* fwd_batch = eventprop_compute_spikes_batch(&fi, n_per_sample, batch_size);
@@ -345,15 +344,14 @@ static void test_backward_spikes_batch_multi_sample(void)
     for (int i = 0; i < total_fwd; i++) post_errors[i] = -1.0;
 
     /* Batch backward */
-    ForwardInputBase base = {
+    EventPropInput base = {
         .w=w, .n_pre=n_pre, .n_post=n_post,
         .times=all_times, .sources=all_sources, .n_spikes=total_spikes,
         .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0
     };
-    BackwardInputBase base_b = { .base=&base };
 
     BackwardOutput* grad_batch = eventprop_backward_spikes_batch(
-        &base_b, n_per_sample, fwd_batch, post_errors, batch_size);
+        &base, n_per_sample, fwd_batch, post_errors, batch_size);
 
     /* Verify each sample has correct dimensions */
     for (int b = 0; b < batch_size; b++) {
@@ -373,14 +371,14 @@ static void test_backward_spikes_batch_multi_sample(void)
     int offset_in = 0;
     int offset_err = 0;
     for (int b = 0; b < batch_size; b++) {
-        ForwardInputBase sample_base = {
+        EventPropInput sample_base = {
             .w=w, .n_pre=n_pre, .n_post=n_post,
             .times=all_times + offset_in, .sources=all_sources + offset_in,
             .n_spikes=n_per_sample[b],
             .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0
         };
         BackwardSpikesInput bsi = {
-            .base = {.base=&sample_base},
+            .input = &sample_base,
             .fwd_times=fwd_batch[b].times, .fwd_sources=fwd_batch[b].sources,
             .fwd_currents=fwd_batch[b].currents,
             .post_errors=post_errors + offset_err,
@@ -432,7 +430,7 @@ static void test_compute_spikes_invalid_bracketing(void)
     }
 
     /* Use low threshold to ensure voltage stays above */
-    ForwardInputBase fi = {
+    EventPropInput fi = {
         .w=w, .n_pre=n_pre, .n_post=n_post,
                  .times=times, .sources=sources, .n_spikes=n_spikes,
                  .tau_mem=0.02, .tau_syn=0.005, .v_th=0.01};

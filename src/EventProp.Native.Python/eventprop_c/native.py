@@ -10,7 +10,7 @@ import numpy as np
 
 
 
-class _ForwardInputBase(Structure):
+class _EventPropInput(Structure):
     _fields_ = [
         ('w', POINTER(c_double)),
         ('n_pre', c_int),
@@ -25,15 +25,11 @@ class _ForwardInputBase(Structure):
 
 
 
-class _BackwardInputBase(Structure):
-    _fields_ = [
-        ('base', POINTER(_ForwardInputBase)),
-    ]
 
 
 class _BackwardSpikesInput(Structure):
     _fields_ = [
-        ('base', _BackwardInputBase),
+        ('input', POINTER(_EventPropInput)),
         ('fwd_times', POINTER(c_double)),
         ('fwd_sources', POINTER(c_int32)),
         ('fwd_currents', POINTER(c_double)),
@@ -44,7 +40,7 @@ class _BackwardSpikesInput(Structure):
 
 class _BackwardMaximaInput(Structure):
     _fields_ = [
-        ('base', _BackwardInputBase),
+        ('input', POINTER(_EventPropInput)),
         ('maxima_times', POINTER(c_double)),
         ('maxima_values', POINTER(c_double)),
         ('maxima_errors', POINTER(c_double)),
@@ -54,7 +50,7 @@ class _BackwardMaximaInput(Structure):
 
 class _VoltageTraceInput(Structure):
     _fields_ = [
-        ('input', POINTER(_ForwardInputBase)),
+        ('input', POINTER(_EventPropInput)),
         ('target_nrn_idx', c_int),
         ('fwd_times', POINTER(c_double)),
         ('fwd_sources', POINTER(c_int32)),
@@ -424,19 +420,19 @@ class EventPropCtypes:
 
         # Forward pass (struct input)
         lib.eventprop_compute_spikes.restype = _SpikeOutput
-        lib.eventprop_compute_spikes.argtypes = [POINTER(_ForwardInputBase)]
+        lib.eventprop_compute_spikes.argtypes = [POINTER(_EventPropInput)]
 
         lib.eventprop_free_spike_output.restype = None
         lib.eventprop_free_spike_output.argtypes = [POINTER(_SpikeOutput)]
 
         lib.eventprop_compute_sums.restype = _SumsOutput
-        lib.eventprop_compute_sums.argtypes = [POINTER(_ForwardInputBase)]
+        lib.eventprop_compute_sums.argtypes = [POINTER(_EventPropInput)]
 
         lib.eventprop_free_sums_output.restype = None
         lib.eventprop_free_sums_output.argtypes = [POINTER(_SumsOutput)]
 
         lib.eventprop_compute_maxima.restype = _MaximaOutput
-        lib.eventprop_compute_maxima.argtypes = [POINTER(_ForwardInputBase)]
+        lib.eventprop_compute_maxima.argtypes = [POINTER(_EventPropInput)]
 
         lib.eventprop_free_maxima_output.restype = None
         lib.eventprop_free_maxima_output.argtypes = [POINTER(_MaximaOutput)]
@@ -470,7 +466,7 @@ class EventPropCtypes:
         # Batch operations
         lib.eventprop_compute_spikes_batch.restype = POINTER(_SpikeOutput)
         lib.eventprop_compute_spikes_batch.argtypes = [
-            POINTER(_ForwardInputBase),
+            POINTER(_EventPropInput),
             POINTER(c_int),
             c_int,
         ]
@@ -480,7 +476,7 @@ class EventPropCtypes:
 
         lib.eventprop_backward_spikes_batch.restype = POINTER(_BackwardOutput)
         lib.eventprop_backward_spikes_batch.argtypes = [
-            POINTER(_BackwardInputBase),
+            POINTER(_EventPropInput),
             POINTER(c_int),
             POINTER(_SpikeOutput),
             POINTER(c_double),
@@ -491,7 +487,7 @@ class EventPropCtypes:
         lib.eventprop_free_backward_batch_output.argtypes = [POINTER(_BackwardOutput), c_int]
    # ── Forward pass ────────────────────────────────────────────────
 
-    def compute_spikes(self, input: _ForwardInputBase) -> SpikeOutput:
+    def compute_spikes(self, input: _EventPropInput) -> SpikeOutput:
         """Forward pass: predict post-synaptic spike times."""
         return SpikeOutput(self.lib.eventprop_compute_spikes(byref(input)))
 
@@ -499,7 +495,7 @@ class EventPropCtypes:
         """Free a SpikeOutput returned by compute_spikes()."""
         self.lib.eventprop_free_spike_output(output)
 
-    def compute_sums(self, input: _ForwardInputBase) -> SumsOutput:
+    def compute_sums(self, input: _EventPropInput) -> SumsOutput:
         """Compute cumulative exponential-weighted sums."""
         return SumsOutput(self.lib.eventprop_compute_sums(byref(input)))
 
@@ -507,7 +503,7 @@ class EventPropCtypes:
         """Free a SumsOutput returned by compute_sums()."""
         self.lib.eventprop_free_sums_output(output)
 
-    def compute_maxima(self, input: _ForwardInputBase) -> MaximaOutput:
+    def compute_maxima(self, input: _EventPropInput) -> MaximaOutput:
         """Compute membrane potential maxima per neuron."""
         return MaximaOutput(self.lib.eventprop_compute_maxima(byref(input)))
 
@@ -554,7 +550,7 @@ class EventPropCtypes:
     # ── Batch operations ────────────────────────────────────────────
 
     def compute_spikes_batch(
-        self, input: _ForwardInputBase, n_spikes_per_sample: POINTER(c_int), batch_size: int
+        self, input: _EventPropInput, n_spikes_per_sample: POINTER(c_int), batch_size: int
     ) -> BatchSpikeOutput:
         """Batch forward pass: predict post-synaptic spikes for multiple samples."""
         c_ptr = self.lib.eventprop_compute_spikes_batch(byref(input), n_spikes_per_sample, batch_size)
@@ -565,12 +561,12 @@ class EventPropCtypes:
         self.lib.eventprop_free_batch_spike_output(output, batch_size)
 
     def backward_spikes_batch(
-        self, base: _BackwardInputBase, n_spikes_per_sample: POINTER(c_int),
+        self, input: _EventPropInput, n_spikes_per_sample: POINTER(c_int),
         fwd_batch: POINTER(_SpikeOutput), post_errors: POINTER(c_double), batch_size: int
     ) -> BatchBackwardOutput:
         """Batch backward pass: compute weight gradients for multiple samples."""
         c_ptr = self.lib.eventprop_backward_spikes_batch(
-            byref(base), n_spikes_per_sample, fwd_batch, post_errors, batch_size
+            byref(input), n_spikes_per_sample, fwd_batch, post_errors, batch_size
         )
         return BatchBackwardOutput(c_ptr, batch_size)
 

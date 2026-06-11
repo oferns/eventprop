@@ -512,7 +512,7 @@ static double toms748_solve(void* ctx, root_fn_t fn, double a, double b) {
 
 /* ── SpikeOutput ─────────────────────────────────────────────────────── */
 
-SpikeOutput eventprop_compute_spikes(const ForwardInputBase* input)
+SpikeOutput eventprop_compute_spikes(const EventPropInput* input)
 {
     SpikeOutput result;
 
@@ -781,7 +781,7 @@ void eventprop_free_spike_output(SpikeOutput* output)
 
 /* ── SumsOutput ─────────────────────────────────────────────────────── */
 
-SumsOutput eventprop_compute_sums(const ForwardInputBase* input)
+SumsOutput eventprop_compute_sums(const EventPropInput* input)
 {
     SumsOutput result;
     int n_rows = input->n_spikes + 1;
@@ -829,7 +829,7 @@ void eventprop_free_sums_output(SumsOutput* output)
 
 /* ── MaximaOutput ───────────────────────────────────────────────────── */
 
-MaximaOutput eventprop_compute_maxima(const ForwardInputBase* input)
+MaximaOutput eventprop_compute_maxima(const EventPropInput* input)
 {
     MaximaOutput result;
     result.n_post = input->n_post;
@@ -916,73 +916,73 @@ BackwardOutput eventprop_backward_spikes(const BackwardSpikesInput* input)
     BackwardOutput result;
 
     /* Allocate output - exact sizes known upfront */
-    result.n_pre = input->base.base->n_pre;
-    result.n_post = input->base.base->n_post;
-    result.grad = calloc(input->base.base->n_pre * input->base.base->n_post, sizeof(double));
-    result.spike_errors = calloc(input->base.base->n_spikes, sizeof(double));
+    result.n_pre = input->input->n_pre;
+    result.n_post = input->input->n_post;
+    result.grad = calloc(input->input->n_pre * input->input->n_post, sizeof(double));
+    result.spike_errors = calloc(input->input->n_spikes, sizeof(double));
 
     if (input->n_post_spikes == 0)
         return result;
 
-    int total = input->base.base->n_spikes + input->n_post_spikes;
+    int total = input->input->n_spikes + input->n_post_spikes;
     AllocMergedSpike* merged = malloc(total * sizeof(AllocMergedSpike));
 
-    for (int i = 0; i < input->base.base->n_spikes; i++) { merged[i].time=input->base.base->times[i]; merged[i].idx=i; merged[i].is_input=1; }
-    for (int i = 0; i < input->n_post_spikes; i++) { merged[input->base.base->n_spikes+i].time=input->fwd_times[i]; merged[input->base.base->n_spikes+i].idx=i; merged[input->base.base->n_spikes+i].is_input=0; }
+    for (int i = 0; i < input->input->n_spikes; i++) { merged[i].time=input->input->times[i]; merged[i].idx=i; merged[i].is_input=1; }
+    for (int i = 0; i < input->n_post_spikes; i++) { merged[input->input->n_spikes+i].time=input->fwd_times[i]; merged[input->input->n_spikes+i].idx=i; merged[input->input->n_spikes+i].is_input=0; }
 
     /* Sort descending by time: O(n log n) via qsort */
     qsort(merged, total, sizeof(AllocMergedSpike), cmp_merged_desc);
 
     double* all_errors = calloc(total, sizeof(double));
-    for (int i = 0; i < input->n_post_spikes; i++) all_errors[input->base.base->n_spikes + i] = input->post_errors[i];
+    for (int i = 0; i < input->n_post_spikes; i++) all_errors[input->input->n_spikes + i] = input->post_errors[i];
 
-    double* lambda_v = calloc(input->base.base->n_post, sizeof(double));
-    double* lambda_i = malloc(input->base.base->n_post * sizeof(double));
+    double* lambda_v = calloc(input->input->n_post, sizeof(double));
+    double* lambda_i = malloc(input->input->n_post * sizeof(double));
 
     /* Per-neuron jump storage (matching Eigen's vector<vector<pair<double,double>>> structure) */
-    double** jump_time = calloc(input->base.base->n_post, sizeof(double*));
-    double** jump_mag  = calloc(input->base.base->n_post, sizeof(double*));
-    int*   jump_count  = calloc(input->base.base->n_post, sizeof(int));
-    int*   jump_cap    = calloc(input->base.base->n_post, sizeof(int));
-    for (int i = 0; i < input->base.base->n_post; i++) {
+    double** jump_time = calloc(input->input->n_post, sizeof(double*));
+    double** jump_mag  = calloc(input->input->n_post, sizeof(double*));
+    int*   jump_count  = calloc(input->input->n_post, sizeof(int));
+    int*   jump_cap    = calloc(input->input->n_post, sizeof(int));
+    for (int i = 0; i < input->input->n_post; i++) {
         jump_cap[i] = 8;  /* initial capacity */
         jump_time[i] = malloc(jump_cap[i] * sizeof(double));
         jump_mag[i]  = malloc(jump_cap[i] * sizeof(double));
     }
 
     double largest_time = merged[0].time, previous_t = largest_time;
-    double k_bwd = input->base.base->tau_mem / (input->base.base->tau_mem - input->base.base->tau_syn);
+    double k_bwd = input->input->tau_mem / (input->input->tau_mem - input->input->tau_syn);
 
     for (int s = 0; s < total; s++) {
         int spike_idx = merged[s].idx, is_input = merged[s].is_input;
         double spike_time = merged[s].time;
-        int spike_source = is_input ? input->base.base->sources[spike_idx] : input->fwd_sources[spike_idx];
+        int spike_source = is_input ? input->input->sources[spike_idx] : input->fwd_sources[spike_idx];
 
         double t_bwd = largest_time - spike_time;
         double dt = previous_t - t_bwd;
-        scale_inplace_simd(lambda_v, exp(dt / input->base.base->tau_mem), input->base.base->n_post);
+        scale_inplace_simd(lambda_v, exp(dt / input->input->tau_mem), input->input->n_post);
 
         if (is_input) {
             /* Compute lambda_i for ALL post-synaptic neurons (matching Eigen structure) */
-            memset(lambda_i, 0, input->base.base->n_post * sizeof(double));
-            for (int nrn = 0; nrn < input->base.base->n_post; nrn++) {
+            memset(lambda_i, 0, input->input->n_post * sizeof(double));
+            for (int nrn = 0; nrn < input->input->n_post; nrn++) {
                 for (int j = 0; j < jump_count[nrn]; j++) {
                     double dt_jump = t_bwd - jump_time[nrn][j];
-                    lambda_i[nrn] += jump_mag[nrn][j] * k_bwd * (exp(-dt_jump / input->base.base->tau_mem) - exp(-dt_jump / input->base.base->tau_syn));
+                    lambda_i[nrn] += jump_mag[nrn][j] * k_bwd * (exp(-dt_jump / input->input->tau_mem) - exp(-dt_jump / input->input->tau_syn));
                 }
             }
 
-            vadd_scaled_simd(result.grad + spike_source * input->base.base->n_post, lambda_i, -input->base.base->tau_syn, input->base.base->n_post);
+            vadd_scaled_simd(result.grad + spike_source * input->input->n_post, lambda_i, -input->input->tau_syn, input->input->n_post);
 
             /* Compute dot product: w[row] · (lambda_v - lambda_i)
                Use stack allocation for small n_post, heap otherwise. */
 #define BACKWARD_DIFF_STACK_SIZE 512
             double stack_diff[BACKWARD_DIFF_STACK_SIZE];
-            int use_stack = (input->base.base->n_post <= BACKWARD_DIFF_STACK_SIZE);
-            double* diff = use_stack ? stack_diff : malloc(input->base.base->n_post * sizeof(double));
+            int use_stack = (input->input->n_post <= BACKWARD_DIFF_STACK_SIZE);
+            double* diff = use_stack ? stack_diff : malloc(input->input->n_post * sizeof(double));
 
-            vsub_simd(diff, lambda_v, lambda_i, input->base.base->n_post);
-            double outbound = dot_product_simd(input->base.base->w + spike_source * input->base.base->n_post, diff, input->base.base->n_post);
+            vsub_simd(diff, lambda_v, lambda_i, input->input->n_post);
+            double outbound = dot_product_simd(input->input->w + spike_source * input->input->n_post, diff, input->input->n_post);
             all_errors[spike_idx] += outbound;
 
             if (!use_stack) free(diff);
@@ -991,9 +991,9 @@ BackwardOutput eventprop_backward_spikes(const BackwardSpikesInput* input)
             result.spike_errors[spike_idx] = all_errors[spike_idx];
         } else {
             double current = input->fwd_currents[spike_idx];
-            double inv_ic = 1.0 / (current - input->base.base->v_th);
+            double inv_ic = 1.0 / (current - input->input->v_th);
             int nrn = spike_source;  /* post-spike: spike_source is the post-synaptic neuron */
-            double post_err = all_errors[input->base.base->n_spikes + spike_idx];
+            double post_err = all_errors[input->input->n_spikes + spike_idx];
 
             /* Record jump for this neuron (with capacity management) */
             if (jump_count[nrn] >= jump_cap[nrn]) {
@@ -1002,15 +1002,15 @@ BackwardOutput eventprop_backward_spikes(const BackwardSpikesInput* input)
                 jump_mag[nrn]  = realloc(jump_mag[nrn],  jump_cap[nrn] * sizeof(double));
             }
             jump_time[nrn][jump_count[nrn]] = t_bwd;
-            jump_mag[nrn][jump_count[nrn]]  = inv_ic * (input->base.base->v_th * lambda_v[nrn] + post_err);
+            jump_mag[nrn][jump_count[nrn]]  = inv_ic * (input->input->v_th * lambda_v[nrn] + post_err);
             jump_count[nrn]++;
 
-            lambda_v[nrn] = (current / (current - input->base.base->v_th)) * lambda_v[nrn] + inv_ic * post_err;
+            lambda_v[nrn] = (current / (current - input->input->v_th)) * lambda_v[nrn] + inv_ic * post_err;
         }
         previous_t = t_bwd;
     }
 
-    for (int i = 0; i < input->base.base->n_post; i++) {
+    for (int i = 0; i < input->input->n_post; i++) {
         free(jump_time[i]); free(jump_mag[i]);
     }
     free(merged); free(all_errors); free(lambda_v); free(lambda_i);
@@ -1029,7 +1029,7 @@ void eventprop_free_backward_output(BackwardOutput* output)
 /* ── BackwardSpikes Batch Function ─────────────────────────────── */
 
 BackwardOutput* eventprop_backward_spikes_batch(
-    const BackwardInputBase* base,
+    const EventPropInput* input,
     const int* n_spikes_per_sample,
     SpikeOutput* fwd_batch,        /* Forward spike outputs from compute_spikes_batch */
     const double* post_errors,
@@ -1050,9 +1050,9 @@ BackwardOutput* eventprop_backward_spikes_batch(
 
     /* Process each sample in parallel */
 #ifdef _OPENMP
-   #pragma omp parallel for schedule(static) shared(base, offsets, err_offsets, n_spikes_per_sample,\
+   #pragma omp parallel for schedule(static) shared(input, offsets, err_offsets, n_spikes_per_sample,\
             batch_size, result, fwd_batch, post_errors) \
-          if(batch_size >= 2 || batch_size * base->base->n_pre >= 50)
+          if(batch_size >= 2 || batch_size * input->n_pre >= 50)
 #endif
     for (int b = 0; b < batch_size; b++) {
         int offset = offsets[b];
@@ -1061,13 +1061,13 @@ BackwardOutput* eventprop_backward_spikes_batch(
         /* Extract forward spike data directly from SpikeOutput */
         int n_fwd_spikes = fwd_batch[b].n_spikes;
 
-        ForwardInputBase fwbase = {
-            .w=base->base->w, .n_pre=base->base->n_pre, .n_post=base->base->n_post,
-            .times=base->base->times + offset, .sources=base->base->sources + offset, .n_spikes=n_spikes,
-            .tau_mem=base->base->tau_mem, .tau_syn=base->base->tau_syn, .v_th=base->base->v_th
+        EventPropInput fwbase = {
+            .w=input->w, .n_pre=input->n_pre, .n_post=input->n_post,
+            .times=input->times + offset, .sources=input->sources + offset, .n_spikes=n_spikes,
+            .tau_mem=input->tau_mem, .tau_syn=input->tau_syn, .v_th=input->v_th
         };
         BackwardSpikesInput backward_input = {
-            .base = {.base=&fwbase},
+            .input = &fwbase,
             .fwd_times=fwd_batch[b].times,
             .fwd_sources=fwd_batch[b].sources,
             .fwd_currents=fwd_batch[b].currents,
@@ -1101,26 +1101,26 @@ BackwardOutput eventprop_backward_maxima(const BackwardMaximaInput* input)
 {
     BackwardOutput result;
 
-    result.n_pre = input->base.base->n_pre;
-    result.n_post = input->base.base->n_post;
+    result.n_pre = input->input->n_pre;
+    result.n_post = input->input->n_post;
 
     /* Allocate output - exact sizes known upfront */
-    result.grad = calloc(input->base.base->n_pre * input->base.base->n_post, sizeof(double));
-    result.spike_errors = calloc(input->base.base->n_spikes, sizeof(double));
+    result.grad = calloc(input->input->n_pre * input->input->n_post, sizeof(double));
+    result.spike_errors = calloc(input->input->n_spikes, sizeof(double));
 
-    if (input->base.base->n_spikes == 0 || input->n_maxima == 0)
+    if (input->input->n_spikes == 0 || input->n_maxima == 0)
         return result;
 
-    double largest_time = input->base.base->times[input->base.base->n_spikes - 1];
-    double k_bwd_prefactor = input->base.base->tau_mem / (input->base.base->tau_mem - input->base.base->tau_syn);
+    double largest_time = input->input->times[input->input->n_spikes - 1];
+    double k_bwd_prefactor = input->input->tau_mem / (input->input->tau_mem - input->input->tau_syn);
 
     /* Precompute inverse time constants */
-    double tau_mem_inv = 1.0 / input->base.base->tau_mem;
-    double tau_syn_inv = 1.0 / input->base.base->tau_syn;
+    double tau_mem_inv = 1.0 / input->input->tau_mem;
+    double tau_syn_inv = 1.0 / input->input->tau_syn;
 
     /* Sweep backward through input spikes */
-    for (int spike_idx = input->base.base->n_spikes - 1; spike_idx >= 0; spike_idx--) {
-        double t_bwd = largest_time - input->base.base->times[spike_idx];
+    for (int spike_idx = input->input->n_spikes - 1; spike_idx >= 0; spike_idx--) {
+        double t_bwd = largest_time - input->input->times[spike_idx];
 
         for (int max_idx = 0; max_idx < input->n_maxima; max_idx++) {
             if (isnan(input->maxima_times[max_idx]))
@@ -1137,8 +1137,8 @@ BackwardOutput eventprop_backward_maxima(const BackwardMaximaInput* input)
             double k_bwd_val = k_bwd_prefactor * (exp(dt_mem) - exp(dt_syn));
             double lambda_i = -k_bwd_val * input->maxima_errors[max_idx] * tau_mem_inv;
 
-            int source_nrn = input->base.base->sources[spike_idx];
-            result.grad[source_nrn * input->base.base->n_post + max_idx] -= input->base.base->tau_syn * lambda_i;
+            int source_nrn = input->input->sources[spike_idx];
+            result.grad[source_nrn * input->input->n_post + max_idx] -= input->input->tau_syn * lambda_i;
 
             result.spike_errors[spike_idx] += lambda_v - lambda_i;
         }
@@ -1153,7 +1153,7 @@ BackwardOutput eventprop_backward_maxima(const BackwardMaximaInput* input)
 
 
 SpikeOutput* eventprop_compute_spikes_batch(
-    const ForwardInputBase* input,
+    const EventPropInput* input,
     const int* n_spikes_per_sample, int batch_size)
 {
     /* Allocate array of SpikeOutput structs */
@@ -1176,7 +1176,7 @@ SpikeOutput* eventprop_compute_spikes_batch(
         int n_spikes = n_spikes_per_sample[b];
 
         /* Call single-sample function for this batch element */
-        ForwardInputBase sample_input = {
+        EventPropInput sample_input = {
             .w=input->w, .n_pre=input->n_pre, .n_post=input->n_post,
             .times=input->times + offset, .sources=input->sources + offset, .n_spikes=n_spikes,
             .tau_mem=input->tau_mem, .tau_syn=input->tau_syn,

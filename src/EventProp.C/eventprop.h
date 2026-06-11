@@ -20,9 +20,9 @@
 extern "C" {
 #endif
 
-/* ── Forward pass input struct (borrowed data, no allocation) ─────── */
+/* ── Shared input struct (borrowed data, no allocation) ───────────── */
 
-/** Forward pass input — common parameters for sums/maxima/spikes. */
+/** Common layer parameters — used by all forward and backward operations. */
 typedef struct {
     const double* w;           /* Weight matrix (row-major, borrowed) */
     int n_pre;                 /* Pre-synaptic neurons */
@@ -33,7 +33,7 @@ typedef struct {
     double tau_mem;            /* Membrane time constant (seconds) */
     double tau_syn;             /* Synaptic time constant (seconds) */
     double v_th;                /* Spike threshold voltage */
-} ForwardInputBase;
+} EventPropInput;
 
 /* ── Spike output (owned memory) ─────────────────────────────────────── */
 
@@ -48,7 +48,7 @@ typedef struct {
  * Forward pass with automatic memory allocation.
  * Returns a SpikeOutput struct — caller must free via eventprop_free_spike_output().
  */
-SpikeOutput eventprop_compute_spikes(const ForwardInputBase* input);
+SpikeOutput eventprop_compute_spikes(const EventPropInput* input);
 
 /** Free memory owned by a SpikeOutput struct. */
 void eventprop_free_spike_output(SpikeOutput* output);
@@ -66,7 +66,7 @@ typedef struct {
  * Compute cumulative sums with automatic memory allocation.
  * Returns a SumsOutput struct — caller must free via eventprop_free_sums_output().
  */
-SumsOutput eventprop_compute_sums(const ForwardInputBase* input);
+SumsOutput eventprop_compute_sums(const EventPropInput* input);
 
 /** Free memory owned by a SumsOutput struct. */
 void eventprop_free_sums_output(SumsOutput* output);
@@ -83,21 +83,16 @@ typedef struct {
  * Compute membrane potential maxima with automatic memory allocation.
  * Returns a MaximaOutput struct — caller must free via eventprop_free_maxima_output().
  */
-MaximaOutput eventprop_compute_maxima(const ForwardInputBase* input);
+MaximaOutput eventprop_compute_maxima(const EventPropInput* input);
 
 /** Free memory owned by a MaximaOutput struct. */
 void eventprop_free_maxima_output(MaximaOutput* output);
 
 /* ── Backward pass input structs (borrowed data, no allocation) ─────── */
 
-/** Base backward pass input — common parameters for spikes/maxima. */
+/** Backward spikes input — forward spike data and errors. */
 typedef struct {
-    const ForwardInputBase* base;      /* Common forward pass params + input spike data (borrowed) */
-} BackwardInputBase;
-
-/** Backward spikes input — extends base with forward spike data and errors. */
-typedef struct {
-    BackwardInputBase base;
+    const EventPropInput* input;      /* Shared layer params + input spike data (borrowed) */
     const double* fwd_times;           /* Forward spike times (borrowed) */
     const int32_t* fwd_sources;        /* Forward spike sources (borrowed) */
     const double* fwd_currents;         /* Forward spike currents (borrowed) */
@@ -105,9 +100,9 @@ typedef struct {
     int n_post_spikes;                  /* Number of post-synaptic spikes */
 } BackwardSpikesInput;
 
-/** Backward maxima input — extends base with membrane potential maxima data. */
+/** Backward maxima input — membrane potential maxima data. */
 typedef struct {
-    BackwardInputBase base;
+    const EventPropInput* input;      /* Shared layer params + input spike data (borrowed) */
     const double* maxima_times;        /* Maxima times (borrowed) */
     const double* maxima_values;         /* Maxima values (borrowed) */
     const double* maxima_errors;          /* Maxima errors (borrowed) */
@@ -147,20 +142,13 @@ BackwardOutput eventprop_backward_maxima(const BackwardMaximaInput* input);
  * Batch forward pass with automatic memory allocation.
  * Processes multiple samples in parallel using OpenMP.
  *
- * @param w           Weight matrix (flat, row-major)
- * @param n_pre        Number of pre-synaptic neurons
- * @param n_post       Number of post-synaptic neurons
- * @param times        Flat array of all input spike times (sorted per sample)
- * @param sources      Flat array of all source neurons
+ * @param input           Shared layer params (weights, tau_mem, tau_syn, v_th)
  * @param n_spikes_per_sample  Spike count per sample (length: batch_size)
  * @param batch_size   Number of samples in batch
- * @param v_th          Spike threshold voltage
- * @param tau_mem       Membrane time constant (seconds)
- * @param tau_syn       Synaptic time constant (seconds)
  *
  * @return Array of SpikeOutput structs (one per sample), freed via eventprop_free_batch_spike_output()
  */
-SpikeOutput* eventprop_compute_spikes_batch(const ForwardInputBase* input,
+SpikeOutput* eventprop_compute_spikes_batch(const EventPropInput* input,
                                                   const int* n_spikes_per_sample, int batch_size);
 
 /** Free memory owned by batch SpikeOutput array. */
@@ -169,10 +157,10 @@ void eventprop_free_batch_spike_output(SpikeOutput* output, int batch_size);
 /**
  * Batch backward pass (spikes) with automatic memory allocation.
  * Processes multiple samples in parallel using OpenMP.
- * Returns array of BackwardSpikesOutput structs (one per sample).
+ * Returns array of BackwardOutput structs (one per sample).
  */
 BackwardOutput* eventprop_backward_spikes_batch(
-    const BackwardInputBase* base,
+    const EventPropInput* input,
     const int* n_spikes_per_sample,
     SpikeOutput* fwd_batch,        /* Forward spike outputs from compute_spikes_batch */
     const double* post_errors,
