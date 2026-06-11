@@ -2,8 +2,7 @@
  * @file eventprop.h
  * @brief EventProp: Event-based backpropagation for SNN training.
  *
- * Pure C implementation with optional SIMD (AVX2/NEON). Zero-allocation hot paths
- * via pre-allocated scratch buffers. Flat row-major double[] arrays throughout.
+ * Pure C implementation with optional SIMD (AVX2/NEON). 
  *
  * Parameters (SI units):
  *   tau_mem  — membrane time constant (seconds, typically 0.02)

@@ -32,6 +32,13 @@
 #include <arm_neon.h>
 #endif
 
+#define EXP_STACK_SIZE 1024
+#define DIFF_STACK_SIZE 512
+
+#define TOMS748_MAX_ITER 1024
+#define TOMS748_TOL 1e-14
+
+
 #define COMPUTE_V_INLINE(t, i, spike_count, post_spike_times, neuron_offset, \
                         sum0, sum1, target_nrn, input, k_prefactor) \
 ({ \
@@ -73,13 +80,6 @@
     } \
     mem; \
 })
-
-/* ── Configuration constants ─────────────────────────────────────────── */
-#define EXP_STACK_SIZE 1024
-#define DIFF_STACK_SIZE 512
-
-#define TOMS748_MAX_ITER 1024
-#define TOMS748_TOL 1e-14
 
 typedef double (*RootFinderFn)(void* ctx, double t);
 
@@ -407,17 +407,11 @@ static void vsub_simd(double* dest, const double* a, const double* b, int n)
         dest[j] = a[j] - b[j];
 }
 
-
-
 static int cmp_merged_desc(const void* a, const void* b) {
     double ta = ((const MergedSpike*)a)->time;
     double tb = ((const MergedSpike*)b)->time;
     return (ta < tb) - (ta > tb);
 }
-
-/* ── Helper functions (MACROS) for compute_spikes ─── */
-
-
 
 static double compute_tmax(int i, int n_spikes, const double* times,
                            int spike_count, const double* post_spike_times, int neuron_offset,
