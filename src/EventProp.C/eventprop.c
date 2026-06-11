@@ -81,8 +81,6 @@
     mem; \
 })
 
-typedef double (*RootFinderFn)(void* ctx, double t);
-
 typedef struct RootContext {
     const double* sum0; const double* sum1;
     int i, spike_count, target_nrn, n_post;
@@ -465,17 +463,16 @@ static int cmp_spike_asc(const void* a, const void* b) {
     return (ta > tb) - (ta < tb);
 }
 
-static double root_fn(void* ctx_ptr, double t) {
-    RootContext* c = (RootContext*)ctx_ptr;
-    return COMPUTE_V_FACTORED(t, c->i, c->spike_count, c->post_spike_times, c->neuron_offset,
-                     c->sum0, c->sum1, c->target_nrn, c->n_post,
-                     c->k_prefactor, c->tau_mem_inv, c->tau_syn_inv, c->v_th,
-                     c->post_spike_exp_st) - c->v_th;
-}
+/* Inline voltage computation — eliminates callback indirection */
+#define VOLTAGE(c, t) \
+    (COMPUTE_V_FACTORED(t, (c)->i, (c)->spike_count, (c)->post_spike_times, (c)->neuron_offset, \
+                 (c)->sum0, (c)->sum1, (c)->target_nrn, (c)->n_post, \
+                 (c)->k_prefactor, (c)->tau_mem_inv, (c)->tau_syn_inv, (c)->v_th, \
+                 (c)->post_spike_exp_st) - (c)->v_th)
 
-static double toms748_solve(void* ctx, RootFinderFn fn, double a, double b) {
+static double toms748_solve(const RootContext* ctx, double a, double b) {
 
-    double fa = fn(ctx, a), fb = fn(ctx, b);
+    double fa = VOLTAGE(ctx, a), fb = VOLTAGE(ctx, b);
     if (!isfinite(fa) || !isfinite(fb)) return a;
 
     /* Precondition: bracket must contain sign change */
@@ -520,7 +517,7 @@ static double toms748_solve(void* ctx, RootFinderFn fn, double a, double b) {
         if (useBisection) s = a + m;
 
         double f_oldB = fb;   // save before updating - avoids redundant fn call below
-        double prevB = b; b = s; fb = fn(ctx, b);
+        double prevB = b; b = s; fb = VOLTAGE(ctx, b);
         if (!isfinite(fb)) return prevB;
 
         if (fabs(fb) <= TOMS748_TOL || fabs(b - prevB) <= TOMS748_TOL * fmax(1.0, fabs(prevB)))
@@ -610,7 +607,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput* input)
                             rctx.k_prefactor=k_prefactor; rctx.tau_mem_inv=tau_mem_inv;
                             rctx.tau_syn_inv=tau_syn_inv; rctx.v_th=input->v_th;
                             rctx.post_spike_exp_st = post_exp_st;
-                            double t_post = toms748_solve(&rctx, root_fn, t_lower, tmax);
+                            double t_post = toms748_solve(&rctx, t_lower, tmax);
                             free(post_exp_st);
                             if (t_post > t_lower && t_post < tmax) {
                                 if (count >= cap) {
@@ -657,7 +654,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput* input)
                             rctx.k_prefactor=k_prefactor; rctx.tau_mem_inv=tau_mem_inv;
                             rctx.tau_syn_inv=tau_syn_inv; rctx.v_th=input->v_th;
                             rctx.post_spike_exp_st = post_exp_st;
-                            double t_post = toms748_solve(&rctx, root_fn, t_before, tmax);
+                            double t_post = toms748_solve(&rctx, t_before, tmax);
                             free(post_exp_st);
                             if (t_post > t_before && t_post < tmax) {
                                 if (count >= cap) {
@@ -699,7 +696,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput* input)
                         rctx.k_prefactor=k_prefactor; rctx.tau_mem_inv=tau_mem_inv;
                         rctx.tau_syn_inv=tau_syn_inv; rctx.v_th=input->v_th;
                         rctx.post_spike_exp_st = post_exp_st;
-                        double t_post = toms748_solve(&rctx, root_fn, t_before, t_input);
+                        double t_post = toms748_solve(&rctx, t_before, t_input);
                         free(post_exp_st);
                         if (t_post > t_before && t_post < t_input) {
                             if (count >= cap) {
