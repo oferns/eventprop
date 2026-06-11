@@ -16,7 +16,7 @@ extern "C" {
 #endif
 
 /** Input for voltage-trace computation. */
-typedef struct {
+typedef struct VoltageTraceInput {
     const EventPropInput* input;       /* Forward pass parameters (weights, spikes, v_th, tau_mem, tau_syn) */
     int target_nrn_idx;                /* Post-synaptic neuron to trace */
     const double* fwd_times;           /* Forward-pass spike times (borrowed) */
@@ -27,13 +27,13 @@ typedef struct {
 } VoltageTraceInput;
 
 /** Voltage trace output */
-typedef struct {
+typedef struct VoltageTraceOutput {
     int n_t;                           /* Number of time points (= t_max / dt) */
     double* v_trace;                   /* Voltage values (malloc'd, length n_t) */
     double* ts;                        /* Time array (malloc'd, length n_t) */
 } VoltageTraceOutput;
 
-typedef struct {
+typedef struct LambdaITraceInput {
     const double* fwd_times;           /* Forward-pass spike times (borrowed) */
     int n_post_spikes;                 /* Number of forward-pass spikes */
     int target_nrn_idx;                /* Post-synaptic neuron to trace */
@@ -45,7 +45,7 @@ typedef struct {
 } LambdaITraceInput;
 
 /** Lambda-I trace output. */
-typedef struct {
+typedef struct LambdaITraceOutput {
     int n_t;                           /* Number of time points (= t_max / dt) */
     double* lambda_trace;              /* Lambda-I values (malloc'd, length n_t) */
     double* ts;                        /* Time array (malloc'd, length n_t) */

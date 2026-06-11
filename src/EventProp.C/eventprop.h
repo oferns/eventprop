@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-typedef struct {
+typedef struct EventPropInput {
     const double* w;           /* Weight matrix (row-major) */
     int n_pre;                 /* Pre-synaptic neurons */
     int n_post;                /* Post-synaptic neurons */
@@ -30,33 +30,33 @@ typedef struct {
     double v_th;               /* Spike threshold voltage */
 } EventPropInput;
 
-typedef struct {
+typedef struct BatchEventPropInput {
     const EventPropInput* input;
     const int* n_spikes_per_sample;
     int batch_size;
 } BatchEventPropInput;
 
-typedef struct {
+typedef struct SpikeOutput {
     int n_spikes;            /* Number of output spikes */
     double* times;           /* Output spike times (malloc'd) */
     int* sources;        /* Output source neurons (malloc'd) */
     double* currents;        /* Synaptic currents at spike times (malloc'd) */
 } SpikeOutput;
 
-typedef struct {
+typedef struct SumsOutput {
     int n_rows;              /* n_spikes + 1 */
     int n_post;              /* Number of post-synaptic neurons */
     double* sum0;            /* Cumulative sums (malloc'd, n_rows * n_post) */
     double* sum1;            /* Cumulative sums (malloc'd, n_rows * n_post) */
 } SumsOutput;
 
-typedef struct {
+typedef struct MaximaOutput {
     int n_post;              /* Number of post-synaptic neurons */
     double* times;           /* Maxima times (malloc'd, n_post) */
     double* values;          /* Maxima values (malloc'd, n_post) */
 } MaximaOutput;
 
-typedef struct {
+typedef struct BackwardSpikesInput {
     const EventPropInput* input;      /* Shared layer params + input spike data (borrowed) */
     const double* fwd_times;           /* Forward spike times (borrowed) */
     const int* fwd_sources;        /* Forward spike sources (borrowed) */
@@ -65,7 +65,7 @@ typedef struct {
     int n_post_spikes;                  /* Number of post-synaptic spikes */
 } BackwardSpikesInput;
 
-typedef struct {
+typedef struct BackwardMaximaInput {
     const EventPropInput* input;      /* Shared layer params + input spike data (borrowed) */
     const double* maxima_times;        /* Maxima times (borrowed) */
     const double* maxima_values;         /* Maxima values (borrowed) */
@@ -73,7 +73,7 @@ typedef struct {
     int n_maxima;                       /* Number of maxima */
 } BackwardMaximaInput;
 
-typedef struct {
+typedef struct BackwardOutput {
     int n_pre;               /* Number of pre-synaptic neurons */
     int n_post;              /* Number of post-synaptic neurons */
     double* grad;            /* Weight gradient (malloc'd, n_pre * n_post) */
