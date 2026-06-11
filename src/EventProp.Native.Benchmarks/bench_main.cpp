@@ -25,7 +25,7 @@
 // ============================================================
 
 static void GenerateUniformData(int n_pre, int n_post, int n_spikes,
-                                 double* w, double* times, int32_t* sources)
+                                 double* w, double* times, int* sources)
 {
     std::mt19937 rng(42);
     std::uniform_real_distribution<double> w_dist(0.5, 2.0);
@@ -35,12 +35,12 @@ static void GenerateUniformData(int n_pre, int n_post, int n_spikes,
 
     for (int i = 0; i < n_spikes; i++) {
         times[i] = (i + 1) / static_cast<double>(n_spikes + 1);
-        sources[i] = std::uniform_int_distribution<int32_t>(0, n_pre - 1)(rng);
+        sources[i] = std::uniform_int_distribution<int>(0, n_pre - 1)(rng);
     }
 }
 
 static void GeneratePoissonData(int n_pre, int n_post, int n_spikes,
-                                 double* w, double* times, int32_t* sources)
+                                 double* w, double* times, int* sources)
 {
     std::mt19937 rng(42);
     std::uniform_real_distribution<double> w_dist(0.5, 2.0);
@@ -55,7 +55,7 @@ static void GeneratePoissonData(int n_pre, int n_post, int n_spikes,
     for (int idx = 0; idx < n_spikes; idx++) {
         double u = u_dist(rng);
         times[idx] = -std::log(1.0 - u) / rate;
-        sources[idx] = std::uniform_int_distribution<int32_t>(0, n_pre - 1)(rng);
+        sources[idx] = std::uniform_int_distribution<int>(0, n_pre - 1)(rng);
 
         if (idx > 0 && times[idx] <= times[idx - 1])
             times[idx] = times[idx - 1] + dt;
@@ -63,7 +63,7 @@ static void GeneratePoissonData(int n_pre, int n_post, int n_spikes,
 }
 
 static void GenerateBurstData(int n_pre, int n_post, int n_spikes,
-                               double* w, double* times, int32_t* sources)
+                               double* w, double* times, int* sources)
 {
     std::mt19937 rng(42);
     std::uniform_real_distribution<double> w_dist(0.5, 2.0);
@@ -104,7 +104,7 @@ static const ProblemSize kSizes[] = {
 };
 
 static const char* kPatterns[] = {"uniform", "poisson", "burst"};
-using DataGenerator = void(*)(int, int, int, double*, double*, int32_t*);
+using DataGenerator = void(*)(int, int, int, double*, double*, int*);
 static DataGenerator kGen[] = {GenerateUniformData, GeneratePoissonData, GenerateBurstData};
 
 // ============================================================
@@ -115,7 +115,7 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
 {
     std::vector<double> w(sz.n_pre * sz.n_post);
     std::vector<double> times(sz.n_spikes);
-    std::vector<int32_t> sources(sz.n_spikes);
+    std::vector<int> sources(sz.n_spikes);
     gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
 
 #ifdef USE_CPP_WRAPPER
@@ -196,7 +196,7 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
 {
     std::vector<double> w(sz.n_pre * sz.n_post);
     std::vector<double> times(sz.n_spikes);
-    std::vector<int32_t> sources(sz.n_spikes);
+    std::vector<int> sources(sz.n_spikes);
     gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
 
 #ifdef USE_CPP_WRAPPER
@@ -282,7 +282,7 @@ static void BM_FullTrainingStep(benchmark::State& state, const ProblemSize& sz, 
 {
     std::vector<double> w(sz.n_pre * sz.n_post);
     std::vector<double> times(sz.n_spikes);
-    std::vector<int32_t> sources(sz.n_spikes);
+    std::vector<int> sources(sz.n_spikes);
     gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
 
 #ifdef USE_CPP_WRAPPER
@@ -399,13 +399,13 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
     std::vector<Spikes> input_batch(batch_size);
     for (int b = 0; b < batch_size; b++) {
         std::vector<double> times(sz.n_spikes);
-        std::vector<int32_t> sources(sz.n_spikes);
+        std::vector<int> sources(sz.n_spikes);
         // Vary RNG seed per sample
         std::mt19937 rng(42 + b);
         std::uniform_real_distribution<double> w_dist(0.5, 2.0);
         for (int i = 0; i < sz.n_spikes; i++) {
             times[i] = (i + 1) / static_cast<double>(sz.n_spikes + 1);
-            sources[i] = std::uniform_int_distribution<int32_t>(0, sz.n_pre - 1)(rng);
+            sources[i] = std::uniform_int_distribution<int>(0, sz.n_pre - 1)(rng);
         }
         input_batch[b] = Spikes(Eigen::Map<Eigen::ArrayXd>(times.data(), sz.n_spikes),
                                Eigen::Map<Eigen::ArrayXi>(sources.data(), sz.n_spikes));
@@ -429,14 +429,14 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
 #else
     // C library: flat arrays + per-sample spike counts
     std::vector<double> times(batch_size * sz.n_spikes);
-    std::vector<int32_t> sources(batch_size * sz.n_spikes);
+    std::vector<int> sources(batch_size * sz.n_spikes);
     std::vector<int> n_spikes_per_sample(batch_size, sz.n_spikes);
     
     for (int b = 0; b < batch_size; b++) {
         std::mt19937 rng(42 + b);
         for (int i = 0; i < sz.n_spikes; i++) {
             times[b * sz.n_spikes + i] = (i + 1) / static_cast<double>(sz.n_spikes + 1);
-            sources[b * sz.n_spikes + i] = std::uniform_int_distribution<int32_t>(0, sz.n_pre - 1)(rng);
+            sources[b * sz.n_spikes + i] = std::uniform_int_distribution<int>(0, sz.n_pre - 1)(rng);
         }
     }
 
@@ -452,7 +452,7 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
             total_fwd += warmup[b].n_spikes;
         // Pre-allocate buffers large enough for all samples
         std::vector<double> fwd_times(total_fwd);
-        std::vector<int32_t> fwd_sources(total_fwd);
+        std::vector<int> fwd_sources(total_fwd);
         std::vector<double> fwd_currents(total_fwd);
         std::vector<double> post_errors(total_fwd, -1.0);
         eventprop_free_batch_spike_output(warmup, batch_size);
@@ -460,7 +460,7 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
 
     // Pre-allocate buffers outside loop (reuse each iteration)
     std::vector<double> fwd_times(batch_size * sz.n_spikes);
-    std::vector<int32_t> fwd_sources(batch_size * sz.n_spikes);
+    std::vector<int> fwd_sources(batch_size * sz.n_spikes);
     std::vector<double> fwd_currents(batch_size * sz.n_spikes);
     std::vector<double> post_errors(batch_size * sz.n_spikes, -1.0);
     std::vector<int> n_fwd_spikes_per_sample(batch_size);
@@ -520,7 +520,7 @@ static void BM_ComputeSpikesVth(benchmark::State& state)
 
     std::vector<double> w(n_pre * n_post);
     std::vector<double> times(n_spikes);
-    std::vector<int32_t> sources(n_spikes);
+    std::vector<int> sources(n_spikes);
 
     GenerateUniformData(n_pre, n_post, n_spikes, w.data(), times.data(), sources.data());
 
@@ -558,7 +558,7 @@ static void BM_BackwardSpikesVth(benchmark::State& state)
 
     std::vector<double> w(n_pre * n_post);
     std::vector<double> times(n_spikes);
-    std::vector<int32_t> sources(n_spikes);
+    std::vector<int> sources(n_spikes);
 
     GenerateUniformData(n_pre, n_post, n_spikes, w.data(), times.data(), sources.data());
 
@@ -625,7 +625,7 @@ static void BM_ComputeSums(benchmark::State& state, const ProblemSize& sz, DataG
 {
     std::vector<double> w(sz.n_pre * sz.n_post);
     std::vector<double> times(sz.n_spikes);
-    std::vector<int32_t> sources(sz.n_spikes);
+    std::vector<int> sources(sz.n_spikes);
 
     gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
 
@@ -699,7 +699,7 @@ static void BM_ComputeMaxima(benchmark::State& state, const ProblemSize& sz, Dat
 {
     std::vector<double> w(sz.n_pre * sz.n_post);
     std::vector<double> times(sz.n_spikes);
-    std::vector<int32_t> sources(sz.n_spikes);
+    std::vector<int> sources(sz.n_spikes);
 
     gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
 
@@ -773,7 +773,7 @@ static void BM_BackwardMaxima(benchmark::State& state, const ProblemSize& sz, Da
 {
     std::vector<double> w(sz.n_pre * sz.n_post);
     std::vector<double> times(sz.n_spikes);
-    std::vector<int32_t> sources(sz.n_spikes);
+    std::vector<int> sources(sz.n_spikes);
 
     gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
 

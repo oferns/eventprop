@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 import ctypes
-from ctypes import cdll, c_double, c_int32, c_int, Structure, POINTER, byref
+from ctypes import cdll, c_double, c_int, c_int, Structure, POINTER, byref
 import numpy as np
 
 
@@ -16,7 +16,7 @@ class _EventPropInput(Structure):
         ('n_pre', c_int),
         ('n_post', c_int),
         ('times', POINTER(c_double)),
-        ('sources', POINTER(c_int32)),
+        ('sources', POINTER(c_int)),
         ('n_spikes', c_int),
         ('tau_mem', c_double),
         ('tau_syn', c_double),
@@ -31,7 +31,7 @@ class _BackwardSpikesInput(Structure):
     _fields_ = [
         ('input', POINTER(_EventPropInput)),
         ('fwd_times', POINTER(c_double)),
-        ('fwd_sources', POINTER(c_int32)),
+        ('fwd_sources', POINTER(c_int)),
         ('fwd_currents', POINTER(c_double)),
         ('post_errors', POINTER(c_double)),
         ('n_post_spikes', c_int),
@@ -53,7 +53,7 @@ class _VoltageTraceInput(Structure):
         ('input', POINTER(_EventPropInput)),
         ('target_nrn_idx', c_int),
         ('fwd_times', POINTER(c_double)),
-        ('fwd_sources', POINTER(c_int32)),
+        ('fwd_sources', POINTER(c_int)),
         ('n_post_spikes', c_int),
         ('t_max', c_double),
         ('dt', c_double),
@@ -77,7 +77,7 @@ class _SpikeOutput(Structure):
     _fields_ = [
         ('n_spikes', c_int),
         ('times', POINTER(c_double)),
-        ('sources', POINTER(c_int32)),
+        ('sources', POINTER(c_int)),
         ('currents', POINTER(c_double)),
     ]
 
@@ -153,7 +153,7 @@ class Int32ArrayView:
     """Zero-copy view of C int32 array."""
     __slots__ = ('_ptr', '_length')
 
-    def __init__(self, ptr: POINTER(c_int32), length: int):
+    def __init__(self, ptr: POINTER(c_int), length: int):
         self._ptr = ptr
         self._length = length
 
@@ -169,7 +169,7 @@ class Int32ArrayView:
         )
 
     @property
-    def ptr(self) -> POINTER[c_int32]:
+    def ptr(self) -> POINTER[c_int]:
         """Raw ctypes pointer for passing to C structs."""
         return self._ptr
 

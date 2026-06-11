@@ -9,7 +9,6 @@
 #ifndef EVENTPROP_DIAG_H
 #define EVENTPROP_DIAG_H
 
-#include <stdint.h>
 #include "eventprop.h"
 
 #ifdef __cplusplus
@@ -23,7 +22,7 @@ typedef struct {
     const EventPropInput* input;     /* Forward pass parameters (weights, spikes, v_th, tau_mem, tau_syn) */
     int target_nrn_idx;                /* Post-synaptic neuron to trace */
     const double* fwd_times;           /* Forward-pass spike times (borrowed) */
-    const int32_t* fwd_sources;        /* Forward-pass spike sources (borrowed) */
+    const int* fwd_sources;        /* Forward-pass spike sources (borrowed) */
     int n_post_spikes;                 /* Number of forward-pass spikes */
     double t_max;                      /* Simulation end time (seconds) */
     double dt;                         /* Time step (seconds) */

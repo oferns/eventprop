@@ -41,8 +41,6 @@ typedef double (*root_fn_t)(void* ctx, double t);
 
 /* ── SIMD helper functions ───────────────────────────────────── */
 
-/* ── SIMD helpers (copied from eventprop_scalar.c) ─────────────── */
-
 static int simd_vec_width(void)
 {
 #ifdef HAVE_AVX512F
@@ -306,7 +304,7 @@ static int cmp_merged_desc(const void* a, const void* b) {
     return (ta < tb) - (ta > tb);
 }
 
-/* ── Helper functions for compute_spikes_alloc (mirroring original) ─── */
+/* ── Helper functions (MACROS) for compute_spikes ─── */
 
 #define ALLOC_COMPUTE_V_INLINE(t, i, spike_count, post_spike_times, neuron_offset, \
                         sum0, sum1, target_nrn, input, k_prefactor) \
@@ -317,21 +315,6 @@ static int cmp_merged_desc(const void* a, const void* b) {
         double st = post_spike_times[neuron_offset + s]; \
         if (st <= t) {  /* Include all spikes where st <= t, don't break early */ \
             mem -= input->v_th * exp(-(t - st) / input->tau_mem); \
-        } \
-    } \
-    mem; \
-})
-
-#define ALLOC_COMPUTE_V_INLINE2(t, i, spike_count, post_spike_times, neuron_offset, \
-                         sum0, sum1, target_nrn, n_post, k_prefactor, tau_mem_inv, \
-                         tau_syn_inv, v_th) \
-({ \
-    double mem = k_prefactor * (sum1[i * n_post + target_nrn] * exp(-t * tau_mem_inv) \
-                    - sum0[i * n_post + target_nrn] * exp(-t * tau_syn_inv)); \
-    for (int s = 0; s < spike_count; s++) { \
-        double st = post_spike_times[neuron_offset + s]; \
-        if (st <= t) {  /* Include all spikes where st <= t, don't break early */ \
-            mem -= v_th * exp(-(t - st) * tau_mem_inv); \
         } \
     } \
     mem; \
@@ -443,10 +426,7 @@ static double root_fn(void* ctx_ptr, double t) {
                      c->post_spike_exp_st) - c->v_th;
 }
 
-extern int rootfind_calls = 0;
-
 static double toms748_solve(void* ctx, root_fn_t fn, double a, double b) {
-    rootfind_calls++;
 
     double fa = fn(ctx, a), fb = fn(ctx, b);
     if (!isfinite(fa) || !isfinite(fb)) return a;
@@ -510,8 +490,6 @@ static double toms748_solve(void* ctx, root_fn_t fn, double a, double b) {
     return b;
 }
 
-/* ── SpikeOutput ─────────────────────────────────────────────────────── */
-
 SpikeOutput eventprop_compute_spikes(const EventPropInput* input)
 {
     SpikeOutput result;
@@ -523,15 +501,10 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput* input)
     double tau_mem_inv = 1.0 / input->tau_mem;
     double tau_syn_inv = 1.0 / input->tau_syn;
 
-    /* Initialize diagnostic counters */
-    rootfind_calls = 0;
-
-    /* Compute sums using alloc version */
-
+    /* Compute sums */
     SumsOutput sums = eventprop_compute_sums(input);
     const double* sum0 = sums.sum0;
     const double* sum1 = sums.sum1;
-
 
     /* Per-neuron dynamic buffers - growable to handle burst patterns */
     double** post_times_arr   = malloc(input->n_post * sizeof(double*));
@@ -779,8 +752,6 @@ void eventprop_free_spike_output(SpikeOutput* output)
     output->n_spikes = 0;
 }
 
-/* ── SumsOutput ─────────────────────────────────────────────────────── */
-
 SumsOutput eventprop_compute_sums(const EventPropInput* input)
 {
     SumsOutput result;
@@ -826,8 +797,6 @@ void eventprop_free_sums_output(SumsOutput* output)
     free(output->sum0);
     free(output->sum1);
 }
-
-/* ── MaximaOutput ───────────────────────────────────────────────────── */
 
 MaximaOutput eventprop_compute_maxima(const EventPropInput* input)
 {
@@ -909,7 +878,55 @@ void eventprop_free_maxima_output(MaximaOutput* output)
     free(output->values);
 }
 
-/* ── BackwardOutput ───────────────────────────────────────────── */
+BackwardOutput eventprop_backward_maxima(const BackwardMaximaInput* input)
+{
+    BackwardOutput result;
+
+    result.n_pre = input->input->n_pre;
+    result.n_post = input->input->n_post;
+
+    /* Allocate output - exact sizes known upfront */
+    result.grad = calloc(input->input->n_pre * input->input->n_post, sizeof(double));
+    result.spike_errors = calloc(input->input->n_spikes, sizeof(double));
+
+    if (input->input->n_spikes == 0 || input->n_maxima == 0)
+        return result;
+
+    double largest_time = input->input->times[input->input->n_spikes - 1];
+    double k_bwd_prefactor = input->input->tau_mem / (input->input->tau_mem - input->input->tau_syn);
+
+    /* Precompute inverse time constants */
+    double tau_mem_inv = 1.0 / input->input->tau_mem;
+    double tau_syn_inv = 1.0 / input->input->tau_syn;
+
+    /* Sweep backward through input spikes */
+    for (int spike_idx = input->input->n_spikes - 1; spike_idx >= 0; spike_idx--) {
+        double t_bwd = largest_time - input->input->times[spike_idx];
+
+        for (int max_idx = 0; max_idx < input->n_maxima; max_idx++) {
+            if (isnan(input->maxima_times[max_idx]))
+                continue;
+
+            double t_vmax_bwd = largest_time - input->maxima_times[max_idx];
+            if (t_vmax_bwd > t_bwd)
+                continue;
+
+            double dt_mem = -(t_bwd - t_vmax_bwd) * tau_mem_inv;
+            double dt_syn = -(t_bwd - t_vmax_bwd) * tau_syn_inv;
+
+            double lambda_v = -exp(dt_mem) * input->maxima_errors[max_idx] * tau_mem_inv;
+            double k_bwd_val = k_bwd_prefactor * (exp(dt_mem) - exp(dt_syn));
+            double lambda_i = -k_bwd_val * input->maxima_errors[max_idx] * tau_mem_inv;
+
+            int source_nrn = input->input->sources[spike_idx];
+            result.grad[source_nrn * input->input->n_post + max_idx] -= input->input->tau_syn * lambda_i;
+
+            result.spike_errors[spike_idx] += lambda_v - lambda_i;
+        }
+    }
+
+    return result;
+}
 
 BackwardOutput eventprop_backward_spikes(const BackwardSpikesInput* input)
 {
@@ -1026,8 +1043,6 @@ void eventprop_free_backward_output(BackwardOutput* output)
     free(output->spike_errors);
 }
 
-/* ── BackwardSpikes Batch Function ─────────────────────────────── */
-
 BackwardOutput* eventprop_backward_spikes_batch(
     const EventPropInput* input,
     const int* n_spikes_per_sample,
@@ -1094,63 +1109,6 @@ void eventprop_free_backward_batch_output(BackwardOutput* output, int batch_size
     /* Free the array itself */
     free(output);
 }
-
-/* ── BackwardOutput ───────────────────────────────────────────── */
-
-BackwardOutput eventprop_backward_maxima(const BackwardMaximaInput* input)
-{
-    BackwardOutput result;
-
-    result.n_pre = input->input->n_pre;
-    result.n_post = input->input->n_post;
-
-    /* Allocate output - exact sizes known upfront */
-    result.grad = calloc(input->input->n_pre * input->input->n_post, sizeof(double));
-    result.spike_errors = calloc(input->input->n_spikes, sizeof(double));
-
-    if (input->input->n_spikes == 0 || input->n_maxima == 0)
-        return result;
-
-    double largest_time = input->input->times[input->input->n_spikes - 1];
-    double k_bwd_prefactor = input->input->tau_mem / (input->input->tau_mem - input->input->tau_syn);
-
-    /* Precompute inverse time constants */
-    double tau_mem_inv = 1.0 / input->input->tau_mem;
-    double tau_syn_inv = 1.0 / input->input->tau_syn;
-
-    /* Sweep backward through input spikes */
-    for (int spike_idx = input->input->n_spikes - 1; spike_idx >= 0; spike_idx--) {
-        double t_bwd = largest_time - input->input->times[spike_idx];
-
-        for (int max_idx = 0; max_idx < input->n_maxima; max_idx++) {
-            if (isnan(input->maxima_times[max_idx]))
-                continue;
-
-            double t_vmax_bwd = largest_time - input->maxima_times[max_idx];
-            if (t_vmax_bwd > t_bwd)
-                continue;
-
-            double dt_mem = -(t_bwd - t_vmax_bwd) * tau_mem_inv;
-            double dt_syn = -(t_bwd - t_vmax_bwd) * tau_syn_inv;
-
-            double lambda_v = -exp(dt_mem) * input->maxima_errors[max_idx] * tau_mem_inv;
-            double k_bwd_val = k_bwd_prefactor * (exp(dt_mem) - exp(dt_syn));
-            double lambda_i = -k_bwd_val * input->maxima_errors[max_idx] * tau_mem_inv;
-
-            int source_nrn = input->input->sources[spike_idx];
-            result.grad[source_nrn * input->input->n_post + max_idx] -= input->input->tau_syn * lambda_i;
-
-            result.spike_errors[spike_idx] += lambda_v - lambda_i;
-        }
-    }
-
-    return result;
-}
-
-/* ── Diagnostic functions moved to eventprop_diag.c ──────────────────── */
-
-/* ── Batch operations (parallel processing) ───────────────────────────── */
-
 
 SpikeOutput* eventprop_compute_spikes_batch(
     const EventPropInput* input,

@@ -17,55 +17,55 @@
 #include "../EventProp.Cpp.Wrapper/eventprop_eigen_stripped.h"
 #include "../EventProp.C/eventprop_diag.h"
 
-static void generate_uniform_data(int n_pre, int n_post, int n_spikes, double* w, double* times, int32_t* sources) {
+static void generate_uniform_data(int n_pre, int n_post, int n_spikes, double* w, double* times, int* sources) {
     std::mt19937 rng(42); std::uniform_real_distribution<double> w_dist(0.5, 2.0), time_dist(0.01, 0.99);
     for (int i = 0; i < n_pre * n_post; i++) w[i] = w_dist(rng);
-    for (int i = 0; i < n_spikes; i++) { times[i] = time_dist(rng); sources[i] = std::uniform_int_distribution<int32_t>(0, n_pre - 1)(rng); }
+    for (int i = 0; i < n_spikes; i++) { times[i] = time_dist(rng); sources[i] = std::uniform_int_distribution<int>(0, n_pre - 1)(rng); }
 }
 
-static void generate_poisson_data(int n_pre, int n_post, int n_spikes, double* w, double* times, int32_t* sources) {
+static void generate_poisson_data(int n_pre, int n_post, int n_spikes, double* w, double* times, int* sources) {
     std::mt19937 rng(42); std::uniform_real_distribution<double> w_dist(0.5, 2.0);
     double rate = 200.0; double dt = 1.0 / (rate * n_spikes);
     for (int i = 0; i < n_pre * n_post; i++) w[i] = w_dist(rng);
-    for (int idx = 0; idx < n_spikes; idx++) { std::uniform_real_distribution<double> u_dist(0.0, 1.0); times[idx] = -std::log(1.0 - u_dist(rng)) / rate; sources[idx] = std::uniform_int_distribution<int32_t>(0, n_pre - 1)(rng); if (idx > 0 && times[idx] <= times[idx - 1]) times[idx] = times[idx - 1] + dt; }
+    for (int idx = 0; idx < n_spikes; idx++) { std::uniform_real_distribution<double> u_dist(0.0, 1.0); times[idx] = -std::log(1.0 - u_dist(rng)) / rate; sources[idx] = std::uniform_int_distribution<int>(0, n_pre - 1)(rng); if (idx > 0 && times[idx] <= times[idx - 1]) times[idx] = times[idx - 1] + dt; }
 }
 
-static void generate_burst_data(int n_pre, int n_post, int n_spikes, double* w, double* times, int32_t* sources) {
+static void generate_burst_data(int n_pre, int n_post, int n_spikes, double* w, double* times, int* sources) {
     std::mt19937 rng(42); std::uniform_real_distribution<double> w_dist(0.5, 2.0); for (int i = 0; i < n_pre * n_post; i++) w[i] = w_dist(rng); int spike_idx = 0;
     for (int nrn = 0; nrn < n_pre && spike_idx < n_spikes; nrn++) { double burst_start = 0.05 + nrn * 0.1; for (int b = 0; burst_start < 1.0 && spike_idx < n_spikes; b++) { for (int s = 0; s < 5 && spike_idx < n_spikes; s++) { times[spike_idx] = burst_start + s * 0.002; sources[spike_idx] = nrn; spike_idx++; } burst_start += 0.12; } }
 }
 
-static void generate_zero_data(int n_pre, int n_post, int n_spikes, double* w, double* times, int32_t* sources) {
+static void generate_zero_data(int n_pre, int n_post, int n_spikes, double* w, double* times, int* sources) {
     std::mt19937 rng(42); std::uniform_real_distribution<double> w_dist(0.5, 2.0);
     for (int i = 0; i < n_pre * n_post; i++) w[i] = w_dist(rng);
     // No spikes, arrays empty
 }
 
-static void generate_single_spike_data(int n_pre, int n_post, int n_spikes, double* w, double* times, int32_t* sources) {
+static void generate_single_spike_data(int n_pre, int n_post, int n_spikes, double* w, double* times, int* sources) {
     std::mt19937 rng(42); std::uniform_real_distribution<double> w_dist(0.5, 2.0);
     for (int i = 0; i < n_pre * n_post; i++) w[i] = w_dist(rng);
     times[0] = 0.5; sources[0] = 0;
 }
 
-static void generate_simultaneous_data(int n_pre, int n_post, int n_spikes, double* w, double* times, int32_t* sources) {
+static void generate_simultaneous_data(int n_pre, int n_post, int n_spikes, double* w, double* times, int* sources) {
     std::mt19937 rng(42); std::uniform_real_distribution<double> w_dist(0.5, 2.0);
     for (int i = 0; i < n_pre * n_post; i++) w[i] = w_dist(rng);
-    for (int i = 0; i < n_spikes; i++) { times[i] = 0.5; sources[i] = std::uniform_int_distribution<int32_t>(0, n_pre - 1)(rng); }
+    for (int i = 0; i < n_spikes; i++) { times[i] = 0.5; sources[i] = std::uniform_int_distribution<int>(0, n_pre - 1)(rng); }
 }
 
-static void generate_regular_data(int n_pre, int n_post, int n_spikes, double* w, double* times, int32_t* sources) {
+static void generate_regular_data(int n_pre, int n_post, int n_spikes, double* w, double* times, int* sources) {
     std::mt19937 rng(42); std::uniform_real_distribution<double> w_dist(0.5, 2.0);
     for (int i = 0; i < n_pre * n_post; i++) w[i] = w_dist(rng);
     for (int i = 0; i < n_spikes; i++) { times[i] = 0.1 + (i * 0.8) / n_spikes; sources[i] = i % n_pre; }
 }
 
-static void generate_exponential_data(int n_pre, int n_post, int n_spikes, double* w, double* times, int32_t* sources) {
+static void generate_exponential_data(int n_pre, int n_post, int n_spikes, double* w, double* times, int* sources) {
     std::mt19937 rng(42); std::uniform_real_distribution<double> w_dist(0.5, 2.0);
     for (int i = 0; i < n_pre * n_post; i++) w[i] = w_dist(rng);
-    for (int i = 0; i < n_spikes; i++) { times[i] = 0.1 + 0.8 * std::exp(3.0 * i / n_spikes); times[i] = times[i] / (1 + std::exp(3.0)); sources[i] = std::uniform_int_distribution<int32_t>(0, n_pre - 1)(rng); }
+    for (int i = 0; i < n_spikes; i++) { times[i] = 0.1 + 0.8 * std::exp(3.0 * i / n_spikes); times[i] = times[i] / (1 + std::exp(3.0)); sources[i] = std::uniform_int_distribution<int>(0, n_pre - 1)(rng); }
 }
 
-static void sort_spikes(double* times, int32_t* sources, int n) { for (int i = 1; i < n; i++) { if (times[i] < times[i-1]) { double t = times[i]; int32_t s = sources[i]; int j = i; while (j > 0 && times[j-1] > t) { times[j] = times[j-1]; sources[j] = sources[j-1]; j--; } times[j] = t; sources[j] = s; } } }
+static void sort_spikes(double* times, int* sources, int n) { for (int i = 1; i < n; i++) { if (times[i] < times[i-1]) { double t = times[i]; int s = sources[i]; int j = i; while (j > 0 && times[j-1] > t) { times[j] = times[j-1]; sources[j] = sources[j-1]; j--; } times[j] = t; sources[j] = s; } } }
 
 #define ABS_TOLERANCE 1e-10
 #define REL_TOLERANCE 1e-9
@@ -85,8 +85,8 @@ struct TestCase {
     double tau_syn = 0.005;     // synaptic time constant
 };
 
-static void gen_data(const char* pattern, int n_pre, int n_post, int n_spikes, double*& w, double*& times, int32_t*& sources) {
-    w = (double*)malloc(n_pre * n_post * sizeof(double)); times = (double*)calloc(n_spikes, sizeof(double)); sources = (int32_t*)malloc(n_spikes * sizeof(int32_t));
+static void gen_data(const char* pattern, int n_pre, int n_post, int n_spikes, double*& w, double*& times, int*& sources) {
+    w = (double*)malloc(n_pre * n_post * sizeof(double)); times = (double*)calloc(n_spikes, sizeof(double)); sources = (int*)malloc(n_spikes * sizeof(int));
     if (strcmp(pattern, "uniform") == 0) generate_uniform_data(n_pre, n_post, n_spikes, w, times, sources);
     else if (strcmp(pattern, "poisson") == 0) generate_poisson_data(n_pre, n_post, n_spikes, w, times, sources);
     else if (strcmp(pattern, "burst") == 0) generate_burst_data(n_pre, n_post, n_spikes, w, times, sources);
@@ -99,12 +99,12 @@ static void gen_data(const char* pattern, int n_pre, int n_post, int n_spikes, d
     sort_spikes(times, sources, n_spikes);
 }
 
-static Spikes make_eigen_spikes(const double* t, const int32_t* s, int n) { Eigen::ArrayXd et = Eigen::Map<Eigen::ArrayXd const>(t, n); Eigen::ArrayXi es = Eigen::Map<Eigen::ArrayXi const>(s, n); return Spikes(std::move(et), std::move(es)); }
+static Spikes make_eigen_spikes(const double* t, const int* s, int n) { Eigen::ArrayXd et = Eigen::Map<Eigen::ArrayXd const>(t, n); Eigen::ArrayXi es = Eigen::Map<Eigen::ArrayXi const>(s, n); return Spikes(std::move(et), std::move(es)); }
 static RowMatrixXd make_w_mat(const double* w, int n_pre, int n_post) { RowMatrixXd wm(n_pre, n_post); for (int i = 0; i < n_pre * n_post; i++) wm(i) = w[i]; return wm; }
 
 static void test_compute_sums(const TestCase& tc) {
     char name[256]; snprintf(name, sizeof(name), "ComputeSums %s (%dx%d, %d spikes)", tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes); TEST(name);
-    double* w; double* times; int32_t* sources; gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
+    double* w; double* times; int* sources; gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
     
     EventPropInput fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn};
     SumsOutput sums_c = eventprop_compute_sums(&fi_base);
@@ -126,7 +126,7 @@ static void test_compute_sums(const TestCase& tc) {
 
 static void test_compute_spikes(const TestCase& tc) {
     char name[256]; snprintf(name, sizeof(name), "ComputeSpikes %s (%dx%d, %d spikes)", tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes); TEST(name);
-    double* w; double* times; int32_t* sources; gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
+    double* w; double* times; int* sources; gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
     
     EventPropInput fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
     SpikeOutput spikes_c = eventprop_compute_spikes(&fi_spikes);
@@ -142,7 +142,7 @@ static void test_compute_spikes(const TestCase& tc) {
         ASSERT_ARRAY_NEAR(spikes_c.times, out_times_e, spikes_c.n_spikes, ABS_TOLERANCE, REL_TOLERANCE, "times"); 
         ASSERT_ARRAY_NEAR(spikes_c.currents, out_currents_e, spikes_c.n_spikes, ABS_TOLERANCE, REL_TOLERANCE, "currents"); 
         for (int i = 0; i < spikes_c.n_spikes; i++) { 
-            ASSERT_EQ(spikes_c.sources[i], (int32_t)result_eig.sources(i), "sources"); 
+            ASSERT_EQ(spikes_c.sources[i], (int)result_eig.sources(i), "sources"); 
         } 
         free(out_times_e); free(out_currents_e); 
     }
@@ -158,7 +158,7 @@ static void test_backward_spikes(const TestCase& tc) {
     // Skip zero spike case - Eigen has issues with empty arrays
     if (tc.n_spikes == 0) { printf("SKIP (zero spikes - Eigen empty array issue)\n"); tests_passed++; return; }
     
-    double* w; double* times; int32_t* sources; gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
+    double* w; double* times; int* sources; gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
     
     EventPropInput fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
     SpikeOutput fwd_c = eventprop_compute_spikes(&fi_spikes);
@@ -173,10 +173,10 @@ static void test_backward_spikes(const TestCase& tc) {
     
     RowMatrixXd w_mat = make_w_mat(w, tc.n_pre, tc.n_post); 
     Eigen::ArrayXd e_itimes = Eigen::Map<Eigen::ArrayXd const>(times, tc.n_spikes); 
-    Eigen::ArrayXi e_isources = Eigen::Map<Eigen::ArrayXi const>((int32_t*)sources, tc.n_spikes); 
+    Eigen::ArrayXi e_isources = Eigen::Map<Eigen::ArrayXi const>((int*)sources, tc.n_spikes); 
     Spikes input_eig(std::move(e_itimes), std::move(e_isources));
     Eigen::ArrayXd e_ptimes = Eigen::Map<Eigen::ArrayXd const>(fwd_c.times, fwd_c.n_spikes); 
-    Eigen::ArrayXi e_psources = Eigen::Map<Eigen::ArrayXi const>((int32_t*)fwd_c.sources, fwd_c.n_spikes); 
+    Eigen::ArrayXi e_psources = Eigen::Map<Eigen::ArrayXi const>((int*)fwd_c.sources, fwd_c.n_spikes); 
     Eigen::ArrayXd e_pcurrents = Eigen::Map<Eigen::ArrayXd const>(fwd_c.currents, fwd_c.n_spikes);
     Spikes post_eig(std::move(e_ptimes), std::move(e_psources), std::move(e_pcurrents), std::vector<double>(), std::vector<int>()); 
     for (int i = 0; i < fwd_c.n_spikes; i++) post_eig.set_error(i, 1.0);
@@ -196,7 +196,7 @@ static void test_backward_spikes(const TestCase& tc) {
 
 static void test_compute_maxima(const TestCase& tc) {
     char name[256]; snprintf(name, sizeof(name), "ComputeMaxima %s (%dx%d, %d spikes)", tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes); TEST(name);
-    double* w; double* times; int32_t* sources; gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
+    double* w; double* times; int* sources; gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
     
     EventPropInput fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn};
     MaximaOutput maxima_c = eventprop_compute_maxima(&fi_base);
@@ -221,7 +221,7 @@ static void test_backward_maxima(const TestCase& tc) {
     // Skip zero spike case - Eigen has issues with empty arrays
     if (tc.n_spikes == 0) { printf("SKIP (zero spikes - Eigen empty array issue)\n"); tests_passed++; return; }
     
-    double* w; double* times; int32_t* sources; gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
+    double* w; double* times; int* sources; gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
     
     EventPropInput fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn};
     MaximaOutput maxima_c = eventprop_compute_maxima(&fi_base);
@@ -233,7 +233,7 @@ static void test_backward_maxima(const TestCase& tc) {
     
     RowMatrixXd w_mat = make_w_mat(w, tc.n_pre, tc.n_post); 
     Eigen::ArrayXd e_itimes = Eigen::Map<Eigen::ArrayXd const>(times, tc.n_spikes); 
-    Eigen::ArrayXi e_isources = Eigen::Map<Eigen::ArrayXi const>((int32_t*)sources, tc.n_spikes); 
+    Eigen::ArrayXi e_isources = Eigen::Map<Eigen::ArrayXi const>((int*)sources, tc.n_spikes); 
     Spikes input_eig(std::move(e_itimes), std::move(e_isources));
     Eigen::ArrayXd e_mtimes = Eigen::Map<Eigen::ArrayXd const>(maxima_c.times, tc.n_post); 
     Eigen::ArrayXd e_mvalues = Eigen::Map<Eigen::ArrayXd const>(maxima_c.values, tc.n_post); 
@@ -258,7 +258,7 @@ static void test_voltage_trace(const TestCase& tc) {
     char name[256]; snprintf(name, sizeof(name), "VoltageTrace %s (%dx%d, %d spikes)", tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes); TEST(name);
     if (tc.n_spikes == 0 || tc.v_th < 0.9) { printf("SKIP\n"); tests_passed++; return; }
 
-    double* w; double* times; int32_t* sources;
+    double* w; double* times; int* sources;
     gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
 
     EventPropInput fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
@@ -290,7 +290,7 @@ static void test_lambda_i_trace(const TestCase& tc) {
     char name[256]; snprintf(name, sizeof(name), "LambdaITrace %s (%dx%d, %d spikes)", tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes); TEST(name);
     if (tc.n_spikes == 0 || tc.v_th < 0.9) { printf("SKIP\n"); tests_passed++; return; }
 
-    double* w; double* times; int32_t* sources;
+    double* w; double* times; int* sources;
     gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
 
     EventPropInput fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};

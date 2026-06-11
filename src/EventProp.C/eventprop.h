@@ -14,7 +14,6 @@
 #ifndef EVENTPROP_H
 #define EVENTPROP_H
 
-#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,7 +27,7 @@ typedef struct {
     int n_pre;                 /* Pre-synaptic neurons */
     int n_post;                /* Post-synaptic neurons */
     const double* times;       /* Input spike times (borrowed) */
-    const int32_t* sources;   /* Input source neurons (borrowed) */
+    const int* sources;   /* Input source neurons (borrowed) */
     int n_spikes;              /* Number of input spikes */
     double tau_mem;            /* Membrane time constant (seconds) */
     double tau_syn;             /* Synaptic time constant (seconds) */
@@ -40,7 +39,7 @@ typedef struct {
 typedef struct {
     int n_spikes;            /* Number of output spikes */
     double* times;           /* Output spike times (malloc'd) */
-    int32_t* sources;        /* Output source neurons (malloc'd) */
+    int* sources;        /* Output source neurons (malloc'd) */
     double* currents;        /* Synaptic currents at spike times (malloc'd) */
 } SpikeOutput;
 
@@ -94,7 +93,7 @@ void eventprop_free_maxima_output(MaximaOutput* output);
 typedef struct {
     const EventPropInput* input;      /* Shared layer params + input spike data (borrowed) */
     const double* fwd_times;           /* Forward spike times (borrowed) */
-    const int32_t* fwd_sources;        /* Forward spike sources (borrowed) */
+    const int* fwd_sources;        /* Forward spike sources (borrowed) */
     const double* fwd_currents;         /* Forward spike currents (borrowed) */
     const double* post_errors;          /* Post-synaptic errors (borrowed) */
     int n_post_spikes;                  /* Number of post-synaptic spikes */
