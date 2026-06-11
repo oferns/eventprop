@@ -41,12 +41,12 @@ typedef struct {
     int n_spikes;              /* Number of input spikes */
     double tau_mem;            /* Membrane time constant (seconds) */
     double tau_syn;             /* Synaptic time constant (seconds) */
+    double v_th;                /* Spike threshold voltage */
 } ForwardInputBase;
 
-/** Extended forward pass input for spike computation (adds threshold). */
+/** Extended forward pass input for spike computation. */
 typedef struct {
     ForwardInputBase base;   /* Base parameters (must be first member) */
-    double v_th;             /* Spike threshold voltage */
 } ForwardInputSpikes;
 
 /* ── Spike output (owned memory) ─────────────────────────────────────── */
@@ -106,9 +106,7 @@ void eventprop_free_maxima_output(MaximaOutput* output);
 
 /** Base backward pass input — common parameters for spikes/maxima. */
 typedef struct {
-    const SpikeInput* input;           /* Input spike data (borrowed) */
-    const ForwardInputBase* base;      /* Common forward pass parameters (borrowed) */
-    double v_th;                        /* Spike threshold voltage */
+    const ForwardInputBase* base;      /* Common forward pass params + input spike data (borrowed) */
 } BackwardInputBase;
 
 /** Backward spikes input — extends base with forward spike data and errors. */
@@ -119,7 +117,6 @@ typedef struct {
     const double* fwd_currents;         /* Forward spike currents (borrowed) */
     const double* post_errors;          /* Post-synaptic errors (borrowed) */
     int n_post_spikes;                  /* Number of post-synaptic spikes */
-    double v_th;                        /* Spike threshold voltage */
 } BackwardSpikesInput;
 
 /** Backward maxima input — extends base with membrane potential maxima data. */

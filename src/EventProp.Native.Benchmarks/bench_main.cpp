@@ -135,8 +135,7 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
         ForwardInputSpikes spikes_input = {
             .base = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                     .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-                    .tau_mem=0.02, .tau_syn=0.005},
-            .v_th = 1.0
+                    .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
         };
         SpikeOutput warmup = eventprop_compute_spikes(&spikes_input);
         benchmark::DoNotOptimize(warmup.times);
@@ -153,8 +152,7 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
         ForwardInputSpikes spikes_input = {
             .base = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                     .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-                    .tau_mem=0.02, .tau_syn=0.005},
-            .v_th = 1.0
+                    .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
         };
         SpikeOutput output = eventprop_compute_spikes(&spikes_input);
         benchmark::DoNotOptimize(output.times);
@@ -169,8 +167,7 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
     ForwardInputSpikes spikes_input = {
         .base = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                 .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-                .tau_mem=0.02, .tau_syn=0.005},
-        .v_th = 1.0
+                .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
     };
     SpikeOutput last = eventprop_compute_spikes(&spikes_input);
 #endif
@@ -236,8 +233,7 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
     ForwardInputSpikes spikes_input = {
         .base = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                 .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-                .tau_mem=0.02, .tau_syn=0.005},
-        .v_th = 1.0
+                .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
     };
     SpikeOutput fwd_result = eventprop_compute_spikes(&spikes_input);
 
@@ -251,7 +247,7 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
         ForwardInputBase base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                                   .tau_mem=0.02, .tau_syn=0.005 };
         BackwardSpikesInput backward_input = {
-            .base = {.input=&input, .base=&base},
+            .base = {.base=&base},
             .fwd_times=fwd_result.times, .fwd_sources=fwd_result.sources,
             .fwd_currents=fwd_result.currents, .post_errors=post_errors.data(),
             .n_post_spikes=n_post_spikes
@@ -331,8 +327,7 @@ static void BM_FullTrainingStep(benchmark::State& state, const ProblemSize& sz, 
     ForwardInputSpikes spikes_input = {
         .base = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                 .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-                .tau_mem=0.02, .tau_syn=0.005},
-        .v_th = 1.0
+                .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
     };
     SpikeOutput fwd_warmup = eventprop_compute_spikes(&spikes_input);
     benchmark::DoNotOptimize(fwd_warmup.times);
@@ -350,8 +345,7 @@ static void BM_FullTrainingStep(benchmark::State& state, const ProblemSize& sz, 
         ForwardInputSpikes spikes_input = {
             .base = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                     .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-                    .tau_mem=0.02, .tau_syn=0.005},
-            .v_th = 1.0
+                    .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
         };
         SpikeOutput fwd = eventprop_compute_spikes(&spikes_input);
 
@@ -363,7 +357,7 @@ static void BM_FullTrainingStep(benchmark::State& state, const ProblemSize& sz, 
         ForwardInputBase base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                                   .tau_mem=0.02, .tau_syn=0.005 };
         BackwardSpikesInput backward_input = {
-            .base = {.input=&input, .base=&base},
+            .base = {.base=&base},
             .fwd_times=fwd.times, .fwd_sources=fwd.sources,
             .fwd_currents=fwd.currents, .post_errors=post_errors.data(),
             .n_post_spikes=fwd.n_spikes
@@ -465,8 +459,7 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
         ForwardInputSpikes spikes_input = {
             .base = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                     .times=times.data(), .sources=sources.data(),
-                    .tau_mem=0.02, .tau_syn=0.005},
-            .v_th = 1.0
+                    .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
         };
         SpikeOutput* warmup = eventprop_compute_spikes_batch(&spikes_input,
             n_spikes_per_sample.data(), batch_size);
@@ -493,8 +486,7 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
         ForwardInputSpikes spikes_input = {
             .base = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                     .times=times.data(), .sources=sources.data(),
-                    .tau_mem=0.02, .tau_syn=0.005},
-            .v_th = 1.0
+                    .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
         };
         SpikeOutput* fwd_batch = eventprop_compute_spikes_batch(&spikes_input,
             n_spikes_per_sample.data(), batch_size);
@@ -509,7 +501,7 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
         SpikeInput input = { .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes };
         ForwardInputBase base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                                   .tau_mem=0.02, .tau_syn=0.005 };
-        BackwardInputBase backward_base = { .input=&input, .base=&base };
+        BackwardInputBase backward_base = { .base=&base };
         BackwardSpikesOutput* result_batch = eventprop_backward_spikes_batch(
             &backward_base, n_spikes_per_sample.data(),
             fwd_batch,  /* Pass forward outputs directly */
@@ -564,8 +556,7 @@ static void BM_ComputeSpikesVth(benchmark::State& state)
         ForwardInputSpikes spikes_input = {
             .base = {.w=w.data(), .n_pre=n_pre, .n_post=n_post,
                     .times=times.data(), .sources=sources.data(), .n_spikes=n_spikes,
-                    .tau_mem=0.02, .tau_syn=0.005},
-            .v_th = v_th
+                    .tau_mem=0.02, .tau_syn=0.005, .v_th=v_th}
         };
         SpikeOutput output = eventprop_compute_spikes(&spikes_input);
         benchmark::DoNotOptimize(output.times);
@@ -611,8 +602,7 @@ static void BM_BackwardSpikesVth(benchmark::State& state)
     ForwardInputSpikes spikes_input = {
         .base = {.w=w.data(), .n_pre=n_pre, .n_post=n_post,
                 .times=times.data(), .sources=sources.data(), .n_spikes=n_spikes,
-                .tau_mem=0.02, .tau_syn=0.005},
-        .v_th = 1.0
+                .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
     };
     SpikeOutput fwd = eventprop_compute_spikes(&spikes_input);
 
@@ -628,7 +618,7 @@ static void BM_BackwardSpikesVth(benchmark::State& state)
         ForwardInputBase base = { .w=w.data(), .n_pre=n_pre, .n_post=n_post,
                                   .tau_mem=0.02, .tau_syn=0.005 };
         BackwardSpikesInput backward_input = {
-            .base = {.input=&input, .base=&base},
+            .base = {.base=&base},
             .fwd_times=fwd.times, .fwd_sources=fwd.sources,
             .fwd_currents=fwd.currents, .post_errors=post_errors.data(),
             .n_post_spikes=fwd.n_spikes
@@ -844,7 +834,7 @@ static void BM_BackwardMaxima(benchmark::State& state, const ProblemSize& sz, Da
         ForwardInputBase base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                                   .tau_mem=0.02, .tau_syn=0.005 };
         BackwardMaximaInput backward_input = {
-            .base = {.input=&input, .base=&base},
+            .base = {.base=&base},
             .maxima_times=maxima.times, .maxima_values=maxima.values,
             .maxima_errors=maxima_errors.data(), .n_maxima=sz.n_post
         };

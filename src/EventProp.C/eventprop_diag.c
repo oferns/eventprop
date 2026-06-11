@@ -38,7 +38,7 @@ VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput* inpu
         for (int i = 0; i < input->n_post_spikes; i++) {
             if (input->fwd_times[i] > t) break;
             if (input->fwd_sources[i] == input->target_nrn_idx)
-                mem -= fwd->v_th * exp(-(t - input->fwd_times[i]) / fwd->base.tau_mem);
+                mem -= fwd->base.v_th * exp(-(t - input->fwd_times[i]) / fwd->base.tau_mem);
         }
 
         result.v_trace[ti] = mem;

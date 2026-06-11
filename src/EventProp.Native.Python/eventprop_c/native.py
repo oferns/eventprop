@@ -32,15 +32,12 @@ class _ForwardInputBase(Structure):
 class _ForwardInputSpikes(Structure):
     _fields_ = [
         ('base', _ForwardInputBase),
-        ('v_th', c_double),
     ]
 
 
 class _BackwardInputBase(Structure):
     _fields_ = [
-        ('input', POINTER(_SpikeInput)),
         ('base', POINTER(_ForwardInputBase)),
-        ('v_th', c_double),
     ]
 
 
@@ -52,7 +49,6 @@ class _BackwardSpikesInput(Structure):
         ('fwd_currents', POINTER(c_double)),
         ('post_errors', POINTER(c_double)),
         ('n_post_spikes', c_int),
-        ('v_th', c_double),
     ]
 
 
@@ -170,6 +166,11 @@ class DoubleArrayView:
             dtype=np.float64, count=self._length,
         )
 
+    @property
+    def ptr(self) -> POINTER[c_double]:
+        """Raw ctypes pointer for passing to C structs."""
+        return self._ptr
+
 
 class Int32ArrayView:
     """Zero-copy view of C int32 array."""
@@ -189,6 +190,11 @@ class Int32ArrayView:
             ctypes.string_at(self._ptr, self._length * 4),
             dtype=np.int32, count=self._length,
         )
+
+    @property
+    def ptr(self) -> POINTER[c_int32]:
+        """Raw ctypes pointer for passing to C structs."""
+        return self._ptr
 
 
 # ── Output wrapper classes with auto-cleanup ───────────────────────────
