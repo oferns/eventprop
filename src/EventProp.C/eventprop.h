@@ -20,18 +20,9 @@
 extern "C" {
 #endif
 
-/* ── Spike input (borrowed data, no allocation) ─────────────────────── */
+/* ── Forward pass input struct (borrowed data, no allocation) ─────── */
 
-/** Input spike data — borrowed pointers, no memory management. */
-typedef struct {
-    const double* times;           /* Spike times (borrowed) */
-    const int32_t* sources;        /* Source neurons (borrowed) */
-    int n_spikes;                   /* Number of input spikes */
-} SpikeInput;
-
-/* ── Forward pass input structs (borrowed data, no allocation) ─────── */
-
-/** Base forward pass input — common parameters for sums/maxima/spikes. */
+/** Forward pass input — common parameters for sums/maxima/spikes. */
 typedef struct {
     const double* w;           /* Weight matrix (row-major, borrowed) */
     int n_pre;                 /* Pre-synaptic neurons */
@@ -43,11 +34,6 @@ typedef struct {
     double tau_syn;             /* Synaptic time constant (seconds) */
     double v_th;                /* Spike threshold voltage */
 } ForwardInputBase;
-
-/** Extended forward pass input for spike computation. */
-typedef struct {
-    ForwardInputBase base;   /* Base parameters (must be first member) */
-} ForwardInputSpikes;
 
 /* ── Spike output (owned memory) ─────────────────────────────────────── */
 
@@ -62,7 +48,7 @@ typedef struct {
  * Forward pass with automatic memory allocation.
  * Returns a SpikeOutput struct — caller must free via eventprop_free_spike_output().
  */
-SpikeOutput eventprop_compute_spikes(const ForwardInputSpikes* input);
+SpikeOutput eventprop_compute_spikes(const ForwardInputBase* input);
 
 /** Free memory owned by a SpikeOutput struct. */
 void eventprop_free_spike_output(SpikeOutput* output);
@@ -184,7 +170,7 @@ void eventprop_free_backward_maxima_output(BackwardMaximaOutput* output);
  *
  * @return Array of SpikeOutput structs (one per sample), freed via eventprop_free_batch_spike_output()
  */
-SpikeOutput* eventprop_compute_spikes_batch(const ForwardInputSpikes* input,
+SpikeOutput* eventprop_compute_spikes_batch(const ForwardInputBase* input,
                                                   const int* n_spikes_per_sample, int batch_size);
 
 /** Free memory owned by batch SpikeOutput array. */

@@ -106,12 +106,11 @@ static void test_compute_spikes(void)
     double w[10*5], times[20]; int32_t sources[20];
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
 
-    ForwardInputSpikes spikes_input = {
-        .base = {.w=w, .n_pre=n_pre, .n_post=n_post,
+    ForwardInputBase fi = {
+        .w=w, .n_pre=n_pre, .n_post=n_post,
                  .times=times, .sources=sources, .n_spikes=n_spikes,
-                 .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
-    };
-    SpikeOutput output = eventprop_compute_spikes(&spikes_input);
+                 .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
+    SpikeOutput output = eventprop_compute_spikes(&fi);
 
     ASSERT(output.n_spikes >= 0, "negative spike count");
     if (output.n_spikes > 1) {
@@ -169,12 +168,11 @@ static void test_compute_spikes_alloc_burst_medium(void)
     int32_t* sources = malloc(n_spikes * sizeof(int32_t));
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
 
-    ForwardInputSpikes spikes_input = {
-        .base = {.w=w, .n_pre=n_pre, .n_post=n_post,
+    ForwardInputBase fi = {
+        .w=w, .n_pre=n_pre, .n_post=n_post,
                  .times=times, .sources=sources, .n_spikes=n_spikes,
-                 .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
-    };
-    SpikeOutput output = eventprop_compute_spikes(&spikes_input);
+                 .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
+    SpikeOutput output = eventprop_compute_spikes(&fi);
 
     printf(" (generated %d post spikes)\n", output.n_spikes);
     eventprop_free_spike_output(&output);
@@ -248,11 +246,9 @@ static void test_backward_spikes_batch_single_sample(void)
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
 
     /* Forward pass */
-    ForwardInputSpikes fi = {
-        .base = {.w=w, .n_pre=n_pre, .n_post=n_post,
+    ForwardInputBase fi = {.w=w, .n_pre=n_pre, .n_post=n_post,
                  .times=times, .sources=sources, .n_spikes=n_spikes,
-                 .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
-    };
+                 .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
     SpikeOutput fwd = eventprop_compute_spikes(&fi);
 
     if (fwd.n_spikes == 0) {
@@ -329,11 +325,9 @@ static void test_backward_spikes_batch_multi_sample(void)
     }
 
     /* Batch forward */
-    ForwardInputSpikes fi = {
-        .base = {.w=w, .n_pre=n_pre, .n_post=n_post,
+    ForwardInputBase fi = {.w=w, .n_pre=n_pre, .n_post=n_post,
                  .times=all_times, .sources=all_sources, .n_spikes=0,
-                 .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
-    };
+                 .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
     SpikeOutput* fwd_batch = eventprop_compute_spikes_batch(&fi, n_per_sample, batch_size);
 
     /* Count total forward spikes */
@@ -438,12 +432,11 @@ static void test_compute_spikes_invalid_bracketing(void)
     }
 
     /* Use low threshold to ensure voltage stays above */
-    ForwardInputSpikes spikes_input = {
-        .base = {.w=w, .n_pre=n_pre, .n_post=n_post,
+    ForwardInputBase fi = {
+        .w=w, .n_pre=n_pre, .n_post=n_post,
                  .times=times, .sources=sources, .n_spikes=n_spikes,
-                 .tau_mem=0.02, .tau_syn=0.005, .v_th=0.01}
-    };
-    SpikeOutput output = eventprop_compute_spikes(&spikes_input);
+                 .tau_mem=0.02, .tau_syn=0.005, .v_th=0.01};
+    SpikeOutput output = eventprop_compute_spikes(&fi);
 
     /* Function should not crash even with invalid brackets */
     ASSERT(output.times != NULL, "output times is NULL");

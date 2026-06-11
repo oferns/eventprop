@@ -11,7 +11,7 @@
 
 VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput* input)
 {
-    const ForwardInputSpikes* fwd = input->input;
+    const ForwardInputBase* fwd = input->base;
     int n_t = (int)(input->t_max / input->dt);
 
     VoltageTraceOutput result;
@@ -19,7 +19,7 @@ VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput* inpu
     result.v_trace = calloc(n_t, sizeof(double));
     result.ts      = calloc(n_t, sizeof(double));
 
-    double k_prefactor = fwd->base.tau_syn / (fwd->base.tau_mem - fwd->base.tau_syn);
+    double k_prefactor = fwd->tau_syn / (fwd->tau_mem - fwd->tau_syn);
 
     for (int ti = 0; ti < n_t; ti++) {
         double t = input->dt * ti;
@@ -27,18 +27,18 @@ VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput* inpu
         double mem = 0.0;
 
         /* Pre-synaptic contribution */
-        for (int i = 0; i < fwd->base.n_spikes; i++) {
-            if (fwd->base.times[i] > t) break;
-            mem += fwd->base.w[fwd->base.sources[i] * fwd->base.n_post + input->target_nrn_idx] *
-                   k_prefactor * (exp(-(t - fwd->base.times[i]) / fwd->base.tau_mem) -
-                                  exp(-(t - fwd->base.times[i]) / fwd->base.tau_syn));
+        for (int i = 0; i < fwd->n_spikes; i++) {
+            if (fwd->times[i] > t) break;
+            mem += fwd->w[fwd->sources[i] * fwd->n_post + input->target_nrn_idx] *
+                   k_prefactor * (exp(-(t - fwd->times[i]) / fwd->tau_mem) -
+                                  exp(-(t - fwd->times[i]) / fwd->tau_syn));
         }
 
         /* Post-synaptic contribution (spike reset) */
         for (int i = 0; i < input->n_post_spikes; i++) {
             if (input->fwd_times[i] > t) break;
             if (input->fwd_sources[i] == input->target_nrn_idx)
-                mem -= fwd->base.v_th * exp(-(t - input->fwd_times[i]) / fwd->base.tau_mem);
+                mem -= fwd->v_th * exp(-(t - input->fwd_times[i]) / fwd->tau_mem);
         }
 
         result.v_trace[ti] = mem;

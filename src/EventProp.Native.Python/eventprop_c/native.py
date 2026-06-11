@@ -8,12 +8,6 @@ import numpy as np
 
 # ── Input structs (borrowed data) matching eventprop.h ─────────────────
 
-class _SpikeInput(Structure):
-    _fields_ = [
-        ('times', POINTER(c_double)),
-        ('sources', POINTER(c_int32)),
-        ('n_spikes', c_int),
-    ]
 
 
 class _ForwardInputBase(Structure):
@@ -29,10 +23,6 @@ class _ForwardInputBase(Structure):
     ]
 
 
-class _ForwardInputSpikes(Structure):
-    _fields_ = [
-        ('base', _ForwardInputBase),
-    ]
 
 
 class _BackwardInputBase(Structure):
@@ -64,7 +54,7 @@ class _BackwardMaximaInput(Structure):
 
 class _VoltageTraceInput(Structure):
     _fields_ = [
-        ('input', POINTER(_ForwardInputSpikes)),
+        ('input', POINTER(_ForwardInputBase)),
         ('target_nrn_idx', c_int),
         ('fwd_times', POINTER(c_double)),
         ('fwd_sources', POINTER(c_int32)),
@@ -470,7 +460,7 @@ class EventPropCtypes:
 
         # Forward pass (struct input)
         lib.eventprop_compute_spikes.restype = _SpikeOutput
-        lib.eventprop_compute_spikes.argtypes = [POINTER(_ForwardInputSpikes)]
+        lib.eventprop_compute_spikes.argtypes = [POINTER(_ForwardInputBase)]
 
         lib.eventprop_free_spike_output.restype = None
         lib.eventprop_free_spike_output.argtypes = [POINTER(_SpikeOutput)]
@@ -516,7 +506,7 @@ class EventPropCtypes:
         # Batch operations
         lib.eventprop_compute_spikes_batch.restype = POINTER(_SpikeOutput)
         lib.eventprop_compute_spikes_batch.argtypes = [
-            POINTER(_ForwardInputSpikes),
+            POINTER(_ForwardInputBase),
             POINTER(c_int),
             c_int,
         ]
@@ -537,7 +527,7 @@ class EventPropCtypes:
         lib.eventprop_free_backward_spikes_batch_output.argtypes = [POINTER(_BackwardSpikesOutput), c_int]
    # ── Forward pass ────────────────────────────────────────────────
 
-    def compute_spikes(self, input: _ForwardInputSpikes) -> SpikeOutput:
+    def compute_spikes(self, input: _ForwardInputBase) -> SpikeOutput:
         """Forward pass: predict post-synaptic spike times."""
         return SpikeOutput(self.lib.eventprop_compute_spikes(byref(input)))
 
@@ -600,7 +590,7 @@ class EventPropCtypes:
     # ── Batch operations ────────────────────────────────────────────
 
     def compute_spikes_batch(
-        self, input: _ForwardInputSpikes, n_spikes_per_sample: POINTER(c_int), batch_size: int
+        self, input: _ForwardInputBase, n_spikes_per_sample: POINTER(c_int), batch_size: int
     ) -> BatchSpikeOutput:
         """Batch forward pass: predict post-synaptic spikes for multiple samples."""
         c_ptr = self.lib.eventprop_compute_spikes_batch(byref(input), n_spikes_per_sample, batch_size)

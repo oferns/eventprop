@@ -132,12 +132,10 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
         Spikes warmup = compute_spikes(w_map, input_spikes, 1.0, 0.02, 0.005);
         benchmark::DoNotOptimize(warmup.times);
 #else
-        ForwardInputSpikes spikes_input = {
-            .base = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+        ForwardInputBase fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                     .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-                    .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
-        };
-        SpikeOutput warmup = eventprop_compute_spikes(&spikes_input);
+                    .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
+        SpikeOutput warmup = eventprop_compute_spikes(&fi);
         benchmark::DoNotOptimize(warmup.times);
         eventprop_free_spike_output(&warmup);
 #endif
@@ -149,12 +147,10 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
         benchmark::DoNotOptimize(output.times);
         benchmark::DoNotOptimize(output.currents);
 #else
-        ForwardInputSpikes spikes_input = {
-            .base = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+        ForwardInputBase fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                     .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-                    .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
-        };
-        SpikeOutput output = eventprop_compute_spikes(&spikes_input);
+                    .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
+        SpikeOutput output = eventprop_compute_spikes(&fi);
         benchmark::DoNotOptimize(output.times);
         benchmark::DoNotOptimize(output.currents);
         eventprop_free_spike_output(&output);
@@ -164,12 +160,10 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
 #ifdef USE_CPP_WRAPPER
     Spikes last = compute_spikes(w_map, input_spikes, 1.0, 0.02, 0.005);
 #else
-    ForwardInputSpikes spikes_input = {
-        .base = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+    ForwardInputBase fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                 .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-                .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
-    };
-    SpikeOutput last = eventprop_compute_spikes(&spikes_input);
+                .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
+    SpikeOutput last = eventprop_compute_spikes(&fi);
 #endif
     state.counters["output_spikes"] = benchmark::Counter(last.n_spikes);
 
@@ -230,12 +224,10 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
     state.counters["output_spikes"] = benchmark::Counter(post_spikes.n_spikes);
 #else
     // C library: Run forward pass to get post-spike data
-    ForwardInputSpikes spikes_input = {
-        .base = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+    ForwardInputBase fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                 .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-                .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
-    };
-    SpikeOutput fwd_result = eventprop_compute_spikes(&spikes_input);
+                .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
+    SpikeOutput fwd_result = eventprop_compute_spikes(&fi);
 
     int n_post_spikes = fwd_result.n_spikes;
     
@@ -243,7 +235,6 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
     std::vector<double> post_errors(n_post_spikes, 1.0);
 
     for (auto _ : state) {
-        SpikeInput input = { .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes };
         ForwardInputBase base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                                   .tau_mem=0.02, .tau_syn=0.005 };
         BackwardSpikesInput backward_input = {
@@ -324,12 +315,10 @@ static void BM_FullTrainingStep(benchmark::State& state, const ProblemSize& sz, 
     }
 #else
     // C library: warmup forward pass to get post-spike data
-    ForwardInputSpikes spikes_input = {
-        .base = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+    ForwardInputBase fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                 .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-                .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
-    };
-    SpikeOutput fwd_warmup = eventprop_compute_spikes(&spikes_input);
+                .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
+    SpikeOutput fwd_warmup = eventprop_compute_spikes(&fi);
     benchmark::DoNotOptimize(fwd_warmup.times);
     eventprop_free_spike_output(&fwd_warmup);
 
@@ -342,18 +331,15 @@ static void BM_FullTrainingStep(benchmark::State& state, const ProblemSize& sz, 
         };
         SumsOutput sums = eventprop_compute_sums(&base_input);
 
-        ForwardInputSpikes spikes_input = {
-            .base = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+        ForwardInputBase fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                     .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-                    .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
-        };
-        SpikeOutput fwd = eventprop_compute_spikes(&spikes_input);
+                    .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
+        SpikeOutput fwd = eventprop_compute_spikes(&fi);
 
         // Set errors for backward pass (all -1.0)
         std::vector<double> post_errors(fwd.n_spikes, -1.0);
 
         // Backward: gradient computation
-        SpikeInput input = { .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes };
         ForwardInputBase base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                                   .tau_mem=0.02, .tau_syn=0.005 };
         BackwardSpikesInput backward_input = {
@@ -456,12 +442,10 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
 
     // Warmup: run forward pass to determine max output sizes
     {
-        ForwardInputSpikes spikes_input = {
-            .base = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+        ForwardInputBase fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                     .times=times.data(), .sources=sources.data(),
-                    .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
-        };
-        SpikeOutput* warmup = eventprop_compute_spikes_batch(&spikes_input,
+                    .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
+        SpikeOutput* warmup = eventprop_compute_spikes_batch(&fi,
             n_spikes_per_sample.data(), batch_size);
         int total_fwd = 0;
         for (int b = 0; b < batch_size; b++)
@@ -483,12 +467,10 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
 
     for (auto _ : state) {
         // Forward: batch compute spikes
-        ForwardInputSpikes spikes_input = {
-            .base = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+        ForwardInputBase fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                     .times=times.data(), .sources=sources.data(),
-                    .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
-        };
-        SpikeOutput* fwd_batch = eventprop_compute_spikes_batch(&spikes_input,
+                    .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
+        SpikeOutput* fwd_batch = eventprop_compute_spikes_batch(&fi,
             n_spikes_per_sample.data(), batch_size);
         
         // Set errors for backward pass
@@ -498,7 +480,6 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
         std::vector<double> post_errors(total_fwd, -1.0);
 
         // Backward: batch gradient computation (pass fwd_batch directly, no copying)
-        SpikeInput input = { .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes };
         ForwardInputBase base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                                   .tau_mem=0.02, .tau_syn=0.005 };
         BackwardInputBase backward_base = { .base=&base };
@@ -553,12 +534,10 @@ static void BM_ComputeSpikesVth(benchmark::State& state)
         benchmark::DoNotOptimize(output.times);
         benchmark::DoNotOptimize(output.currents);
 #else
-        ForwardInputSpikes spikes_input = {
-            .base = {.w=w.data(), .n_pre=n_pre, .n_post=n_post,
+        ForwardInputBase fi = {.w=w.data(), .n_pre=n_pre, .n_post=n_post,
                     .times=times.data(), .sources=sources.data(), .n_spikes=n_spikes,
-                    .tau_mem=0.02, .tau_syn=0.005, .v_th=v_th}
-        };
-        SpikeOutput output = eventprop_compute_spikes(&spikes_input);
+                    .tau_mem=0.02, .tau_syn=0.005, .v_th=v_th};
+        SpikeOutput output = eventprop_compute_spikes(&fi);
         benchmark::DoNotOptimize(output.times);
         benchmark::DoNotOptimize(output.currents);
         eventprop_free_spike_output(&output);
@@ -599,12 +578,10 @@ static void BM_BackwardSpikesVth(benchmark::State& state)
 
     std::pair<RowMatrixXd, Eigen::ArrayXd> gradient;
 #else
-    ForwardInputSpikes spikes_input = {
-        .base = {.w=w.data(), .n_pre=n_pre, .n_post=n_post,
+    ForwardInputBase fi = {.w=w.data(), .n_pre=n_pre, .n_post=n_post,
                 .times=times.data(), .sources=sources.data(), .n_spikes=n_spikes,
-                .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0}
-    };
-    SpikeOutput fwd = eventprop_compute_spikes(&spikes_input);
+                .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
+    SpikeOutput fwd = eventprop_compute_spikes(&fi);
 
     std::vector<double> post_errors(fwd.n_spikes, -1.0);
 #endif
@@ -614,7 +591,6 @@ static void BM_BackwardSpikesVth(benchmark::State& state)
         gradient = backward(input, post, w_map, v_th, 0.02, 0.005);
         benchmark::DoNotOptimize(gradient.first.data());
 #else
-        SpikeInput input = { .times=times.data(), .sources=sources.data(), .n_spikes=n_spikes };
         ForwardInputBase base = { .w=w.data(), .n_pre=n_pre, .n_post=n_post,
                                   .tau_mem=0.02, .tau_syn=0.005 };
         BackwardSpikesInput backward_input = {
@@ -830,7 +806,6 @@ static void BM_BackwardMaxima(benchmark::State& state, const ProblemSize& sz, Da
         gradient = backward(input, maxima, w_map, 0.02, 0.005);
         benchmark::DoNotOptimize(gradient.first.data());
 #else
-        SpikeInput input = { .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes };
         ForwardInputBase base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                                   .tau_mem=0.02, .tau_syn=0.005 };
         BackwardMaximaInput backward_input = {
