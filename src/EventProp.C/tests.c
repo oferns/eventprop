@@ -1,6 +1,6 @@
 /**
  * @file tests.c
- * @brief EventProp C implementation test suite (alloc functions only).
+ * @brief EventProp C implementation test suite ( functions only).
  */
 
 #include <stdio.h>
@@ -38,11 +38,11 @@ static void gen_data(int n_pre, int n_post, int n_spikes,
         sources[i] = i % n_pre;
 }
 
-/* ── Alloc function tests ─────────────────────────────────────── */
+/* ── function tests ─────────────────────────────────────── */
 
 static void test_compute_sums(void)
 {
-    TEST("ComputeSums Alloc Tiny (10×5, 20 spikes)");
+    TEST("ComputeSums Tiny (10×5, 20 spikes)");
     int n_pre = 10, n_post = 5, n_spikes = 20;
     double w[10*5], times[20]; int32_t sources[20];
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
@@ -67,18 +67,18 @@ static void test_compute_sums(void)
     TEST_END;
 }
 
-static void test_compute_sums_alloc_zero_spikes(void)
+static void test_compute_sums__zero_spikes(void)
 {
-    TEST("ComputeSums Alloc zero spikes");
+    TEST("ComputeSums zero spikes");
     SumsOutput output = eventprop_compute_sums(&((EventPropInput){.w=NULL, .n_pre=10, .n_post=5,
     .times=NULL, .sources=NULL, .n_spikes=0, .tau_mem=0.02, .tau_syn=0.005}));
     eventprop_free_sums_output(&output);
     TEST_END;
 }
 
-static void test_compute_sums_alloc_large(void)
+static void test_compute_sums__large(void)
 {
-    TEST("ComputeSums Alloc Large (200×80, 500 spikes)");
+    TEST("ComputeSums Large (200×80, 500 spikes)");
     int n_pre = 200, n_post = 80, n_spikes = 500;
     double* w = malloc(n_pre * n_post * sizeof(double));
     double* times = malloc(n_spikes * sizeof(double));
@@ -101,7 +101,7 @@ static void test_compute_sums_alloc_large(void)
 
 static void test_compute_spikes(void)
 {
-    TEST("ComputeSpikes Alloc Tiny (10x5, 20 spikes)");
+    TEST("ComputeSpikes  Tiny (10x5, 20 spikes)");
     int n_pre = 10, n_post = 5, n_spikes = 20;
     double w[10*5], times[20]; int32_t sources[20];
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
@@ -124,7 +124,7 @@ static void test_compute_spikes(void)
 
 static void test_backward_spikes(void)
 {
-    TEST("BackwardSpikes Alloc Tiny (10x5, 20 spikes)");
+    TEST("BackwardSpikes Tiny (10x5, 20 spikes)");
     int n_pre = 10, n_post = 5, n_spikes = 20;
     double w[10*5], times[20]; int32_t sources[20];
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
@@ -159,9 +159,9 @@ static void test_backward_spikes(void)
     TEST_END;
 }
 
-static void test_compute_spikes_alloc_burst_medium(void)
+static void test_compute_spikes__burst_medium(void)
 {
-    TEST("ComputeSpikes Alloc burst Medium (diagnostic)");
+    TEST("ComputeSpikes  burst Medium (diagnostic)");
     int n_pre = 100, n_post = 40, n_spikes = 250;
     double* w = malloc(n_pre * n_post * sizeof(double));
     double* times = malloc(n_spikes * sizeof(double));
@@ -183,7 +183,7 @@ static void test_compute_spikes_alloc_burst_medium(void)
 
 static void test_compute_maxima(void)
 {
-    TEST("ComputeMaxima Alloc Tiny (10×5, 20 spikes)");
+    TEST("ComputeMaxima  Tiny (10×5, 20 spikes)");
     int n_pre = 10, n_post = 5, n_spikes = 20;
     double w[10*5], times[20]; int32_t sources[20];
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
@@ -202,7 +202,7 @@ static void test_compute_maxima(void)
 
 static void test_backward_maxima(void)
 {
-    TEST("BackwardMaxima Alloc Tiny (10×5, 20 spikes)");
+    TEST("BackwardMaxima  Tiny (10×5, 20 spikes)");
     int n_pre = 10, n_post = 5, n_spikes = 20;
     double w[10*5], times[20]; int32_t sources[20];
     gen_data(n_pre, n_post, n_spikes, w, times, sources);
@@ -462,30 +462,30 @@ static void test_compute_spikes_invalid_bracketing(void)
 
 int main(void)
 {
-    printf("EventProp C Tests (alloc functions only)\n");
+    printf("EventProp C Tests ( functions only)\n");
     printf("==========================================\n\n");
 
-    /* ComputeSums alloc tests */
+    /* ComputeSums tests */
     test_compute_sums();
-    test_compute_sums_alloc_zero_spikes();
-    test_compute_sums_alloc_large();
+    test_compute_sums__zero_spikes();
+    test_compute_sums__large();
 
-    /* ComputeSpikes alloc tests */
+    /* ComputeSpikes  tests */
     test_compute_spikes();
-    test_compute_spikes_alloc_burst_medium();
+    test_compute_spikes__burst_medium();
     test_compute_spikes_invalid_bracketing();
 
-    /* BackwardSpikes alloc tests */
+    /* BackwardSpikes tests */
     test_backward_spikes();
 
     /* Batch backward tests */
     test_backward_spikes_batch_single_sample();
     test_backward_spikes_batch_multi_sample();
 
-    /* ComputeMaxima alloc tests */
+    /* ComputeMaxima  tests */
     test_compute_maxima();
 
-    /* BackwardMaxima alloc tests */
+    /* BackwardMaxima  tests */
     test_backward_maxima();
 
     printf("\n==========================================\n");
