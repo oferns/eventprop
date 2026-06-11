@@ -14,27 +14,27 @@
 #ifndef EVENTPROP_H
 #define EVENTPROP_H
 
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* ── Shared input struct (borrowed data, no allocation) ───────────── */
-
-/** Common layer parameters — used by all forward and backward operations. */
 typedef struct {
-    const double* w;           /* Weight matrix (row-major, borrowed) */
+    const double* w;           /* Weight matrix (row-major) */
     int n_pre;                 /* Pre-synaptic neurons */
     int n_post;                /* Post-synaptic neurons */
-    const double* times;       /* Input spike times (borrowed) */
-    const int* sources;   /* Input source neurons (borrowed) */
+    const double* times;       /* Input spike times */
+    const int* sources;        /* Input source neurons  */
     int n_spikes;              /* Number of input spikes */
     double tau_mem;            /* Membrane time constant (seconds) */
-    double tau_syn;             /* Synaptic time constant (seconds) */
-    double v_th;                /* Spike threshold voltage */
+    double tau_syn;            /* Synaptic time constant (seconds) */
+    double v_th;               /* Spike threshold voltage */
 } EventPropInput;
 
-/* ── Spike output (owned memory) ─────────────────────────────────────── */
+typedef struct {
+    const EventPropInput* input;
+    const int* n_spikes_per_sample;
+    int batch_size;
+} BatchEventPropInput;
 
 typedef struct {
     int n_spikes;            /* Number of output spikes */
@@ -43,17 +43,6 @@ typedef struct {
     double* currents;        /* Synaptic currents at spike times (malloc'd) */
 } SpikeOutput;
 
-/**
- * Forward pass with automatic memory allocation.
- * Returns a SpikeOutput struct — caller must free via eventprop_free_spike_output().
- */
-SpikeOutput eventprop_compute_spikes(const EventPropInput* input);
-
-/** Free memory owned by a SpikeOutput struct. */
-void eventprop_free_spike_output(SpikeOutput* output);
-
-/* ── Cumulative sums output (owned memory) ───────────────────────────── */
-
 typedef struct {
     int n_rows;              /* n_spikes + 1 */
     int n_post;              /* Number of post-synaptic neurons */
@@ -61,35 +50,12 @@ typedef struct {
     double* sum1;            /* Cumulative sums (malloc'd, n_rows * n_post) */
 } SumsOutput;
 
-/**
- * Compute cumulative sums with automatic memory allocation.
- * Returns a SumsOutput struct — caller must free via eventprop_free_sums_output().
- */
-SumsOutput eventprop_compute_sums(const EventPropInput* input);
-
-/** Free memory owned by a SumsOutput struct. */
-void eventprop_free_sums_output(SumsOutput* output);
-
-/* ── Maxima output (owned memory) ─────────────────────────────────────── */
-
 typedef struct {
     int n_post;              /* Number of post-synaptic neurons */
     double* times;           /* Maxima times (malloc'd, n_post) */
     double* values;          /* Maxima values (malloc'd, n_post) */
 } MaximaOutput;
 
-/**
- * Compute membrane potential maxima with automatic memory allocation.
- * Returns a MaximaOutput struct — caller must free via eventprop_free_maxima_output().
- */
-MaximaOutput eventprop_compute_maxima(const EventPropInput* input);
-
-/** Free memory owned by a MaximaOutput struct. */
-void eventprop_free_maxima_output(MaximaOutput* output);
-
-/* ── Backward pass input structs (borrowed data, no allocation) ─────── */
-
-/** Backward spikes input — forward spike data and errors. */
 typedef struct {
     const EventPropInput* input;      /* Shared layer params + input spike data (borrowed) */
     const double* fwd_times;           /* Forward spike times (borrowed) */
@@ -99,7 +65,6 @@ typedef struct {
     int n_post_spikes;                  /* Number of post-synaptic spikes */
 } BackwardSpikesInput;
 
-/** Backward maxima input — membrane potential maxima data. */
 typedef struct {
     const EventPropInput* input;      /* Shared layer params + input spike data (borrowed) */
     const double* maxima_times;        /* Maxima times (borrowed) */
@@ -108,9 +73,6 @@ typedef struct {
     int n_maxima;                       /* Number of maxima */
 } BackwardMaximaInput;
 
-/* ── Backward pass output (owned memory) ───────────────────────────── */
-
-/** Backward pass output — weight gradient + input spike errors. */
 typedef struct {
     int n_pre;               /* Number of pre-synaptic neurons */
     int n_post;              /* Number of post-synaptic neurons */
@@ -118,40 +80,54 @@ typedef struct {
     double* spike_errors;   /* Input spike errors (malloc'd, n_spikes) */
 } BackwardOutput;
 
+void eventprop_free_spike_output(SpikeOutput* output);
+void eventprop_free_sums_output(SumsOutput* output);
+void eventprop_free_maxima_output(MaximaOutput* output);
+void eventprop_free_backward_output(BackwardOutput* output);
+void eventprop_free_batch_spike_output(SpikeOutput* output, int batch_size);
+void eventprop_free_backward_batch_output(BackwardOutput* output, int batch_size);
+
 /**
- * Backward pass (spikes) with automatic memory allocation.
+ * Forward pass
+ * Returns a SpikeOutput struct — caller must free via eventprop_free_spike_output().
+ */
+SpikeOutput eventprop_compute_spikes(const EventPropInput* input);
+
+/**
+ * Compute cumulative sums
+ * Returns a SumsOutput struct — caller must free via eventprop_free_sums_output().
+ */
+SumsOutput eventprop_compute_sums(const EventPropInput* input);
+
+/**
+ * Compute membrane potential maxima
+ * Returns a MaximaOutput struct — caller must free via eventprop_free_maxima_output().
+ */
+MaximaOutput eventprop_compute_maxima(const EventPropInput* input);
+
+/**
+ * Backward pass (spikes).
  * Returns a BackwardOutput struct — caller must free via eventprop_free_backward_output().
  */
 BackwardOutput eventprop_backward_spikes(const BackwardSpikesInput* input);
 
-/** Free memory owned by a BackwardOutput struct. */
-void eventprop_free_backward_output(BackwardOutput* output);
-
 /**
- * Backward pass (maxima) with automatic memory allocation.
+ * Backward pass (maxima).
  * Returns a BackwardOutput struct — caller must free via eventprop_free_backward_output().
  */
 BackwardOutput eventprop_backward_maxima(const BackwardMaximaInput* input);
 
-/* ── Diagnostic functions are in eventprop_diag.h ───────────────────── */
-
-/* ── Batch operations (parallel processing) ──────────────────────────── */
-
 /**
- * Batch forward pass with automatic memory allocation.
- * Processes multiple samples in parallel using OpenMP.
+ * Batch forward pass.
+ * Processes multiple samples in parallel using OpenMP (if available).
  *
- * @param input           Shared layer params (weights, tau_mem, tau_syn, v_th)
+ * @param input                Shared layer params (weights, tau_mem, tau_syn, v_th)
  * @param n_spikes_per_sample  Spike count per sample (length: batch_size)
- * @param batch_size   Number of samples in batch
+ * @param batch_size           Number of samples in batch
  *
  * @return Array of SpikeOutput structs (one per sample), freed via eventprop_free_batch_spike_output()
  */
-SpikeOutput* eventprop_compute_spikes_batch(const EventPropInput* input,
-                                                  const int* n_spikes_per_sample, int batch_size);
-
-/** Free memory owned by batch SpikeOutput array. */
-void eventprop_free_batch_spike_output(SpikeOutput* output, int batch_size);
+SpikeOutput* eventprop_compute_spikes_batch(const BatchEventPropInput* input);
 
 /**
  * Batch backward pass (spikes) with automatic memory allocation.
@@ -159,14 +135,10 @@ void eventprop_free_batch_spike_output(SpikeOutput* output, int batch_size);
  * Returns array of BackwardOutput structs (one per sample).
  */
 BackwardOutput* eventprop_backward_spikes_batch(
-    const EventPropInput* input,
-    const int* n_spikes_per_sample,
+    const BatchEventPropInput* input,
     SpikeOutput* fwd_batch,        /* Forward spike outputs from compute_spikes_batch */
-    const double* post_errors,
-    int batch_size);
-
-/** Free memory owned by batch BackwardOutput array. */
-void eventprop_free_backward_batch_output(BackwardOutput* output, int batch_size);
+    const double* post_errors
+    );
 
 #ifdef __cplusplus
 }

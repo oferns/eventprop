@@ -27,6 +27,14 @@ class _EventPropInput(Structure):
 
 
 
+class _BatchEventPropInput(Structure):
+    _fields_ = [
+        ('input', POINTER(_EventPropInput)),
+        ('n_spikes_per_sample', POINTER(c_int)),
+        ('batch_size', c_int),
+    ]
+
+
 class _BackwardSpikesInput(Structure):
     _fields_ = [
         ('input', POINTER(_EventPropInput)),
@@ -466,9 +474,7 @@ class EventPropCtypes:
         # Batch operations
         lib.eventprop_compute_spikes_batch.restype = POINTER(_SpikeOutput)
         lib.eventprop_compute_spikes_batch.argtypes = [
-            POINTER(_EventPropInput),
-            POINTER(c_int),
-            c_int,
+            POINTER(_BatchEventPropInput),
         ]
 
         lib.eventprop_free_batch_spike_output.restype = None
@@ -476,11 +482,9 @@ class EventPropCtypes:
 
         lib.eventprop_backward_spikes_batch.restype = POINTER(_BackwardOutput)
         lib.eventprop_backward_spikes_batch.argtypes = [
-            POINTER(_EventPropInput),
-            POINTER(c_int),
+            POINTER(_BatchEventPropInput),
             POINTER(_SpikeOutput),
             POINTER(c_double),
-            c_int,
         ]
 
         lib.eventprop_free_backward_batch_output.restype = None
@@ -550,25 +554,25 @@ class EventPropCtypes:
     # ── Batch operations ────────────────────────────────────────────
 
     def compute_spikes_batch(
-        self, input: _EventPropInput, n_spikes_per_sample: POINTER(c_int), batch_size: int
+        self, input: _BatchEventPropInput
     ) -> BatchSpikeOutput:
         """Batch forward pass: predict post-synaptic spikes for multiple samples."""
-        c_ptr = self.lib.eventprop_compute_spikes_batch(byref(input), n_spikes_per_sample, batch_size)
-        return BatchSpikeOutput(c_ptr, batch_size)
+        c_ptr = self.lib.eventprop_compute_spikes_batch(byref(input))
+        return BatchSpikeOutput(c_ptr, input.batch_size)
 
     def free_batch_spike_output(self, output: POINTER(_SpikeOutput), batch_size: int):
         """Free a batch SpikeOutput returned by compute_spikes_batch()."""
         self.lib.eventprop_free_batch_spike_output(output, batch_size)
 
     def backward_spikes_batch(
-        self, input: _EventPropInput, n_spikes_per_sample: POINTER(c_int),
-        fwd_batch: POINTER(_SpikeOutput), post_errors: POINTER(c_double), batch_size: int
+        self, input: _BatchEventPropInput,
+        fwd_batch: POINTER(_SpikeOutput), post_errors: POINTER(c_double)
     ) -> BatchBackwardOutput:
         """Batch backward pass: compute weight gradients for multiple samples."""
         c_ptr = self.lib.eventprop_backward_spikes_batch(
-            byref(input), n_spikes_per_sample, fwd_batch, post_errors, batch_size
+            byref(input), fwd_batch, post_errors
         )
-        return BatchBackwardOutput(c_ptr, batch_size)
+        return BatchBackwardOutput(c_ptr, input.batch_size)
 
     def free_backward_spikes_batch_output(self, output: POINTER(_BackwardOutput), batch_size: int):
         """Free a batch BackwardOutput returned by backward_spikes_batch()."""

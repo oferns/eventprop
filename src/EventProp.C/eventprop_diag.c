@@ -7,7 +7,19 @@
 #include <stdlib.h>
 #include <math.h>
 
-/* ── Voltage trace ─────────────────────────────────────────────────────── */
+void eventprop_free_lambda_i_trace_output(LambdaITraceOutput* output)
+{
+    if (!output) return;
+    free(output->lambda_trace);
+    free(output->ts);
+}
+
+void eventprop_free_voltage_trace_output(VoltageTraceOutput* output)
+{
+    if (!output) return;
+    free(output->v_trace);
+    free(output->ts);
+}
 
 VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput* input)
 {
@@ -47,15 +59,6 @@ VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput* inpu
     return result;
 }
 
-void eventprop_free_voltage_trace_output(VoltageTraceOutput* output)
-{
-    if (!output) return;
-    free(output->v_trace);
-    free(output->ts);
-}
-
-/* ── Lambda-I trace ───────────────────────────────────────────────────── */
-
 LambdaITraceOutput eventprop_compute_lambda_i_trace(const LambdaITraceInput* input)
 {
     int n_t = (int)(input->t_max / input->dt);
@@ -92,11 +95,4 @@ LambdaITraceOutput eventprop_compute_lambda_i_trace(const LambdaITraceInput* inp
     }
 
     return result;
-}
-
-void eventprop_free_lambda_i_trace_output(LambdaITraceOutput* output)
-{
-    if (!output) return;
-    free(output->lambda_trace);
-    free(output->ts);
 }

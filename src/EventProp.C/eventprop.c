@@ -1044,12 +1044,14 @@ void eventprop_free_backward_output(BackwardOutput* output)
 }
 
 BackwardOutput* eventprop_backward_spikes_batch(
-    const EventPropInput* input,
-    const int* n_spikes_per_sample,
-    SpikeOutput* fwd_batch,        /* Forward spike outputs from compute_spikes_batch */
-    const double* post_errors,
-    int batch_size)
+    const BatchEventPropInput* input,
+    SpikeOutput* fwd_batch,
+    const double* post_errors)
 {
+    int batch_size = input->batch_size;
+    const EventPropInput* base = input->input;
+    const int* n_spikes_per_sample = input->n_spikes_per_sample;
+
     /* Allocate array of BackwardOutput structs */
     BackwardOutput* result = (BackwardOutput*)calloc(batch_size, sizeof(BackwardOutput));
 
@@ -1065,9 +1067,9 @@ BackwardOutput* eventprop_backward_spikes_batch(
 
     /* Process each sample in parallel */
 #ifdef _OPENMP
-   #pragma omp parallel for schedule(static) shared(input, offsets, err_offsets, n_spikes_per_sample,\
+   #pragma omp parallel for schedule(static) shared(base, offsets, err_offsets, n_spikes_per_sample,\
             batch_size, result, fwd_batch, post_errors) \
-          if(batch_size >= 2 || batch_size * input->n_pre >= 50)
+          if(batch_size >= 2 || batch_size * base->n_pre >= 50)
 #endif
     for (int b = 0; b < batch_size; b++) {
         int offset = offsets[b];
@@ -1077,9 +1079,9 @@ BackwardOutput* eventprop_backward_spikes_batch(
         int n_fwd_spikes = fwd_batch[b].n_spikes;
 
         EventPropInput fwbase = {
-            .w=input->w, .n_pre=input->n_pre, .n_post=input->n_post,
-            .times=input->times + offset, .sources=input->sources + offset, .n_spikes=n_spikes,
-            .tau_mem=input->tau_mem, .tau_syn=input->tau_syn, .v_th=input->v_th
+            .w=base->w, .n_pre=base->n_pre, .n_post=base->n_post,
+            .times=base->times + offset, .sources=base->sources + offset, .n_spikes=n_spikes,
+            .tau_mem=base->tau_mem, .tau_syn=base->tau_syn, .v_th=base->v_th
         };
         BackwardSpikesInput backward_input = {
             .input = &fwbase,
@@ -1111,9 +1113,12 @@ void eventprop_free_backward_batch_output(BackwardOutput* output, int batch_size
 }
 
 SpikeOutput* eventprop_compute_spikes_batch(
-    const EventPropInput* input,
-    const int* n_spikes_per_sample, int batch_size)
+    const BatchEventPropInput* input)
 {
+    int batch_size = input->batch_size;
+    const EventPropInput* base = input->input;
+    const int* n_spikes_per_sample = input->n_spikes_per_sample;
+
     /* Allocate array of SpikeOutput structs */
     SpikeOutput* result = (SpikeOutput*)calloc(batch_size, sizeof(SpikeOutput));
 
@@ -1126,8 +1131,8 @@ SpikeOutput* eventprop_compute_spikes_batch(
 
     /* Process each sample in parallel */
 #ifdef _OPENMP
-#pragma omp parallel for schedule(static) shared(input, offsets, n_spikes_per_sample, \
-         batch_size, result) if(batch_size >= 2 || batch_size * input->n_pre >= 50)
+#pragma omp parallel for schedule(static) shared(base, offsets, n_spikes_per_sample, \
+         batch_size, result) if(batch_size >= 2 || batch_size * base->n_pre >= 50)
 #endif
     for (int b = 0; b < batch_size; b++) {
         int offset = offsets[b];
@@ -1135,10 +1140,10 @@ SpikeOutput* eventprop_compute_spikes_batch(
 
         /* Call single-sample function for this batch element */
         EventPropInput sample_input = {
-            .w=input->w, .n_pre=input->n_pre, .n_post=input->n_post,
-            .times=input->times + offset, .sources=input->sources + offset, .n_spikes=n_spikes,
-            .tau_mem=input->tau_mem, .tau_syn=input->tau_syn,
-            .v_th = input->v_th
+            .w=base->w, .n_pre=base->n_pre, .n_post=base->n_post,
+            .times=base->times + offset, .sources=base->sources + offset, .n_spikes=n_spikes,
+            .tau_mem=base->tau_mem, .tau_syn=base->tau_syn,
+            .v_th = base->v_th
         };
         result[b] = eventprop_compute_spikes(&sample_input);
     }

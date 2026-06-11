@@ -279,8 +279,9 @@ static void test_backward_spikes_batch_single_sample(void)
     double* post_errors_batch = malloc(fwd.n_spikes * sizeof(double));
     for (int i = 0; i < fwd.n_spikes; i++) post_errors_batch[i] = -1.0;
 
+    BatchEventPropInput batch_input = { .input = &base, .n_spikes_per_sample = n_per_sample, .batch_size = 1 };
     BackwardOutput* grad_batch = eventprop_backward_spikes_batch(
-        &base, n_per_sample, fwd_batch, post_errors_batch, 1);
+        &batch_input, fwd_batch, post_errors_batch);
 
     /* Compare gradients element-wise */
     int mismatch = 0;
@@ -327,7 +328,8 @@ static void test_backward_spikes_batch_multi_sample(void)
     EventPropInput fi = {.w=w, .n_pre=n_pre, .n_post=n_post,
                  .times=all_times, .sources=all_sources, .n_spikes=0,
                  .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
-    SpikeOutput* fwd_batch = eventprop_compute_spikes_batch(&fi, n_per_sample, batch_size);
+    BatchEventPropInput batch_fwd = { .input = &fi, .n_spikes_per_sample = n_per_sample, .batch_size = batch_size };
+    SpikeOutput* fwd_batch = eventprop_compute_spikes_batch(&batch_fwd);
 
     /* Count total forward spikes */
     int total_fwd = 0;
@@ -350,8 +352,9 @@ static void test_backward_spikes_batch_multi_sample(void)
         .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0
     };
 
+    BatchEventPropInput batch_bwd = { .input = &base, .n_spikes_per_sample = n_per_sample, .batch_size = batch_size };
     BackwardOutput* grad_batch = eventprop_backward_spikes_batch(
-        &base, n_per_sample, fwd_batch, post_errors, batch_size);
+        &batch_bwd, fwd_batch, post_errors);
 
     /* Verify each sample has correct dimensions */
     for (int b = 0; b < batch_size; b++) {
