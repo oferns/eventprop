@@ -8,3 +8,10 @@ CMakeFiles/
 
 # Debug symbols (macOS)
 *.dSYM/
+
+# ASAN build
+build_asan/
+
+# Stress test binaries
+test_batch_stress
+test_batch_stress.c
