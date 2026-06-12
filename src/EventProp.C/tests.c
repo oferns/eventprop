@@ -459,6 +459,80 @@ static void test_compute_spikes_invalid_bracketing(void)
     TEST_END;
 }
 
+/* ── Dropout tests ─────────────────────────────────────────────── */
+
+static void test_dropout_spikes(void)
+{
+    /* Generate simple input: 10 spikes from neurons 0-9 */
+    int n_spikes = 10;
+    double times[10];
+    int sources[10];
+    for (int i = 0; i < n_spikes; i++) {
+        times[i] = (i + 1) * 0.1;
+        sources[i] = i % 3;
+    }
+
+    EventPropInput input = {
+        .w=NULL, .n_pre=3, .n_post=2,
+        .times=times, .sources=sources, .n_spikes=n_spikes,
+        .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0
+    };
+    int n_per_sample[] = {n_spikes};
+    BatchEventPropInput batch = {
+        .input=&input, .n_spikes_per_sample=n_per_sample, .batch_size=1
+    };
+
+    /* Test 1: p_drop=0 should keep all spikes */
+    TEST("Dropout  p_drop=0 (keep all)");
+    DropoutOutput* out0 = eventprop_dropout_spikes_batch(&batch, 0.0, 42);
+    ASSERT(out0[0].n_spikes == n_spikes, "should keep all spikes");
+    for (int i = 0; i < n_spikes; i++) {
+        ASSERT_NEAR(out0[0].times[i], times[i], 1e-12);
+        ASSERT(out0[0].sources[i] == sources[i], "source mismatch");
+    }
+    eventprop_free_dropout_output(out0, 1);
+    TEST_END;
+
+    /* Test 2: p_drop=1.0 should drop all spikes */
+    TEST("Dropout  p_drop=1.0 (drop all)");
+    DropoutOutput* out1 = eventprop_dropout_spikes_batch(&batch, 1.0, 42);
+    ASSERT(out1[0].n_spikes == 0, "should drop all spikes");
+    eventprop_free_dropout_output(out1, 1);
+    TEST_END;
+
+    /* Test 3: p_drop=0.5 should drop roughly half (deterministic with seed) */
+    TEST("Dropout  p_drop=0.5 (partial)");
+    DropoutOutput* out2 = eventprop_dropout_spikes_batch(&batch, 0.5, 42);
+    ASSERT(out2[0].n_spikes >= 1 && out2[0].n_spikes <= n_spikes - 1,
+           "should drop some but not all");
+    eventprop_free_dropout_output(out2, 1);
+    TEST_END;
+
+    /* Test 4: Multi-sample batch */
+    double times2[20] = {0};
+    int sources2[20] = {0};
+    for (int i = 0; i < 20; i++) {
+        times2[i] = (i + 1) * 0.05;
+        sources2[i] = i % 3;
+    }
+    EventPropInput input2 = {
+        .w=NULL, .n_pre=3, .n_post=2,
+        .times=times2, .sources=sources2, .n_spikes=20,
+        .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0
+    };
+    int n_per_sample2[] = {10, 10};
+    BatchEventPropInput batch2 = {
+        .input=&input2, .n_spikes_per_sample=n_per_sample2, .batch_size=2
+    };
+
+    TEST("Dropout  batch=2, p_drop=0.3");
+    DropoutOutput* out3 = eventprop_dropout_spikes_batch(&batch2, 0.3, 123);
+    ASSERT(out3[0].n_spikes <= 10 && out3[1].n_spikes <= 10, "no sample exceeds input");
+    ASSERT(out3[0].n_spikes + out3[1].n_spikes < 20, "should drop some total");
+    eventprop_free_dropout_output(out3, 2);
+    TEST_END;
+}
+
 /* ── Main ─────────────────────────────────────────────────────── */
 
 int main(void)
@@ -488,6 +562,9 @@ int main(void)
 
     /* BackwardMaxima  tests */
     test_backward_maxima();
+
+    /* Dropout tests */
+    test_dropout_spikes();
 
     printf("\n==========================================\n");
     printf("Tests: %d passed, %d failed (of %d total)\n",

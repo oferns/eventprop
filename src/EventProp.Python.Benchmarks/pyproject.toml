@@ -21,3 +21,7 @@ dev = [
 
 [tool.setuptools.packages.find]
 include = ["*"]
+
+[tool.pytest.ini_options]
+addopts = "--benchmark-min-time=0.05 --benchmark-max-time=2"
+testpaths = ["."]

@@ -1,0 +1,81 @@
+{
+    "machine_info": {
+        "node": "m2u-studio.hq.coverware.co.uk",
+        "processor": "arm",
+        "machine": "arm64",
+        "python_compiler": "Clang 21.0.0 (clang-2100.0.123.102)",
+        "python_implementation": "CPython",
+        "python_implementation_version": "3.14.5",
+        "python_version": "3.14.5",
+        "python_build": [
+            "main",
+            "May 10 2026 10:21:34"
+        ],
+        "release": "25.5.0",
+        "system": "Darwin",
+        "cpu": {
+            "python_version": "3.14.5.final.0 (64 bit)",
+            "cpuinfo_version": [
+                9,
+                0,
+                0
+            ],
+            "cpuinfo_version_string": "9.0.0",
+            "arch": "ARM_8",
+            "bits": 64,
+            "count": 24,
+            "arch_string_raw": "arm64",
+            "brand_raw": "Apple M2 Ultra"
+        }
+    },
+    "commit_info": {
+        "id": "2357947cbd577d78997230c21bf9a2fedd7f64a3",
+        "time": "2026-06-12T11:35:35+01:00",
+        "author_time": "2026-06-12T11:35:35+01:00",
+        "dirty": true,
+        "project": "eventprop.net",
+        "branch": "simd-experiments"
+    },
+    "benchmarks": [
+        {
+            "group": null,
+            "name": "test_ctypes[uniform-Tiny]",
+            "fullname": "test_benchmarks.py::TestLIFForward::test_ctypes[uniform-Tiny]",
+            "params": {
+                "pattern": "uniform",
+                "size_name": "Tiny"
+            },
+            "param": "uniform-Tiny",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 5.0,
+                "min_time": 0.1,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00012325425003655255,
+                "max": 0.00013003979198401795,
+                "mean": 0.00012429739060025894,
+                "stddev": 1.1662457430006655e-06,
+                "rounds": 40,
+                "median": 0.00012413279150496237,
+                "iqr": 6.861664878670174e-07,
+                "q1": 0.00012371668752166442,
+                "q3": 0.00012440285400953143,
+                "iqr_outliers": 2,
+                "stddev_outliers": 2,
+                "outliers": "2;2",
+                "ld15iqr": 0.00012325425003655255,
+                "hd15iqr": 0.0001274502500309609,
+                "ops": 8045.22118421621,
+                "total": 0.004971895624010358,
+                "iterations": 1000
+            }
+        }
+    ],
+    "datetime": "2026-06-12T12:28:57.960280+00:00",
+    "version": "5.2.3"
+}

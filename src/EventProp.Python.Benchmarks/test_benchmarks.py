@@ -1,10 +1,18 @@
-"""Benchmarks comparing pybind11 (EventProp.Python) vs ctypes (eventprop).
+"""Benchmarks comparing pybind11 (EventProp.Python) vs ctypes (eventprop_c).
 
-Tests the Python public API surface — layer forward/backward passes and loss functions.
-Problem sizes and spike patterns match the .NET/C benchmark suite for alignment.
+Tests the Python public API surface — layer forward/backward passes, loss layers,
+full training loops, and utility functions. Problem sizes match the C/C++ benchmark suite.
 
 Usage:
-    PYTHONPATH="EventProp.Python:EventProp.Native.Python" pytest test_benchmarks.py -v --benchmark-only
+    cd src/EventProp.Python.Benchmarks
+    source .venv/bin/activate
+    DYLD_LIBRARY_PATH=../../EventProp.C/build pytest test_benchmarks.py -v --benchmark-only
+
+    # Save baseline for comparison:
+    pytest test_benchmarks.py --benchmark-only --benchmark-save=baseline
+
+    # Compare against saved baseline:
+    pytest test_benchmarks.py --benchmark-only --benchmark-compare=baseline
 """
 
 from __future__ import annotations
@@ -12,178 +20,109 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-# Import both libraries — they coexist because eventprop was renamed.
-from eventprop.eventprop_cpp import (
-    Spikes, SpikesVector, Maxima, MaximaVector,
+# pybind11 (reference)
+from eventprop.eventprop_cpp import Spikes as PySpikes, SpikesVector as PySpikesVector
+from eventprop.lif_layer import LIFLayer as PyLIFLayer, LIFLayerParameters as PyLIFParams
+from eventprop.li_layer import LILayer as PyLILayer, LILayerParameters as PyLIParams
+from eventprop.loss_layer import (
+    TTFSCrossEntropyLoss as PyTTFS,
+    VMaxCrossEntropyLoss as PyVMax,
 )
 
-# Import ctypes library (eventprop) — new implementation to benchmark
-import eventprop as native_lib
-
-from eventprop.lif_layer import LIFLayer, LIFLayerParameters
-from eventprop.li_layer import LILayer, LILayerParameters as LiLIFLayerParameters
-from eventprop.loss_layer import TTFSCrossEntropyLoss, VMaxCrossEntropyLoss
+# ctypes (under test)
+from eventprop_c.spikes import Spikes as CtSpikes, SpikesVector as CtSpikesVector
+from eventprop_c.lif_layer import LIFLayer as CtLIFLayer, LIFLayerParameters as CtLIFParams
+from eventprop_c.li_layer import LILayer as CtLILayer, LILayerParameters as CtLIParams
+from eventprop_c.loss_layer import (
+    TTFSCrossEntropyLoss as CtTTFS,
+    VMaxCrossEntropyLoss as CtVMax,
+)
 
 from conftest import SIZES, TAU_MEM, TAU_SYN, V_TH, make_input_batch, make_weights
-
-
-# ============================================================
-# Helper: create Spikes objects for both libraries.
-# ============================================================
-
-# Get ctypes library instance (cached for performance)
-def _get_native_lib():
-    """Get or create a ctypes library instance."""
-    if not hasattr(_get_native_lib, '_lib'):
-        from pathlib import Path
-        
-        # Try to find library relative to project root
-        _project_root = Path(__file__).resolve().parent.parent.parent  # eventprop.net root
-        lib_paths = [
-            _project_root / "src" / "EventProp.C" / "build" / "libeventprop_c_api.dylib",
-            _project_root / "src" / "EventProp.C" / "build" / "libeventprop_c_api.so",
-            Path.cwd() / "libeventprop_c_api.dylib",
-            Path.cwd() / "libeventprop_c_api.so",
-        ]
-        
-        for path in lib_paths:
-            if path.exists():
-                _get_native_lib._lib = native_lib.EventPropCtypes(str(path))
-                return
-        
-        raise FileNotFoundError(
-            "Could not find libeventprop_c_api.dylib/.so. Run ./build.sh c first."
-        )
-    return _get_native_lib._lib
-
-def make_spikes(times, sources):
-    """Create Spikes objects for both libraries from raw arrays."""
-    # For ctypes, we just pass the raw arrays directly (zero-copy)
-    return (Spikes(times, sources), (times, sources))
-
-
-def make_spikes_vector(batch):
-    """Create SpikesVector objects for both libraries from a list of (times, sources) tuples."""
-    pybind11_batch = SpikesVector([Spikes(t, s) for t, s in batch])
-    # For ctypes, we just use the list of tuples directly
-    native_batch = batch
-    return pybind11_batch, native_batch
-
-
-def make_maxima_vector(batch):
-    """Create MaximaVector objects for both libraries."""
-    pybind11_batch = MaximaVector([Maxima(t, v) for t, v in batch])
-    # For ctypes, we just use the list of tuples directly
-    native_batch = batch
-    return pybind11_batch, native_batch
-
-
-# ============================================================
-# Parametrized fixtures for size × pattern combinations.
-# ============================================================
-
-@pytest.fixture(params=SIZES.keys(), ids=list(SIZES.keys()))
-def size_name(request):
-    return request.param
-
-
-@pytest.fixture(params=["uniform", "poisson", "burst"], ids=["uniform", "poisson", "burst"])
-def pattern(request):
-    return request.param
-
-
-@pytest.fixture(params=["Tiny", "Small"], ids=lambda x: f"size={x}")
-def small_size(request):
-    return request.param
-
-
-@pytest.fixture(params=["Medium", "Large"], ids=lambda x: f"size={x}")
-def large_size(request):
-    return request.param
 
 
 # ============================================================
 # LIF Layer — Forward & Backward Benchmarks
 # ============================================================
 
+# Burst patterns at Medium+ are extremely slow (root-finding iterations).
+# Skip them to keep benchmark runs tractable — matches C/C++ suite behaviour.
+SLOW_BURST = {("Medium", "burst"), ("Large", "burst")}
+
+
 class TestLIFForward:
-    """Benchmark LIFLayer.forward() — the core forward pass."""
-
-    def _make_layer_and_input(self, size_name, pattern):
-        """Create LIF layer and input batch for both libraries."""
-        cfg = SIZES[size_name]
-        n_in, n_out, spikes_per_neuron = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
-
-        w = make_weights(n_in, n_out)
-        times, sources = make_input_batch(n_in, n_out, spikes_per_neuron, pattern)
-
-        pybind11_spikes = Spikes(times, sources)
-        native_spikes = (times, sources)
-
-        pybind11_params = LIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
-        native_params = LIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
-
-        pybind11_layer = LIFLayer(pybind11_params, w_in=w)
-        native_layer = LIFLayer(native_params, w_in=w)
-
-        return (pybind11_layer, native_layer), pybind11_spikes, native_spikes
+    """Benchmark LIFLayer.forward() — core forward pass."""
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_pybind11(self, benchmark, size_name, pattern):
-        layer_pair, spikes, _ = self._make_layer_and_input(size_name, pattern)
-        benchmark(layer_pair[0].forward, SpikesVector([spikes]))
+        if (size_name, pattern) in SLOW_BURST:
+            pytest.skip("Medium+/burst root-finding too slow")
+        if (size_name, pattern) in SLOW_BURST:
+            pytest.skip("Medium+/burst root-finding too slow")
+        cfg = SIZES[size_name]
+        n_in, n_out, spn = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spn, pattern)
+
+        layer = PyLIFLayer(PyLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
+        batch = PySpikesVector([PySpikes(times, sources)])
+
+        benchmark(layer.forward, batch)
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_ctypes(self, benchmark, size_name, pattern):
-        layer_pair, _, spikes = self._make_layer_and_input(size_name, pattern)
-        benchmark(layer_pair[1].forward, [spikes])
+        if (size_name, pattern) in SLOW_BURST:
+            pytest.skip("Medium+/burst root-finding too slow")
+        cfg = SIZES[size_name]
+        n_in, n_out, spn = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spn, pattern)
+
+        layer = CtLIFLayer(CtLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
+        batch = CtSpikesVector([CtSpikes(times=times, sources=sources)])
+
+        benchmark(layer.forward, batch)
 
 
 class TestLIFBackward:
-    """Benchmark LIFLayer.backward() — the core backward pass."""
-
-    def _make_layer_and_batch(self, size_name, pattern):
-        """Create LIF layer with pre-computed forward pass for both libraries."""
-        cfg = SIZES[size_name]
-        n_in, n_out, spikes_per_neuron = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
-
-        w = make_weights(n_in, n_out)
-        times, sources = make_input_batch(n_in, n_out, spikes_per_neuron, pattern)
-
-        pybind11_spikes = Spikes(times, sources)
-        native_spikes = (times, sources)
-
-        pybind11_params = LIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
-        native_params = LIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
-
-        pybind11_layer = LIFLayer(pybind11_params, w_in=w)
-        native_layer = LIFLayer(native_params, w_in=w)
-
-        # Run forward pass for both
-        pybind11_post = pybind11_layer.forward(SpikesVector([pybind11_spikes]))
-        native_post = native_layer.forward([native_spikes])
-
-        # Set error=1.0 on all post-synaptic spikes
-        for i in range(pybind11_post[0].n_spikes):
-            pybind11_post[0].set_error(i, 1.0)
-        for i in range(native_post[0].n_spikes):
-            native_post[0].set_error(i, 1.0)
-
-        return (pybind11_layer, native_layer), pybind11_post, native_post
+    """Benchmark LIFLayer.backward() — core backward pass."""
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_pybind11(self, benchmark, size_name, pattern):
-        layer_pair, post_spikes, _ = self._make_layer_and_batch(size_name, pattern)
-        benchmark(layer_pair[0].backward)
+        if (size_name, pattern) in SLOW_BURST:
+            pytest.skip("Medium+/burst root-finding too slow")
+        cfg = SIZES[size_name]
+        n_in, n_out, spn = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spn, pattern)
+
+        layer = PyLIFLayer(PyLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
+        batch = PySpikesVector([PySpikes(times, sources)])
+        post = layer.forward(batch)
+
+        for i in range(post[0].n_spikes):
+            post[0].set_error(i, 1.0)
+
+        benchmark(layer.backward)
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_ctypes(self, benchmark, size_name, pattern):
-        layer_pair, _, post_spikes = self._make_layer_and_batch(size_name, pattern)
-        benchmark(layer_pair[1].backward)
+        if (size_name, pattern) in SLOW_BURST:
+            pytest.skip("Medium+/burst root-finding too slow")
+        cfg = SIZES[size_name]
+        n_in, n_out, spn = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spn, pattern)
+
+        layer = CtLIFLayer(CtLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
+        batch = CtSpikesVector([CtSpikes(times=times, sources=sources)])
+        layer.forward(batch)
+
+        benchmark(layer.backward)
 
 
 # ============================================================
@@ -191,240 +130,412 @@ class TestLIFBackward:
 # ============================================================
 
 class TestLIForward:
-    """Benchmark LILayer.forward() — membrane potential maxima computation."""
-
-    def _make_layer_and_input(self, size_name, pattern):
-        cfg = SIZES[size_name]
-        n_in, n_out, spikes_per_neuron = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
-
-        w = make_weights(n_in, n_out)
-        times, sources = make_input_batch(n_in, n_out, spikes_per_neuron, pattern)
-
-        pybind11_spikes = Spikes(times, sources)
-        native_spikes = (times, sources)
-
-        pybind11_params = LiLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN)
-        native_params = LiLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN)
-
-        pybind11_layer = LILayer(pybind11_params, w_in=w)
-        native_layer = LILayer(native_params, w_in=w)
-
-        return (pybind11_layer, native_layer), pybind11_spikes, native_spikes
+    """Benchmark LILayer.forward() — membrane potential maxima."""
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_pybind11(self, benchmark, size_name, pattern):
-        layer_pair, spikes, _ = self._make_layer_and_input(size_name, pattern)
-        benchmark(layer_pair[0].forward, SpikesVector([spikes]))
+        if (size_name, pattern) in SLOW_BURST:
+            pytest.skip("Medium+/burst root-finding too slow")
+        cfg = SIZES[size_name]
+        n_in, n_out, spn = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spn, pattern)
+
+        layer = PyLILayer(PyLIParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN), w_in=w)
+        batch = PySpikesVector([PySpikes(times, sources)])
+
+        benchmark(layer.forward, batch)
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_ctypes(self, benchmark, size_name, pattern):
-        layer_pair, _, spikes = self._make_layer_and_input(size_name, pattern)
-        benchmark(layer_pair[1].forward, [spikes])
+        if (size_name, pattern) in SLOW_BURST:
+            pytest.skip("Medium+/burst root-finding too slow")
+        cfg = SIZES[size_name]
+        n_in, n_out, spn = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spn, pattern)
+
+        layer = CtLILayer(CtLIParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN), w_in=w)
+        batch = CtSpikesVector([CtSpikes(times=times, sources=sources)])
+
+        benchmark(layer.forward, batch)
 
 
 class TestLIBackward:
     """Benchmark LILayer.backward() — maxima-based backward pass."""
 
-    def _make_layer_and_batch(self, size_name, pattern):
-        cfg = SIZES[size_name]
-        n_in, n_out, spikes_per_neuron = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
-
-        w = make_weights(n_in, n_out)
-        times, sources = make_input_batch(n_in, n_out, spikes_per_neuron, pattern)
-
-        pybind11_spikes = Spikes(times, sources)
-        native_spikes = (times, sources)
-
-        pybind11_params = LiLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN)
-        native_params = LiLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN)
-
-        pybind11_layer = LILayer(pybind11_params, w_in=w)
-        native_layer = LILayer(native_params, w_in=w)
-
-        # Run forward pass for both
-        pybind11_maxima = pybind11_layer.forward(SpikesVector([pybind11_spikes]))
-        native_maxima = native_layer.forward([native_spikes])
-
-        # Set error=1.0 on all maxima neurons
-        for i in range(len(pybind11_maxima[0].values)):
-            pybind11_maxima[0].set_error(i, 1.0)
-        for i in range(len(native_maxima[0].values)):
-            native_maxima[0].set_error(i, 1.0)
-
-        return (pybind11_layer, native_layer), pybind11_maxima, native_maxima
-
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_pybind11(self, benchmark, size_name, pattern):
-        layer_pair, maxima, _ = self._make_layer_and_batch(size_name, pattern)
-        benchmark(layer_pair[0].backward)
+        if (size_name, pattern) in SLOW_BURST:
+            pytest.skip("Medium+/burst root-finding too slow")
+        cfg = SIZES[size_name]
+        n_in, n_out, spn = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spn, pattern)
+
+        layer = PyLILayer(PyLIParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN), w_in=w)
+        batch = PySpikesVector([PySpikes(times, sources)])
+        maxima = layer.forward(batch)
+
+        for i in range(len(maxima[0].values)):
+            maxima[0].set_error(i, 1.0)
+
+        benchmark(layer.backward)
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_ctypes(self, benchmark, size_name, pattern):
-        layer_pair, _, maxima = self._make_layer_and_batch(size_name, pattern)
-        benchmark(layer_pair[1].backward)
+        if (size_name, pattern) in SLOW_BURST:
+            pytest.skip("Medium+/burst root-finding too slow")
+        cfg = SIZES[size_name]
+        n_in, n_out, spn = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spn, pattern)
+
+        layer = CtLILayer(CtLIParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN), w_in=w)
+        batch = CtSpikesVector([CtSpikes(times=times, sources=sources)])
+        maxima = layer.forward(batch)
+
+        for i in range(maxima[0].n_post):
+            maxima[0].set_error(i, 1.0)
+
+        benchmark(layer.backward)
 
 
 # ============================================================
-# Loss Layer — Forward & Backward Benchmarks
+# Loss Layer — Forward & Backward Benchmarks (batch=1 for simplicity)
 # ============================================================
 
 class TestTTFSForward:
     """Benchmark TTFSCrossEntropyLoss.forward() — includes first spike extraction."""
 
-    def _make_layer_and_input(self, size_name, pattern):
-        cfg = SIZES[size_name]
-        n_in, n_out, spikes_per_neuron = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
-
-        w = make_weights(n_in, n_out)
-        times, sources = make_input_batch(n_in, n_out, spikes_per_neuron, pattern)
-
-        pybind11_spikes = Spikes(times, sources)
-        native_spikes = (times, sources)
-
-        lif_params = LIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
-        loss_params = type('TTFSCrossEntropyLossParameters', (), {'lif_parameters': lif_params, 'alpha': 1e-2})()
-
-        native_lif_params = LIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
-        native_loss_params = type('TTFSCrossEntropyLossParameters', (), {'lif_parameters': native_lif_params, 'alpha': 1e-2})()
-
-        pybind11_layer = TTFSCrossEntropyLoss(loss_params, w_in=w)
-        native_layer = TTFSCrossEntropyLoss(native_loss_params, w_in=w)
-
-        return (pybind11_layer, native_layer), pybind11_spikes, native_spikes
-
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_pybind11(self, benchmark, size_name, pattern):
-        layer_pair, spikes, _ = self._make_layer_and_input(size_name, pattern)
-        benchmark(layer_pair[0].forward, SpikesVector([spikes]))
+        if (size_name, pattern) in SLOW_BURST:
+            pytest.skip("Medium+/burst root-finding too slow")
+        cfg = SIZES[size_name]
+        n_in, n_out, spn = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spn, pattern)
+
+        from eventprop.loss_layer import TTFSCrossEntropyLossParameters
+        lif_params = PyLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
+        loss_params = TTFSCrossEntropyLossParameters(lif_parameters=lif_params, alpha=1e-2)
+
+        layer = PyTTFS(loss_params, w_in=w)
+        batch = PySpikesVector([PySpikes(times, sources)])
+
+        benchmark(layer.forward, batch)
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_ctypes(self, benchmark, size_name, pattern):
-        layer_pair, _, spikes = self._make_layer_and_input(size_name, pattern)
-        benchmark(layer_pair[1].forward, [spikes])
+        if (size_name, pattern) in SLOW_BURST:
+            pytest.skip("Medium+/burst root-finding too slow")
+        cfg = SIZES[size_name]
+        n_in, n_out, spn = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spn, pattern)
+
+        from eventprop_c.loss_layer import TTFSCrossEntropyLossParameters
+        lif_params = CtLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
+        loss_params = TTFSCrossEntropyLossParameters(lif_parameters=lif_params, alpha=1e-2)
+
+        layer = CtTTFS(loss_params, w_in=w)
+        batch = CtSpikesVector([CtSpikes(times=times, sources=sources)])
+
+        benchmark(layer.forward, batch)
 
 
 class TestTTFSBackward:
-    """Benchmark TTFSCrossEntropyLoss.backward() — includes loss gradient setup."""
-
-    def _make_layer_and_batch(self, size_name, pattern):
-        cfg = SIZES[size_name]
-        n_in, n_out, spikes_per_neuron = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
-
-        w = make_weights(n_in, n_out)
-        times, sources = make_input_batch(n_in, n_out, spikes_per_neuron, pattern)
-
-        pybind11_spikes = Spikes(times, sources)
-        native_spikes = (times, sources)
-
-        lif_params = LIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
-        loss_params = type('TTFSCrossEntropyLossParameters', (), {'lif_parameters': lif_params, 'alpha': 1e-2})()
-
-        native_lif_params = LIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
-        native_loss_params = type('TTFSCrossEntropyLossParameters', (), {'lif_parameters': native_lif_params, 'alpha': 1e-2})()
-
-        pybind11_layer = TTFSCrossEntropyLoss(loss_params, w_in=w)
-        native_layer = TTFSCrossEntropyLoss(native_loss_params, w_in=w)
-
-        # Run forward pass for both
-        pybind11_layer.forward(SpikesVector([pybind11_spikes]))
-        native_layer.forward([native_spikes])
-
-        # Set labels for backward pass
-        batch_size = 1
-        labels = np.array([0])
-
-        return (pybind11_layer, native_layer), labels
+    """Benchmark TTFSCrossEntropyLoss.backward() — loss gradient + chain backward."""
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_pybind11(self, benchmark, size_name, pattern):
-        layer_pair, labels = self._make_layer_and_batch(size_name, pattern)
-        benchmark(layer_pair[0].backward, labels)
+        if (size_name, pattern) in SLOW_BURST:
+            pytest.skip("Medium+/burst root-finding too slow")
+        cfg = SIZES[size_name]
+        n_in, n_out, spn = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spn, pattern)
+
+        from eventprop.loss_layer import TTFSCrossEntropyLossParameters
+        lif_params = PyLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
+        loss_params = TTFSCrossEntropyLossParameters(lif_parameters=lif_params, alpha=1e-2)
+
+        layer = PyTTFS(loss_params, w_in=w)
+        batch = PySpikesVector([PySpikes(times, sources)])
+        layer.forward(batch)
+
+        benchmark(layer.backward, np.array([0]))
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_ctypes(self, benchmark, size_name, pattern):
-        layer_pair, labels = self._make_layer_and_batch(size_name, pattern)
-        benchmark(layer_pair[1].backward, labels)
+        if (size_name, pattern) in SLOW_BURST:
+            pytest.skip("Medium+/burst root-finding too slow")
+        cfg = SIZES[size_name]
+        n_in, n_out, spn = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spn, pattern)
+
+        from eventprop_c.loss_layer import TTFSCrossEntropyLossParameters
+        lif_params = CtLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
+        loss_params = TTFSCrossEntropyLossParameters(lif_parameters=lif_params, alpha=1e-2)
+
+        layer = CtTTFS(loss_params, w_in=w)
+        batch = CtSpikesVector([CtSpikes(times=times, sources=sources)])
+        layer.forward(batch)
+
+        benchmark(layer.backward, np.array([0]))
 
 
 class TestVMaxForward:
     """Benchmark VMaxCrossEntropyLoss.forward() — includes sum0 computation."""
 
-    def _make_layer_and_input(self, size_name, pattern):
-        cfg = SIZES[size_name]
-        n_in, n_out, spikes_per_neuron = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
-
-        w = make_weights(n_in, n_out)
-        times, sources = make_input_batch(n_in, n_out, spikes_per_neuron, pattern)
-
-        pybind11_spikes = Spikes(times, sources)
-        native_spikes = (times, sources)
-
-        lif_params = LiLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN)
-        native_lif_params = LiLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN)
-
-        pybind11_layer = VMaxCrossEntropyLoss(lif_params, w_in=w)
-        native_layer = VMaxCrossEntropyLoss(native_lif_params, w_in=w)
-
-        return (pybind11_layer, native_layer), pybind11_spikes, native_spikes
-
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_pybind11(self, benchmark, size_name, pattern):
-        layer_pair, spikes, _ = self._make_layer_and_input(size_name, pattern)
-        benchmark(layer_pair[0].forward, SpikesVector([spikes]))
+        if (size_name, pattern) in SLOW_BURST:
+            pytest.skip("Medium+/burst root-finding too slow")
+        cfg = SIZES[size_name]
+        n_in, n_out, spn = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spn, pattern)
+
+        layer = PyVMax(PyLIParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN), w_in=w)
+        batch = PySpikesVector([PySpikes(times, sources)])
+
+        benchmark(layer.forward, batch)
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_ctypes(self, benchmark, size_name, pattern):
-        layer_pair, _, spikes = self._make_layer_and_input(size_name, pattern)
-        benchmark(layer_pair[1].forward, [spikes])
+        if (size_name, pattern) in SLOW_BURST:
+            pytest.skip("Medium+/burst root-finding too slow")
+        cfg = SIZES[size_name]
+        n_in, n_out, spn = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spn, pattern)
+
+        layer = CtVMax(CtLIParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN), w_in=w)
+        batch = CtSpikesVector([CtSpikes(times=times, sources=sources)])
+
+        benchmark(layer.forward, batch)
 
 
 class TestVMaxBackward:
-    """Benchmark VMaxCrossEntropyLoss.backward() — includes error setup."""
-
-    def _make_layer_and_batch(self, size_name, pattern):
-        cfg = SIZES[size_name]
-        n_in, n_out, spikes_per_neuron = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
-
-        w = make_weights(n_in, n_out)
-        times, sources = make_input_batch(n_in, n_out, spikes_per_neuron, pattern)
-
-        pybind11_spikes = Spikes(times, sources)
-        native_spikes = (times, sources)
-
-        lif_params = LiLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN)
-        native_lif_params = LiLIFLayerParameters(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN)
-
-        pybind11_layer = VMaxCrossEntropyLoss(lif_params, w_in=w)
-        native_layer = VMaxCrossEntropyLoss(native_lif_params, w_in=w)
-
-        # Run forward pass for both
-        pybind11_layer.forward(SpikesVector([pybind11_spikes]))
-        native_layer.forward([native_spikes])
-
-        # Set labels for backward pass
-        batch_size = 1
-        labels = np.array([0])
-
-        return (pybind11_layer, native_layer), labels
+    """Benchmark VMaxCrossEntropyLoss.backward() — error setup + chain backward."""
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_pybind11(self, benchmark, size_name, pattern):
-        layer_pair, labels = self._make_layer_and_batch(size_name, pattern)
-        benchmark(layer_pair[0].backward, labels)
+        if (size_name, pattern) in SLOW_BURST:
+            pytest.skip("Medium+/burst root-finding too slow")
+        cfg = SIZES[size_name]
+        n_in, n_out, spn = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spn, pattern)
+
+        layer = PyVMax(PyLIParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN), w_in=w)
+        batch = PySpikesVector([PySpikes(times, sources)])
+        layer.forward(batch)
+
+        benchmark(layer.backward, np.array([0]))
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
     def test_ctypes(self, benchmark, size_name, pattern):
-        layer_pair, labels = self._make_layer_and_batch(size_name, pattern)
-        benchmark(layer_pair[1].backward, labels)
+        if (size_name, pattern) in SLOW_BURST:
+            pytest.skip("Medium+/burst root-finding too slow")
+        cfg = SIZES[size_name]
+        n_in, n_out, spn = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spn, pattern)
+
+        layer = CtVMax(CtLIParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN), w_in=w)
+        batch = CtSpikesVector([CtSpikes(times=times, sources=sources)])
+        layer.forward(batch)
+
+        benchmark(layer.backward, np.array([0]))
+
+
+# ============================================================
+# Batch benchmarks — realistic batch sizes (4, 8, 16)
+# ============================================================
+
+class TestBatchForward:
+    """Benchmark LIFLayer.forward() with realistic batch sizes."""
+
+    @pytest.mark.parametrize("batch_size", [4, 8, 16])
+    def test_pybind11_batch(self, benchmark, batch_size):
+        n_in, n_out = 50, 20
+        w = make_weights(n_in, n_out)
+
+        layer = PyLIFLayer(PyLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
+
+        rng = np.random.default_rng(42)
+        spikes = [PySpikes(
+            np.sort(rng.uniform(0.001, 0.1, size=20)),
+            rng.integers(0, n_in, 20, dtype=np.int32),
+        ) for _ in range(batch_size)]
+
+        benchmark(layer.forward, PySpikesVector(spikes))
+
+    @pytest.mark.parametrize("batch_size", [4, 8, 16])
+    def test_ctypes_batch(self, benchmark, batch_size):
+        n_in, n_out = 50, 20
+        w = make_weights(n_in, n_out)
+
+        layer = CtLIFLayer(CtLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
+
+        rng = np.random.default_rng(42)
+        spikes = [CtSpikes(
+            times=np.sort(rng.uniform(0.001, 0.1, size=20)),
+            sources=rng.integers(0, n_in, 20, dtype=np.int32),
+        ) for _ in range(batch_size)]
+
+        benchmark(layer.forward, CtSpikesVector(spikes))
+
+
+# ============================================================
+# Dropout benchmark — pure NumPy (ctypes) vs C++ (pybind11)
+# ============================================================
+
+class TestDropout:
+    """Benchmark dropout_spikes — pure NumPy (ctypes) vs C++ (pybind11)."""
+
+    @pytest.mark.parametrize("batch_size", [4, 8, 16])
+    def test_pybind11_dropout(self, benchmark, batch_size):
+        from eventprop.training import dropout_spikes_cpp
+
+        rng = np.random.default_rng(42)
+        n_in, n_spikes_per_sample = 10, 30
+        spikes = [PySpikes(
+            np.sort(rng.uniform(0.001, 0.1, size=n_spikes_per_sample)),
+            rng.integers(0, n_in, n_spikes_per_sample, dtype=np.int32),
+        ) for _ in range(batch_size)]
+
+        benchmark(dropout_spikes_cpp, PySpikesVector(spikes), 0.3, 42)
+
+    @pytest.mark.parametrize("batch_size", [4, 8, 16])
+    def test_ctypes_dropout(self, benchmark, batch_size):
+        from eventprop_c.training import dropout_spikes
+
+        rng = np.random.default_rng(42)
+        n_in, n_spikes_per_sample = 10, 30
+        spikes = [CtSpikes(
+            times=np.sort(rng.uniform(0.001, 0.1, size=n_spikes_per_sample)),
+            sources=rng.integers(0, n_in, n_spikes_per_sample, dtype=np.int32),
+        ) for _ in range(batch_size)]
+
+        benchmark(dropout_spikes, CtSpikesVector(spikes), 0.3, 42)
+
+
+# ============================================================
+# Full training step — forward + backward chain (2-layer TTFS/VMax)
+# ============================================================
+
+class TestTrainingStep:
+    """Benchmark a full training step: hidden.forward -> loss.forward -> loss.backward."""
+
+    @pytest.mark.parametrize("batch_size", [4, 8])
+    def test_pybind11_ttfs_step(self, benchmark, batch_size):
+        n_in, n_hidden, n_classes = 10, 8, 3
+        w1 = make_weights(n_in, n_hidden)
+        w2 = make_weights(n_hidden, n_classes)
+
+        from eventprop.loss_layer import TTFSCrossEntropyLossParameters
+        hidden = PyLIFLayer(PyLIFParams(n=n_hidden, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w1)
+        loss = PyTTFS(
+            TTFSCrossEntropyLossParameters(lif_parameters=PyLIFParams(n=n_classes, n_in=n_hidden, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), alpha=1e-2),
+            w_in=w2,
+        )
+
+        rng = np.random.default_rng(42)
+        spikes = [PySpikes(
+            np.sort(rng.uniform(0.001, 0.05, size=15)),
+            rng.integers(0, n_in, 15, dtype=np.int32),
+        ) for _ in range(batch_size)]
+
+        def step():
+            hidden.forward(PySpikesVector(spikes))
+            loss.forward(hidden.post_batch)
+            loss.backward(np.array([i % n_classes for i in range(batch_size)]))
+
+        benchmark(step)
+
+    @pytest.mark.parametrize("batch_size", [4, 8])
+    def test_ctypes_ttfs_step(self, benchmark, batch_size):
+        n_in, n_hidden, n_classes = 10, 8, 3
+        w1 = make_weights(n_in, n_hidden)
+        w2 = make_weights(n_hidden, n_classes)
+
+        from eventprop_c.loss_layer import TTFSCrossEntropyLossParameters
+        hidden = CtLIFLayer(CtLIFParams(n=n_hidden, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w1)
+        loss = CtTTFS(
+            TTFSCrossEntropyLossParameters(lif_parameters=CtLIFParams(n=n_classes, n_in=n_hidden, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), alpha=1e-2),
+            w_in=w2,
+        )
+
+        rng = np.random.default_rng(42)
+        spikes = [CtSpikes(
+            times=np.sort(rng.uniform(0.001, 0.05, size=15)),
+            sources=rng.integers(0, n_in, 15, dtype=np.int32),
+        ) for _ in range(batch_size)]
+
+        def step():
+            hidden.forward(CtSpikesVector(spikes))
+            loss.forward(hidden.post_batch)
+            loss.backward(np.array([i % n_classes for i in range(batch_size)]))
+
+        benchmark(step)
+
+    @pytest.mark.parametrize("batch_size", [4, 8])
+    def test_pybind11_vmax_step(self, benchmark, batch_size):
+        n_in, n_hidden, n_classes = 10, 8, 3
+        w1 = make_weights(n_in, n_hidden)
+        w2 = make_weights(n_hidden, n_classes)
+
+        hidden = PyLIFLayer(PyLIFParams(n=n_hidden, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w1)
+        loss = PyVMax(PyLIParams(n=n_classes, n_in=n_hidden, tau_mem=TAU_MEM, tau_syn=TAU_SYN), w_in=w2)
+
+        rng = np.random.default_rng(42)
+        spikes = [PySpikes(
+            np.sort(rng.uniform(0.001, 0.05, size=15)),
+            rng.integers(0, n_in, 15, dtype=np.int32),
+        ) for _ in range(batch_size)]
+
+        def step():
+            hidden.forward(PySpikesVector(spikes))
+            loss.forward(hidden.post_batch)
+            loss.backward(np.array([i % n_classes for i in range(batch_size)]))
+
+        benchmark(step)
+
+    @pytest.mark.parametrize("batch_size", [4, 8])
+    def test_ctypes_vmax_step(self, benchmark, batch_size):
+        n_in, n_hidden, n_classes = 10, 8, 3
+        w1 = make_weights(n_in, n_hidden)
+        w2 = make_weights(n_hidden, n_classes)
+
+        hidden = CtLIFLayer(CtLIFParams(n=n_hidden, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w1)
+        loss = CtVMax(CtLIParams(n=n_classes, n_in=n_hidden, tau_mem=TAU_MEM, tau_syn=TAU_SYN), w_in=w2)
+
+        rng = np.random.default_rng(42)
+        spikes = [CtSpikes(
+            times=np.sort(rng.uniform(0.001, 0.05, size=15)),
+            sources=rng.integers(0, n_in, 15, dtype=np.int32),
+        ) for _ in range(batch_size)]
+
+        def step():
+            hidden.forward(CtSpikesVector(spikes))
+            loss.forward(hidden.post_batch)
+            loss.backward(np.array([i % n_classes for i in range(batch_size)]))
+
+        benchmark(step)

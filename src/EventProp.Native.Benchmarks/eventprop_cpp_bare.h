@@ -55,5 +55,6 @@ void backward_maxima_batch(std::vector<Spikes> &input_batch, std::vector<Maxima>
 std::pair<Eigen::ArrayXd, Eigen::ArrayXd> compute_voltage_trace(double t_max, double dt, int target_nrn_idx, Eigen::Ref<RowMatrixXd const> w, Spikes const& spikes, double v_th, double tau_mem, double tau_syn);
 double compute_lambda_i(double t, int target_nrn_idx, Spikes const& post_spikes, double v_th, double tau_mem, double tau_syn);
 std::pair<Eigen::ArrayXd, Eigen::ArrayXd> compute_lambda_i_trace(double t_max, double dt, int target_nrn_idx, Spikes const& post_spikes, double v_th, double tau_mem, double tau_syn);
+std::vector<Spikes> dropout_spikes(std::vector<Spikes> const& spikes, double p_drop, unsigned int random_seed);
 
 #endif // EVENTPROP_CPP_BARE_H

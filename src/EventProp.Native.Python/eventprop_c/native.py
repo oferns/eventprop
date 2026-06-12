@@ -117,6 +117,14 @@ class _BackwardOutput(Structure):
     ]
 
 
+class _DropoutOutput(Structure):
+    _fields_ = [
+        ('n_spikes', c_int),
+        ('times', POINTER(c_double)),
+        ('sources', POINTER(c_int)),
+    ]
+
+
 class _VoltageTraceOutput(Structure):
     _fields_ = [
         ('n_t', c_int),
@@ -431,8 +439,10 @@ class BatchSpikeOutput:
         return self.batch_size
 
     def __del__(self):
-        # TEMP: disabled to isolate crash
-        pass
+        if EventPropCtypes._global_lib is not None and self._c:
+            EventPropCtypes._global_lib.eventprop_free_batch_spike_output(
+                self._c, self.batch_size
+            )
 
 
 class SpikeOutputView(SpikeOutput):
@@ -509,6 +519,56 @@ class MaximaOutputView(MaximaOutput):
 
     def __del__(self):
         pass
+
+
+class DropoutOutputView:
+    """Zero-copy view of a single DropoutOutput sample (C-owned memory)."""
+
+    __slots__ = ('_c',)
+
+    def __init__(self, c_struct: _DropoutOutput):
+        self._c = c_struct
+
+    @property
+    def n_spikes(self) -> int:
+        return self._c.n_spikes
+
+    @property
+    def times(self) -> DoubleArrayView:
+        if self._c.n_spikes == 0 or self._c.times is None:
+            return DoubleArrayView(None, 0)
+        return DoubleArrayView(self._c.times, self._c.n_spikes)
+
+    @property
+    def sources(self) -> Int32ArrayView:
+        if self._c.n_spikes == 0 or self._c.sources is None:
+            return Int32ArrayView(None, 0)
+        return Int32ArrayView(self._c.sources, self._c.n_spikes)
+
+    def __del__(self):
+        pass  # memory owned by DropoutBatchOutput
+
+
+class DropoutBatchOutput:
+    """Wrapper for batch dropout output (array of DropoutOutput structs)."""
+
+    def __init__(self, c_ptr: ctypes.POINTER(_DropoutOutput), batch_size: int):
+        self._c = c_ptr
+        self.batch_size = batch_size
+
+    def __getitem__(self, idx: int) -> 'DropoutOutputView':
+        if not 0 <= idx < self.batch_size:
+            raise IndexError(f"index {idx} out of range [0, {self.batch_size})")
+        return DropoutOutputView(self._c[idx])
+
+    def __len__(self) -> int:
+        return self.batch_size
+
+    def __del__(self):
+        if EventPropCtypes._global_lib is not None and self._c:
+            EventPropCtypes._global_lib.eventprop_free_dropout_output(
+                self._c, self.batch_size
+            )
 
 
 # ── Library loader and function bindings ─────────────────────────────────
@@ -627,6 +687,17 @@ class EventPropCtypes:
             POINTER(c_double),
         ]
 
+        # Batch dropout
+        lib.eventprop_dropout_spikes_batch.restype = POINTER(_DropoutOutput)
+        lib.eventprop_dropout_spikes_batch.argtypes = [
+            POINTER(_BatchEventPropInput),
+            c_double,
+            c_int,
+        ]
+
+        lib.eventprop_free_dropout_output.restype = None
+        lib.eventprop_free_dropout_output.argtypes = [POINTER(_DropoutOutput), c_int]
+
     # ── Forward pass ────────────────────────────────────────────────
 
     def compute_spikes(self, input: _EventPropInput) -> SpikeOutput:
@@ -715,6 +786,38 @@ class EventPropCtypes:
     def free_backward_spikes_batch_output(self, output: POINTER(_BackwardOutput), batch_size: int):
         """Free a batch BackwardOutput returned by backward_spikes_batch()."""
         self.lib.eventprop_free_backward_batch_output(output, batch_size)
+
+    def compute_maxima_batch(
+        self, input: _BatchEventPropInput
+    ) -> BatchMaximaOutput:
+        """Batch forward pass: compute membrane potential maxima for multiple samples."""
+        c_ptr = self.lib.eventprop_compute_maxima_batch(byref(input))
+        return BatchMaximaOutput(c_ptr, input.batch_size)
+
+    def free_batch_maxima_output(self, output: POINTER(_MaximaOutput), batch_size: int):
+        """Free a batch MaximaOutput returned by compute_maxima_batch()."""
+        self.lib.eventprop_free_batch_maxima_output(output, batch_size)
+
+    def backward_maxima_batch(
+        self, input: _BatchEventPropInput,
+        fwd_batch: POINTER(_MaximaOutput), maxima_errors: POINTER(c_double)
+    ) -> BatchBackwardOutput:
+        """Batch backward pass (maxima): compute weight gradients for multiple samples."""
+        c_ptr = self.lib.eventprop_backward_maxima_batch(
+            byref(input), fwd_batch, maxima_errors
+        )
+        return BatchBackwardOutput(c_ptr, input.batch_size)
+
+    def dropout_spikes_batch(
+        self, input: _BatchEventPropInput, p_drop: float, seed: int
+    ) -> 'DropoutBatchOutput':
+        """Batch dropout: randomly drop spikes from each sample."""
+        c_ptr = self.lib.eventprop_dropout_spikes_batch(byref(input), c_double(p_drop), c_int(seed))
+        return DropoutBatchOutput(c_ptr, input.batch_size)
+
+    def free_dropout_output(self, output: POINTER(_DropoutOutput), batch_size: int):
+        """Free a dropout output returned by dropout_spikes_batch()."""
+        self.lib.eventprop_free_dropout_output(output, batch_size)
 
     # ── Convenience wrappers (keyword-argument API) ────────────────
     # These construct the ctypes Structures internally so callers can pass

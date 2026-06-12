@@ -18,6 +18,7 @@
 #else
 // C library functions (consolidated header)
 #include "eventprop.h"
+#include "eventprop_batch.h"
 #endif
 
 // ============================================================
@@ -842,4 +843,89 @@ BACKWARDMAXIMA_BENCH(Small,   50,   20,  100);
 BACKWARDMAXIMA_BENCH(Medium,  200,  80,  500);
 BACKWARDMAXIMA_BENCH(Large,   500,  200, 1000);
 BACKWARDMAXIMA_BENCH(XL,      2000, 500, 5000);
+
+// ============================================================
+// Benchmark: Dropout (batch)
+// ============================================================
+
+static void BM_Dropout(benchmark::State& state, const ProblemSize& sz, DataGenerator gen)
+{
+    int batch_size = 8;
+    int total_spikes = sz.n_spikes * batch_size;
+
+    std::vector<double> times(total_spikes);
+    std::vector<int> sources(total_spikes);
+
+    // Generate per-sample data
+    for (int b = 0; b < batch_size; b++) {
+        int offset = b * sz.n_spikes;
+        std::mt19937 rng(42 + b);
+        std::uniform_real_distribution<double> t_dist(0.0, 1.0);
+        std::uniform_int_distribution<int> s_dist(0, sz.n_pre - 1);
+        for (int i = 0; i < sz.n_spikes; i++) {
+            times[offset + i] = t_dist(rng);
+            sources[offset + i] = s_dist(rng);
+        }
+    }
+
+#ifdef USE_CPP_WRAPPER
+    // Pre-construct Spikes vector for C++
+    std::vector<Spikes> cpp_spikes;
+    cpp_spikes.reserve(batch_size);
+    for (int b = 0; b < batch_size; b++) {
+        int offset = b * sz.n_spikes;
+        Eigen::ArrayXd e_times = Eigen::Map<Eigen::ArrayXd>(times.data() + offset, sz.n_spikes);
+        Eigen::ArrayXi e_sources = Eigen::Map<Eigen::ArrayXi>(sources.data() + offset, sz.n_spikes);
+        cpp_spikes.emplace_back(e_times, e_sources);
+    }
+#endif
+
+#ifndef USE_CPP_WRAPPER
+    // Setup C batch input
+    int* n_per_sample = (int*)malloc(batch_size * sizeof(int));
+    for (int b = 0; b < batch_size; b++) n_per_sample[b] = sz.n_spikes;
+
+    EventPropInput input = {
+        .w=NULL, .n_pre=sz.n_pre, .n_post=0,
+        .times=times.data(), .sources=sources.data(), .n_spikes=total_spikes,
+        .tau_mem=0.0, .tau_syn=0.0, .v_th=0.0
+    };
+    BatchEventPropInput batch = {
+        .input=&input, .n_spikes_per_sample=n_per_sample, .batch_size=batch_size
+    };
+#endif
+
+    for (auto _ : state) {
+#ifdef USE_CPP_WRAPPER
+        auto dropped = dropout_spikes(cpp_spikes, 0.3, 42);
+        benchmark::DoNotOptimize(dropped);
+#else
+        DropoutOutput* dropped = eventprop_dropout_spikes_batch(&batch, 0.3, 42);
+        int total = 0;
+        for (int b = 0; b < batch_size; b++) total += dropped[b].n_spikes;
+        benchmark::DoNotOptimize(total);
+        eventprop_free_dropout_output(dropped, batch_size);
+#endif
+    }
+
+#ifndef USE_CPP_WRAPPER
+    free(n_per_sample);
+#endif
+
+    state.SetItemsProcessed(state.iterations() * total_spikes);
+}
+
+#define DROPOUT_BENCH(SizeName, NP, NPO, NS)                                               \
+    BENCHMARK_CAPTURE(BM_Dropout, SizeName##_uniform,                                       \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(   \
+        "Dropout/" #SizeName "/uniform");                                                  \
+    BENCHMARK_CAPTURE(BM_Dropout, SizeName##_poisson,                                       \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(   \
+        "Dropout/" #SizeName "/poisson")
+
+DROPOUT_BENCH(Tiny,    10,   5,   20);
+DROPOUT_BENCH(Small,   50,   20,  100);
+DROPOUT_BENCH(Medium,  200,  80,  500);
+DROPOUT_BENCH(Large,   500,  200, 1000);
+
 BENCHMARK_MAIN();

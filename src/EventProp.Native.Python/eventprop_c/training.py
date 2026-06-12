@@ -4,6 +4,7 @@ Mirrors the pybind11 training API from EventProp.Python.
 """
 
 from abc import ABC, abstractmethod
+import ctypes
 import numpy as np
 import logging
 from typing import NamedTuple, Tuple, Iterator
@@ -11,12 +12,13 @@ from typing import NamedTuple, Tuple, Iterator
 from .optimizer import GradientDescentParameters, Optimizer, Adam
 from .layer import Layer, SpikeDataset
 from .spikes import Spikes, SpikesVector
+from .native import EventPropCtypes, _BatchEventPropInput, _EventPropInput
 
 
 def dropout_spikes(spikes: SpikesVector, p_drop: float, random_seed: int) -> SpikesVector:
     """Randomly drop spikes from each sample in the batch.
 
-    Pure numpy replacement for pybind11 ``dropout_spikes_cpp``.
+    Uses the C library (eventprop_dropout_spikes_batch) for performance.
     For each spike, a Bernoulli trial with probability *p_drop* decides
     whether to keep it (0 = keep, 1 = drop).
 
@@ -32,24 +34,66 @@ def dropout_spikes(spikes: SpikesVector, p_drop: float, random_seed: int) -> Spi
     Returns
     -------
     SpikesVector
-        New vector with surviving spikes only.
+        New vector with surviving spikes only (zero-copy, C-owned memory).
     """
-    rng = np.random.RandomState(random_seed)
-    dropped_spikes: list[Spikes] = []
+    if p_drop <= 0.0:
+        return spikes
 
-    for sample in spikes:
-        if sample.n_spikes == 0 or p_drop <= 0.0:
-            dropped_spikes.append(sample)
-            continue
+    batch_size = len(spikes)
+    n_spikes_per_sample = [s.n_spikes for s in spikes]
 
-        # Bernoulli trial per spike: 0 = keep, 1 = drop
-        mask = rng.binomial(1, 1.0 - p_drop, size=sample.n_spikes).astype(bool)
-        dropped_spikes.append(Spikes(
-            times=sample.times[mask],
-            sources=sample.sources[mask],
-        ))
+    # Flatten times and sources into contiguous arrays for C
+    total_spikes = sum(n_spikes_per_sample)
+    if total_spikes == 0:
+        return SpikesVector([Spikes() for _ in range(batch_size)])
 
-    return SpikesVector(dropped_spikes)
+    times_flat = np.empty(total_spikes, dtype=np.float64)
+    sources_flat = np.empty(total_spikes, dtype=np.intc)
+
+    offset = 0
+    for i, s in enumerate(spikes):
+        times_flat[offset:offset + s.n_spikes] = np.asarray(s.times)
+        sources_flat[offset:offset + s.n_spikes] = np.asarray(s.sources).astype(np.intc)
+        offset += s.n_spikes
+
+    # Build C input struct
+    inp = _EventPropInput(
+        w=None,
+        n_pre=0,
+        n_post=0,
+        times=times_flat.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        sources=sources_flat.ctypes.data_as(ctypes.POINTER(ctypes.c_int)),
+        n_spikes=total_spikes,
+        tau_mem=0.0,
+        tau_syn=0.0,
+        v_th=0.0,
+    )
+
+    n_per_sample = (ctypes.c_int * batch_size)(*n_spikes_per_sample)
+    batch_inp = _BatchEventPropInput(
+        input=ctypes.pointer(inp),
+        n_spikes_per_sample=n_per_sample,
+        batch_size=batch_size,
+    )
+
+    # Call C library — returns zero-copy DropoutBatchOutput (C-owned memory)
+    lib = EventPropCtypes()
+    c_output = lib.dropout_spikes_batch(batch_inp, p_drop, random_seed)
+
+    # Wrap in SpikesVector — convert zero-copy views to owned Spikes
+    result = []
+    for i in range(batch_size):
+        sample = c_output[i]
+        if sample.n_spikes > 0:
+            result.append(Spikes(
+                times=np.asarray(sample.times),
+                sources=np.asarray(sample.sources).astype(np.int32),
+            ))
+        else:
+            result.append(Spikes())
+
+    # c_output freed by DropoutBatchOutput.__del__ when GC'd
+    return SpikesVector(result)
 
 
 class AbstractTraining(ABC):
