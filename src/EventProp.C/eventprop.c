@@ -157,6 +157,17 @@ void eventprop_free_batch_spike_output(SpikeOutput* output, int batch_size)
     }
     free(output);
 }
+void eventprop_free_batch_maxima_output(MaximaOutput* output, int batch_size)
+{
+    if (!output) return;
+    for (int i = 0; i < batch_size; i++) {
+        free(output[i].times);
+        output[i].times = NULL;
+        free(output[i].values);
+        output[i].values = NULL;
+    }
+    free(output);
+}
 
 /* ── SIMD helper functions ───────────────────────────────────── */
 
@@ -1152,20 +1163,6 @@ SpikeOutput* eventprop_compute_spikes_batch(const BatchEventPropInput* input)
     }
     free(offsets);
     return result;
-}
-/**
- * Free batch maxima output array.
- */
-void eventprop_free_batch_maxima_output(MaximaOutput* output, int batch_size)
-{
-    if (!output) return;
-    for (int i = 0; i < batch_size; i++) {
-        free(output[i].times);
-        output[i].times = NULL;
-        free(output[i].values);
-        output[i].values = NULL;
-    }
-    free(output);
 }
 
 /**
