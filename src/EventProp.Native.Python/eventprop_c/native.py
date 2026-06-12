@@ -152,9 +152,12 @@ class DoubleArrayView:
             dtype=np.float64, count=self._length,
         )
 
-    def __array__(self) -> np.ndarray:
+    def __array__(self, dtype=None) -> np.ndarray:
         """Allow np.asarray() to work on DoubleArrayView."""
-        return self.to_numpy()
+        arr = self.to_numpy()
+        if dtype is not None:
+            arr = arr.astype(dtype, copy=False)
+        return arr
 
     @property
     def ptr(self) -> POINTER[c_double]:
@@ -181,9 +184,12 @@ class Int32ArrayView:
             dtype=np.int32, count=self._length,
         )
 
-    def __array__(self) -> np.ndarray:
+    def __array__(self, dtype=None) -> np.ndarray:
         """Allow np.asarray() to work on Int32ArrayView."""
-        return self.to_numpy()
+        arr = self.to_numpy()
+        if dtype is not None:
+            arr = arr.astype(dtype, copy=False)
+        return arr
 
     @property
     def ptr(self) -> POINTER[c_int]:
