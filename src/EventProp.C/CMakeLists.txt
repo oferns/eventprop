@@ -30,6 +30,7 @@ find_package(OpenMP QUIET)
 add_library(eventprop_c_api SHARED
     eventprop.c
     eventprop_diag.c
+    eventprop_batch.c
 )
 # CPU-specific optimization (kept for performance)
 target_compile_options(eventprop_c_api PRIVATE -march=native)
@@ -55,7 +56,7 @@ target_include_directories(eventprop_c_api PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Install
 install(TARGETS eventprop_c_api LIBRARY DESTINATION lib)
-install(FILES eventprop.h eventprop_diag.h DESTINATION include)
+install(FILES eventprop.h eventprop_diag.h eventprop_batch.h DESTINATION include)
 
 # Unit tests
 add_executable(test_runner tests.c)

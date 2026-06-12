@@ -8,6 +8,7 @@
 #include <string.h>
 #include <math.h>
 #include "eventprop.h"
+#include "eventprop_batch.h"
 
 #define EPSILON 1e-6
 static int tests_run = 0, tests_passed = 0, tests_failed = 0;

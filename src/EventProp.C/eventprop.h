@@ -29,12 +29,6 @@ typedef struct EventPropInput {
     double v_th;               /* Spike threshold voltage */
 } EventPropInput;
 
-typedef struct BatchEventPropInput {
-    const EventPropInput* input;
-    const int* n_spikes_per_sample;
-    int batch_size;
-} BatchEventPropInput;
-
 typedef struct SpikeOutput {
     int n_spikes;            /* Number of output spikes */
     double* times;           /* Output spike times (malloc'd) */
@@ -83,10 +77,6 @@ void eventprop_free_spike_output(SpikeOutput* output);
 void eventprop_free_sums_output(SumsOutput* output);
 void eventprop_free_maxima_output(MaximaOutput* output);
 void eventprop_free_backward_output(BackwardOutput* output);
-void eventprop_free_batch_spike_output(SpikeOutput* output, int batch_size);
-void eventprop_free_backward_batch_output(BackwardOutput* output, int batch_size);
-void eventprop_free_batch_maxima_output(MaximaOutput* output, int batch_size);
-
 /**
  * Forward pass
  * Returns a SpikeOutput struct — caller must free via eventprop_free_spike_output().
@@ -116,50 +106,6 @@ BackwardOutput eventprop_backward_spikes(const BackwardSpikesInput* input);
  * Returns a BackwardOutput struct — caller must free via eventprop_free_backward_output().
  */
 BackwardOutput eventprop_backward_maxima(const BackwardMaximaInput* input);
-
-/**
- * Batch forward pass.
- * Processes multiple samples in parallel using OpenMP (if available).
- *
- * @param input                Shared layer params (weights, tau_mem, tau_syn, v_th)
- * @param n_spikes_per_sample  Spike count per sample (length: batch_size)
- * @param batch_size           Number of samples in batch
- *
- * @return Array of SpikeOutput structs (one per sample), freed via eventprop_free_batch_spike_output()
- */
-SpikeOutput* eventprop_compute_spikes_batch(const BatchEventPropInput* input);
-
-/**
- * Batch backward pass (spikes) with automatic memory allocation.
- * Processes multiple samples in parallel using OpenMP.
- * Returns array of BackwardOutput structs (one per sample).
- */
-BackwardOutput* eventprop_backward_spikes_batch(
-    const BatchEventPropInput* input,
-    SpikeOutput* fwd_batch,        /* Forward spike outputs from compute_spikes_batch */
-    const double* post_errors
-    );
-
-/**
- * Batch forward pass — compute membrane potential maxima.
- * Processes multiple samples in parallel using OpenMP (if available).
- *
- * @param input  BatchEventPropInput with per-sample spike counts
- *
- * @return Array of MaximaOutput structs (one per sample), freed via eventprop_free_batch_maxima_output()
- */
-MaximaOutput* eventprop_compute_maxima_batch(const BatchEventPropInput* input);
-
-/**
- * Batch backward pass (maxima).
- * Processes multiple samples in parallel using OpenMP.
- * Returns array of BackwardOutput structs (one per sample).
- */
-BackwardOutput* eventprop_backward_maxima_batch(
-    const BatchEventPropInput* input,
-    MaximaOutput* fwd_batch,       /* Forward maxima outputs from compute_maxima_batch */
-    const double* maxima_errors
-    );
 
 #ifdef __cplusplus
 }
