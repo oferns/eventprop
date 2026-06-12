@@ -38,19 +38,17 @@ class TTFSCrossEntropyLoss(LIFLayer):
         self._ran_forward = True
 
     def _find_first_spikes(self):
-        self.first_spike_times = np.empty(
-            (self.n_batch, self.parameters.n),
-        )
-        self.first_spike_idxs = np.empty(
-            (self.n_batch, self.parameters.n), dtype=int
-        )
-        for batch_idx, spikes in enumerate(self.post_batch):
-            self.first_spike_times[batch_idx, :] = self.post_batch[
-                batch_idx
-            ].first_spike_times
-            self.first_spike_idxs[batch_idx, :] = self.post_batch[
-                batch_idx
-            ].first_spike_idxs
+        n_post = self.parameters.n
+        self.first_spike_times = np.full((self.n_batch, n_post), np.nan)
+        self.first_spike_idxs = np.full((self.n_batch, n_post), -1, dtype=int)
+        for batch_idx in range(self.n_batch):
+            spikes = self.post_batch[batch_idx]
+            fts = spikes.first_spike_times
+            fidxs = spikes.first_spike_idxs
+            # first_spike_times/idxs may be smaller than n_post if not all neurons fired
+            for nrn in range(len(fts)):
+                self.first_spike_times[batch_idx, nrn] = fts[nrn]
+                self.first_spike_idxs[batch_idx, nrn] = fidxs[nrn]
 
     def get_losses(self, labels: np.ndarray):
         """
@@ -130,23 +128,17 @@ class VMaxCrossEntropyLoss(LILayer):
     def forward(self, input_batch):
         super().forward(input_batch)
         self.n_batch = len(self.input_batch)
-        self.sum0 = [
-            np.sum(np.exp(self.maxima_batch[batch_idx].values))
-            for batch_idx in range(self.n_batch)
-        ]
+        # Convert to numpy for loss computation (numpy ufuncs use __array__)
+        self.values_batch = [np.asarray(self.maxima_batch[i].values) for i in range(self.n_batch)]
+        self.sum0 = [np.sum(np.exp(v)) for v in self.values_batch]
         self._ran_forward = True
 
     def get_losses(self, labels: np.ndarray):
-        """
-        Compute cross-entropy loss over voltage maxima
-        """
+        """Compute cross-entropy loss over voltage maxima."""
         if not self._ran_forward:
             raise RuntimeError("Run forward first!")
         loss = [
-            -np.log(
-                np.exp(self.maxima_batch[batch_idx].values[labels[batch_idx]])
-                / self.sum0[batch_idx]
-            )
+            -np.log(np.exp(self.values_batch[batch_idx][labels[batch_idx]]) / self.sum0[batch_idx])
             for batch_idx in range(self.n_batch)
         ]
         return loss
@@ -154,17 +146,12 @@ class VMaxCrossEntropyLoss(LILayer):
     def get_predictions(self) -> np.ndarray:
         if not self._ran_forward:
             raise RuntimeError("Run forward first!")
-        return np.array([np.argmax(maxima.values) for maxima in self.maxima_batch])
+        return np.array([np.argmax(v) for v in self.values_batch])
 
     def get_accuracy(self, labels: np.ndarray):
         return np.mean(
             [
-                np.sum(
-                    (
-                        self.maxima_batch[batch_idx].values
-                        >= self.maxima_batch[batch_idx].values[labels[batch_idx]]
-                    )
-                )
+                np.sum(self.values_batch[batch_idx] >= self.values_batch[batch_idx][labels[batch_idx]])
                 == 1
                 for batch_idx in range(self.n_batch)
             ]
@@ -175,12 +162,8 @@ class VMaxCrossEntropyLoss(LILayer):
             raise RuntimeError("Run forward first!")
         n_batch = len(self.maxima_batch)
         for batch_idx in range(self.n_batch):
-            error = (
-                1
-                / n_batch
-                * np.exp(self.maxima_batch[batch_idx].values)
-                / self.sum0[batch_idx]
-            )
+            values = self.values_batch[batch_idx]
+            error = np.exp(values) / self.sum0[batch_idx] / n_batch
             for nrn_idx in range(self.parameters.n):
                 self.maxima_batch[batch_idx].set_error(nrn_idx, error[nrn_idx])
             self.maxima_batch[batch_idx].set_error(

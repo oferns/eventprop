@@ -144,6 +144,16 @@ class DoubleArrayView:
     def __len__(self) -> int:
         return self._length
 
+    def __getitem__(self, idx: int) -> float:
+        if self._ptr is None or self._length == 0:
+            raise IndexError("empty array")
+        arr = (c_double * self._length).from_address(ctypes.addressof(self._ptr.contents))
+        return arr[idx]
+
+    def __iter__(self):
+        for i in range(self._length):
+            yield self[i]
+
     def to_numpy(self) -> np.ndarray:
         if self._ptr is None or self._length == 0:
             return np.array([], dtype=np.float64)
@@ -175,6 +185,16 @@ class Int32ArrayView:
 
     def __len__(self) -> int:
         return self._length
+
+    def __getitem__(self, idx: int) -> float:
+        if self._ptr is None or self._length == 0:
+            raise IndexError("empty array")
+        arr = (c_double * self._length).from_address(ctypes.addressof(self._ptr.contents))
+        return arr[idx]
+
+    def __iter__(self):
+        for i in range(self._length):
+            yield self[i]
 
     def to_numpy(self) -> np.ndarray:
         if self._ptr is None or self._length == 0:
