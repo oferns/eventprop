@@ -85,6 +85,7 @@ void eventprop_free_maxima_output(MaximaOutput* output);
 void eventprop_free_backward_output(BackwardOutput* output);
 void eventprop_free_batch_spike_output(SpikeOutput* output, int batch_size);
 void eventprop_free_backward_batch_output(BackwardOutput* output, int batch_size);
+void eventprop_free_batch_maxima_output(MaximaOutput* output, int batch_size);
 
 /**
  * Forward pass
@@ -138,11 +139,6 @@ BackwardOutput* eventprop_backward_spikes_batch(
     SpikeOutput* fwd_batch,        /* Forward spike outputs from compute_spikes_batch */
     const double* post_errors
     );
-
-/**
- * Free batch maxima output array.
- */
-void eventprop_free_batch_maxima_output(MaximaOutput* output, int batch_size);
 
 /**
  * Batch forward pass — compute membrane potential maxima.
