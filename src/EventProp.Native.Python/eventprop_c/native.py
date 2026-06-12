@@ -221,6 +221,46 @@ class SpikeOutput:
     def currents(self) -> DoubleArrayView:
         return DoubleArrayView(self._c.currents, self.n_spikes)
 
+    @property
+    def first_spike_times(self) -> np.ndarray:
+        """Return times of first spike per neuron."""
+        if self.n_spikes == 0:
+            # Determine n_post from sources array length (all zeros if empty)
+            return np.full(1, np.nan)
+        times_arr = self.times.to_numpy()
+        sources_arr = self.sources.to_numpy()
+        max_nrn = int(np.max(sources_arr)) + 1
+        result = np.full(max_nrn, np.nan)
+        seen = set()
+        for time, source in zip(times_arr, sources_arr):
+            src = int(source)
+            if src not in seen:
+                result[src] = time
+                seen.add(src)
+        return result
+
+    @property
+    def first_spike_idxs(self) -> np.ndarray:
+        """Return indices (in the spike list) of first spike per neuron."""
+        if self.n_spikes == 0:
+            return np.full(1, -1, dtype=np.int64)
+        sources_arr = self.sources.to_numpy()
+        max_nrn = int(np.max(sources_arr)) + 1
+        result = np.full(max_nrn, -1, dtype=np.int64)
+        seen = set()
+        for idx, source in enumerate(sources_arr):
+            src = int(source)
+            if src not in seen:
+                result[src] = idx
+                seen.add(src)
+        return result
+
+    def set_error(self, spike_idx: int, error: float):
+        """Set error for a specific spike (stored on Python side)."""
+        if not hasattr(self, '_errors'):
+            self._errors = np.zeros(self.n_spikes, dtype=np.float64)
+        self._errors[spike_idx] = error
+
     def __del__(self):
         if EventPropCtypes._global_lib is not None:
             EventPropCtypes._global_lib.eventprop_free_spike_output(byref(self._c))
@@ -414,6 +454,37 @@ class BackwardOutputView(BackwardOutput):
 
     def __del__(self):
         pass
+
+
+class BatchMaximaOutput:
+    """Wrapper for batch maxima output (array of MaximaOutput structs)."""
+
+    def __init__(self, c_ptr: ctypes.POINTER(_MaximaOutput), batch_size: int):
+        self._c = c_ptr
+        self.batch_size = batch_size
+
+    def __getitem__(self, idx: int) -> 'MaximaOutputView':
+        if not 0 <= idx < self.batch_size:
+            raise IndexError(f"index {idx} out of range [0, {self.batch_size})")
+        return MaximaOutputView(self._c[idx])
+
+    def __len__(self) -> int:
+        return self.batch_size
+
+    def __del__(self):
+        if EventPropCtypes._global_lib is not None and self._c:
+            EventPropCtypes._global_lib.eventprop_free_batch_maxima_output(
+                self._c, self.batch_size
+            )
+
+
+class MaximaOutputView(MaximaOutput):
+    """View of a MaximaOutput — doesn't free memory on deletion."""
+
+    def __del__(self):
+        pass
+
+
 # ── Library loader and function bindings ─────────────────────────────────
 
 
@@ -516,7 +587,21 @@ class EventPropCtypes:
 
         lib.eventprop_free_backward_batch_output.restype = None
         lib.eventprop_free_backward_batch_output.argtypes = [POINTER(_BackwardOutput), c_int]
-   # ── Forward pass ────────────────────────────────────────────────
+
+        lib.eventprop_free_batch_maxima_output.restype = None
+        lib.eventprop_free_batch_maxima_output.argtypes = [POINTER(_MaximaOutput), c_int]
+
+        lib.eventprop_compute_maxima_batch.restype = POINTER(_MaximaOutput)
+        lib.eventprop_compute_maxima_batch.argtypes = [POINTER(_BatchEventPropInput)]
+
+        lib.eventprop_backward_maxima_batch.restype = POINTER(_BackwardOutput)
+        lib.eventprop_backward_maxima_batch.argtypes = [
+            POINTER(_BatchEventPropInput),
+            POINTER(_MaximaOutput),
+            POINTER(c_double),
+        ]
+
+    # ── Forward pass ────────────────────────────────────────────────
 
     def compute_spikes(self, input: _EventPropInput) -> SpikeOutput:
         """Forward pass: predict post-synaptic spike times."""

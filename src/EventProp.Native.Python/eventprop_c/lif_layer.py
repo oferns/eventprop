@@ -55,6 +55,8 @@ class LIFLayer(Layer):
         if array is None or len(array) == 0:
             return None, None
         arr = np.asarray(array, dtype=np.float64)
+        if not arr.flags.c_contiguous:
+            arr = np.ascontiguousarray(arr)
         return arr.ctypes.data_as(POINTER(c_double)), arr
 
     @staticmethod
@@ -63,6 +65,8 @@ class LIFLayer(Layer):
         if array is None or len(array) == 0:
             return None, None
         arr = np.asarray(array, dtype=np.int32)
+        if not arr.flags.c_contiguous:
+            arr = np.ascontiguousarray(arr)
         return arr.ctypes.data_as(POINTER(c_int)), arr
 
     def _make_input(self, times: np.ndarray | None, sources: np.ndarray | None) -> Tuple[_EventPropInput, dict]:
@@ -102,8 +106,8 @@ class LIFLayer(Layer):
         times_list = [np.asarray(s.times, dtype=np.float64) for s in input_batch]
         sources_list = [np.asarray(s.sources, dtype=np.int32) for s in input_batch]
 
-        all_times = np.concatenate(times_list).astype(np.float64, copy=True) if times_list else np.array([], dtype=np.float64)
-        all_sources = np.concatenate(sources_list).astype(np.int32, copy=True) if sources_list else np.array([], dtype=np.int32)
+        all_times = np.concatenate(times_list) if times_list else np.array([], dtype=np.float64)
+        all_sources = np.concatenate(sources_list) if sources_list else np.array([], dtype=np.int32)
 
         inp, refs = self._make_input(all_times, all_sources)
         # _make_input may have created new arrays via asarray — use those refs
@@ -132,37 +136,28 @@ class LIFLayer(Layer):
         lib = NativeApi()
         batch_size = len(self.input_batch)
 
-        # Collect per-sample input data into flat arrays
+        # Collect per-sample input data into flat arrays (necessary: Python-owned -> C)
         times_list = [np.asarray(inp.times, dtype=np.float64) for inp in self.input_batch]
         sources_list = [np.asarray(inp.sources, dtype=np.int32) for inp in self.input_batch]
 
-        all_times = np.concatenate(times_list).astype(np.float64, copy=True) if times_list else np.array([], dtype=np.float64)
-        all_sources = np.concatenate(sources_list).astype(np.int32, copy=True) if sources_list else np.array([], dtype=np.int32)
+        all_times = np.concatenate(times_list) if times_list else np.array([], dtype=np.float64)
+        all_sources = np.concatenate(sources_list) if sources_list else np.array([], dtype=np.int32)
 
         inp, refs = self._make_input(all_times, all_sources)
 
-        # Collect forward output data and errors into flat arrays
-        fwd_times_list = []
-        fwd_sources_list = []
-        fwd_currents_list = []
+        # Collect errors into flat array (necessary: Python computes loss)
+        # C accesses fwd data directly from SpikeOutput* — no concatenation needed
         errors_list = []
-
         for i in range(batch_size):
             fwd = self.post_batch[i]
-            fwd_times_list.append(fwd.times)
-            fwd_sources_list.append(fwd.sources)
-            fwd_currents_list.append(fwd.currents)
-
             errors = getattr(fwd, '_errors', None)
             if errors is None:
                 errors_list.append(np.ones(fwd.n_spikes, dtype=np.float64))
             else:
                 errors_list.append(np.asarray(errors, dtype=np.float64))
 
-        all_fwd_times = np.concatenate(fwd_times_list).astype(np.float64, copy=True) if fwd_times_list else np.array([], dtype=np.float64)
-        all_fwd_sources = np.concatenate(fwd_sources_list).astype(np.int32, copy=True) if fwd_sources_list else np.array([], dtype=np.int32)
-        all_fwd_currents = np.concatenate(fwd_currents_list).astype(np.float64, copy=True) if fwd_currents_list else np.array([], dtype=np.float64)
-        all_errors = np.concatenate(errors_list).astype(np.float64, copy=True) if errors_list else np.array([], dtype=np.float64)
+        all_errors = np.concatenate(errors_list) if errors_list else np.array([], dtype=np.float64)
+        err_ptr, err_arr = self._np_to_ptr(all_errors)
 
         # Build batch input struct
         n_spikes_per_sample = (c_int * batch_size)(*[len(t) for t in times_list])
@@ -172,21 +167,7 @@ class LIFLayer(Layer):
         batch_inp.n_spikes_per_sample = n_spikes_per_sample
         batch_inp.batch_size = batch_size
 
-        # Build backward input struct (pointers to fwd data)
-        fwd_t_ptr, fwd_t_arr = self._np_to_ptr(all_fwd_times)
-        fwd_s_ptr, fwd_s_arr = self._np_to_int_ptr(all_fwd_sources)
-        fwd_c_ptr, fwd_c_arr = self._np_to_ptr(all_fwd_currents)
-        err_ptr, err_arr = self._np_to_ptr(all_errors)
-
-        backward_inp = _BackwardSpikesInput()
-        backward_inp.input = pointer(inp)
-        backward_inp.fwd_times = fwd_t_ptr
-        backward_inp.fwd_sources = fwd_s_ptr
-        backward_inp.fwd_currents = fwd_c_ptr
-        backward_inp.post_errors = err_ptr
-        backward_inp.n_post_spikes = len(all_fwd_times)
-
-        # Call C library batch backward
+        # Call C library — passes SpikeOutput* directly, C reads fwd data from it
         c_output = lib.backward_spikes_batch(
             batch_inp, self.post_batch._batch_output._c, err_ptr
         )
@@ -194,10 +175,9 @@ class LIFLayer(Layer):
         # Accumulate gradients (average over batch)
         self.gradient[:] = c_output.grads.mean(axis=0)
 
-        # Keep all arrays alive
-        self._backward_refs = {**refs, 'batch_inp': batch_inp, 'n_spikes_per_sample': n_spikes_per_sample,
-                               'fwd_times': fwd_t_arr, 'fwd_sources': fwd_s_arr,
-                               'fwd_currents': fwd_c_arr, 'errors': err_arr}
+        # Keep arrays alive
+        self._backward_refs = {**refs, 'inp': inp, 'batch_inp': batch_inp,
+                               'n_spikes_per_sample': n_spikes_per_sample, 'errors': err_arr}
 
         self._ran_backward = True
         super().backward()

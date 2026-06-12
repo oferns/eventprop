@@ -139,6 +139,32 @@ BackwardOutput* eventprop_backward_spikes_batch(
     const double* post_errors
     );
 
+/**
+ * Free batch maxima output array.
+ */
+void eventprop_free_batch_maxima_output(MaximaOutput* output, int batch_size);
+
+/**
+ * Batch forward pass — compute membrane potential maxima.
+ * Processes multiple samples in parallel using OpenMP (if available).
+ *
+ * @param input  BatchEventPropInput with per-sample spike counts
+ *
+ * @return Array of MaximaOutput structs (one per sample), freed via eventprop_free_batch_maxima_output()
+ */
+MaximaOutput* eventprop_compute_maxima_batch(const BatchEventPropInput* input);
+
+/**
+ * Batch backward pass (maxima).
+ * Processes multiple samples in parallel using OpenMP.
+ * Returns array of BackwardOutput structs (one per sample).
+ */
+BackwardOutput* eventprop_backward_maxima_batch(
+    const BatchEventPropInput* input,
+    MaximaOutput* fwd_batch,       /* Forward maxima outputs from compute_maxima_batch */
+    const double* maxima_errors
+    );
+
 #ifdef __cplusplus
 }
 #endif
