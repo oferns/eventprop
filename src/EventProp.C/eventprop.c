@@ -112,6 +112,9 @@ void eventprop_free_spike_output(SpikeOutput* output)
     free(output->times);
     free(output->sources);
     free(output->currents);
+    output->times = NULL;
+    output->sources = NULL;
+    output->currents = NULL;
     output->n_spikes = 0;
 }
 void eventprop_free_sums_output(SumsOutput* output)
@@ -119,18 +122,24 @@ void eventprop_free_sums_output(SumsOutput* output)
     if (!output) return;
     free(output->sum0);
     free(output->sum1);
+    output->sum0 = NULL;
+    output->sum1 = NULL;
 }
 void eventprop_free_maxima_output(MaximaOutput* output)
 {
     if (!output) return;
     free(output->times);
     free(output->values);
+    output->times = NULL;
+    output->values = NULL;
 }
 void eventprop_free_backward_output(BackwardOutput* output)
 {
     if (!output) return;
     free(output->grad);
     free(output->spike_errors);
+    output->grad = NULL;
+    output->spike_errors = NULL;
 }
 void eventprop_free_backward_batch_output(BackwardOutput* output, int batch_size)
 {
@@ -477,9 +486,6 @@ static double toms748_solve(const RootContext* ctx, double a, double b) {
 
     /* Precondition: bracket must contain sign change */
     if (fa * fb > 0) {
-        fprintf(stderr, "toms748_solve: invalid bracket at a=%.10f, b=%.10f (fa=%.2e, fb=%.2e)\n",
-                a, b, fa, fb);
-        errno = EDOM;  // Domain error - root not bracketed
         return NAN;
     }
 

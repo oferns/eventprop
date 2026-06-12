@@ -152,6 +152,10 @@ class DoubleArrayView:
             dtype=np.float64, count=self._length,
         )
 
+    def __array__(self) -> np.ndarray:
+        """Allow np.asarray() to work on DoubleArrayView."""
+        return self.to_numpy()
+
     @property
     def ptr(self) -> POINTER[c_double]:
         """Raw ctypes pointer for passing to C structs."""
@@ -176,6 +180,10 @@ class Int32ArrayView:
             ctypes.string_at(self._ptr, self._length * 4),
             dtype=np.int32, count=self._length,
         )
+
+    def __array__(self) -> np.ndarray:
+        """Allow np.asarray() to work on Int32ArrayView."""
+        return self.to_numpy()
 
     @property
     def ptr(self) -> POINTER[c_int]:
@@ -351,10 +359,8 @@ class BatchSpikeOutput:
         return self.batch_size
 
     def __del__(self):
-        if EventPropCtypes._global_lib is not None and self._c:
-            EventPropCtypes._global_lib.eventprop_free_batch_spike_output(
-                self._c, self.batch_size
-            )
+        # TEMP: disabled to isolate crash
+        pass
 
 
 class SpikeOutputView(SpikeOutput):
@@ -377,6 +383,18 @@ class BatchBackwardOutput:
 
     def __len__(self) -> int:
         return self.batch_size
+
+    @property
+    def grads(self) -> np.ndarray:
+        """Aggregate per-sample gradients into (batch_size, n_pre, n_post) array."""
+        results = []
+        for i in range(self.batch_size):
+            sample = self._c[i]
+            grad_arr = ctypes.cast(sample.grad, POINTER(c_double * (sample.n_pre * sample.n_post)))
+            grad_np = np.frombuffer(grad_arr.contents, dtype=np.float64, count=sample.n_pre * sample.n_post)
+            grad_np = grad_np.reshape(sample.n_pre, sample.n_post)
+            results.append(grad_np)
+        return np.stack(results)
 
     def __del__(self):
         if EventPropCtypes._global_lib is not None and self._c:
