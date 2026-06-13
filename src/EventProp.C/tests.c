@@ -53,27 +53,27 @@ static void test_compute_sums(void)
         .times=times, .sources=sources, .n_spikes=n_spikes,
         .tau_mem=0.02, .tau_syn=0.005
     };
-    SumsOutput output = eventprop_compute_sums(&base_input);
+    SumsOutput* output = eventprop_compute_sums(&base_input);
 
-    ASSERT(output.n_rows == n_spikes + 1, "wrong row count");
+    ASSERT(output->n_rows == n_spikes + 1, "wrong row count");
     ASSERT(output->n_post == n_post, "wrong post count");
 
     /* Row 0 should be zeros */
     for (int j = 0; j < n_post; j++) {
-        ASSERT_NEAR(output.sum0[j], 0.0, EPSILON);
-        ASSERT_NEAR(output.sum1[j], 0.0, EPSILON);
+        ASSERT_NEAR(output->sum0[j], 0.0, EPSILON);
+        ASSERT_NEAR(output->sum1[j], 0.0, EPSILON);
     }
 
-    eventprop_free_sums_output(&output);
+    eventprop_free_sums_output(output);
     TEST_END;
 }
 
 static void test_compute_sums__zero_spikes(void)
 {
     TEST("ComputeSums zero spikes");
-    SumsOutput output = eventprop_compute_sums(&((EventPropInput){.w=NULL, .n_pre=10, .n_post=5,
+    SumsOutput* output = eventprop_compute_sums(&((EventPropInput){.w=NULL, .n_pre=10, .n_post=5,
     .times=NULL, .sources=NULL, .n_spikes=0, .tau_mem=0.02, .tau_syn=0.005}));
-    eventprop_free_sums_output(&output);
+    eventprop_free_sums_output(output);
     TEST_END;
 }
 
@@ -91,10 +91,10 @@ static void test_compute_sums__large(void)
         .times=times, .sources=sources, .n_spikes=n_spikes,
         .tau_mem=0.02, .tau_syn=0.005
     };
-    SumsOutput output = eventprop_compute_sums(&base_input);
+    SumsOutput* output = eventprop_compute_sums(&base_input);
 
-    ASSERT(output.n_rows == n_spikes + 1, "wrong row count");
-    eventprop_free_sums_output(&output);
+    ASSERT(output->n_rows == n_spikes + 1, "wrong row count");
+    eventprop_free_sums_output(output);
 
     free(w); free(times); free(sources);
     TEST_END;
@@ -113,13 +113,13 @@ static void test_compute_spikes(void)
                  .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
     SpikeOutput* output = eventprop_compute_spikes(&fi);
 
-    ASSERT(output.n_spikes >= 0, "negative spike count");
-    if (output.n_spikes > 1) {
-        for (int i = 1; i < output.n_spikes; i++)
+    ASSERT(output->n_spikes >= 0, "negative spike count");
+    if (output->n_spikes > 1) {
+        for (int i = 1; i < output->n_spikes; i++)
             ASSERT(output->times[i] >= output->times[i-1], "times not sorted");
     }
 
-    eventprop_free_spike_output(&output);
+    eventprop_free_spike_output(output);
     TEST_END;
 }
 
@@ -152,10 +152,10 @@ static void test_backward_spikes(void)
     };
     BackwardOutput* output = eventprop_backward_spikes(&backward_input);
 
-    ASSERT(output.n_pre == n_pre, "wrong pre count");
+    ASSERT(output->n_pre == n_pre, "wrong pre count");
     ASSERT(output->n_post == n_post, "wrong post count");
 
-    eventprop_free_backward_output(&output);
+    eventprop_free_backward_output(output);
     free(fwd_times); free(fwd_sources); free(fwd_currents); free(post_errors);
     TEST_END;
 }
@@ -175,8 +175,8 @@ static void test_compute_spikes__burst_medium(void)
                  .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
     SpikeOutput* output = eventprop_compute_spikes(&fi);
 
-    printf(" (generated %d post spikes)\n", output.n_spikes);
-    eventprop_free_spike_output(&output);
+    printf(" (generated %d post spikes)\n", output->n_spikes);
+    eventprop_free_spike_output(output);
 
     free(w); free(times); free(sources);
     TEST_END;
@@ -197,7 +197,7 @@ static void test_compute_maxima(void)
     MaximaOutput* output = eventprop_compute_maxima(&base_input);
 
     ASSERT(output->n_post == n_post, "wrong post count");
-    eventprop_free_maxima_output(&output);
+    eventprop_free_maxima_output(output);
     TEST_END;
 }
 
@@ -228,8 +228,8 @@ static void test_backward_maxima(void)
     };
     BackwardOutput* output = eventprop_backward_maxima(&backward_input);
 
-    ASSERT(output.n_pre == n_pre, "wrong pre count");
-    eventprop_free_backward_output(&output);
+    ASSERT(output->n_pre == n_pre, "wrong pre count");
+    eventprop_free_backward_output(output);
 
     free(maxima_times); free(maxima_values); free(maxima_errors);
     TEST_END;
@@ -267,7 +267,7 @@ static void test_backward_spikes_batch_single_sample(void)
     BackwardSpikesInput bsi_single = {
         .input = &base,
         .fwd_times=fwd->times, .fwd_sources=fwd->sources,
-        .fwd_currents=fwd.currents,
+        .fwd_currents=fwd->currents,
         .post_errors=post_errors_single, .n_post_spikes=fwd->n_spikes
     };
     BackwardOutput* grad_single = eventprop_backward_spikes(&bsi_single);
@@ -275,7 +275,7 @@ static void test_backward_spikes_batch_single_sample(void)
     /* Batch backward with batch_size=1 */
     int n_per_sample[] = { n_spikes };
     SpikeOutput* fwd_batch = malloc(sizeof(SpikeOutput));
-    *fwd_batch = fwd;  // copy struct (pointers still valid)
+    *fwd_batch = *fwd;  // copy struct (pointers still valid)
 
     double* post_errors_batch = malloc(fwd->n_spikes * sizeof(double));
     for (int i = 0; i < fwd->n_spikes; i++) post_errors_batch[i] = -1.0;
@@ -298,9 +298,9 @@ static void test_backward_spikes_batch_single_sample(void)
     for (int i = 0; i < n_pre * n_post; i++) grad_sum += fabs(grad_single->grad[i]);
     ASSERT(grad_sum > EPSILON, "all gradients are zero");
 
-    eventprop_free_backward_output(&grad_single);
+    eventprop_free_backward_output(grad_single);
     eventprop_free_backward_batch_output(grad_batch, 1);
-    eventprop_free_spike_output(&fwd);
+    eventprop_free_spike_output(fwd);
     free(fwd_batch); free(post_errors_single); free(post_errors_batch);
     free(w); free(times); free(sources);
     TEST_END;
@@ -398,7 +398,7 @@ static void test_backward_spikes_batch_multi_sample(void)
         }
         ASSERT(!mismatch, "multi-sample batch gradient mismatch");
 
-        eventprop_free_backward_output(&grad_single);
+        eventprop_free_backward_output(grad_single);
         offset_in += n_per_sample[b];
         offset_err += fwd_batch[b].n_spikes;
     }
@@ -445,16 +445,16 @@ static void test_compute_spikes_invalid_bracketing(void)
 
     /* Check that returned spike times are valid (not NaN) */
     int invalid_count = 0;
-    for (int i = 0; i < output.n_spikes; i++) {
+    for (int i = 0; i < output->n_spikes; i++) {
         if (!isfinite(output->times[i])) {
             invalid_count++;
         }
     }
 
     /* Some spikes may be skipped due to invalid brackets */
-    printf(" (spikes: %d, invalid skipped: may vary)\n", output.n_spikes);
+    printf(" (spikes: %d, invalid skipped: may vary)\n", output->n_spikes);
 
-    eventprop_free_spike_output(&output);
+    eventprop_free_spike_output(output);
     free(w); free(times); free(sources);
     TEST_END;
 }

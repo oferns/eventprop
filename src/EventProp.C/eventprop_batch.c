@@ -49,7 +49,7 @@ BackwardOutput* eventprop_backward_spikes_batch(const BatchEventPropInput* input
             .post_errors=post_errors + err_offsets[b],
             .n_post_spikes=n_fwd_spikes,
         };
-        result[b] = eventprop_backward_spikes(&backward_input);
+        result[b] = *eventprop_backward_spikes(&backward_input);
     }
 
     free(offsets);
@@ -92,7 +92,7 @@ SpikeOutput* eventprop_compute_spikes_batch(const BatchEventPropInput* input)
             .tau_mem=base->tau_mem, .tau_syn=base->tau_syn,
             .v_th = base->v_th
         };
-        result[b] = eventprop_compute_spikes(&sample_input);
+        result[b] = *eventprop_compute_spikes(&sample_input);
     }
     free(offsets);
     return result;
@@ -132,7 +132,7 @@ MaximaOutput* eventprop_compute_maxima_batch(const BatchEventPropInput* input)
             .tau_mem=base->tau_mem, .tau_syn=base->tau_syn,
             .v_th = base->v_th
         };
-        result[b] = eventprop_compute_maxima(&sample_input);
+        result[b] = *eventprop_compute_maxima(&sample_input);
     }
     free(offsets);
     return result;
@@ -184,7 +184,7 @@ BackwardOutput* eventprop_backward_maxima_batch(const BatchEventPropInput* input
             .maxima_errors=maxima_errors + err_offset,
             .n_maxima=n_post,
         };
-        result[b] = eventprop_backward_maxima(&backward_input);
+        result[b] = *eventprop_backward_maxima(&backward_input);
     }
 
     free(offsets);

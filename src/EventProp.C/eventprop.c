@@ -551,9 +551,9 @@ static double toms748_solve(const RootContext* ctx, double a, double b) {
     return b;
 }
 
-SpikeOutput eventprop_compute_spikes(const EventPropInput* input)
+SpikeOutput* eventprop_compute_spikes(const EventPropInput* input)
 {
-    SpikeOutput result;
+    SpikeOutput* result = malloc(sizeof(SpikeOutput));
 
     /* Use dynamic arrays internally, then copy to exact-size output */
     double k_prefactor = input->tau_syn / (input->tau_mem - input->tau_syn);
@@ -563,9 +563,9 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput* input)
     double tau_syn_inv = 1.0 / input->tau_syn;
 
     /* Compute sums */
-    SumsOutput sums = eventprop_compute_sums(input);
-    const double* sum0 = sums.sum0;
-    const double* sum1 = sums.sum1;
+    SumsOutput* sums = eventprop_compute_sums(input);
+    const double* sum0 = sums->sum0;
+    const double* sum1 = sums->sum1;
 
     /* Per-neuron dynamic buffers - growable to handle burst patterns */
     double** post_times_arr   = malloc(input->n_post * sizeof(double*));
@@ -804,9 +804,9 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput* input)
     return result;
 }
 
-SumsOutput eventprop_compute_sums(const EventPropInput* input)
+SumsOutput* eventprop_compute_sums(const EventPropInput* input)
 {
-    SumsOutput result;
+    SumsOutput* result = malloc(sizeof(SumsOutput));
     int n_rows = input->n_spikes + 1;
     result->n_rows = n_rows;
     result->n_post = input->n_post;
@@ -843,9 +843,9 @@ SumsOutput eventprop_compute_sums(const EventPropInput* input)
     return result;
 }
 
-MaximaOutput eventprop_compute_maxima(const EventPropInput* input)
+MaximaOutput* eventprop_compute_maxima(const EventPropInput* input)
 {
-    MaximaOutput result;
+    MaximaOutput* result = malloc(sizeof(MaximaOutput));
     result->n_post = input->n_post;
 
     /* Allocate output - always exactly n_post elements */
@@ -859,11 +859,11 @@ MaximaOutput eventprop_compute_maxima(const EventPropInput* input)
     }
 
     /* Use our own alloc function */
-    SumsOutput sums = eventprop_compute_sums(input);
+    SumsOutput* sums = eventprop_compute_sums(input);
 
-    int n_rows = sums.n_rows;
-    double* sum0 = sums.sum0;
-    double* sum1 = sums.sum1;
+    int n_rows = sums->n_rows;
+    double* sum0 = sums->sum0;
+    double* sum1 = sums->sum1;
 
     /* Find maxima for each post-synaptic neuron */
     double k_pref = input->tau_syn / (input->tau_mem - input->tau_syn);
@@ -916,9 +916,9 @@ MaximaOutput eventprop_compute_maxima(const EventPropInput* input)
     return result;
 }
 
-BackwardOutput eventprop_backward_maxima(const BackwardMaximaInput* input)
+BackwardOutput* eventprop_backward_maxima(const BackwardMaximaInput* input)
 {
-    BackwardOutput result;
+    BackwardOutput* result = malloc(sizeof(BackwardOutput));
 
     result->n_pre = input->input->n_pre;
     result->n_post = input->input->n_post;
