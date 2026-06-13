@@ -756,7 +756,7 @@ SpikeOutput* eventprop_compute_spikes(const EventPropInput* input)
             free(post_times_arr[n]);
             free(post_currents_arr[n]);
         }
-        eventprop_free_sums_output(&sums);
+        eventprop_free_sums_output(sums);
         free(post_times_arr); free(post_currents_arr);
         free(spike_caps); free(spike_counts);
         return result;
@@ -796,7 +796,7 @@ SpikeOutput* eventprop_compute_spikes(const EventPropInput* input)
         free(post_times_arr[n]);
         free(post_currents_arr[n]);
     }
-    eventprop_free_sums_output(&sums);
+    eventprop_free_sums_output(sums);
     free(post_times_arr); free(post_currents_arr);
     free(spike_caps); free(spike_counts);
     free(entries);
@@ -872,7 +872,7 @@ MaximaOutput* eventprop_compute_maxima(const EventPropInput* input)
 
     /* No spikes → nothing to compute, return NaN/-INF (matches Eigen) */
     if (input->n_spikes == 0) {
-        eventprop_free_sums_output(&sums);
+        eventprop_free_sums_output(sums);
         return result;
     }
 
@@ -912,7 +912,7 @@ MaximaOutput* eventprop_compute_maxima(const EventPropInput* input)
         }
     }
 
-    eventprop_free_sums_output(&sums);
+    eventprop_free_sums_output(sums);
     return result;
 }
 
