@@ -81,31 +81,31 @@ void eventprop_free_backward_output(BackwardOutput* output);
  * Forward pass
  * Returns a SpikeOutput struct — caller must free via eventprop_free_spike_output().
  */
-SpikeOutput eventprop_compute_spikes(const EventPropInput* input);
+SpikeOutput* eventprop_compute_spikes(const EventPropInput* input);
 
 /**
  * Compute cumulative sums
  * Returns a SumsOutput struct — caller must free via eventprop_free_sums_output().
  */
-SumsOutput eventprop_compute_sums(const EventPropInput* input);
+SumsOutput* eventprop_compute_sums(const EventPropInput* input);
 
 /**
  * Compute membrane potential maxima
  * Returns a MaximaOutput struct — caller must free via eventprop_free_maxima_output().
  */
-MaximaOutput eventprop_compute_maxima(const EventPropInput* input);
+MaximaOutput* eventprop_compute_maxima(const EventPropInput* input);
 
 /**
  * Backward pass (spikes).
  * Returns a BackwardOutput struct — caller must free via eventprop_free_backward_output().
  */
-BackwardOutput eventprop_backward_spikes(const BackwardSpikesInput* input);
+BackwardOutput* eventprop_backward_spikes(const BackwardSpikesInput* input);
 
 /**
  * Backward pass (maxima).
  * Returns a BackwardOutput struct — caller must free via eventprop_free_backward_output().
  */
-BackwardOutput eventprop_backward_maxima(const BackwardMaximaInput* input);
+BackwardOutput* eventprop_backward_maxima(const BackwardMaximaInput* input);
 
 #ifdef __cplusplus
 }

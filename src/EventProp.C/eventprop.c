@@ -742,15 +742,15 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput* input)
 
 
     /* Count total spikes and allocate exact-size output */
-    result.n_spikes = 0;
+    result->n_spikes = 0;
     for (int n = 0; n < input->n_post; n++)
-        result.n_spikes += spike_counts[n];
+        result->n_spikes += spike_counts[n];
 
 
-    if (result.n_spikes == 0) {
-        result.times = NULL;
-        result.sources = NULL;
-        result.currents = NULL;
+    if (result->n_spikes == 0) {
+        result->times = NULL;
+        result->sources = NULL;
+        result->currents = NULL;
 
         for (int n = 0; n < input->n_post; n++) {
             free(post_times_arr[n]);
@@ -763,7 +763,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput* input)
     }
 
     /* Collect all spikes into sortable array */
-    SpikeEntry* entries = malloc(result.n_spikes * sizeof(SpikeEntry));
+    SpikeEntry* entries = malloc(result->n_spikes * sizeof(SpikeEntry));
     int idx = 0;
     for (int n = 0; n < input->n_post; n++) {
         int cnt = spike_counts[n];
@@ -778,17 +778,17 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput* input)
     }
 
     /* Sort by time ascending */
-    qsort(entries, result.n_spikes, sizeof(SpikeEntry), cmp_spike_asc);
+    qsort(entries, result->n_spikes, sizeof(SpikeEntry), cmp_spike_asc);
 
     /* Allocate and copy to output */
-    result.times = malloc(result.n_spikes * sizeof(double));
-    result.sources = malloc(result.n_spikes * sizeof(int));
-    result.currents = malloc(result.n_spikes * sizeof(double));
+    result->times = malloc(result->n_spikes * sizeof(double));
+    result->sources = malloc(result->n_spikes * sizeof(int));
+    result->currents = malloc(result->n_spikes * sizeof(double));
 
-    for (int i = 0; i < result.n_spikes; i++) {
-        result.times[i]     = entries[i].time;
-        result.sources[i]   = entries[i].source;
-        result.currents[i]  = entries[i].current;
+    for (int i = 0; i < result->n_spikes; i++) {
+        result->times[i]     = entries[i].time;
+        result->sources[i]   = entries[i].source;
+        result->currents[i]  = entries[i].current;
     }
 
     /* Cleanup */
@@ -808,12 +808,12 @@ SumsOutput eventprop_compute_sums(const EventPropInput* input)
 {
     SumsOutput result;
     int n_rows = input->n_spikes + 1;
-    result.n_rows = n_rows;
-    result.n_post = input->n_post;
+    result->n_rows = n_rows;
+    result->n_post = input->n_post;
 
     /* Allocate output - exact size known upfront */
-    result.sum0 = calloc(n_rows * input->n_post, sizeof(double));
-    result.sum1 = calloc(n_rows * input->n_post, sizeof(double));
+    result->sum0 = calloc(n_rows * input->n_post, sizeof(double));
+    result->sum1 = calloc(n_rows * input->n_post, sizeof(double));
 
     if (input->n_spikes == 0) return result;
 
@@ -829,11 +829,11 @@ SumsOutput eventprop_compute_sums(const EventPropInput* input)
     /* Accumulate sums using SIMD-accelerated FMA */
     for (int i = 0; i < input->n_spikes; i++) {
         int src = input->sources[i];
-        fma_row_simd(result.sum0 + (i + 1) * input->n_post,
-                           result.sum0 + i * input->n_post,
+        fma_row_simd(result->sum0 + (i + 1) * input->n_post,
+                           result->sum0 + i * input->n_post,
                            input->w + src * input->n_post, exp_syn[i], input->n_post);
-        fma_row_simd(result.sum1 + (i + 1) * input->n_post,
-                           result.sum1 + i * input->n_post,
+        fma_row_simd(result->sum1 + (i + 1) * input->n_post,
+                           result->sum1 + i * input->n_post,
                            input->w + src * input->n_post, exp_mem[i], input->n_post);
     }
 
@@ -846,16 +846,16 @@ SumsOutput eventprop_compute_sums(const EventPropInput* input)
 MaximaOutput eventprop_compute_maxima(const EventPropInput* input)
 {
     MaximaOutput result;
-    result.n_post = input->n_post;
+    result->n_post = input->n_post;
 
     /* Allocate output - always exactly n_post elements */
-    result.times   = calloc(input->n_post, sizeof(double));
-    result.values  = calloc(input->n_post, sizeof(double));
+    result->times   = calloc(input->n_post, sizeof(double));
+    result->values  = calloc(input->n_post, sizeof(double));
 
     /* Initialize maxima to "not found" */
     for (int i = 0; i < input->n_post; i++) {
-        result.times[i]   = NAN;
-        result.values[i]  = -INFINITY;
+        result->times[i]   = NAN;
+        result->values[i]  = -INFINITY;
     }
 
     /* Use our own alloc function */
@@ -893,9 +893,9 @@ MaximaOutput eventprop_compute_maxima(const EventPropInput* input)
                     (i == input->n_spikes || tmax <= t_input)) {
                     double vmax = k_pref * (s1 * exp(-tmax/input->tau_mem) -
                                             s0 * exp(-tmax/input->tau_syn));
-                    if (vmax > result.values[target_nrn]) {
-                        result.values[target_nrn] = vmax;
-                        result.times[target_nrn]  = tmax;
+                    if (vmax > result->values[target_nrn]) {
+                        result->values[target_nrn] = vmax;
+                        result->times[target_nrn]  = tmax;
                     }
                 }
             }
@@ -904,9 +904,9 @@ MaximaOutput eventprop_compute_maxima(const EventPropInput* input)
             if (t_input < INFINITY) {
                 double v_at_input = k_pref * (s1 * exp(-t_input/input->tau_mem) -
                                               s0 * exp(-t_input/input->tau_syn));
-                if (v_at_input > result.values[target_nrn]) {
-                    result.values[target_nrn] = v_at_input;
-                    result.times[target_nrn]  = t_input;
+                if (v_at_input > result->values[target_nrn]) {
+                    result->values[target_nrn] = v_at_input;
+                    result->times[target_nrn]  = t_input;
                 }
             }
         }
@@ -920,12 +920,12 @@ BackwardOutput eventprop_backward_maxima(const BackwardMaximaInput* input)
 {
     BackwardOutput result;
 
-    result.n_pre = input->input->n_pre;
-    result.n_post = input->input->n_post;
+    result->n_pre = input->input->n_pre;
+    result->n_post = input->input->n_post;
 
     /* Allocate output - exact sizes known upfront */
-    result.grad = calloc(input->input->n_pre * input->input->n_post, sizeof(double));
-    result.spike_errors = calloc(input->input->n_spikes, sizeof(double));
+    result->grad = calloc(input->input->n_pre * input->input->n_post, sizeof(double));
+    result->spike_errors = calloc(input->input->n_spikes, sizeof(double));
 
     if (input->input->n_spikes == 0 || input->n_maxima == 0)
         return result;
@@ -957,24 +957,24 @@ BackwardOutput eventprop_backward_maxima(const BackwardMaximaInput* input)
             double lambda_i = -k_bwd_val * input->maxima_errors[max_idx] * tau_mem_inv;
 
             int source_nrn = input->input->sources[spike_idx];
-            result.grad[source_nrn * input->input->n_post + max_idx] -= input->input->tau_syn * lambda_i;
+            result->grad[source_nrn * input->input->n_post + max_idx] -= input->input->tau_syn * lambda_i;
 
-            result.spike_errors[spike_idx] += lambda_v - lambda_i;
+            result->spike_errors[spike_idx] += lambda_v - lambda_i;
         }
     }
 
     return result;
 }
 
-BackwardOutput eventprop_backward_spikes(const BackwardSpikesInput* input)
+BackwardOutput* eventprop_backward_spikes(const BackwardSpikesInput* input)
 {
-    BackwardOutput result;
+    BackwardOutput* result = malloc(sizeof(BackwardOutput));
 
     /* Allocate output - exact sizes known upfront */
-    result.n_pre = input->input->n_pre;
-    result.n_post = input->input->n_post;
-    result.grad = calloc(input->input->n_pre * input->input->n_post, sizeof(double));
-    result.spike_errors = calloc(input->input->n_spikes, sizeof(double));
+    result->n_pre = input->input->n_pre;
+    result->n_post = input->input->n_post;
+    result->grad = calloc(input->input->n_pre * input->input->n_post, sizeof(double));
+    result->spike_errors = calloc(input->input->n_spikes, sizeof(double));
 
     if (input->n_post_spikes == 0)
         return result;
@@ -1027,7 +1027,7 @@ BackwardOutput eventprop_backward_spikes(const BackwardSpikesInput* input)
                 }
             }
 
-            vadd_scaled_simd(result.grad + spike_source * input->input->n_post, lambda_i, -input->input->tau_syn, input->input->n_post);
+            vadd_scaled_simd(result->grad + spike_source * input->input->n_post, lambda_i, -input->input->tau_syn, input->input->n_post);
 
             /* Compute dot product: w[row] · (lambda_v - lambda_i)
                Use stack allocation for small n_post, heap otherwise. */
@@ -1043,7 +1043,7 @@ BackwardOutput eventprop_backward_spikes(const BackwardSpikesInput* input)
             if (!use_stack) free(diff);
 
             /* Write spike error to alloc buffer */
-            result.spike_errors[spike_idx] = all_errors[spike_idx];
+            result->spike_errors[spike_idx] = all_errors[spike_idx];
         } else {
             double current = input->fwd_currents[spike_idx];
             double inv_ic = 1.0 / (current - input->input->v_th);

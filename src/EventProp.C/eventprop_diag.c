@@ -21,21 +21,21 @@ void eventprop_free_voltage_trace_output(VoltageTraceOutput* output)
     free(output->ts);
 }
 
-VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput* input)
+VoltageTraceOutput* eventprop_compute_voltage_trace(const VoltageTraceInput* input)
 {
     const EventPropInput* fwd = input->input;
     int n_t = (int)(input->t_max / input->dt);
 
-    VoltageTraceOutput result;
-    result.n_t = n_t;
-    result.v_trace = calloc(n_t, sizeof(double));
-    result.ts      = calloc(n_t, sizeof(double));
+    VoltageTraceOutput* result = malloc(sizeof(VoltageTraceOutput));
+    result->n_t = n_t;
+    result->v_trace = calloc(n_t, sizeof(double));
+    result->ts      = calloc(n_t, sizeof(double));
 
     double k_prefactor = fwd->tau_syn / (fwd->tau_mem - fwd->tau_syn);
 
     for (int ti = 0; ti < n_t; ti++) {
         double t = input->dt * ti;
-        result.ts[ti] = t;
+        result->ts[ti] = t;
         double mem = 0.0;
 
         /* Pre-synaptic contribution */
@@ -53,27 +53,27 @@ VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput* inpu
                 mem -= fwd->v_th * exp(-(t - input->fwd_times[i]) / fwd->tau_mem);
         }
 
-        result.v_trace[ti] = mem;
+        result->v_trace[ti] = mem;
     }
 
     return result;
 }
 
-LambdaITraceOutput eventprop_compute_lambda_i_trace(const LambdaITraceInput* input)
+LambdaITraceOutput* eventprop_compute_lambda_i_trace(const LambdaITraceInput* input)
 {
     int n_t = (int)(input->t_max / input->dt);
 
-    LambdaITraceOutput result;
-    result.n_t = n_t;
-    result.lambda_trace = calloc(n_t, sizeof(double));
-    result.ts           = calloc(n_t, sizeof(double));
+    LambdaITraceOutput* result = malloc(sizeof(LambdaITraceOutput));
+    result->n_t = n_t;
+    result->lambda_trace = calloc(n_t, sizeof(double));
+    result->ts           = calloc(n_t, sizeof(double));
 
     for (int ti = 0; ti < n_t; ti++) {
         double t = input->dt * ti;
-        result.ts[ti] = t;
+        result->ts[ti] = t;
 
         if (input->n_post_spikes == 0) {
-            result.lambda_trace[ti] = 0.0;
+            result->lambda_trace[ti] = 0.0;
             continue;
         }
 
@@ -91,7 +91,7 @@ LambdaITraceOutput eventprop_compute_lambda_i_trace(const LambdaITraceInput* inp
                         (exp(-dt_jump / input->tau_mem) - exp(-dt_jump / input->tau_syn));
         }
 
-        result.lambda_trace[ti] = lambda_i;
+        result->lambda_trace[ti] = lambda_i;
     }
 
     return result;
