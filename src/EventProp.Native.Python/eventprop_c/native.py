@@ -555,6 +555,7 @@ class DropoutBatchOutput:
     def __init__(self, c_ptr: ctypes.POINTER(_DropoutOutput), batch_size: int):
         self._c = c_ptr
         self.batch_size = batch_size
+        self._freed = False
 
     def __getitem__(self, idx: int) -> 'DropoutOutputView':
         if not 0 <= idx < self.batch_size:
@@ -564,11 +565,17 @@ class DropoutBatchOutput:
     def __len__(self) -> int:
         return self.batch_size
 
-    def __del__(self):
-        if EventPropCtypes._global_lib is not None and self._c:
+    def free(self):
+        """Explicitly free C memory (prevents __del__ from double-freeing)."""
+        if not self._freed and EventPropCtypes._global_lib is not None and self._c:
             EventPropCtypes._global_lib.eventprop_free_dropout_output(
                 self._c, self.batch_size
             )
+            self._freed = True
+
+    def __del__(self):
+        if not self._freed:
+            self.free()
 
 
 # ── Library loader and function bindings ─────────────────────────────────

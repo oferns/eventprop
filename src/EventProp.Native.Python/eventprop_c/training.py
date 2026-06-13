@@ -47,22 +47,16 @@ def dropout_spikes(spikes: SpikesVector, p_drop: float, random_seed: int) -> Spi
     if total_spikes == 0:
         return SpikesVector([Spikes() for _ in range(batch_size)])
 
-    times_flat = np.empty(total_spikes, dtype=np.float64)
-    sources_flat = np.empty(total_spikes, dtype=np.intc)
-
-    offset = 0
-    for i, s in enumerate(spikes):
-        times_flat[offset:offset + s.n_spikes] = np.asarray(s.times)
-        sources_flat[offset:offset + s.n_spikes] = np.asarray(s.sources).astype(np.intc)
-        offset += s.n_spikes
+    all_times = np.concatenate([s.times for s in spikes])
+    all_sources = np.concatenate([s.sources for s in spikes]).astype(np.intc)
 
     # Build C input struct
     inp = _EventPropInput(
         w=None,
         n_pre=0,
         n_post=0,
-        times=times_flat.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
-        sources=sources_flat.ctypes.data_as(ctypes.POINTER(ctypes.c_int)),
+        times=all_times.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        sources=all_sources.ctypes.data_as(ctypes.POINTER(ctypes.c_int)),
         n_spikes=total_spikes,
         tau_mem=0.0,
         tau_syn=0.0,
@@ -80,20 +74,8 @@ def dropout_spikes(spikes: SpikesVector, p_drop: float, random_seed: int) -> Spi
     lib = EventPropCtypes()
     c_output = lib.dropout_spikes_batch(batch_inp, p_drop, random_seed)
 
-    # Wrap in SpikesVector — convert zero-copy views to owned Spikes
-    result = []
-    for i in range(batch_size):
-        sample = c_output[i]
-        if sample.n_spikes > 0:
-            result.append(Spikes(
-                times=np.asarray(sample.times),
-                sources=np.asarray(sample.sources).astype(np.int32),
-            ))
-        else:
-            result.append(Spikes())
-
-    # c_output freed by DropoutBatchOutput.__del__ when GC'd
-    return SpikesVector(result)
+    # Wrap in zero-copy SpikesVector — C memory freed by DropoutBatchOutput.__del__
+    return SpikesVector._from_dropout_output(c_output)
 
 
 class AbstractTraining(ABC):

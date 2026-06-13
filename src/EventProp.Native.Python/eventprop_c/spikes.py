@@ -92,6 +92,14 @@ class SpikesVector:
         obj._batch_output = batch_output  # keeps C memory alive
         return obj
 
+    @classmethod
+    def _from_dropout_output(cls, batch_output: 'DropoutBatchOutput') -> 'SpikesVector':
+        """Create from C-owned DropoutBatchOutput (zero-copy, owns memory)."""
+        obj = object.__new__(cls)
+        obj._spikes = None
+        obj._batch_output = batch_output  # keeps C memory alive
+        return obj
+
     def __len__(self) -> int:
         if self._batch_output is not None:
             return len(self._batch_output)
