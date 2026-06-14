@@ -8,6 +8,9 @@ dist/
 *.dylib
 *.pyd
 
+# Generated Cython C files
+*.c
+
 # Python cache
 __pycache__/
 *.pyc
