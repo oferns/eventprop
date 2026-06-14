@@ -182,7 +182,7 @@ public class NativeVsManagedTests
             new double[times.Length], new double[times.Length]);
 
         // C library via P/Invoke
-        using var cOutput = NativeApi.ComputeSums(w, nPre, nPost, times, sources, 0.02, 0.005);
+        using var cOutput = Api.ComputeSums(w, nPre, nPost, times, sources, 0.02, 0.005);
         var cSum0 = cOutput.Sum0.ToArray();
         var cSum1 = cOutput.Sum1.ToArray();
 
@@ -255,7 +255,7 @@ public class NativeVsManagedTests
         var csResult = EventPropMath.ComputeSpikes(w, times, sources, nPost, 1.0, 0.02, 0.005, buffers);
 
         // C library via P/Invoke
-        using var cOutput = NativeApi.ComputeSpikes(w, nPre, nPost, times, sources, 1.0, 0.02, 0.005);
+        using var cOutput = Api.ComputeSpikes(w, nPre, nPost, times, sources, 1.0, 0.02, 0.005);
         int nCSpikes = cOutput.NSpikes;
         var cTimes = cOutput.Times.ToArray();
         var cSources = cOutput.Sources.ToArray();
@@ -332,7 +332,7 @@ public class NativeVsManagedTests
         var csMaxima = EventPropMath.ComputeMaxima(w, times, sources, nPost, 0.02, 0.005, new ScratchBuffers());
 
         // C library via P/Invoke
-        using var cOutput = NativeApi.ComputeMaxima(w, nPre, nPost, times, sources, 0.02, 0.005);
+        using var cOutput = Api.ComputeMaxima(w, nPre, nPost, times, sources, 0.02, 0.005);
         var cTimes = cOutput.Times.ToArray();
         var cValues = cOutput.Values.ToArray();
 
@@ -421,11 +421,11 @@ public class NativeVsManagedTests
             1.0, 0.02, 0.005, csGradient, buffers);
 
         // C library via P/Invoke
-        using var cOutput = NativeApi.BackwardSpikes(times, sources,
+        using var cOutput = Api.BackwardSpikes(times, sources,
             postSpikes.Times[..postSpikes.NSpikes], postSpikes.Sources[..postSpikes.NSpikes],
             postSpikes.Currents[..postSpikes.NSpikes], postSpikes.Errors[..postSpikes.NSpikes],
             postSpikes.NSpikes, w, nPre, nPost, 1.0, 0.02, 0.005);
-        var cGradient = cOutput.Grad.ToArray();
+        var cGradient = cOutput.Gradient.ToArray();
 
         // Assert: .NET matches C (scaled tolerance)
         for (int i = 0; i < csGradient.Length; i++)
@@ -511,7 +511,7 @@ public class NativeVsManagedTests
             w, nPost, 0.02, 0.005, csGradient);
 
         // C library via P/Invoke
-        using var cOutput = NativeApi.BackwardMaxima(times, sources,
+        using var cOutput = Api.BackwardMaxima(times, sources,
             maximaTimes, maximaValues, maximaErrors, nPost,
             w, nPre, nPost, 0.02, 0.005);
         var cGradient = cOutput.Gradient.ToArray();

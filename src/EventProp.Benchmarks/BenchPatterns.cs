@@ -77,7 +77,7 @@ public abstract class Bench_Pattern_Base : BenchBase
     [Benchmark]
     public void ComputeSums_Native()
     {
-        using var output = NativeApi.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn);
+        using var output = Api.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn);
         // Access to prevent optimization
         var _ = output.Sum0[0];
     }
@@ -89,7 +89,7 @@ public abstract class Bench_Pattern_Base : BenchBase
     [Benchmark]
     public int ComputeSpikes_Native()
     {
-        using var output = NativeApi.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn);
+        using var output = Api.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn);
         return output.NSpikes;
     }
 
@@ -103,12 +103,12 @@ public abstract class Bench_Pattern_Base : BenchBase
     [Benchmark]
     public void BackwardSpikes_Native()
     {
-        using var output = NativeApi.BackwardSpikes(Times, Sources,
+        using var output = Api.BackwardSpikes(Times, Sources,
             PostTimesNative, PostSourcesNative, PostCurrentsNative,
             PostErrorsNative, PostSpikes!.NSpikes, W, NPre, NPost,
             VTh, TauMem, TauSyn);
         // Access to prevent optimization
-        var _ = output.Grad[0];
+        var _ = output.Gradient[0];
     }
 }
 

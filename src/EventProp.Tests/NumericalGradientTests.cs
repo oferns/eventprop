@@ -74,11 +74,11 @@ public class NumericalGradientTests
             1.0, tauMem, tauSyn, csGradient, buffers);
 
         // C++ gradient via P/Invoke
-        using var nativeOutput = NativeApi.BackwardSpikes(inputTimes, inputSources,
+        using var nativeOutput = Api.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times[..postSpikes.NSpikes], postSpikes.Sources[..postSpikes.NSpikes],
             postSpikes.Currents[..postSpikes.NSpikes], postSpikes.Errors[..postSpikes.NSpikes],
             postSpikes.NSpikes, w, nPre, nPost, 1.0, tauMem, tauSyn);
-        var nativeGradient = nativeOutput.Grad.ToArray();
+        var nativeGradient = nativeOutput.Gradient.ToArray();
 
         // All weights should match within tolerance
         for (int i = 0; i < csGradient.Length; i++)
@@ -137,11 +137,11 @@ public class NumericalGradientTests
         {
             int src = activeSrc[k], nrn = activeNrn[k];
 
-            using var nativeOutput = NativeApi.BackwardSpikes(inputTimes, inputSources,
+            using var nativeOutput = Api.BackwardSpikes(inputTimes, inputSources,
                 postSpikes.Times[..postSpikes.NSpikes], postSpikes.Sources[..postSpikes.NSpikes],
                 postSpikes.Currents[..postSpikes.NSpikes], postSpikes.Errors[..postSpikes.NSpikes],
                 postSpikes.NSpikes, w, nPre, nPost, 1.0, tauMem, tauSyn);
-            var nativeGradient = nativeOutput.Grad.ToArray();
+            var nativeGradient = nativeOutput.Gradient.ToArray();
 
             await Assert.That(gradient[src * nPost + nrn]).IsCloseTo(nativeGradient[src * nPost + nrn], 1e-10);
         }
@@ -241,11 +241,11 @@ public class NumericalGradientTests
             1.0, tauMem, tauSyn, csGradient, buffers);
 
         // C++ gradient
-        using var nativeOutput = NativeApi.BackwardSpikes(inputTimes, inputSources,
+        using var nativeOutput = Api.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times[..postSpikes.NSpikes], postSpikes.Sources[..postSpikes.NSpikes],
             postSpikes.Currents[..postSpikes.NSpikes], postSpikes.Errors[..postSpikes.NSpikes],
             postSpikes.NSpikes, w, nPre, nPost, 1.0, tauMem, tauSyn);
-        var nativeGradient = nativeOutput.Grad.ToArray();
+        var nativeGradient = nativeOutput.Gradient.ToArray();
 
         // All weights should match
         for (int i = 0; i < csGradient.Length; i++)
@@ -285,11 +285,11 @@ public class NumericalGradientTests
         EventPropMath.BackwardSpikes(w, inputTimes, inputSources, postSpikes, nPost,
             1.0, tauMem, tauSyn, csGradient, buffers);
 
-        using var nativeOutput = NativeApi.BackwardSpikes(inputTimes, inputSources,
+        using var nativeOutput = Api.BackwardSpikes(inputTimes, inputSources,
             postSpikes.Times[..postSpikes.NSpikes], postSpikes.Sources[..postSpikes.NSpikes],
             postSpikes.Currents[..postSpikes.NSpikes], postSpikes.Errors[..postSpikes.NSpikes],
             postSpikes.NSpikes, w, nPre, nPost, 1.0, tauMem, tauSyn);
-        var nativeGradient = nativeOutput.Grad.ToArray();
+        var nativeGradient = nativeOutput.Gradient.ToArray();
 
         await Assert.That(csGradient[0]).IsCloseTo(nativeGradient[0], 1e-10);
     }
@@ -319,7 +319,7 @@ public class NumericalGradientTests
             return;
 
         // C++ gradient as ground truth
-        using var nativeOutput = NativeApi.BackwardMaxima(inputTimes, inputSources,
+        using var nativeOutput = Api.BackwardMaxima(inputTimes, inputSources,
             maxima.Times[..nPost], maxima.Values[..nPost], [0.1], 1,
             w, nPre, nPost, 0.02, 0.005);
         var nativeGradient = nativeOutput.Gradient.ToArray();
@@ -370,7 +370,7 @@ public class NumericalGradientTests
             maxima.Times, maxima.Values, maximaErrors,
             w, nPost, 0.02, 0.005, csGradient);
 
-        using var nativeOutput = NativeApi.BackwardMaxima(inputTimes, inputSources,
+        using var nativeOutput = Api.BackwardMaxima(inputTimes, inputSources,
             maxima.Times[..nPost], maxima.Values[..nPost], maximaErrors, nPost,
             w, nPre, nPost, 0.02, 0.005);
         var nativeGradient = nativeOutput.Gradient.ToArray();
@@ -425,7 +425,7 @@ public class NumericalGradientTests
         }
 
         // Verify non-zero gradients match C++
-        using var nativeOutput = NativeApi.BackwardMaxima(inputTimes, inputSources,
+        using var nativeOutput = Api.BackwardMaxima(inputTimes, inputSources,
             maxima.Times[..nPost], maxima.Values[..nPost], maximaErrors, nPost,
             w, nPre, nPost, 0.02, 0.005);
         var nativeGradient = nativeOutput.Gradient.ToArray();
