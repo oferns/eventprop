@@ -49,16 +49,16 @@ public static unsafe partial class Batch
     private static partial IntPtr eventprop_dropout_spikes_batch(IntPtr input, double pDrop, int seed);
 
     [LibraryImport(Lib)]
-    private static partial void eventprop_free_batch_spike_output(IntPtr output, int batchSize);
+    public static partial void eventprop_free_batch_spike_output(IntPtr output, int batchSize);
 
     [LibraryImport(Lib)]
-    private static partial void eventprop_free_backward_batch_output(IntPtr output, int batchSize);
+    public static partial void eventprop_free_backward_batch_output(IntPtr output, int batchSize);
 
     [LibraryImport(Lib)]
-    private static partial void eventprop_free_batch_maxima_output(IntPtr output, int batchSize);
+    public static partial void eventprop_free_batch_maxima_output(IntPtr output, int batchSize);
 
     [LibraryImport(Lib)]
-    private static partial void eventprop_free_dropout_output(IntPtr output, int batchSize);
+    public static partial void eventprop_free_dropout_output(IntPtr output, int batchSize);
 
   // ── Flat-array batch (concatenated input) ────────────────────
 
@@ -330,6 +330,9 @@ public static unsafe partial class Batch
             _batchSize = batchSize;
         }
 
+        /// <summary>Get the raw native handle (for passing to backward pass).</summary>
+        public IntPtr GetHandle() => _ptr;
+
         public void Dispose() => eventprop_free_batch_spike_output(_ptr, _batchSize);
     }
 
@@ -356,6 +359,9 @@ public static unsafe partial class Batch
             _ptr = ptr;
             _batchSize = batchSize;
         }
+
+        /// <summary>Get the raw native handle (for passing to backward pass).</summary>
+        public IntPtr GetHandle() => _ptr;
 
         public void Dispose() => eventprop_free_batch_maxima_output(_ptr, _batchSize);
     }
