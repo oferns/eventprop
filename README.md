@@ -1,24 +1,58 @@
-# EventProp .NET
+# EventProp
 
-A high-performance, allocation-free implementation of the **EventProp** algorithm for training Spiking Neural Networks in C#.
+A multi-language implementation of the **EventProp** algorithm for training Spiking Neural Networks.
 
 ## What is EventProp?
 
-EventProp is an event-based backpropagation method that computes **exact gradients** through spike times in spiking neural networks. Unlike surrogate gradient approaches, EventProp analytically differentiates through the threshold-crossing event itself, enabling precise weight updates without approximation.
+EventProp is an event-based backpropagation method that computes **exact gradients** through spike times in spiking neural networks. Unlike surrogate gradient approaches, EventProp analytically differentiates through the threshold-crossing event itself using the adjoint method from control theory — enabling precise weight updates without approximation.
 
-### Key Features
+This repository contains implementations in:
+- **C** — high-performance native library with OpenMP parallelization and SIMD helpers
+- **C++ (Eigen)** — reference core from the original EventProp.Python library
+- **Python** — bindings via pybind11 (reference) and Cython → C library
+- **C# (.NET 10)** — fully managed implementation + P/Invoke bindings to the C library
 
-- **Exact gradients** — no surrogate gradients or approximations
-- **Zero-allocation hot paths** — `ref struct` matrix views, `Span<T>` operations, pre-allocated scratch buffers
-- **LIF neurons** — Leaky Integrate-and-Fire model with dual time constants (membrane + synaptic)
-- **Two loss modes** — Time-To-First-Spike (TTFS) cross-entropy and voltage-based (membrane potential maxima)
-- **.NET 10 native** — modern C# with nullable reference types, implicit usings
+## Project Structure
+
+```
+eventprop.net/
+├── build.sh                    # Build all targets (C, C++, Python, .NET)
+├── clean.sh                    # Clean all or individual targets
+├── src/
+│   ├── EventProp.Python/       # Reference library (git submodule, read-only)
+│   │                           # Python + C++ (Eigen/pybind11) — source of truth
+│   ├── EventProp.C/            # Pure C implementation (libeventprop_c_api)
+│   │                           # 2 sets of batch functions: general + Cython interface
+│   ├── EventProp.Cpp.Wrapper/  # C++ Eigen core (convenience copy, no pybind11)
+│   │                           # Used for native benchmarks and parity tests
+│   ├── EventProp.Native/       # .NET P/Invoke bindings → C library
+│   ├── EventProp/              # Fully managed .NET implementation
+│   ├── EventProp.Tests/        # TUnit test suite (correctness + parity)
+│   ├── EventProp.Benchmarks/   # BenchmarkDotNet (native vs managed .NET)
+│   ├── EventProp.Native.Python/  # Python + Cython bindings → C library
+│   ├── EventProp.Native.Benchmarks/  # Google Benchmark (C vs C++)
+│   ├── EventProp.Native.ParityTests/ # Standalone parity tests (C vs Eigen)
+│   └── EventProp.Python.Benchmarks/  # pytest-benchmark (pybind11 vs Cython)
+└── coverage-report/            # Generated HTML coverage reports (gitignored)
+```
+
+### Reference Library
+
+**`EventProp.Python/`** is a git submodule of the original EventProp library. It is the **reference implementation** — all other implementations should mimic its API and produce matching results.
+
+Before building, apply the macOS compatibility patch:
+```bash
+cd src/EventProp.Python && patch -p0 < submodule.patch
+```
 
 ## Building
 
 ```bash
-# Build everything (C, C++, Python, .NET, parity tests, benchmarks)
+# Build everything (C, C++, Python, .NET, parity tests, benchmarks) — Release mode
 ./build.sh release
+
+# Build everything — Debug mode
+./build.sh debug
 
 # Clean all build outputs
 clean.sh              # removes everything (all targets)
@@ -27,10 +61,10 @@ clean.sh cpp          # only C++ wrapper
 clean.sh python       # only Python package
 clean.sh dotnet       # only .NET projects
 clean.sh parity       # only parity tests (C vs Eigen)
-clean.sh benchmarks   # only native benchmarks
+clean.sh benchmarks   # only native benchmarks (C vs C++)
 ```
 
-## Quick Start
+## Quick Start (.NET)
 
 ### Low-level API (EventPropMath)
 
@@ -97,69 +131,26 @@ var chain = layer1.Chain(layer2);
 chain.Forward(inputTimes, inputSources);  // propagates through both
 ```
 
-## Native Bindings
-
-The project includes two P/Invoke binding layers for calling native code:
-
-- **`EventProp.Native`** — Binds to the pure C library (`libeventprop_c_api`) via `LibraryImport` + `[UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]`
-- **`EventProp.Cpp.Native`** — Binds to the C++ wrapper (`libeventprop_cpp_wrapper`) with Eigen/Boost support
-
-Both use modern .NET 10 source-generated P/Invoke (no `DllImport`).
-
 ## Python Bindings
 
 Two Python binding layers are available:
 
-- **`EventProp.Native.Python/`** — Pure C FFI bindings using the standard CPython API. No pybind11 dependency. Exposes all C library functions (`compute_spikes_batch`, `backward_spikes`, `compute_voltage_trace`, etc.) via a compiled C extension module (`eventprop_cffi._native`).
-- **`EventProp.Python/`** — pybind11-based bindings (git submodule). Includes a complete Python layer with LIF/LI layers, loss functions, and dropout.
+- **`EventProp.Python/`** — pybind11-based bindings (git submodule). The reference implementation with a complete Python layer.
+- **`EventProp.Native.Python/`** — Cython bindings to the C library. The Python layer from EventProp.Python rewritten to use `libeventprop_c_api` via Cython (`eventprop_c/_native.pyx`).
 
-**Build CFFI bindings**:
+**Install pybind11 bindings**:
 ```bash
-cd src/EventProp.Native.Python && rm -rf build eventprop_cffi/*.so
-python3 setup.py build_ext --inplace
+cd src/EventProp.Python && patch -p0 < submodule.patch && pip install -e .
 ```
 
-**Build pybind11 bindings**:
-
-⚠️ **Note**: The submodule is read-only. Before building, apply the patch for macOS compatibility:
+**Install Cython bindings**:
 ```bash
-cd src/EventProp.Python
-patch -p0 < setup.py.patch  # fixes OpenMP flag and adds include paths
-pip install -e .
-```
-
-## Project Structure
-
-```
-src/
-├── EventProp/              # Core library
-│   ├── SpikesData.cs       # Spike event container
-│   ├── MaximaData.cs       # Membrane potential maxima
-│   ├── ScratchBuffers.cs   # Reusable pre-allocated buffers
-│   ├── MatrixView.cs       # Zero-copy row-major matrix ref struct
-│   ├── StridedSpan.cs      # Strided column access (no allocation)
-│   ├── SpanAlgorithms.cs   # Element-wise math helpers
-│   ├── SimdAlgorithms.cs   # SIMD-optimized algorithms (AVX2/AVX-512)
-│   ├── EventPropMath.cs    # Core algorithm implementations
-│   ├── Layer.cs            # Abstract layer + chain composition
-│   ├── LIFLayer.cs         # Leaky Integrate-and-Fire layer
-│   ├── LILayer.cs          # Integrate-and-Fire layer
-│   ├── WeightInitializer.cs# Diagonal weight initialization
-│   └── BatchVectors.cs     # Per-batch state vectors
-├── EventProp.Native/       # P/Invoke bindings (C library)
-├── EventProp.Cpp.Native/   # P/Invoke bindings (C++ wrapper)
-├── EventProp.Benchmarks/   # BenchmarkDotNet benchmarks
-├── EventProp.Tests/        # TUnit tests
-├── EventProp.Cpp.Wrapper/  # C bridge: flat arrays ↔ Eigen/Spikes
-│   ├── eventprop_c_api.h/.cpp  # Flat-array C API over Eigen core
-│   ├── tests.cpp               # Eigen direct unit tests (23 tests)
-│   └── tests_capi.cpp          # C API wrapper unit tests (14 tests)
-├── EventProp.C/            # Pure C implementation (libeventprop_c_api)
-├── EventProp.Native.Python/  # Python bindings: CFFI (pure C → CPython)
-└── EventProp.Python/       # Python bindings: pybind11 (git submodule)
+cd src/EventProp.Native.Python && pip install -e .
 ```
 
 ## Running Tests
+
+### .NET Tests (TUnit)
 
 ```bash
 cd src/EventProp.Tests && dotnet run -c Release -- --no-progress
@@ -190,22 +181,37 @@ cd src/EventProp.Cpp.Wrapper/build && ./eventprop_capi_tests
 | **C library** (`tests.c`) | 17 | All functions + edge cases (zero spikes, negative weights, large-scale) |
 | **Eigen direct** (`tests.cpp`) | 23 | All Eigen methods + degenerate shapes, parameter variations, temporal extremes |
 | **C API wrapper** (`tests_capi.cpp`) | 14 | Flat-array C interface mirroring pure C suite |
-| **Parity tests** (C vs Eigen) | 20 | Numerical equivalence at ≤50×20 scale |
-| **.NET** (TUnit) | 408 | Full managed API + three-way parity (C ≡ Eigen ≡ .NET) |
+| **Parity tests** (C vs Eigen) | 85 | Numerical equivalence at ≤50×20 scale |
+| **.NET** (TUnit) | 408+ | Full managed API + three-way parity (C ≡ Eigen ≡ .NET) |
+
+### Python Benchmarks
+
+```bash
+cd src/EventProp.Python.Benchmarks && pytest test_benchmarks.py -v
+```
+
+### Native Benchmarks (C vs C++)
+
+```bash
+cd src/EventProp.Native.Benchmarks && rm -rf build && mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
+./bench_c --benchmark_min_time=0.1s
+./bench_cpp --benchmark_min_time=0.1s
+```
 
 ## Coverage
 
 ```bash
-cd src/EventProp.Tests && dotnet run -- --coverage --coverage-output-format=cobertura
+cd src/EventProp.Tests && dotnet run -c Release -- --coverage --coverage-output-format=cobertura
 export PATH="$PATH:$HOME/.dotnet/tools"
-reportgenerator -reports:bin/Debug/net10.0/TestResults/*.cobertura.xml \
+reportgenerator -reports:bin/Release/net10.0/TestResults/*.cobertura.xml \
   -targetdir:../../coverage-report -reporttypes:Html
 open coverage-report/index.html
 ```
 
 ## Technical Details
 
-### Memory Model
+### Memory Model (.NET)
 
 All hot-path functions are **allocation-free** when `ScratchBuffers` is provided:
 
@@ -234,6 +240,21 @@ k(t) = τ_syn/(τ_mem - τ_syn) * (exp(-t/τ_mem) - exp(-t/τ_syn))
 ```
 
 This produces a rise-and-decay current profile that is more biologically realistic than simple exponential decay.
+
+### Key Algorithms
+
+| Algorithm | Description |
+|-----------|-------------|
+| **ComputeSums** | Pre-computes cumulative exponential-weighted sums for fast membrane potential evaluation |
+| **ComputeSpikes** | Forward pass — finds threshold-crossing times via root-finding (Toms748/Brent) |
+| **Backward** | Adjoint method — time-reversed sweep propagating λ_v (membrane) and λ_i (synaptic) adjoints |
+| **ComputeMaxima** | Finds membrane potential maxima per neuron (for voltage-based loss) |
+
+## Platform Support
+
+- **macOS** — developed and tested
+- **Linux** — intended support
+- **Windows** — if feasible
 
 ## License
 
