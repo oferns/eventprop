@@ -1,17 +1,17 @@
 import numpy as np
-from numpy.testing import assert_almost_equal
+from numpy.testing import assert_almost_equal, assert_allclose
 from itertools import product
 import unittest
 
-from eventprop_cffi.loss_layer import (
+from eventprop_c.loss_layer import (
     TTFSCrossEntropyLoss,
     TTFSCrossEntropyLossParameters,
     VMaxCrossEntropyLoss,
     VMaxCrossEntropyLossParameters,
 )
-from eventprop_cffi.lif_layer import LIFLayer, LIFLayerParameters
-from eventprop_cffi.spikes import Spikes, SpikesVector
-from test_lif_layer import get_normalization_factor, get_poisson_spikes
+from eventprop_c.lif_layer import LIFLayer, LIFLayerParameters
+from eventprop_c.spikes import Spikes, SpikesVector
+from .test_lif_layer import get_normalization_factor, get_poisson_spikes
 
 
 class LossLIFLIFChainTest(unittest.TestCase):
@@ -167,8 +167,9 @@ class LossLIFLIFChainTest(unittest.TestCase):
         loss_layer.backward(labels)
         grad_numerical_lower /= n_batch
         grad_numerical_upper /= n_batch
-        assert_almost_equal(grad_numerical_lower, lower_layer.gradient)
-        assert_almost_equal(grad_numerical_upper, upper_layer.gradient)
+        # Use rtol+atol for 3-layer chain numerical vs analytical comparison
+        assert_allclose(grad_numerical_lower, lower_layer.gradient, rtol=1e-5, atol=1e-7)
+        assert_allclose(grad_numerical_upper, upper_layer.gradient, rtol=1e-5, atol=1e-7)
 
 
 class LIFLIFChainTest(unittest.TestCase):

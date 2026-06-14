@@ -3,22 +3,26 @@ from itertools import product
 import numpy as np
 from numpy.testing import assert_almost_equal, assert_allclose
 
-from eventprop_cffi.loss_layer import (
+from eventprop_c.loss_layer import (
     TTFSCrossEntropyLoss,
     TTFSCrossEntropyLossParameters,
     VMaxCrossEntropyLoss,
 )
-from eventprop_cffi.spikes import Spikes, SpikesVector
-from eventprop_cffi.li_layer import LILayerParameters
-from eventprop_cffi.lif_layer import LIFLayerParameters
-from test_lif_layer import get_poisson_spikes
+from eventprop_c.spikes import Spikes, SpikesVector
+from eventprop_c.li_layer import LILayerParameters
+from eventprop_c.lif_layer import LIFLayerParameters
+from .test_lif_layer import get_poisson_spikes
 
 
 class TTFSCrossEntropyLossTest(unittest.TestCase):
     def test_numerical_gradient_vs_error(self):
+        np.random.seed(42)
         params = TTFSCrossEntropyLossParameters(
             lif_parameters=LIFLayerParameters(n=5, n_in=5)
         )
+        # Use all-to-all weights so each post-neuron receives spikes from ALL pre-neurons
+        # Diagonal weights don't produce output spikes with single-spike-per-neuron input
+        w = np.ones((params.lif_parameters.n, params.lif_parameters.n)) * 2.0
 
         def get_artificial_output(t_eps, batch_idx, spike_idx):
             times1 = np.arange(params.lif_parameters.n) * 0.001
@@ -29,18 +33,8 @@ class TTFSCrossEntropyLossTest(unittest.TestCase):
                 times2[spike_idx] += t_eps
             return SpikesVector(
                 [
-                    Spikes(
-                        times1.astype(np.float64),
-                        np.arange(params.lif_parameters.n, dtype=np.int32),
-                        times1.tolist(),
-                        np.arange(params.lif_parameters.n, dtype=np.int32).tolist(),
-                    ),
-                    Spikes(
-                        times2.astype(np.float64),
-                        np.arange(params.lif_parameters.n, dtype=np.int32),
-                        times2.tolist(),
-                        np.arange(params.lif_parameters.n, dtype=np.int32).tolist(),
-                    ),
+                    Spikes(times1.astype(np.float64), np.arange(params.lif_parameters.n, dtype=np.int32)),
+                    Spikes(times2.astype(np.float64), np.arange(params.lif_parameters.n, dtype=np.int32)),
                 ]
             )
 
@@ -50,11 +44,11 @@ class TTFSCrossEntropyLossTest(unittest.TestCase):
             for batch_idx in range(2):
                 numerical_grads = list()
                 for spike_idx in range(params.lif_parameters.n):
-                    loss = TTFSCrossEntropyLoss(params)
+                    loss = TTFSCrossEntropyLoss(params, w_in=w)
                     loss.forward(get_artificial_output(t_eps, batch_idx, spike_idx))
                     loss_plus = loss.get_losses([label_neuron])[batch_idx]
 
-                    loss = TTFSCrossEntropyLoss(params)
+                    loss = TTFSCrossEntropyLoss(params, w_in=w)
                     loss.forward(get_artificial_output(-t_eps, batch_idx, spike_idx))
                     loss_minus = loss.get_losses([label_neuron])[batch_idx]
 
@@ -63,7 +57,7 @@ class TTFSCrossEntropyLossTest(unittest.TestCase):
                     )
                 batch_numerical_grads.append(numerical_grads)
 
-            loss = TTFSCrossEntropyLoss(params)
+            loss = TTFSCrossEntropyLoss(params, w_in=w)
             loss.forward(get_artificial_output(0, 0, 0))
             loss.backward([label_neuron] * 2)
             for batch_idx in range(2):
@@ -83,36 +77,34 @@ class VMaxCrossEntropyLossTest(unittest.TestCase):
         w = np.random.normal(1, 1, size=(10, 10))
         params = LILayerParameters(n_in=n_in, n=n_class)
         # test spike gradient
+        base_times = (np.arange(params.n) * 0.001).astype(np.float64)
+        base_sources = np.arange(params.n, dtype=np.int32)
+
         for label_neuron in range(params.n):
-            artificial_output = SpikesVector(
-                [
-                    Spikes(
-                        (np.arange(params.n) * 0.001).astype(np.float64),
-                        np.arange(params.n, dtype=np.int32),
-                    )
-                ]
-            )
             t_eps = 1e-8
             numerical_grads = list()
-            for spike_idx in range(artificial_output[0].n_spikes):
-                saved_time = artificial_output[0].times[spike_idx]
-                artificial_output[0].set_time(spike_idx, saved_time + t_eps)
+            for spike_idx in range(params.n):
+                # Create fresh SpikesVector with perturbed time (no mutation)
+                times_plus = base_times.copy()
+                times_plus[spike_idx] += t_eps
                 loss = VMaxCrossEntropyLoss(params, w_in=w)
-                loss.forward(artificial_output)
+                loss.forward(SpikesVector([Spikes(times_plus, base_sources)]))
                 loss_plus = loss.get_losses([label_neuron])
 
-                artificial_output[0].set_time(spike_idx, saved_time - t_eps)
+                times_minus = base_times.copy()
+                times_minus[spike_idx] -= t_eps
                 loss = VMaxCrossEntropyLoss(params, w_in=w)
-                loss.forward(artificial_output)
+                loss.forward(SpikesVector([Spikes(times_minus, base_sources)]))
                 loss_minus = loss.get_losses([label_neuron])
-                artificial_output[0].set_time(spike_idx, saved_time)
 
                 numerical_grads.append((loss_plus[0] - loss_minus[0]) / (2 * t_eps))
 
+            # Analytical gradient on unperturbed input
+            artificial_output = SpikesVector([Spikes(base_times, base_sources)])
             loss = VMaxCrossEntropyLoss(params, w_in=w)
             loss.forward(artificial_output)
             loss.backward([label_neuron])
-            for spike_idx in range(artificial_output[0].n_spikes):
+            for spike_idx in range(params.n):
                 assert_almost_equal(
                     artificial_output[0].errors[spike_idx], numerical_grads[spike_idx]
                 )

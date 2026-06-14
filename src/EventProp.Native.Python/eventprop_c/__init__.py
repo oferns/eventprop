@@ -1,27 +1,24 @@
-"""EventProp ctypes bindings — zero-copy access to C library.
+"""EventProp Cython bindings — zero-copy access to C library.
 
 Provides Python wrappers around the EventProp C alloc functions with
-zero-copy memory access to C-allocated arrays. No numpy required.
+zero-copy memory access via compiled Cython extensions. No ctypes overhead.
 
 Example:
-    from eventprop_ctypes import EventPropCtypes
+    from eventprop_c import compute_spikes_batch, backward_spikes_batch
     
-    lib = EventPropCtypes()
+    # Forward pass (batch)
+    output = compute_spikes_batch(times, sources, n_per_sample, w, ...)
     
-    # Forward pass
-    output = lib.compute_spikes(w, times, sources, v_th=1.0)
-    print(f"Generated {output.n_spikes} spikes")
-    
-    # Zero-copy access to spike times (returns memoryview)
-    times_view = output.times  # No copy!
-    
-    # Cleanup (frees C memory)
-    del output
+    # Zero-copy access to spike times (returns numpy arrays referencing C memory)
+    for i in range(batch_size):
+        times_i, sources_i, currents_i = output[i]
 """
 
-from .native import EventPropCtypes as NativeApi, SpikeOutput, SumsOutput, MaximaOutput
-from .native import BackwardOutput
-from .native import VoltageTraceOutput, LambdaITraceOutput
+from ._native import (
+    compute_spikes_batch, backward_spikes_batch,
+    compute_maxima_batch, backward_maxima_batch,
+    dropout_spikes_batch,
+)
 from .spikes import Spikes, SpikesVector, Maxima, MaximaVector
 
 # Layer classes
@@ -70,14 +67,12 @@ from .vmax_training import (
 )
 
 __all__ = [
-    # Native API and output wrappers
-    'NativeApi',
-    'SpikeOutput',
-    'SumsOutput',
-    'MaximaOutput',
-    'BackwardOutput',
-    'VoltageTraceOutput',
-    'LambdaITraceOutput',
+    # Cython batch functions
+    'compute_spikes_batch',
+    'backward_spikes_batch',
+    'compute_maxima_batch',
+    'backward_maxima_batch',
+    'dropout_spikes_batch',
     # Python data classes (matching pybind11 interface)
     'Spikes',
     'SpikesVector',

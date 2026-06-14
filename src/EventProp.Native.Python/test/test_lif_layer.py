@@ -2,8 +2,8 @@ import unittest
 import numpy as np
 from numpy.testing import assert_almost_equal
 
-from eventprop_cffi.lif_layer import LIFLayer, LIFLayerParameters
-from eventprop_cffi.spikes import Spikes, SpikesVector
+from eventprop_c.lif_layer import LIFLayer, LIFLayerParameters
+from eventprop_c.spikes import Spikes, SpikesVector
 
 
 def get_normalization_factor(tau_mem: float, tau_syn: float) -> float:

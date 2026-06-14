@@ -108,6 +108,18 @@ cdef extern from "eventprop_batch.h":
         const int* n_spikes_per_sample
         int batch_size
 
+    ctypedef struct BatchEventPropInputPtrs:
+        const double** times
+        const int** sources
+        const int* n_spikes
+        const double* w
+        int n_pre
+        int n_post
+        int batch_size
+        double tau_mem
+        double tau_syn
+        double v_th
+
     ctypedef struct DropoutOutput:
         int n_spikes
         double* times
@@ -116,9 +128,23 @@ cdef extern from "eventprop_batch.h":
     SpikeOutput* eventprop_compute_spikes_batch(const BatchEventPropInput* input)
     BackwardOutput* eventprop_backward_spikes_batch(
         const BatchEventPropInput* input, SpikeOutput* fwd_batch, const double* post_errors)
+    BackwardOutput* eventprop_backward_spikes_batch_accumulate(
+        const BatchEventPropInput* input, SpikeOutput* fwd_batch, const double* post_errors)
     MaximaOutput* eventprop_compute_maxima_batch(const BatchEventPropInput* input)
     BackwardOutput* eventprop_backward_maxima_batch(
         const BatchEventPropInput* input, MaximaOutput* fwd_batch, const double* maxima_errors)
+    BackwardOutput* eventprop_backward_maxima_batch_accumulate(
+        const BatchEventPropInput* input, MaximaOutput* fwd_batch, const double* maxima_errors)
+
+    # Pointer-based batch functions (no flattening)
+    SpikeOutput* eventprop_compute_spikes_batch_ptrs(const BatchEventPropInputPtrs* input)
+    BackwardOutput* eventprop_backward_spikes_batch_accumulate_ptrs(
+        const BatchEventPropInputPtrs* input, SpikeOutput* fwd_batch,
+        const double** post_errors, const int* n_post_errors)
+    MaximaOutput* eventprop_compute_maxima_batch_ptrs(const BatchEventPropInputPtrs* input)
+    BackwardOutput* eventprop_backward_maxima_batch_accumulate_ptrs(
+        const BatchEventPropInputPtrs* input, MaximaOutput* fwd_batch,
+        const double** maxima_errors, int n_post)
     DropoutOutput* eventprop_dropout_spikes_batch(
         const BatchEventPropInput* input, double p_drop, int seed)
 

@@ -855,7 +855,7 @@ MaximaOutput* eventprop_compute_maxima(const EventPropInput* input)
     /* Initialize maxima to "not found" */
     for (int i = 0; i < input->n_post; i++) {
         result->times[i]   = NAN;
-        result->values[i]  = -INFINITY;
+        result->values[i]  = 0.0;
     }
 
     /* Use our own alloc function */
@@ -901,7 +901,7 @@ MaximaOutput* eventprop_compute_maxima(const EventPropInput* input)
             }
 
             /* Also check voltage at input spike time */
-            if (t_input < INFINITY) {
+            if (t_input < INFINITY && (s0 != 0 || s1 != 0)) {
                 double v_at_input = k_pref * (s1 * exp(-t_input/input->tau_mem) -
                                               s0 * exp(-t_input/input->tau_syn));
                 if (v_at_input > result->values[target_nrn]) {
@@ -959,7 +959,8 @@ BackwardOutput* eventprop_backward_maxima(const BackwardMaximaInput* input)
             int source_nrn = input->input->sources[spike_idx];
             result->grad[source_nrn * input->input->n_post + max_idx] -= input->input->tau_syn * lambda_i;
 
-            result->spike_errors[spike_idx] += lambda_v - lambda_i;
+            /* Spike error weighted by connection strength (matching Eigen/pybind11) */
+            result->spike_errors[spike_idx] += input->input->w[source_nrn * input->input->n_post + max_idx] * (lambda_v - lambda_i);
         }
     }
 

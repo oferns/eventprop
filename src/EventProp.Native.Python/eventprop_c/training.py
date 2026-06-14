@@ -4,7 +4,6 @@ Mirrors the pybind11 training API from EventProp.Python.
 """
 
 from abc import ABC, abstractmethod
-import ctypes
 import numpy as np
 import logging
 from typing import NamedTuple, Tuple, Iterator
@@ -12,13 +11,13 @@ from typing import NamedTuple, Tuple, Iterator
 from .optimizer import GradientDescentParameters, Optimizer, Adam
 from .layer import Layer, SpikeDataset
 from .spikes import Spikes, SpikesVector
-from .native import EventPropCtypes, _BatchEventPropInput, _EventPropInput
+from ._native import dropout_spikes_batch
 
 
 def dropout_spikes(spikes: SpikesVector, p_drop: float, random_seed: int) -> SpikesVector:
     """Randomly drop spikes from each sample in the batch.
 
-    Uses the C library (eventprop_dropout_spikes_batch) for performance.
+    Uses Cython binding to eventprop_dropout_spikes_batch for performance.
     For each spike, a Bernoulli trial with probability *p_drop* decides
     whether to keep it (0 = keep, 1 = drop).
 
@@ -40,7 +39,7 @@ def dropout_spikes(spikes: SpikesVector, p_drop: float, random_seed: int) -> Spi
         return spikes
 
     batch_size = len(spikes)
-    n_spikes_per_sample = [s.n_spikes for s in spikes]
+    n_spikes_per_sample = np.array([s.n_spikes for s in spikes], dtype=np.intc)
 
     # Flatten times and sources into contiguous arrays for C
     total_spikes = sum(n_spikes_per_sample)
@@ -50,31 +49,9 @@ def dropout_spikes(spikes: SpikesVector, p_drop: float, random_seed: int) -> Spi
     all_times = np.concatenate([s.times for s in spikes])
     all_sources = np.concatenate([s.sources for s in spikes]).astype(np.intc)
 
-    # Build C input struct
-    inp = _EventPropInput(
-        w=None,
-        n_pre=0,
-        n_post=0,
-        times=all_times.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
-        sources=all_sources.ctypes.data_as(ctypes.POINTER(ctypes.c_int)),
-        n_spikes=total_spikes,
-        tau_mem=0.0,
-        tau_syn=0.0,
-        v_th=0.0,
-    )
+    # Call Cython — zero-copy, returns DropoutBatchOutput owning C memory
+    c_output = dropout_spikes_batch(all_times, all_sources, n_spikes_per_sample, p_drop, random_seed)
 
-    n_per_sample = (ctypes.c_int * batch_size)(*n_spikes_per_sample)
-    batch_inp = _BatchEventPropInput(
-        input=ctypes.pointer(inp),
-        n_spikes_per_sample=n_per_sample,
-        batch_size=batch_size,
-    )
-
-    # Call C library — returns zero-copy DropoutBatchOutput (C-owned memory)
-    lib = EventPropCtypes()
-    c_output = lib.dropout_spikes_batch(batch_inp, p_drop, random_seed)
-
-    # Wrap in zero-copy SpikesVector — C memory freed by DropoutBatchOutput.__del__
     return SpikesVector._from_dropout_output(c_output)
 
 

@@ -1,4 +1,4 @@
-"""Benchmarks comparing pybind11 (EventProp.Python) vs ctypes (eventprop_c).
+"""Benchmarks comparing pybind11 (EventProp.Python) vs Cython (eventprop_c).
 
 Tests the Python public API surface — layer forward/backward passes, loss layers,
 full training loops, and utility functions. Problem sizes match the C/C++ benchmark suite.
@@ -29,7 +29,7 @@ from eventprop.loss_layer import (
     VMaxCrossEntropyLoss as PyVMax,
 )
 
-# ctypes (under test)
+# Cython (under test)
 from eventprop_c.spikes import Spikes as CtSpikes, SpikesVector as CtSpikesVector
 from eventprop_c.lif_layer import LIFLayer as CtLIFLayer, LIFLayerParameters as CtLIFParams
 from eventprop_c.li_layer import LILayer as CtLILayer, LILayerParameters as CtLIParams
@@ -50,12 +50,12 @@ from conftest import SIZES, TAU_MEM, TAU_SYN, V_TH, make_input_batch, make_weigh
 SLOW_BURST = {("Medium", "burst"), ("Large", "burst")}
 
 
-class TestLIFForward:
+class TestLIF_Forward:
     """Benchmark LIFLayer.forward() — core forward pass."""
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
-    def test_pybind11(self, benchmark, size_name, pattern):
+    def test_lif_forward_pybind11(self, benchmark, size_name, pattern):
         if (size_name, pattern) in SLOW_BURST:
             pytest.skip("Medium+/burst root-finding too slow")
         if (size_name, pattern) in SLOW_BURST:
@@ -72,7 +72,7 @@ class TestLIFForward:
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
-    def test_ctypes(self, benchmark, size_name, pattern):
+    def test_lif_forward_cython(self, benchmark, size_name, pattern):
         if (size_name, pattern) in SLOW_BURST:
             pytest.skip("Medium+/burst root-finding too slow")
         cfg = SIZES[size_name]
@@ -86,12 +86,12 @@ class TestLIFForward:
         benchmark(layer.forward, batch)
 
 
-class TestLIFBackward:
+class TestLIF_Backward:
     """Benchmark LIFLayer.backward() — core backward pass."""
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
-    def test_pybind11(self, benchmark, size_name, pattern):
+    def test_lif_backward_pybind11(self, benchmark, size_name, pattern):
         if (size_name, pattern) in SLOW_BURST:
             pytest.skip("Medium+/burst root-finding too slow")
         cfg = SIZES[size_name]
@@ -110,7 +110,7 @@ class TestLIFBackward:
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
-    def test_ctypes(self, benchmark, size_name, pattern):
+    def test_lif_backward_cython(self, benchmark, size_name, pattern):
         if (size_name, pattern) in SLOW_BURST:
             pytest.skip("Medium+/burst root-finding too slow")
         cfg = SIZES[size_name]
@@ -120,7 +120,11 @@ class TestLIFBackward:
 
         layer = CtLIFLayer(CtLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
         batch = CtSpikesVector([CtSpikes(times=times, sources=sources)])
-        layer.forward(batch)
+        post = layer.forward(batch)
+
+        # Set errors on output spikes — matches pybind11 benchmark exactly
+        for i in range(post[0].n_spikes):
+            post[0].set_error(i, 1.0)
 
         benchmark(layer.backward)
 
@@ -129,12 +133,12 @@ class TestLIFBackward:
 # LI Layer — Forward & Backward Benchmarks (maxima-based)
 # ============================================================
 
-class TestLIForward:
+class TestLI_Forward:
     """Benchmark LILayer.forward() — membrane potential maxima."""
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
-    def test_pybind11(self, benchmark, size_name, pattern):
+    def test_li_forward_pybind11(self, benchmark, size_name, pattern):
         if (size_name, pattern) in SLOW_BURST:
             pytest.skip("Medium+/burst root-finding too slow")
         cfg = SIZES[size_name]
@@ -149,7 +153,7 @@ class TestLIForward:
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
-    def test_ctypes(self, benchmark, size_name, pattern):
+    def test_li_forward_cython(self, benchmark, size_name, pattern):
         if (size_name, pattern) in SLOW_BURST:
             pytest.skip("Medium+/burst root-finding too slow")
         cfg = SIZES[size_name]
@@ -163,12 +167,12 @@ class TestLIForward:
         benchmark(layer.forward, batch)
 
 
-class TestLIBackward:
+class TestLI_Backward:
     """Benchmark LILayer.backward() — maxima-based backward pass."""
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
-    def test_pybind11(self, benchmark, size_name, pattern):
+    def test_li_backward_pybind11(self, benchmark, size_name, pattern):
         if (size_name, pattern) in SLOW_BURST:
             pytest.skip("Medium+/burst root-finding too slow")
         cfg = SIZES[size_name]
@@ -187,7 +191,7 @@ class TestLIBackward:
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
-    def test_ctypes(self, benchmark, size_name, pattern):
+    def test_li_backward_cython(self, benchmark, size_name, pattern):
         if (size_name, pattern) in SLOW_BURST:
             pytest.skip("Medium+/burst root-finding too slow")
         cfg = SIZES[size_name]
@@ -214,7 +218,7 @@ class TestTTFSForward:
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
-    def test_pybind11(self, benchmark, size_name, pattern):
+    def test_ttfs_forward_pybind11(self, benchmark, size_name, pattern):
         if (size_name, pattern) in SLOW_BURST:
             pytest.skip("Medium+/burst root-finding too slow")
         cfg = SIZES[size_name]
@@ -233,7 +237,7 @@ class TestTTFSForward:
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
-    def test_ctypes(self, benchmark, size_name, pattern):
+    def test_ttfs_forward_cython(self, benchmark, size_name, pattern):
         if (size_name, pattern) in SLOW_BURST:
             pytest.skip("Medium+/burst root-finding too slow")
         cfg = SIZES[size_name]
@@ -256,7 +260,7 @@ class TestTTFSBackward:
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
-    def test_pybind11(self, benchmark, size_name, pattern):
+    def test_ttfs_backward_pybind11(self, benchmark, size_name, pattern):
         if (size_name, pattern) in SLOW_BURST:
             pytest.skip("Medium+/burst root-finding too slow")
         cfg = SIZES[size_name]
@@ -276,7 +280,7 @@ class TestTTFSBackward:
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
-    def test_ctypes(self, benchmark, size_name, pattern):
+    def test_ttfs_backward_cython(self, benchmark, size_name, pattern):
         if (size_name, pattern) in SLOW_BURST:
             pytest.skip("Medium+/burst root-finding too slow")
         cfg = SIZES[size_name]
@@ -300,7 +304,7 @@ class TestVMaxForward:
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
-    def test_pybind11(self, benchmark, size_name, pattern):
+    def test_vmax_forward_pybind11(self, benchmark, size_name, pattern):
         if (size_name, pattern) in SLOW_BURST:
             pytest.skip("Medium+/burst root-finding too slow")
         cfg = SIZES[size_name]
@@ -315,7 +319,7 @@ class TestVMaxForward:
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
-    def test_ctypes(self, benchmark, size_name, pattern):
+    def test_vmax_forward_cython(self, benchmark, size_name, pattern):
         if (size_name, pattern) in SLOW_BURST:
             pytest.skip("Medium+/burst root-finding too slow")
         cfg = SIZES[size_name]
@@ -334,7 +338,7 @@ class TestVMaxBackward:
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
-    def test_pybind11(self, benchmark, size_name, pattern):
+    def test_vmax_backward_pybind11(self, benchmark, size_name, pattern):
         if (size_name, pattern) in SLOW_BURST:
             pytest.skip("Medium+/burst root-finding too slow")
         cfg = SIZES[size_name]
@@ -350,7 +354,7 @@ class TestVMaxBackward:
 
     @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
     @pytest.mark.parametrize("pattern", ["uniform", "poisson", "burst"])
-    def test_ctypes(self, benchmark, size_name, pattern):
+    def test_vmax_backward_cython(self, benchmark, size_name, pattern):
         if (size_name, pattern) in SLOW_BURST:
             pytest.skip("Medium+/burst root-finding too slow")
         cfg = SIZES[size_name]
@@ -388,7 +392,7 @@ class TestBatchForward:
         benchmark(layer.forward, PySpikesVector(spikes))
 
     @pytest.mark.parametrize("batch_size", [4, 8, 16])
-    def test_ctypes_batch(self, benchmark, batch_size):
+    def test_Cython_batch(self, benchmark, batch_size):
         n_in, n_out = 50, 20
         w = make_weights(n_in, n_out)
 
@@ -404,11 +408,11 @@ class TestBatchForward:
 
 
 # ============================================================
-# Dropout benchmark — pure NumPy (ctypes) vs C++ (pybind11)
+# Dropout benchmark — pure NumPy (Cython) vs C++ (pybind11)
 # ============================================================
 
 class TestDropout:
-    """Benchmark dropout_spikes — pure NumPy (ctypes) vs C++ (pybind11)."""
+    """Benchmark dropout_spikes — pure NumPy (Cython) vs C++ (pybind11)."""
 
     @pytest.mark.parametrize("batch_size", [4, 8, 16])
     def test_pybind11_dropout(self, benchmark, batch_size):
@@ -424,7 +428,7 @@ class TestDropout:
         benchmark(dropout_spikes_cpp, PySpikesVector(spikes), 0.3, 42)
 
     @pytest.mark.parametrize("batch_size", [4, 8, 16])
-    def test_ctypes_dropout(self, benchmark, batch_size):
+    def test_Cython_dropout(self, benchmark, batch_size):
         from eventprop_c.training import dropout_spikes
 
         rng = np.random.default_rng(42)
@@ -471,7 +475,7 @@ class TestTrainingStep:
         benchmark(step)
 
     @pytest.mark.parametrize("batch_size", [4, 8])
-    def test_ctypes_ttfs_step(self, benchmark, batch_size):
+    def test_Cython_ttfs_step(self, benchmark, batch_size):
         n_in, n_hidden, n_classes = 10, 8, 3
         w1 = make_weights(n_in, n_hidden)
         w2 = make_weights(n_hidden, n_classes)
@@ -519,7 +523,7 @@ class TestTrainingStep:
         benchmark(step)
 
     @pytest.mark.parametrize("batch_size", [4, 8])
-    def test_ctypes_vmax_step(self, benchmark, batch_size):
+    def test_Cython_vmax_step(self, benchmark, batch_size):
         n_in, n_hidden, n_classes = 10, 8, 3
         w1 = make_weights(n_in, n_hidden)
         w2 = make_weights(n_hidden, n_classes)
