@@ -27,7 +27,7 @@ BackwardOutput* eventprop_backward_spikes_batch(const BatchEventPropInput* input
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) shared(base, offsets, err_offsets, n_spikes_per_sample,\
             batch_size, result, fwd_batch, post_errors) \
-          if(batch_size >= 2 || batch_size * base->n_pre >= 50)
+          if(batch_size >= 2)
 #endif
     for (int b = 0; b < batch_size; b++) {
         int offset = offsets[b];
@@ -89,7 +89,7 @@ BackwardOutput* eventprop_backward_spikes_batch_accumulate(const BatchEventPropI
 
     /* Process each sample in parallel, accumulate gradients */
 #ifdef _OPENMP
-#pragma omp parallel for schedule(static) shared(base, offsets, err_offsets, batch_size, grad_acc, fwd_batch, post_errors) if(batch_size >= 2 || batch_size * n_pre >= 50)
+#pragma omp parallel for schedule(static) shared(base, offsets, err_offsets, batch_size, grad_acc, fwd_batch, post_errors) if(batch_size >= 2)
 #endif
     for (int b = 0; b < batch_size; b++) {
         int offset = offsets[b];
@@ -161,7 +161,7 @@ SpikeOutput* eventprop_compute_spikes_batch(const BatchEventPropInput* input)
     /* Process each sample in parallel */
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) shared(base, offsets, n_spikes_per_sample, \
-         batch_size, result) if(batch_size >= 2 || batch_size * base->n_pre >= 50)
+         batch_size, result) if(batch_size >= 2)
 #endif
     for (int b = 0; b < batch_size; b++) {
         int offset = offsets[b];
@@ -202,7 +202,7 @@ MaximaOutput* eventprop_compute_maxima_batch(const BatchEventPropInput* input)
     /* Process each sample in parallel */
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) shared(base, offsets, n_spikes_per_sample, \
-         batch_size, result) if(batch_size >= 2 || batch_size * base->n_pre >= 50)
+         batch_size, result) if(batch_size >= 2)
 #endif
     for (int b = 0; b < batch_size; b++) {
         int offset = offsets[b];
@@ -244,7 +244,7 @@ BackwardOutput* eventprop_backward_maxima_batch(const BatchEventPropInput* input
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) shared(base, offsets, n_spikes_per_sample, \
             batch_size, result, fwd_batch, maxima_errors, n_post) \
-          if(batch_size >= 2 || batch_size * base->n_pre >= 50)
+          if(batch_size >= 2)
 #endif
     for (int b = 0; b < batch_size; b++) {
         int offset = offsets[b];
@@ -302,7 +302,7 @@ BackwardOutput* eventprop_backward_maxima_batch_accumulate(const BatchEventPropI
 
     /* Process each sample in parallel, accumulate gradients */
 #ifdef _OPENMP
-#pragma omp parallel for schedule(static) shared(base, offsets, batch_size, grad_acc, fwd_batch, maxima_errors, n_post) if(batch_size >= 2 || batch_size * n_pre >= 50)
+#pragma omp parallel for schedule(static) shared(base, offsets, batch_size, grad_acc, fwd_batch, maxima_errors, n_post) if(batch_size >= 2)
 #endif
     for (int b = 0; b < batch_size; b++) {
         int offset = offsets[b];

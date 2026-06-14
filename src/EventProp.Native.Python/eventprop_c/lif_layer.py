@@ -44,7 +44,7 @@ class LIFLayer(Layer):
     def forward(self, input_batch: SpikesVector) -> SpikesVector:
         super().forward(input_batch)
 
-        # Extract per-sample arrays (no Python-side concatenation)
+        # Extract per-sample arrays — C iterates via pointer array (no Python concatenation)
         times_list = [inp.times for inp in input_batch]
         sources_list = [inp.sources for inp in input_batch]
 
@@ -72,7 +72,7 @@ class LIFLayer(Layer):
     def backward(self):
         batch_size = len(self.input_batch)
 
-        # Extract per-sample arrays (no Python-side concatenation)
+        # Extract per-sample arrays — C iterates via pointer array (no Python concatenation)
         times_list = [inp.times for inp in self.input_batch]
         sources_list = [inp.sources for inp in self.input_batch]
 
@@ -80,7 +80,6 @@ class LIFLayer(Layer):
         errors_list = [self.post_batch[i].errors for i in range(batch_size)]
         all_errors = np.concatenate(errors_list) if errors_list else np.array([], dtype=np.float64)
 
-        # Call Cython — C iterates over per-sample pointers, accumulates gradients internally
         result = backward_spikes_batch_accumulate_ptrs(
             times_list, sources_list,
             self.post_batch._batch_output, all_errors,
