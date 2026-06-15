@@ -1,5 +1,6 @@
 using BenchmarkDotNet.Attributes;
 using CW.EventProp;
+using CApi = CW.EventProp.Native;
 
 namespace EventProp.Benchmarks;
 
@@ -53,7 +54,7 @@ public abstract class Bench_ComputeMaxima_Base : BenchBase
     [Benchmark]
     public void Native()
     {
-        using var output = Api.ComputeMaxima(W, NPre, NPost, Times, Sources, TauMem, TauSyn);
+        using var output = CApi.Api.ComputeMaxima(W, NPre, NPost, Times, Sources, TauMem, TauSyn);
         var _ = output.Times[0]; // Access to prevent optimization
     }
 }
@@ -130,7 +131,7 @@ public abstract class Bench_ComputeMaxima_Poisson_Base : BenchBase
     [Benchmark]
     public void Native()
     {
-        using var output = Api.ComputeMaxima(W, NPre, NPost, Times, Sources, TauMem, TauSyn);
+        using var output = CApi.Api.ComputeMaxima(W, NPre, NPost, Times, Sources, TauMem, TauSyn);
         var _ = output.Times[0]; // Access to prevent optimization
     }
 }
@@ -206,7 +207,7 @@ public abstract class Bench_ComputeMaxima_Burst_Base : BenchBase
     [Benchmark]
     public void Native()
     {
-        using var output = Api.ComputeMaxima(W, NPre, NPost, Times, Sources, TauMem, TauSyn);
+        using var output = CApi.Api.ComputeMaxima(W, NPre, NPost, Times, Sources, TauMem, TauSyn);
         var _ = output.Times[0]; // Access to prevent optimization
     }
 }

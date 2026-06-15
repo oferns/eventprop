@@ -1,5 +1,6 @@
 using BenchmarkDotNet.Attributes;
 using CW.EventProp;
+using CApi = CW.EventProp.Native;
 
 namespace EventProp.Benchmarks;
 
@@ -87,7 +88,7 @@ public class Bench_ComputeSums_Tiny : BenchBase
     [Benchmark]
     public void Native()
     {
-        using var output = Api.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn);
+        using var output = CApi.Api.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn);
         var _ = output.Sum0[0]; // Access to prevent optimization
     }
 }
@@ -109,7 +110,7 @@ public class Bench_ComputeSums_XL : BenchBase
     [Benchmark]
     public void Native()
     {
-        using var output = Api.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn);
+        using var output = CApi.Api.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn);
         var _ = output.Sum0[0]; // Access to prevent optimization
     }
 }
@@ -128,7 +129,7 @@ public class Bench_ComputeSpikes_Tiny : BenchBase
     [Benchmark]
     public int Native()
     {
-        using var output = Api.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn);
+        using var output = CApi.Api.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn);
         return output.NSpikes;
     }
 }
@@ -144,7 +145,7 @@ public class Bench_ComputeSpikes_XL : BenchBase
     [Benchmark]
     public int Native()
     {
-        using var output = Api.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn);
+        using var output = CApi.Api.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn);
         return output.NSpikes;
     }
 }
@@ -166,7 +167,7 @@ public class Bench_BackwardSpikes_Tiny : Bench_TinyXL_Base
     [Benchmark]
     public void Native()
     {
-        using var output = Api.BackwardSpikes(Times, Sources,
+        using var output = CApi.Api.BackwardSpikes(Times, Sources,
             PostTimesNative, PostSourcesNative, PostCurrentsNative,
             PostErrorsNative, NSpikes, W, NPre, NPost,  // Use NSpikes as nPostSpikes
             VTh, TauMem, TauSyn);
@@ -188,7 +189,7 @@ public class Bench_BackwardSpikes_XL : Bench_TinyXL_Base
     [Benchmark]
     public void Native()
     {
-        using var output = Api.BackwardSpikes(Times, Sources,
+        using var output = CApi.Api.BackwardSpikes(Times, Sources,
             PostTimesNative, PostSourcesNative, PostCurrentsNative,
             PostErrorsNative, NSpikes, W, NPre, NPost,  // Use NSpikes as nPostSpikes
             VTh, TauMem, TauSyn);
