@@ -353,6 +353,10 @@ int main(int argc, char* argv[]) {
         {"simultaneous", 50, 20, 100},     // Simultaneous spikes
         {"regular",      50, 20, 100},     // Regular intervals
         {"exponential", 50, 20, 100},     // Exponentially spaced
+
+        /* Edge cases from .NET parity tests */
+        {"simultaneous", 2, 1, 2},         // Tiny simultaneous (matches .NET test)
+        {"uniform",      1, 1, 1, 0.001}, // Near-zero threshold
     };
 
     TestCase diag_cases[] = {
@@ -364,6 +368,41 @@ int main(int argc, char* argv[]) {
 
     for (auto& tc : cases) { test_compute_sums(tc); test_compute_spikes(tc); test_backward_spikes(tc); test_compute_maxima(tc); test_backward_maxima(tc); }
     for (auto& tc : diag_cases) { test_voltage_trace(tc); test_lambda_i_trace(tc); }
+
+    /* Manual edge cases matching .NET tests */
+    // SimultaneousInputSpikeTimes: 2x1, w=[15,10], times=[0.05,0.05], sources=[0,1]
+    {
+        tests_run++;
+        printf("  %-60s ", "ComputeSpikes simultaneous 2x1 w=[15,10]");
+        double w[] = {15.0, 10.0};
+        double times[] = {0.05, 0.05};
+        int sources[] = {0, 1};
+        EventPropInput fi = {w, 2, 1, times, sources, 2, 0.02, 0.005, 1.0};
+        SpikeOutput* spikes_c = eventprop_compute_spikes(&fi);
+        auto result_eig = compute_spikes(make_w_mat(w, 2, 1), make_eigen_spikes(times, sources, 2), 1.0, 0.02, 0.005);
+        int n_c = spikes_c->n_spikes, n_e = (int)result_eig.times.size();
+        printf("C=%d Eigen=%d ", n_c, n_e);
+        if (n_c != n_e) { printf("FAIL [spike count: %d vs %d]\n", n_c, n_e); tests_failed++; }
+        else { printf("PASS\n"); tests_passed++; }
+        eventprop_free_spike_output(spikes_c);
+    }
+
+    // NearZeroThreshold: 1x1, w=[5], times=[0.01], sources=[0], vTh=0.001
+    {
+        tests_run++;
+        printf("  %-60s ", "ComputeSpikes 1x1 vTh=0.001");
+        double w[] = {5.0};
+        double times[] = {0.01};
+        int sources[] = {0};
+        EventPropInput fi = {w, 1, 1, times, sources, 1, 0.02, 0.005, 0.001};
+        SpikeOutput* spikes_c = eventprop_compute_spikes(&fi);
+        auto result_eig = compute_spikes(make_w_mat(w, 1, 1), make_eigen_spikes(times, sources, 1), 0.001, 0.02, 0.005);
+        int n_c = spikes_c->n_spikes, n_e = (int)result_eig.times.size();
+        printf("C=%d Eigen=%d ", n_c, n_e);
+        if (n_c != n_e) { printf("FAIL [spike count: %d vs %d]\n", n_c, n_e); tests_failed++; }
+        else { printf("PASS\n"); tests_passed++; }
+        eventprop_free_spike_output(spikes_c);
+    }
 
     printf("\n=================================\n");
     printf("Results: %d/%d passed, %d failed\n", tests_passed, tests_run, tests_failed);

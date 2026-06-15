@@ -5,6 +5,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>CW.EventProp.Native</RootNamespace>
+    <AssemblyName>CW.EventProp.Native</AssemblyName>
   </PropertyGroup>
 
   <!-- Copy native library to output directory -->
