@@ -6,20 +6,31 @@ namespace EventProp.Benchmarks;
 
 // ============================================================
 // Batch processing benchmarks — Managed (per-sample loop) vs Native (batch C API)
-// Tests realistic batch sizes (4, 8, 16) matching Python benchmark coverage.
+// Tests realistic batch sizes (4, 8, 16).
 // ============================================================
 
-public abstract class Bench_Batch_Base : BenchBase
+public abstract class BenchBatchBase
 {
+    public int NPre { get; protected set; }
+    public int NPost { get; protected set; }
+    public int NSpikes { get; protected set; }
     protected int BatchSize { get; set; }
+
+    protected const double TauMem = 0.02;
+    protected const double TauSyn = 0.005;
+    protected const double VTh = 1.0;
+
+    protected double[] W { get; set; } = null!;
     protected double[][] BatchTimes { get; set; } = null!;
     protected int[][] BatchSources { get; set; } = null!;
 
-    // Layers
     protected CW.EventProp.LIFLayer? ManagedLayer { get; set; }
     protected CApi.LIFLayer? NativeLayer { get; set; }
 
-    public override void Setup()
+    protected abstract void Configure();
+
+    [GlobalSetup]
+    public virtual void Setup()
     {
         Configure();
         var rng = new Random(42);
@@ -42,9 +53,6 @@ public abstract class Bench_Batch_Base : BenchBase
             }
         }
 
-        Buffers = new ScratchBuffers();
-        Buffers.EnsureCapacity(NPost, NPre, NSpikes);
-
         // Create layers with identical weights
         var managedParams = new LIFLayerParameters(NPost, NPre, TauMem, TauSyn, VTh);
         var nativeParams = new CApi.LIFLayerParameters(NPost, NPre, TauMem, TauSyn, VTh);
@@ -64,7 +72,7 @@ public abstract class Bench_Batch_Base : BenchBase
 // ============================================================
 
 [MemoryDiagnoser]
-public class Bench_Batch_Forward_4 : Bench_Batch_Base
+public class Bench_Batch_Forward_4 : BenchBatchBase
 {
     protected override void Configure() { (NPre, NPost, NSpikes) = (50, 20, 100); BatchSize = 4; }
 
@@ -74,7 +82,6 @@ public class Bench_Batch_Forward_4 : Bench_Batch_Base
         var batch = new SpikesVector();
         for (int b = 0; b < BatchSize; b++)
             batch.Add(new SpikesData(BatchTimes[b], BatchSources[b]));
-
         ManagedLayer!.Forward(batch);
     }
 
@@ -84,13 +91,12 @@ public class Bench_Batch_Forward_4 : Bench_Batch_Base
         var batch = new CApi.SpikesVector();
         for (int b = 0; b < BatchSize; b++)
             batch.Add(new CApi.SpikesData(BatchTimes[b], BatchSources[b]));
-
         NativeLayer!.Forward(batch);
     }
 }
 
 [MemoryDiagnoser]
-public class Bench_Batch_Forward_8 : Bench_Batch_Base
+public class Bench_Batch_Forward_8 : BenchBatchBase
 {
     protected override void Configure() { (NPre, NPost, NSpikes) = (50, 20, 100); BatchSize = 8; }
 
@@ -100,7 +106,6 @@ public class Bench_Batch_Forward_8 : Bench_Batch_Base
         var batch = new SpikesVector();
         for (int b = 0; b < BatchSize; b++)
             batch.Add(new SpikesData(BatchTimes[b], BatchSources[b]));
-
         ManagedLayer!.Forward(batch);
     }
 
@@ -110,13 +115,12 @@ public class Bench_Batch_Forward_8 : Bench_Batch_Base
         var batch = new CApi.SpikesVector();
         for (int b = 0; b < BatchSize; b++)
             batch.Add(new CApi.SpikesData(BatchTimes[b], BatchSources[b]));
-
         NativeLayer!.Forward(batch);
     }
 }
 
 [MemoryDiagnoser]
-public class Bench_Batch_Forward_16 : Bench_Batch_Base
+public class Bench_Batch_Forward_16 : BenchBatchBase
 {
     protected override void Configure() { (NPre, NPost, NSpikes) = (50, 20, 100); BatchSize = 16; }
 
@@ -126,7 +130,6 @@ public class Bench_Batch_Forward_16 : Bench_Batch_Base
         var batch = new SpikesVector();
         for (int b = 0; b < BatchSize; b++)
             batch.Add(new SpikesData(BatchTimes[b], BatchSources[b]));
-
         ManagedLayer!.Forward(batch);
     }
 
@@ -136,7 +139,6 @@ public class Bench_Batch_Forward_16 : Bench_Batch_Base
         var batch = new CApi.SpikesVector();
         for (int b = 0; b < BatchSize; b++)
             batch.Add(new CApi.SpikesData(BatchTimes[b], BatchSources[b]));
-
         NativeLayer!.Forward(batch);
     }
 }
@@ -146,7 +148,7 @@ public class Bench_Batch_Forward_16 : Bench_Batch_Base
 // ============================================================
 
 [MemoryDiagnoser]
-public class Bench_Batch_TrainingStep_4 : Bench_Batch_Base
+public class Bench_Batch_TrainingStep_4 : BenchBatchBase
 {
     protected override void Configure() { (NPre, NPost, NSpikes) = (50, 20, 100); BatchSize = 4; }
 
@@ -156,9 +158,8 @@ public class Bench_Batch_TrainingStep_4 : Bench_Batch_Base
         var batch = new SpikesVector();
         for (int b = 0; b < BatchSize; b++)
             batch.Add(new SpikesData(BatchTimes[b], BatchSources[b]));
-
         ManagedLayer!.Forward(batch);
-        var post = ManagedLayer.Output!;
+        var post = ManagedLayer.Output;
         for (int b = 0; b < BatchSize; b++)
             for (int i = 0; i < post[b].NSpikes; i++)
                 post[b].SetError(i, 1.0);
@@ -171,9 +172,8 @@ public class Bench_Batch_TrainingStep_4 : Bench_Batch_Base
         var batch = new CApi.SpikesVector();
         for (int b = 0; b < BatchSize; b++)
             batch.Add(new CApi.SpikesData(BatchTimes[b], BatchSources[b]));
-
         NativeLayer!.Forward(batch);
-        var post = NativeLayer.Output!;
+        var post = NativeLayer.Output;
         for (int b = 0; b < BatchSize; b++)
             for (int i = 0; i < post[b].NSpikes; i++)
                 post[b].SetError(i, 1.0);
@@ -182,7 +182,7 @@ public class Bench_Batch_TrainingStep_4 : Bench_Batch_Base
 }
 
 [MemoryDiagnoser]
-public class Bench_Batch_TrainingStep_8 : Bench_Batch_Base
+public class Bench_Batch_TrainingStep_8 : BenchBatchBase
 {
     protected override void Configure() { (NPre, NPost, NSpikes) = (50, 20, 100); BatchSize = 8; }
 
@@ -192,9 +192,8 @@ public class Bench_Batch_TrainingStep_8 : Bench_Batch_Base
         var batch = new SpikesVector();
         for (int b = 0; b < BatchSize; b++)
             batch.Add(new SpikesData(BatchTimes[b], BatchSources[b]));
-
         ManagedLayer!.Forward(batch);
-        var post = ManagedLayer.Output!;
+        var post = ManagedLayer.Output;
         for (int b = 0; b < BatchSize; b++)
             for (int i = 0; i < post[b].NSpikes; i++)
                 post[b].SetError(i, 1.0);
@@ -207,9 +206,8 @@ public class Bench_Batch_TrainingStep_8 : Bench_Batch_Base
         var batch = new CApi.SpikesVector();
         for (int b = 0; b < BatchSize; b++)
             batch.Add(new CApi.SpikesData(BatchTimes[b], BatchSources[b]));
-
         NativeLayer!.Forward(batch);
-        var post = NativeLayer.Output!;
+        var post = NativeLayer.Output;
         for (int b = 0; b < BatchSize; b++)
             for (int i = 0; i < post[b].NSpikes; i++)
                 post[b].SetError(i, 1.0);
@@ -218,16 +216,32 @@ public class Bench_Batch_TrainingStep_8 : Bench_Batch_Base
 }
 
 // ============================================================
-// Raw batch API benchmarks — direct CApi.Batch.ComputeSpikesBatch call
+// Raw batch API benchmarks — direct Batch.ComputeSpikesBatch call
 // (bypasses layer overhead, measures pure C batch function)
 // ============================================================
 
-[MemoryDiagnoser]
-public class Bench_Batch_RawApi_4 : BenchBase
+public abstract class BenchRawBatchBase
 {
+    public int NPre { get; protected set; }
+    public int NPost { get; protected set; }
+    public int NSpikes { get; protected set; }
     protected int BatchSize => 4;
 
-    public override void Setup()
+    protected const double TauMem = 0.02;
+    protected const double TauSyn = 0.005;
+    protected const double VTh = 1.0;
+
+    protected double[] W { get; set; } = null!;
+    protected double[] Times { get; set; } = null!;
+    protected int[] Sources { get; set; } = null!;
+    protected ScratchBuffers Buffers { get; set; } = null!;
+
+    private int[] _nSpikesPerSample = null!;
+
+    protected abstract void Configure();
+
+    [GlobalSetup]
+    public virtual void Setup()
     {
         Configure();
         var rng = new Random(42);
@@ -240,11 +254,11 @@ public class Bench_Batch_RawApi_4 : BenchBase
         int totalSpikes = NSpikes * BatchSize;
         Times = new double[totalSpikes];
         Sources = new int[totalSpikes];
-        var nSpikesPerSample = new int[BatchSize];
+        _nSpikesPerSample = new int[BatchSize];
 
         for (int b = 0; b < BatchSize; b++)
         {
-            nSpikesPerSample[b] = NSpikes;
+            _nSpikesPerSample[b] = NSpikes;
             for (int i = 0; i < NSpikes; i++)
             {
                 Times[b * NSpikes + i] = (i + 1) * 1.0 / (NSpikes + 1);
@@ -252,16 +266,9 @@ public class Bench_Batch_RawApi_4 : BenchBase
             }
         }
 
-        // Store for benchmarks
-        _nSpikesPerSample = nSpikesPerSample;
-
         Buffers = new ScratchBuffers();
         Buffers.EnsureCapacity(NPost, NPre, NSpikes);
     }
-
-    private int[] _nSpikesPerSample = null!;
-
-    protected override void Configure() => (NPre, NPost, NSpikes) = (50, 20, 100);
 
     [Benchmark(Baseline = true)]
     public void Managed_PerSampleLoop()
@@ -273,8 +280,7 @@ public class Bench_Batch_RawApi_4 : BenchBase
             var sampleSources = new int[NSpikes];
             System.Array.Copy(Times, offset, sampleTimes, 0, NSpikes);
             System.Array.Copy(Sources, offset, sampleSources, 0, NSpikes);
-
-            var result = EventPropMath.ComputeSpikes(W, sampleTimes, sampleSources, NPost, VTh, TauMem, TauSyn, Buffers);
+            EventPropMath.ComputeSpikes(W, sampleTimes, sampleSources, NPost, VTh, TauMem, TauSyn, Buffers);
         }
     }
 
@@ -299,4 +305,10 @@ public class Bench_Batch_RawApi_4 : BenchBase
             var _ = output.NSpikes; // prevent optimization
         }
     }
+}
+
+[MemoryDiagnoser]
+public class Bench_Batch_RawApi_4 : BenchRawBatchBase
+{
+    protected override void Configure() => (NPre, NPost, NSpikes) = (50, 20, 100);
 }
