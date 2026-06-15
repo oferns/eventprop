@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace CW.EventProp;
+namespace CW.EventProp.Native;
 
 /// <summary>P/Invoke bindings for eventprop_diag.h — diagnostic helpers.</summary>
 public static unsafe partial class Diag

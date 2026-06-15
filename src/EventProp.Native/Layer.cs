@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace CW.EventProp;
+namespace CW.EventProp.Native;
 
 /// <summary>
 /// Base interface for spiking neural network layers.

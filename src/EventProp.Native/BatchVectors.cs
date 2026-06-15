@@ -1,4 +1,4 @@
-namespace CW.EventProp;
+namespace CW.EventProp.Native;
 
 /// <summary>
 /// A batch of SpikesData — behaves like a list for indexing, slicing, and iteration.

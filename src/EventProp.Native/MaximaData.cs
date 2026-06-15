@@ -1,4 +1,4 @@
-namespace CW.EventProp;
+namespace CW.EventProp.Native;
 
 /// <summary>
 /// Holds membrane potential maxima for a single sample, one entry per neuron.

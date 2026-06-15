@@ -1,4 +1,4 @@
-namespace CW.EventProp;
+namespace CW.EventProp.Native;
 
 /// <summary>
 /// Parameters for a Leaky Integrate (LI) layer (no spike threshold, uses maxima-based loss).

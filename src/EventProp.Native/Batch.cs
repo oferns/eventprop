@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace CW.EventProp;
+namespace CW.EventProp.Native;
 
 /// <summary>P/Invoke bindings for eventprop_batch.h — struct-based batch operations only.</summary>
 public static unsafe partial class Batch

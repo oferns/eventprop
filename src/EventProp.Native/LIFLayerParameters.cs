@@ -1,4 +1,4 @@
-namespace CW.EventProp;
+namespace CW.EventProp.Native;
 
 /// <summary>
 /// Parameters for a Leaky Integrate-and-Fire (LIF) layer.

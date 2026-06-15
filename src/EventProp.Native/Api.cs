@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace CW.EventProp;
+namespace CW.EventProp.Native;
 
 /// <summary>P/Invoke bindings for eventprop.h — core single-sample operations.</summary>
 public static unsafe partial class Api

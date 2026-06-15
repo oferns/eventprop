@@ -1,4 +1,4 @@
-namespace CW.EventProp;
+namespace CW.EventProp.Native;
 
 /// <summary>
 /// Holds spike event data for a single sample. Times and sources are sorted by time.

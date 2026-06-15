@@ -1,4 +1,4 @@
-namespace CW.EventProp;
+namespace CW.EventProp.Native;
 
 /// <summary>
 /// Leaky Integrate-and-Fire (LIF) layer backed by the C library via P/Invoke.
