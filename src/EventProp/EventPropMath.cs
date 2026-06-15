@@ -202,7 +202,7 @@ public static class EventPropMath
                         for (int s = 0; s < neuronSpikeCount; s++)
                             sum1Val += -vTh * Math.Exp(buffers.PostSpikeTimes[neuronOffset + s] / tauMem);
                         double tmax = tmaxPrefactor * (tmaxSummand + Math.Log(sum1Val / sum0Val));
-                        if (!double.IsInfinity(tmax))
+                        if (!double.IsInfinity(tmax) && !double.IsNaN(tmax))
                         {
                             double vmax = ComputeV(tmax, i, neuronSpikeCount,
                                 buffers.PostSpikeTimes, neuronOffset, buffers.Sum0, buffers.Sum1,
@@ -230,7 +230,8 @@ public static class EventPropMath
                                 }
                             }
                         }
-                        finished = true;
+                        if (!foundSpikeInThisPass) finished = true;
+                        else break; // Stay at last interval to find more spikes
                     }
                     else
                     {
@@ -263,14 +264,17 @@ public static class EventPropMath
                                         targetNrn, nPost, kPrefactor, 1.0 / tauMem, 1.0 / tauSyn, vTh) - vTh,
                                     tBefore, tmax);
 
-                                double current = ComputeI(tPost, nSpikes, times,
-                                    buffers.Sum0, targetNrn, nPost, tauSyn);
-                                if (neuronOffset + neuronSpikeCount < buffers.PostSpikeTimes.Length)
+                                if (tPost > tBefore && tPost < tmax)
                                 {
-                                    buffers.PostSpikeTimes[neuronOffset + neuronSpikeCount] = tPost;
-                                    buffers.PostSpikeCurrents[neuronOffset + neuronSpikeCount] = current;
-                                    neuronSpikeCount++;
-                                    foundSpikeInThisPass = true;
+                                    double current = ComputeI(tPost, nSpikes, times,
+                                        buffers.Sum0, targetNrn, nPost, tauSyn);
+                                    if (neuronOffset + neuronSpikeCount < buffers.PostSpikeTimes.Length)
+                                    {
+                                        buffers.PostSpikeTimes[neuronOffset + neuronSpikeCount] = tPost;
+                                        buffers.PostSpikeCurrents[neuronOffset + neuronSpikeCount] = current;
+                                        neuronSpikeCount++;
+                                        foundSpikeInThisPass = true;
+                                    }
                                 }
                                 processedUpTo = i;
                                 break; // Re-process this interval with updated spike count
@@ -299,14 +303,17 @@ public static class EventPropMath
                                     targetNrn, nPost, kPrefactor, 1.0 / tauMem, 1.0 / tauSyn, vTh) - vTh,
                                 tBefore, tInput);
 
-                            double current = ComputeI(tPost, nSpikes, times,
-                                buffers.Sum0, targetNrn, nPost, tauSyn);
-                            if (neuronOffset + neuronSpikeCount < buffers.PostSpikeTimes.Length)
+                            if (tPost > tBefore && tPost < tInput)
                             {
-                                buffers.PostSpikeTimes[neuronOffset + neuronSpikeCount] = tPost;
-                                buffers.PostSpikeCurrents[neuronOffset + neuronSpikeCount] = current;
-                                neuronSpikeCount++;
-                                foundSpikeInThisPass = true;
+                                double current = ComputeI(tPost, nSpikes, times,
+                                    buffers.Sum0, targetNrn, nPost, tauSyn);
+                                if (neuronOffset + neuronSpikeCount < buffers.PostSpikeTimes.Length)
+                                {
+                                    buffers.PostSpikeTimes[neuronOffset + neuronSpikeCount] = tPost;
+                                    buffers.PostSpikeCurrents[neuronOffset + neuronSpikeCount] = current;
+                                    neuronSpikeCount++;
+                                    foundSpikeInThisPass = true;
+                                }
                             }
                             processedUpTo = i;
                             break; // Re-process this interval with updated spike count
@@ -581,8 +588,10 @@ public static class EventPropMath
         for (int s = 0; s < spikeCount; s++)
         {
             double spikeTime = postSpikeTimes[neuronOffset + s];
-            if (spikeTime > t) break;
-            mem -= vTh * Math.Exp(-(t - spikeTime) * tauMemInv);
+            if (spikeTime <= t)  // Include all spikes where spikeTime <= t, don't break early
+            {
+                mem -= vTh * Math.Exp(-(t - spikeTime) * tauMemInv);
+            }
         }
         return mem;
     }
@@ -653,8 +662,7 @@ public static class EventPropMath
     {
         if (spikeCount > 0)
         {
-            double tLower = postSpikeTimes[neuronOffset + spikeCount - 1];
-            if (tLower < tUpper) return tLower;
+            return postSpikeTimes[neuronOffset + spikeCount - 1];
         }
         return 0.0;
     }

@@ -60,7 +60,7 @@ public class NativeVsManagedEdgeTests
         double vTh = 0.001;
 
         var buffers = new ScratchBuffers();
-        buffers.InitPostSpikeBuffers(nPost, 8);
+        buffers.InitPostSpikeBuffers(nPost, 2048);
         var csResult = EventPropMath.ComputeSpikes(w, [0.01], [0], nPost, vTh, 0.02, 0.005, buffers);
 
         using var nativeOutput = Native.Api.ComputeSpikes(w, nPre, nPost, [0.01], [0], vTh, 0.02, 0.005);
@@ -86,6 +86,47 @@ public class NativeVsManagedEdgeTests
 
         using var nativeOutput = Native.Api.ComputeSpikes(w, nPre, nPost, [0.01, 0.02], [0, 1], vTh, 0.02, 0.005);
 
+        SyncAssert.That(csResult.NSpikes).IsEqualTo(nativeOutput.NSpikes);
+    }
+
+    [Test]
+    public void ComputeSpikes_NativeVsManaged_ShorterTauSyn()
+    {
+        int nPre = 1, nPost = 1;
+        double[] w = [20.0];
+
+        // Shorter tau_syn
+        var buffersShort = new ScratchBuffers();
+        buffersShort.InitPostSpikeBuffers(nPost, 64);
+        var csShort = EventPropMath.ComputeSpikes(w, [0.01], [0], nPost, 1.0, 0.02, 0.003, buffersShort);
+        using var nativeShort = Native.Api.ComputeSpikes(w, nPre, nPost, [0.01], [0], 1.0, 0.02, 0.003);
+        Console.WriteLine($"Short tau_syn: C={nativeShort.NSpikes}, Managed={csShort.NSpikes}");
+        SyncAssert.That(csShort.NSpikes).IsEqualTo(nativeShort.NSpikes);
+
+        // Longer tau_syn
+        var buffersLong = new ScratchBuffers();
+        buffersLong.InitPostSpikeBuffers(nPost, 64);
+        var csLong = EventPropMath.ComputeSpikes(w, [0.01], [0], nPost, 1.0, 0.02, 0.01, buffersLong);
+        using var nativeLong = Native.Api.ComputeSpikes(w, nPre, nPost, [0.01], [0], 1.0, 0.02, 0.01);
+        Console.WriteLine($"Long tau_syn: C={nativeLong.NSpikes}, Managed={csLong.NSpikes}");
+        SyncAssert.That(csLong.NSpikes).IsEqualTo(nativeLong.NSpikes);
+    }
+
+    [Test]
+    public void ComputeSpikes_NativeVsManaged_MultipleIntervals()
+    {
+        int nPre = 2, nPost = 1;
+        double[] w = [3.0, 15.0];
+
+        var buffers = new ScratchBuffers();
+        buffers.InitPostSpikeBuffers(nPost, 64);
+        var csResult = EventPropMath.ComputeSpikes(w, [0.01, 0.05], [0, 1], nPost, 1.0, 0.02, 0.005, buffers);
+        using var nativeOutput = Native.Api.ComputeSpikes(w, nPre, nPost, [0.01, 0.05], [0, 1], 1.0, 0.02, 0.005);
+        Console.WriteLine($"Multiple intervals: C={nativeOutput.NSpikes}, Managed={csResult.NSpikes}");
+        for (int i = 0; i < nativeOutput.NSpikes; i++)
+            Console.WriteLine($"  C[{i}]={nativeOutput.Times[i]:F6}");
+        for (int i = 0; i < csResult.NSpikes; i++)
+            Console.WriteLine($"  M[{i}]={csResult.Times[i]:F6}");
         SyncAssert.That(csResult.NSpikes).IsEqualTo(nativeOutput.NSpikes);
     }
 
