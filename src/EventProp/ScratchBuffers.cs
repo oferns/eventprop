@@ -42,6 +42,27 @@ public sealed class ScratchBuffers : IDisposable
     /// <summary>Pre-allocated per-neuron end index into lambda_i jumps flat arrays.</summary>
     public int[] LambdaIJumpsEnd { get; private set; } = Array.Empty<int>();
 
+    /// <summary>Per-neuron jump capacity tracker (for dynamic growth of flat jump buffers).</summary>
+    public int[] LambdaIJumpsNeuronCap { get; private set; } = Array.Empty<int>();
+
+    /// <summary>Current total jump count across all neurons (into flat LambdaIJumps* arrays).</summary>
+    public int LambdaIJumpsTotalCount { get; internal set; }
+
+    /// <summary>Pre-allocated buffer for merged spike timeline in backward pass.</summary>
+    public MergedSpike[] MergedSpikes { get; private set; } = Array.Empty<MergedSpike>();
+
+    /// <summary>Pre-allocated buffer for spike entries (used by ComputeSpikes output sorting).</summary>
+    public SpikeEntry[] SpikeEntries { get; private set; } = Array.Empty<SpikeEntry>();
+
+    /// <summary>Pre-allocated output buffer for post-spike times.</summary>
+    public double[] OutputSpikeTimes { get; private set; } = Array.Empty<double>();
+
+    /// <summary>Pre-allocated output buffer for post-spike sources.</summary>
+    public int[] OutputSpikeSources { get; private set; } = Array.Empty<int>();
+
+    /// <summary>Pre-allocated output buffer for post-spike currents.</summary>
+    public double[] OutputSpikeCurrents { get; private set; } = Array.Empty<double>();
+
     /// <summary>Pre-allocated buffer for exp(-t/tau_mem) values (one per input spike).</summary>
     public double[] ExpInputMem { get; private set; } = Array.Empty<double>();
 
@@ -90,15 +111,34 @@ public sealed class ScratchBuffers : IDisposable
             SpikeErrors = new double[nSpikes];
 
         // Lambda_i jumps: one per post-spike, plus per-neuron start/end indices
-        if (LambdaIJumpsMagnitude.Length < nSpikes)
+        int nPostSpikes = Math.Max(nSpikes, 1);
+        if (LambdaIJumpsMagnitude.Length < nPostSpikes)
         {
-            LambdaIJumpsMagnitude = new double[nSpikes];
-            LambdaIJumpsTimeOffset = new double[nSpikes];
+            LambdaIJumpsMagnitude = new double[nPostSpikes];
+            LambdaIJumpsTimeOffset = new double[nPostSpikes];
         }
         if (LambdaIJumpsStart.Length < nNeurons + 1)
         {
             LambdaIJumpsStart = new int[nNeurons + 1];
             LambdaIJumpsEnd = new int[nNeurons + 1];
+        }
+        if (LambdaIJumpsNeuronCap.Length < nNeurons)
+            LambdaIJumpsNeuronCap = new int[nNeurons];
+
+        // Merged spikes for backward pass (input + post)
+        if (MergedSpikes.Length < nSpikes * 2)
+            MergedSpikes = new MergedSpike[nSpikes * 2];
+
+        // Spike entries for output sorting
+        if (SpikeEntries.Length < nSpikes)
+            SpikeEntries = new SpikeEntry[nSpikes];
+
+        // Output spike arrays
+        if (OutputSpikeTimes.Length < nSpikes)
+        {
+            OutputSpikeTimes = new double[nSpikes];
+            OutputSpikeSources = new int[nSpikes];
+            OutputSpikeCurrents = new double[nSpikes];
         }
 
         // Exp buffers: one value per input spike
@@ -150,6 +190,7 @@ public sealed class ScratchBuffers : IDisposable
         LambdaITrace.AsSpan().Clear();
         LambdaIJumpsMagnitude.AsSpan().Clear();
         LambdaIJumpsTimeOffset.AsSpan().Clear();
+        Array.Clear(LambdaIJumpsNeuronCap, 0, LambdaIJumpsNeuronCap.Length);
     }
 
     public void Dispose()
@@ -168,5 +209,11 @@ public sealed class ScratchBuffers : IDisposable
         PostSpikeCurrents = Array.Empty<double>();
         SpikeCountPerNeuron = Array.Empty<int>();
         SpikeOffsetPerNeuron = Array.Empty<int>();
+        LambdaIJumpsNeuronCap = Array.Empty<int>();
+        MergedSpikes = Array.Empty<MergedSpike>();
+        SpikeEntries = Array.Empty<SpikeEntry>();
+        OutputSpikeTimes = Array.Empty<double>();
+        OutputSpikeSources = Array.Empty<int>();
+        OutputSpikeCurrents = Array.Empty<double>();
     }
 }

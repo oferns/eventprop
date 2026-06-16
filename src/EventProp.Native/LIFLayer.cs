@@ -92,14 +92,15 @@ public sealed class LIFLayer : Layer
         var (flatTimes, flatSources, nSpikesPerSample) = FlattenSpikes(inputBatch);
 
         // Batch forward pass — single C call
-        using var nativeOutput = Batch.ComputeSpikesBatch(
+        var nativeOutput = Batch.ComputeSpikesBatch(
             _weights, _params.NIn, _params.N,
             flatTimes, flatSources, nSpikesPerSample,
             _params.VTh, _params.TauMem, _params.TauSyn);
 
-        // Keep the native pointer alive for backward pass
-        // We need to "steal" it from the owned wrapper so we can free it later
-        _fwdBatchPtr = GetNativePointer(nativeOutput);
+        // Transfer ownership of native pointer to this layer.
+        // We deliberately do NOT dispose nativeOutput here — the layer owns it now
+        // and will free it in Dispose() or on the next Forward() call.
+        _fwdBatchPtr = nativeOutput.GetHandle();
 
         // Reconstruct managed SpikesData from native output
         var postBatch = new SpikesVector(inputBatch.Count);

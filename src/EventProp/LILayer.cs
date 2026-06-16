@@ -80,32 +80,71 @@ public sealed class LILayer : Layer
 
     /// <summary>
     /// Run forward pass: compute membrane potential maxima per neuron given input spikes.
+    /// Processes samples in parallel when batch size >= 2.
     /// </summary>
     public override void Forward(SpikesVector inputBatch)
     {
         _inputBatch = inputBatch;
 
-        // Ensure scratch buffers are sized for the largest sample
+        // Determine max spikes for buffer sizing
         int maxSpikes = 0;
         foreach (var spikes in inputBatch)
             maxSpikes = Math.Max(maxSpikes, spikes.NSpikes);
 
-        _buffers.EnsureCapacity(_params.N, _params.NIn, maxSpikes);
-        _buffers.Clear();
-
         var maximaBatch = new MaximaVector(inputBatch.Count);
-        foreach (var inputSpikes in inputBatch)
-        {
-            var maxima = EventPropMath.ComputeMaxima(
-                _weights.AsSpan(),
-                inputSpikes.Times,
-                inputSpikes.Sources,
-                _params.N,
-                _params.TauMem,
-                _params.TauSyn,
-                _buffers);
 
-            maximaBatch.Add(maxima);
+        if (inputBatch.Count >= 2)
+        {
+            // Parallel path: each thread gets its own ScratchBuffers
+            double[] wArr = _weights;
+            var results = new MaximaData[inputBatch.Count];
+            Parallel.For(0, inputBatch.Count, () =>
+            {
+                var buffers = new ScratchBuffers();
+                buffers.EnsureCapacity(_params.N, _params.NIn, maxSpikes);
+                return buffers;
+            },
+            (idx, _, buffers) =>
+            {
+                var inputSpikes = inputBatch[idx];
+                buffers.Clear();
+
+                var maxima = EventPropMath.ComputeMaxima(
+                    wArr,
+                    inputSpikes.Times,
+                    inputSpikes.Sources,
+                    _params.N,
+                    _params.TauMem,
+                    _params.TauSyn,
+                    buffers);
+
+                results[idx] = maxima;
+                return buffers;
+            },
+            buffers => buffers.Dispose());
+
+            maximaBatch = new MaximaVector(results);
+        }
+        else
+        {
+            // Sequential path: reuse single buffer
+            _buffers.EnsureCapacity(_params.N, _params.NIn, maxSpikes);
+
+            foreach (var inputSpikes in inputBatch)
+            {
+                _buffers.Clear();
+
+                var maxima = EventPropMath.ComputeMaxima(
+                    _weights.AsSpan(),
+                    inputSpikes.Times,
+                    inputSpikes.Sources,
+                    _params.N,
+                    _params.TauMem,
+                    _params.TauSyn,
+                    _buffers);
+
+                maximaBatch.Add(maxima);
+            }
         }
 
         _maximaBatch = maximaBatch;
@@ -116,6 +155,7 @@ public sealed class LILayer : Layer
     /// <summary>
     /// Run backward pass: compute weight gradients via the adjoint method.
     /// Gradients are accumulated into self.Gradient (not zeroed — call ZeroGrad() first if needed).
+    /// Processes samples in parallel when batch size >= 2.
     /// </summary>
     public override void Backward()
     {
@@ -125,19 +165,56 @@ public sealed class LILayer : Layer
         // Zero gradient before accumulation
         Gradient.AsSpan().Clear();
 
-        foreach (var inputSpikes in _inputBatch!)
-            foreach (var maxima in _maximaBatch!)
-                EventPropMath.BackwardMaxima(
-                    inputSpikes.Times,
-                    inputSpikes.Sources,
-                    maxima.Times,
-                    maxima.Values,
-                    maxima.Errors,
-                    _weights.AsSpan(),
-                    _params.N,
-                    _params.TauMem,
-                    _params.TauSyn,
-                    Gradient.AsSpan());
+        int batchCount = _inputBatch!.Count;
+
+        if (batchCount >= 2)
+        {
+            // Parallel path: each thread computes local gradient, then accumulate with lock
+            double[] wArr = _weights;
+            int gradSize = Gradient.Length;
+            Parallel.For(0, batchCount, () => new double[gradSize],
+                (idx, _, localGrad) =>
+                {
+                    EventPropMath.BackwardMaxima(
+                        _inputBatch[idx].Times,
+                        _inputBatch[idx].Sources,
+                        _maximaBatch![idx].Times,
+                        _maximaBatch[idx].Values,
+                        _maximaBatch[idx].Errors,
+                        wArr,
+                        _params.N,
+                        _params.TauMem,
+                        _params.TauSyn,
+                        localGrad);
+
+                    return localGrad;
+                },
+                localGrad =>
+                {
+                    lock (Gradient)
+                    {
+                        for (int i = 0; i < gradSize; i++)
+                            Gradient[i] += localGrad[i];
+                    }
+                });
+        }
+        else
+        {
+            // Sequential path: accumulate directly into Gradient
+            foreach (var inputSpikes in _inputBatch)
+                foreach (var maxima in _maximaBatch!)
+                    EventPropMath.BackwardMaxima(
+                        inputSpikes.Times,
+                        inputSpikes.Sources,
+                        maxima.Times,
+                        maxima.Values,
+                        maxima.Errors,
+                        _weights.AsSpan(),
+                        _params.N,
+                        _params.TauMem,
+                        _params.TauSyn,
+                        Gradient.AsSpan());
+        }
 
         _ranBackward = true;
     }

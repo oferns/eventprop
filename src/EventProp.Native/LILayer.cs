@@ -98,12 +98,12 @@ public sealed class LILayer : Layer
         var (flatTimes, flatSources, nSpikesPerSample) = FlattenSpikes(inputBatch);
 
         // Batch forward pass — single C call
-        using var nativeOutput = Batch.ComputeMaximaBatch(
+        var nativeOutput = Batch.ComputeMaximaBatch(
             _weights, _params.NIn, _params.N,
             flatTimes, flatSources, nSpikesPerSample,
             _params.TauMem, _params.TauSyn);
 
-        // Steal the native pointer for backward pass
+        // Transfer ownership of native pointer to this layer.
         _fwdBatchPtr = nativeOutput.GetHandle();
 
         // Reconstruct managed MaximaData from native output

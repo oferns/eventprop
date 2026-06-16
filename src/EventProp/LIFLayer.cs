@@ -81,33 +81,73 @@ public sealed class LIFLayer : Layer
 
     /// <summary>
     /// Run forward pass: compute post-synaptic spike times given input spikes.
+    /// Processes samples in parallel when batch size >= 2.
     /// </summary>
     public override void Forward(SpikesVector inputBatch)
     {
         _inputBatch = inputBatch;
 
-        // Ensure scratch buffers are sized for the largest sample
+        // Ensure scratch buffers are sized for the largest sample (used by sequential path)
         int maxSpikes = 0;
         foreach (var spikes in inputBatch)
             maxSpikes = Math.Max(maxSpikes, spikes.NSpikes);
 
-        _buffers.EnsureCapacity(_params.N, _params.NIn, maxSpikes);
-        _buffers.Clear();
-
         var postBatch = new SpikesVector(inputBatch.Count);
-        foreach (var inputSpikes in inputBatch)
-        {
-            var post = EventPropMath.ComputeSpikes(
-                _weights.AsSpan(),
-                inputSpikes.Times,
-                inputSpikes.Sources,
-                _params.N,
-                _params.VTh,
-                _params.TauMem,
-                _params.TauSyn,
-                _buffers);
 
-            postBatch.Add(post);
+        if (inputBatch.Count >= 2)
+        {
+            // Parallel path: each thread gets its own ScratchBuffers
+            double[] wArr = _weights;
+            var results = new SpikesData[inputBatch.Count];
+            Parallel.For(0, inputBatch.Count, () =>
+            {
+                var buffers = new ScratchBuffers();
+                buffers.EnsureCapacity(_params.N, _params.NIn, maxSpikes);
+                return buffers;
+            },
+            (idx, _, buffers) =>
+            {
+                var inputSpikes = inputBatch[idx];
+                buffers.Clear();
+
+                var post = EventPropMath.ComputeSpikes(
+                    wArr,
+                    inputSpikes.Times,
+                    inputSpikes.Sources,
+                    _params.N,
+                    _params.VTh,
+                    _params.TauMem,
+                    _params.TauSyn,
+                    buffers);
+
+                results[idx] = post;
+                return buffers;
+            },
+            buffers => buffers.Dispose());
+
+            postBatch = new SpikesVector(results);
+        }
+        else
+        {
+            // Sequential path: reuse single buffer
+            _buffers.EnsureCapacity(_params.N, _params.NIn, maxSpikes);
+
+            foreach (var inputSpikes in inputBatch)
+            {
+                _buffers.Clear();
+
+                var post = EventPropMath.ComputeSpikes(
+                    _weights.AsSpan(),
+                    inputSpikes.Times,
+                    inputSpikes.Sources,
+                    _params.N,
+                    _params.VTh,
+                    _params.TauMem,
+                    _params.TauSyn,
+                    _buffers);
+
+                postBatch.Add(post);
+            }
         }
 
         _postBatch = postBatch;
@@ -118,6 +158,7 @@ public sealed class LIFLayer : Layer
     /// <summary>
     /// Run backward pass: compute weight gradients via the adjoint method.
     /// Gradients are accumulated into self.Gradient (not zeroed — call ZeroGrad() first if needed).
+    /// Processes samples in parallel when batch size >= 2.
     /// </summary>
     public override void Backward()
     {
@@ -127,19 +168,84 @@ public sealed class LIFLayer : Layer
         // Zero gradient before accumulation
         Gradient.AsSpan().Clear();
 
-        foreach (var inputSpikes in _inputBatch!)
-            foreach (var postSpikes in _postBatch!)
+        int batchCount = _inputBatch!.Count;
+        int totalSpikes = 0;
+        foreach (var s in _inputBatch) totalSpikes += s.NSpikes;
+        if (totalSpikes == 0)
+        {
+            _ranBackward = true;
+            return;
+        }
+
+        if (batchCount >= 2)
+        {
+            // Parallel path: each thread computes local gradient, then accumulate with lock
+            double[] wArr = _weights;
+            int gradSize = Gradient.Length;
+            Parallel.For(0, batchCount, () =>
+            {
+                var buffers = new ScratchBuffers();
+                var localGrad = new double[gradSize];
+                return (buffers, localGrad);
+            },
+            (idx, _, local) =>
+            {
+                var buffers = local.buffers;
+                int maxNeurons = Math.Max(_params.NIn, _params.N);
+                buffers.EnsureCapacity(
+                    nNeurons: maxNeurons,
+                    nPre: _params.NIn,
+                    nSpikes: _inputBatch[idx].NSpikes + _postBatch![idx].NSpikes);
+
                 EventPropMath.BackwardSpikes(
-                    _weights.AsSpan(),
-                    inputSpikes.Times,
-                    inputSpikes.Sources,
-                    postSpikes,
+                    wArr,
+                    _inputBatch[idx].Times,
+                    _inputBatch[idx].Sources,
+                    _postBatch[idx],
                     _params.N,
                     _params.VTh,
                     _params.TauMem,
                     _params.TauSyn,
-                    Gradient.AsSpan(),
-                    _buffers);
+                    local.localGrad,
+                    buffers);
+
+                return local;
+            },
+            local =>
+            {
+                lock (Gradient)
+                {
+                    for (int i = 0; i < gradSize; i++)
+                        Gradient[i] += local.localGrad[i];
+                }
+                local.buffers.Dispose();
+            });
+        }
+        else
+        {
+            // Sequential path: accumulate directly into Gradient
+            int maxNeurons = Math.Max(_params.NIn, _params.N);
+            foreach (var inputSpikes in _inputBatch)
+                foreach (var postSpikes in _postBatch!)
+                {
+                    _buffers.EnsureCapacity(
+                        nNeurons: maxNeurons,
+                        nPre: _params.NIn,
+                        nSpikes: inputSpikes.NSpikes + postSpikes.NSpikes);
+
+                    EventPropMath.BackwardSpikes(
+                        _weights.AsSpan(),
+                        inputSpikes.Times,
+                        inputSpikes.Sources,
+                        postSpikes,
+                        _params.N,
+                        _params.VTh,
+                        _params.TauMem,
+                        _params.TauSyn,
+                        Gradient.AsSpan(),
+                        _buffers);
+                }
+        }
 
         _ranBackward = true;
     }
