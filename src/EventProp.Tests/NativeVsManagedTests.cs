@@ -113,12 +113,12 @@ public class NativeVsManagedTests
     // Scaled Tolerance Helper (matches C/C++ parity test logic)
     // ========================================================================
 
-    private static void AssertScaled(double actual, double expected, string name, int index)
+    private static void AssertScaled(double managed, double nativeC, string name, int index)
     {
-        double diff = Math.Abs(actual - expected);
-        double scale = Math.Max(Math.Abs(actual), Math.Abs(expected));
+        double diff = Math.Abs(managed - nativeC);
+        double scale = Math.Max(Math.Abs(managed), Math.Abs(nativeC));
         if (diff > AbsTolerance && diff > RelTolerance * scale)
-            throw new Exception($"Mismatch [{name}[{index}]]: {actual} vs {expected}, diff={diff}");
+            throw new Exception($"Mismatch [{name}[{index}]]: MANAGED={managed} NATIVE_C={nativeC} diff={diff} relDiff={(scale > 0 ? diff / scale : 0)}");
     }
 
     // ========================================================================
@@ -251,7 +251,7 @@ public class NativeVsManagedTests
         SortTimesSources(ref times, ref sources);
 
         // .NET implementation
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nPost, nPre, times.Length);
         var csResult = EventPropMath.ComputeSpikes(w, times, sources, nPost, 1.0, 0.02, 0.005, buffers);
 
@@ -330,7 +330,8 @@ public class NativeVsManagedTests
         SortTimesSources(ref times, ref sources);
 
         // .NET implementation
-        var csMaxima = EventPropMath.ComputeMaxima(w, times, sources, nPost, 0.02, 0.005, new ScratchBuffers());
+        using var maximaBuffers = new ScratchBuffers();
+        var csMaxima = EventPropMath.ComputeMaxima(w, times, sources, nPost, 0.02, 0.005, maximaBuffers);
 
         // C library via P/Invoke
         using var cOutput = Native.Api.ComputeMaxima(w, nPre, nPost, times, sources, 0.02, 0.005);
@@ -408,7 +409,7 @@ public class NativeVsManagedTests
         SortTimesSources(ref times, ref sources);
 
         // Forward pass using .NET (we just need post-spike data; both C and .NET use the same input)
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nPost, nPre, times.Length);
         var postSpikes = EventPropMath.ComputeSpikes(w, times, sources, nPost, 1.0, 0.02, 0.005, buffers);
         if (postSpikes.NSpikes == 0) return; // Skip — no post-spike activity
@@ -429,9 +430,22 @@ public class NativeVsManagedTests
         var cGradient = cOutput.Gradient.ToArray();
 
         // Assert: .NET matches C (scaled tolerance)
-        for (int i = 0; i < csGradient.Length; i++)
+        try
         {
-            AssertScaled(csGradient[i], cGradient[i], "gradient", i);
+            for (int i = 0; i < csGradient.Length; i++)
+            {
+                AssertScaled(csGradient[i], cGradient[i], "gradient", i);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"\n### PARITY FAILURE: BackwardSpikes_{pattern}_{nPre}x{nPost} ###");
+            Console.WriteLine($"Seed=42 tauMem=0.02 tauSyn=0.005 vTh=1.0");
+            Console.WriteLine($"Input spikes: {times.Length}, Post spikes: {postSpikes.NSpikes}");
+            Console.WriteLine($"First 10 input times: [{string.Join(", ", times.Take(10).Select(t => t.ToString("F6")))}]");
+            Console.WriteLine($"First 10 sources: [{string.Join(", ", sources.Take(10))}]");
+            Console.WriteLine($"Error: {ex.Message}");
+            throw;
         }
     }
 
@@ -491,7 +505,8 @@ public class NativeVsManagedTests
         SortTimesSources(ref times, ref sources);
 
         // Compute maxima using .NET (just need the data; both C and .NET backward passes use same input)
-        var netMaxima = EventPropMath.ComputeMaxima(w, times, sources, nPost, 0.02, 0.005, new ScratchBuffers());
+        using var maximaBuf = new ScratchBuffers();
+        var netMaxima = EventPropMath.ComputeMaxima(w, times, sources, nPost, 0.02, 0.005, maximaBuf);
 
         // Build backwards-compatible maxima arrays (n_maxima == n_post for C constraint)
         double[] maximaTimes = new double[nPost];

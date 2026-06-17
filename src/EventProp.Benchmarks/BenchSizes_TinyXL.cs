@@ -169,7 +169,7 @@ public class Bench_BackwardSpikes_Tiny : Bench_TinyXL_Base
     {
         using var output = CApi.Api.BackwardSpikes(Times, Sources,
             PostTimesNative, PostSourcesNative, PostCurrentsNative,
-            PostErrorsNative, NSpikes, W, NPre, NPost,  // Use NSpikes as nPostSpikes
+            PostErrorsNative, PostSpikes!.NSpikes, W, NPre, NPost,
             VTh, TauMem, TauSyn);
         var _ = output.Gradient[0]; // Access to prevent optimization
     }
@@ -191,7 +191,7 @@ public class Bench_BackwardSpikes_XL : Bench_TinyXL_Base
     {
         using var output = CApi.Api.BackwardSpikes(Times, Sources,
             PostTimesNative, PostSourcesNative, PostCurrentsNative,
-            PostErrorsNative, NSpikes, W, NPre, NPost,  // Use NSpikes as nPostSpikes
+            PostErrorsNative, PostSpikes!.NSpikes, W, NPre, NPost,
             VTh, TauMem, TauSyn);
         var _ = output.Gradient[0]; // Access to prevent optimization
     }

@@ -23,6 +23,10 @@ public abstract class BenchLayerBase
     protected double[] Times { get; set; } = null!;
     protected int[] Sources { get; set; } = null!;
 
+    // Pre-allocated input for reuse across iterations (zero-allocation benchmark)
+    protected SpikesVector ManagedInput { get; set; } = null!;
+    protected CApi.SpikesVector NativeInput { get; set; } = null!;
+
     protected CW.EventProp.LIFLayer? ManagedLayer { get; set; }
     protected CApi.LIFLayer? NativeLayer { get; set; }
 
@@ -51,11 +55,16 @@ public abstract class BenchLayerBase
         var nativeParams = new CApi.LIFLayerParameters(NPost, NPre, TauMem, TauSyn, VTh);
         ManagedLayer = new CW.EventProp.LIFLayer(managedParams, W);
         NativeLayer = new CApi.LIFLayer(nativeParams, W);
+
+        // Pre-allocate input vectors for reuse across iterations (zero-allocation benchmark)
+        ManagedInput = new SpikesVector(new[] { new SpikesData(Times, Sources) });
+        NativeInput = new CApi.SpikesVector(new[] { new CApi.SpikesData(Times, Sources) });
     }
 
     [IterationCleanup]
     public void Cleanup()
     {
+        ManagedLayer?.Dispose();
         NativeLayer?.Dispose();
     }
 }
@@ -70,18 +79,10 @@ public class Bench_LIF_Forward_Small : BenchLayerBase
     protected override void Configure() => (NPre, NPost, NSpikes) = (50, 20, 100);
 
     [Benchmark(Baseline = true)]
-    public void Managed()
-    {
-        var input = new SpikesVector(new[] { new SpikesData(Times, Sources) });
-        ManagedLayer!.Forward(input);
-    }
+    public void Managed() => ManagedLayer!.Forward(ManagedInput);
 
     [Benchmark]
-    public void Native()
-    {
-        var input = new CApi.SpikesVector(new[] { new CApi.SpikesData(Times, Sources) });
-        NativeLayer!.Forward(input);
-    }
+    public void Native() => NativeLayer!.Forward(NativeInput);
 }
 
 [MemoryDiagnoser]
@@ -90,18 +91,10 @@ public class Bench_LIF_Forward_Medium : BenchLayerBase
     protected override void Configure() => (NPre, NPost, NSpikes) = (200, 80, 500);
 
     [Benchmark(Baseline = true)]
-    public void Managed()
-    {
-        var input = new SpikesVector(new[] { new SpikesData(Times, Sources) });
-        ManagedLayer!.Forward(input);
-    }
+    public void Managed() => ManagedLayer!.Forward(ManagedInput);
 
     [Benchmark]
-    public void Native()
-    {
-        var input = new CApi.SpikesVector(new[] { new CApi.SpikesData(Times, Sources) });
-        NativeLayer!.Forward(input);
-    }
+    public void Native() => NativeLayer!.Forward(NativeInput);
 }
 
 [MemoryDiagnoser]
@@ -110,18 +103,10 @@ public class Bench_LIF_Forward_Large : BenchLayerBase
     protected override void Configure() => (NPre, NPost, NSpikes) = (500, 200, 1000);
 
     [Benchmark(Baseline = true)]
-    public void Managed()
-    {
-        var input = new SpikesVector(new[] { new SpikesData(Times, Sources) });
-        ManagedLayer!.Forward(input);
-    }
+    public void Managed() => ManagedLayer!.Forward(ManagedInput);
 
     [Benchmark]
-    public void Native()
-    {
-        var input = new CApi.SpikesVector(new[] { new CApi.SpikesData(Times, Sources) });
-        NativeLayer!.Forward(input);
-    }
+    public void Native() => NativeLayer!.Forward(NativeInput);
 }
 
 // ============================================================
@@ -136,8 +121,7 @@ public class Bench_LIF_Backward_Small : BenchLayerBase
     [Benchmark(Baseline = true)]
     public void Managed()
     {
-        var input = new SpikesVector(new[] { new SpikesData(Times, Sources) });
-        ManagedLayer!.Forward(input);
+        ManagedLayer!.Forward(ManagedInput);
         var post = ManagedLayer.Output;
         for (int i = 0; i < post[0].NSpikes; i++)
             post[0].SetError(i, 1.0);
@@ -147,8 +131,7 @@ public class Bench_LIF_Backward_Small : BenchLayerBase
     [Benchmark]
     public void Native()
     {
-        var input = new CApi.SpikesVector(new[] { new CApi.SpikesData(Times, Sources) });
-        NativeLayer!.Forward(input);
+        NativeLayer!.Forward(NativeInput);
         var post = NativeLayer.Output;
         for (int i = 0; i < post[0].NSpikes; i++)
             post[0].SetError(i, 1.0);
@@ -164,8 +147,7 @@ public class Bench_LIF_Backward_Medium : BenchLayerBase
     [Benchmark(Baseline = true)]
     public void Managed()
     {
-        var input = new SpikesVector(new[] { new SpikesData(Times, Sources) });
-        ManagedLayer!.Forward(input);
+        ManagedLayer!.Forward(ManagedInput);
         var post = ManagedLayer.Output;
         for (int i = 0; i < post[0].NSpikes; i++)
             post[0].SetError(i, 1.0);
@@ -175,8 +157,7 @@ public class Bench_LIF_Backward_Medium : BenchLayerBase
     [Benchmark]
     public void Native()
     {
-        var input = new CApi.SpikesVector(new[] { new CApi.SpikesData(Times, Sources) });
-        NativeLayer!.Forward(input);
+        NativeLayer!.Forward(NativeInput);
         var post = NativeLayer.Output;
         for (int i = 0; i < post[0].NSpikes; i++)
             post[0].SetError(i, 1.0);
@@ -192,8 +173,7 @@ public class Bench_LIF_Backward_Large : BenchLayerBase
     [Benchmark(Baseline = true)]
     public void Managed()
     {
-        var input = new SpikesVector(new[] { new SpikesData(Times, Sources) });
-        ManagedLayer!.Forward(input);
+        ManagedLayer!.Forward(ManagedInput);
         var post = ManagedLayer.Output;
         for (int i = 0; i < post[0].NSpikes; i++)
             post[0].SetError(i, 1.0);
@@ -203,8 +183,7 @@ public class Bench_LIF_Backward_Large : BenchLayerBase
     [Benchmark]
     public void Native()
     {
-        var input = new CApi.SpikesVector(new[] { new CApi.SpikesData(Times, Sources) });
-        NativeLayer!.Forward(input);
+        NativeLayer!.Forward(NativeInput);
         var post = NativeLayer.Output;
         for (int i = 0; i < post[0].NSpikes; i++)
             post[0].SetError(i, 1.0);

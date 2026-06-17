@@ -1,76 +1,119 @@
+using System.Buffers;
+
 namespace CW.EventProp;
 
 /// <summary>
 /// Holds spike event data for a single sample. Times and sources are sorted by time.
 /// Errors and Currents arrays must always match Times.Length.
 /// </summary>
-public sealed class SpikesData
+public sealed class SpikesData : IDisposable
 {
-    public double[] Times { get; }
-    public int[] Sources { get; }
+    static readonly ArrayPool<double> D = ArrayPool<double>.Shared;
+    static readonly ArrayPool<int> I = ArrayPool<int>.Shared;
 
-    /// <summary>Error signals for each spike. Must always match Times.Length.</summary>
+    double[] _times;
+    int[] _sources;
+    double[] _errors;
+    double[] _currents;
+    bool _rented;
+
+    public double[] Times => _times;
+    public int[] Sources => _sources;
     public double[] Errors { get; set; }
-
-    /// <summary>Synaptic currents at each spike time. Must always match Times.Length.</summary>
     public double[] Currents { get; set; }
+    public int NSpikes => _times.Length;
 
-    /// <summary>Number of spikes.</summary>
-    public int NSpikes => Times.Length;
+    /// <summary>
+    /// Rent a SpikesData from ArrayPool. Call Return() or Dispose() when done.
+    /// </summary>
+    public static SpikesData Rent(int capacity)
+    {
+        return new SpikesData(D.Rent(capacity), I.Rent(capacity), D.Rent(capacity), D.Rent(capacity), rented: true);
+    }
+
+    /// <summary>Return a rented SpikesData to ArrayPool.</summary>
+    public void Return()
+    {
+        if (!_rented) return;
+        _rented = false;
+
+        D.Return(_times, clearArray: false);
+        I.Return(_sources, clearArray: false);
+        D.Return(_errors, clearArray: false);
+        D.Return(_currents, clearArray: false);
+
+        _times = [];
+        _sources = [];
+        _errors = [];
+        Errors = [];
+        _currents = [];
+        Currents = [];
+    }
 
     public SpikesData(double[] times, int[] sources)
     {
-        Times = times;
-        Sources = sources;
-        Errors = new double[times.Length];
-        Currents = new double[times.Length];
+        _times = times;
+        _sources = sources;
+        _errors = new double[times.Length];
+        Errors = _errors;
+        _currents = new double[times.Length];
+        Currents = _currents;
     }
 
     public SpikesData(double[] times, int[] sources, double[] currents)
     {
-        Times = times;
-        Sources = sources;
-        Errors = new double[times.Length];
-        Currents = currents;
+        _times = times;
+        _sources = sources;
+        _errors = new double[times.Length];
+        Errors = _errors;
+        _currents = currents;
+        Currents = _currents;
     }
 
-    /// <summary>Set error signal for a specific spike.</summary>
+    SpikesData(double[] times, int[] sources, double[] errors, double[] currents, bool rented)
+    {
+        _times = times;
+        _sources = sources;
+        _errors = errors;
+        Errors = errors;
+        _currents = currents;
+        Currents = currents;
+        _rented = rented;
+    }
+
     public void SetError(int spikeIdx, double error)
     {
-        if (spikeIdx < 0 || spikeIdx >= Errors.Length)
+        if (spikeIdx < 0 || spikeIdx >= _errors.Length)
             throw new ArgumentOutOfRangeException(nameof(spikeIdx),
-                $"Spike index {spikeIdx} out of range [0, {Errors.Length - 1}]");
-        Errors[spikeIdx] = error;
+                $"Spike index {spikeIdx} out of range [0, {_errors.Length - 1}]");
+        _errors[spikeIdx] = error;
     }
 
-    /// <summary>Set spike time for a specific spike.</summary>
     public void SetTime(int spikeIdx, double time)
     {
-        if (spikeIdx < 0 || spikeIdx >= Times.Length)
+        if (spikeIdx < 0 || spikeIdx >= _times.Length)
             throw new ArgumentOutOfRangeException(nameof(spikeIdx),
-                $"Spike index {spikeIdx} out of range [0, {Times.Length - 1}]");
-        Times[spikeIdx] = time;
+                $"Spike index {spikeIdx} out of range [0, {_times.Length - 1}]");
+        _times[spikeIdx] = time;
     }
 
-    /// <summary>
-    /// Replace the Errors array. Validates that the new array matches Times.Length.
-    /// </summary>
     public void SetErrors(double[] errors)
     {
-        if (errors.Length != Times.Length)
+        if (errors.Length != _times.Length)
             throw new ArgumentException(
-                $"Errors array length ({errors.Length}) must match Times length ({Times.Length})", nameof(errors));
+                $"Errors array length ({errors.Length}) must match Times length ({_times.Length})", nameof(errors));
+        _errors = errors;
         Errors = errors;
     }
 
-    /// <summary>
-    /// Replace the Currents array. Validates that the new array matches Times.Length.
-    /// </summary>
     public void SetCurrents(double[] currents)
     {
-        if (currents.Length != Times.Length)
+        if (currents.Length != _times.Length)
             throw new ArgumentException(
-                $"Currents array length ({currents.Length}) must match Times length ({Times.Length})", nameof(currents));
+                $"Currents array length ({currents.Length}) must match Times length ({_times.Length})", nameof(currents));
+        _currents = currents;
         Currents = currents;
     }
+
+    public void Dispose() => Return();
 }

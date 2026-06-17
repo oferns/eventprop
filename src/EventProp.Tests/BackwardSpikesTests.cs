@@ -30,7 +30,7 @@ public class BackwardSpikesTests
             [0, 1]                     // post-spike sources (neurons)
         );
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nNeurons: nPost, nPre: nPre, nSpikes: inputTimes.Length);
         buffers.Clear();
 
@@ -67,7 +67,7 @@ public class BackwardSpikesTests
         double[] inputTimes = [0.1];
         int[] inputSources = [0];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nNeurons: nPost, nPre: nPre, nSpikes: inputTimes.Length);
         buffers.Clear();
 
@@ -89,7 +89,7 @@ public class BackwardSpikesTests
         double eps = 1e-8;
 
         // Forward with w + eps
-        var buffersPlus = new ScratchBuffers();
+        using var buffersPlus = new ScratchBuffers();
         buffersPlus.EnsureCapacity(nNeurons: nPost, nPre: nPre, nSpikes: inputTimes.Length);
         buffersPlus.Clear();
         double[] wPlus = [wSave + eps, 0.0];
@@ -97,7 +97,7 @@ public class BackwardSpikesTests
             1.0, tauMem, tauSyn, buffersPlus);
 
         // Forward with w - eps
-        var buffersMinus = new ScratchBuffers();
+        using var buffersMinus = new ScratchBuffers();
         buffersMinus.EnsureCapacity(nNeurons: nPost, nPre: nPre, nSpikes: inputTimes.Length);
         buffersMinus.Clear();
         double[] wMinus = [wSave - eps, 0.0];
@@ -130,7 +130,7 @@ public class BackwardSpikesTests
         double[] inputTimes = [0.1, 0.105];
         int[] inputSources = [0, 0];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nNeurons: nPost, nPre: nPre, nSpikes: inputTimes.Length);
         buffers.Clear();
 
@@ -151,14 +151,14 @@ public class BackwardSpikesTests
         // Compute numerical gradient by perturbing w[0]
         double eps = 1e-8;
 
-        var buffersPlus = new ScratchBuffers();
+        using var buffersPlus = new ScratchBuffers();
         buffersPlus.EnsureCapacity(nNeurons: nPost, nPre: nPre, nSpikes: inputTimes.Length);
         buffersPlus.Clear();
         double[] wPlus = [wSave + eps];
         var postSpikesPlus = EventPropMath.ComputeSpikes(wPlus, inputTimes, inputSources, nPost,
             1.0, tauMem, tauSyn, buffersPlus);
 
-        var buffersMinus = new ScratchBuffers();
+        using var buffersMinus = new ScratchBuffers();
         buffersMinus.EnsureCapacity(nNeurons: nPost, nPre: nPre, nSpikes: inputTimes.Length);
         buffersMinus.Clear();
         double[] wMinus = [wSave - eps];
@@ -196,7 +196,7 @@ public class BackwardSpikesTests
         double[] inputTimes = [0.01, 0.02, 0.03, 0.04, 0.05];
         int[] inputSources = [0, 1, 2, 0, 1];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nNeurons: nPost, nPre: nPre, nSpikes: inputTimes.Length);
         buffers.Clear();
 
@@ -222,7 +222,7 @@ public class BackwardSpikesTests
         // Test gradient for w[0, 0]
         double[] wPlus = (double[])w.Clone();
         wPlus[0] += eps;
-        var buffersPlus = new ScratchBuffers();
+        using var buffersPlus = new ScratchBuffers();
         buffersPlus.EnsureCapacity(nNeurons: nPost, nPre: nPre, nSpikes: inputTimes.Length);
         buffersPlus.Clear();
         var postSpikesPlus = EventPropMath.ComputeSpikes(wPlus, inputTimes, inputSources, nPost,
@@ -230,7 +230,7 @@ public class BackwardSpikesTests
 
         double[] wMinus = (double[])w.Clone();
         wMinus[0] -= eps;
-        var buffersMinus = new ScratchBuffers();
+        using var buffersMinus = new ScratchBuffers();
         buffersMinus.EnsureCapacity(nNeurons: nPost, nPre: nPre, nSpikes: inputTimes.Length);
         buffersMinus.Clear();
         var postSpikesMinus = EventPropMath.ComputeSpikes(wMinus, inputTimes, inputSources, nPost,
@@ -263,7 +263,7 @@ public class BackwardSpikesTests
         double[] inputTimes = [0.1];
         int[] inputSources = [0];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nNeurons: nPost, nPre: nPre, nSpikes: inputTimes.Length);
         buffers.Clear();
 
@@ -306,7 +306,7 @@ public class BackwardSpikesTests
         double[] inputTimes = [0.1];
         int[] inputSources = [0];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nNeurons: nPost, nPre: nPre, nSpikes: inputTimes.Length);
         buffers.Clear();
 

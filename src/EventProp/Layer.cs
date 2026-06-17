@@ -42,6 +42,53 @@ public abstract class Layer
     public abstract void ZeroGrad();
 
     /// <summary>
+    /// Zero-allocation training step: forward + backward for a single sample.
+    /// Writes output spike times/sources directly into the provided buffers.
+    /// Returns the number of output spikes written.
+    ///
+    /// Callers pre-allocate input/output buffers once and reuse them across iterations.
+    /// This avoids all GC pressure in the training loop.
+    /// </summary>
+    /// <param name="inputTimes">Input spike times (sorted ascending).</param>
+    /// <param name="inputSources">Source neuron index for each input spike.</param>
+    /// <param name="outputTimes">Pre-allocated buffer for output spike times. Must have capacity >= expected max spikes.</param>
+    /// <param name="outputSources">Pre-allocated buffer for output spike sources.</param>
+    /// <param name="outputCurrents">Pre-allocated buffer for output synaptic currents.</param>
+    /// <returns>Number of output spikes written into the buffers.</returns>
+    public virtual int TrainingStep(
+        ReadOnlySpan<double> inputTimes,
+        ReadOnlySpan<int> inputSources,
+        Span<double> outputTimes,
+        Span<int> outputSources,
+        Span<double> outputCurrents)
+    {
+        throw new NotSupportedException("TrainingStep not supported for this layer type.");
+    }
+
+    /// <summary>
+    /// Zero-allocation backward pass after a TrainingStep forward.
+    /// Computes weight gradients into the existing Gradient array (zeroed first).
+    /// </summary>
+    /// <param name="inputTimes">Input spike times from TrainingStep.</param>
+    /// <param name="inputSources">Input spike sources from TrainingStep.</param>
+    /// <param name="outputTimes">Output spike times from TrainingStep.</param>
+    /// <param name="outputSources">Output spike sources from TrainingStep.</param>
+    /// <param name="outputCurrents">Output synaptic currents from TrainingStep.</param>
+    /// <param name="nOutputSpikes">Number of valid entries in the output buffers (returned by TrainingStep).</param>
+    /// <param name="outputErrors">Error signal for each output spike.</param>
+    public virtual void TrainingStepBackward(
+        ReadOnlySpan<double> inputTimes,
+        ReadOnlySpan<int> inputSources,
+        ReadOnlySpan<double> outputTimes,
+        ReadOnlySpan<int> outputSources,
+        ReadOnlySpan<double> outputCurrents,
+        int nOutputSpikes,
+        ReadOnlySpan<double> outputErrors)
+    {
+        throw new NotSupportedException("TrainingStepBackward not supported for this layer type.");
+    }
+
+    /// <summary>
     /// Compute the voltage trace for a single neuron during forward pass.
     /// </summary>
     public virtual (double[] times, double[] voltages) GetVoltageTrace(

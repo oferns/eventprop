@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace CW.EventProp.Native;
@@ -271,14 +272,34 @@ public static unsafe partial class Api
     {
         private readonly IntPtr _ptr;
 
-        public int NSpikes => Read().NSpikes;
-        public Span<double> Times { get { var o = Read(); return NS<double>(o.Times, o.NSpikes); } }
-        public Span<int> Sources { get { var o = Read(); return NS<int>(o.Sources, o.NSpikes); } }
-        public Span<double> Currents { get { var o = Read(); return NS<double>(o.Currents, o.NSpikes); } }
+        public int NSpikes => Unsafe.Read<int>(_ptr.ToPointer());
+        public Span<double> Times
+        {
+            get
+            {
+                IntPtr ptr = *(IntPtr*)((byte*)_ptr.ToPointer() + 8);
+                return NS<double>(ptr, NSpikes);
+            }
+        }
+        public Span<int> Sources
+        {
+            get
+            {
+                IntPtr ptr = *(IntPtr*)((byte*)_ptr.ToPointer() + 16);
+                return NS<int>(ptr, NSpikes);
+            }
+        }
+        public Span<double> Currents
+        {
+            get
+            {
+                IntPtr ptr = *(IntPtr*)((byte*)_ptr.ToPointer() + 24);
+                return NS<double>(ptr, NSpikes);
+            }
+        }
 
         internal OwnedSpikeOutput(IntPtr ptr) => _ptr = ptr;
         public void Dispose() => eventprop_free_spike_output(_ptr);
-        private SpikeOutput Read() => Marshal.PtrToStructure<SpikeOutput>(_ptr)!;
     }
 
     /// <summary>Owned sums output — Dispose() frees native memory.</summary>
@@ -286,14 +307,27 @@ public static unsafe partial class Api
     {
         private readonly IntPtr _ptr;
 
-        public int NRows => Read().NRows;
-        public int NPost => Read().NPost;
-        public Span<double> Sum0 { get { var o = Read(); return NS<double>(o.Sum0, o.NRows * o.NPost); } }
-        public Span<double> Sum1 { get { var o = Read(); return NS<double>(o.Sum1, o.NRows * o.NPost); } }
+        public int NRows => Unsafe.Read<int>(_ptr.ToPointer());
+        public int NPost => Unsafe.Read<int>((void*)((byte*)_ptr.ToPointer() + 4));
+        public Span<double> Sum0
+        {
+            get
+            {
+                IntPtr ptr = *(IntPtr*)((byte*)_ptr.ToPointer() + 8);
+                return NS<double>(ptr, NRows * NPost);
+            }
+        }
+        public Span<double> Sum1
+        {
+            get
+            {
+                IntPtr ptr = *(IntPtr*)((byte*)_ptr.ToPointer() + 16);
+                return NS<double>(ptr, NRows * NPost);
+            }
+        }
 
         internal OwnedSumsOutput(IntPtr ptr) => _ptr = ptr;
         public void Dispose() => eventprop_free_sums_output(_ptr);
-        private SumsOutput Read() => Marshal.PtrToStructure<SumsOutput>(_ptr)!;
     }
 
     /// <summary>Owned maxima output — Dispose() frees native memory.</summary>
@@ -301,13 +335,26 @@ public static unsafe partial class Api
     {
         private readonly IntPtr _ptr;
 
-        public int NPost => Read().NPost;
-        public Span<double> Times { get { var o = Read(); return NS<double>(o.Times, o.NPost); } }
-        public Span<double> Values { get { var o = Read(); return NS<double>(o.Values, o.NPost); } }
+        public int NPost => Unsafe.Read<int>(_ptr.ToPointer());
+        public Span<double> Times
+        {
+            get
+            {
+                IntPtr ptr = *(IntPtr*)((byte*)_ptr.ToPointer() + 8);
+                return NS<double>(ptr, NPost);
+            }
+        }
+        public Span<double> Values
+        {
+            get
+            {
+                IntPtr ptr = *(IntPtr*)((byte*)_ptr.ToPointer() + 16);
+                return NS<double>(ptr, NPost);
+            }
+        }
 
         internal OwnedMaximaOutput(IntPtr ptr) => _ptr = ptr;
         public void Dispose() => eventprop_free_maxima_output(_ptr);
-        private MaximaOutput Read() => Marshal.PtrToStructure<MaximaOutput>(_ptr)!;
     }
 
     /// <summary>Owned backward output — Dispose() frees native memory.</summary>
@@ -316,19 +363,31 @@ public static unsafe partial class Api
         private readonly IntPtr _ptr;
         private readonly int _nSpikes;
 
-        public int NPre => Read().NPre;
-        public int NPost => Read().NPost;
-        public Span<double> Gradient { get { var o = Read(); return NS<double>(o.Grad, o.NPre * o.NPost); } }
-        public Span<double> SpikeErrors { get { var o = Read(); return NS<double>(o.SpikeErrors, _nSpikes); } }
+        public int NPre => Unsafe.Read<int>(_ptr.ToPointer());
+        public int NPost => Unsafe.Read<int>((void*)((byte*)_ptr.ToPointer() + 4));
+        public Span<double> Gradient
+        {
+            get
+            {
+                IntPtr ptr = *(IntPtr*)((byte*)_ptr.ToPointer() + 8);
+                return NS<double>(ptr, NPre * NPost);
+            }
+        }
+        public Span<double> SpikeErrors
+        {
+            get
+            {
+                IntPtr ptr = *(IntPtr*)((byte*)_ptr.ToPointer() + 16);
+                return NS<double>(ptr, _nSpikes);
+            }
+        }
 
         internal OwnedBackwardOutput(IntPtr ptr, int nSpikes)
         {
             _ptr = ptr;
             _nSpikes = nSpikes;
         }
-
         public void Dispose() => eventprop_free_backward_output(_ptr);
-        private BackwardOutput Read() => Marshal.PtrToStructure<BackwardOutput>(_ptr)!;
     }
 
   // ── Helpers ─────────────────────────────────────────────────

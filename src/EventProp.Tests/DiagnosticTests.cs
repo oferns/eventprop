@@ -19,7 +19,7 @@ public class DiagnosticTests
         double[] times = [];
         int[] sources = [];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nPost, 1, 0);
 
         // Act
@@ -44,7 +44,7 @@ public class DiagnosticTests
         double[] times = [0.05];
         int[] sources = [0];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nPost, 1, 1);
 
         // Act
@@ -84,7 +84,7 @@ public class DiagnosticTests
         double[] times = [0.05, 0.10];
         int[] sources = [0, 0];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nPost, 1, 2);
 
         // Act — two spikes
@@ -93,7 +93,7 @@ public class DiagnosticTests
             w, nPre: 1, nPost, times, sources, vTh: 1.0, tauMem: 0.02, tauSyn: 0.005, buffers);
 
         // Compare with single spike at t=0.05
-        var buffers2 = new ScratchBuffers();
+        using var buffers2 = new ScratchBuffers();
         buffers2.EnsureCapacity(nPost, 1, 1);
         var resultSingle = EventPropMath.ComputeVoltageTrace(
             tMax: 0.2, dt: 0.01, targetNrnIdx: 0,
@@ -113,7 +113,7 @@ public class DiagnosticTests
         double[] times = [0.05, 0.15];
         int[] sources = [0, 1];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nPost, 2, 2);
 
         // Act
@@ -141,7 +141,7 @@ public class DiagnosticTests
         double[] times = [0.05];
         int[] sources = [0];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nPost, 1, 1);
 
         // Act — compute for neuron 0 and neuron 1
@@ -167,7 +167,7 @@ public class DiagnosticTests
         int nPost = 1;
         double[] w = [2.0]; // weight from input to the single output neuron
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nPost, 1, 1);
 
         // Spike at t=0.1
@@ -199,7 +199,7 @@ public class DiagnosticTests
         int nPost = 1;
         double[] w = [1.0];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nPost, 1, 0);
 
         // Act — no spikes
@@ -219,7 +219,7 @@ public class DiagnosticTests
         int nPost = 1;
         double[] w = [2.0];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nPost, 1, 1);
 
         // Act

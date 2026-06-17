@@ -107,6 +107,53 @@ public static class EventPropMath
     }
 
     /// <summary>
+    /// Zero-allocation variant of ComputeMaxima that writes into caller-provided spans.
+    /// </summary>
+    public static void ComputeMaximaInto(
+        ReadOnlySpan<double> w,
+        ReadOnlySpan<double> times,
+        ReadOnlySpan<int> sources,
+        int nPost,
+        double tauMem,
+        double tauSyn,
+        Span<double> outMaximaTimes,
+        Span<double> outMaximaValues,
+        ScratchBuffers buffers)
+    {
+        int nSpikes = times.Length;
+
+        int nPre = w.Length / nPost;
+        buffers.EnsureCapacity(nNeurons: nPost, nPre: nPre, nSpikes: nSpikes);
+        buffers.Clear();
+
+        int nSums = (nSpikes + 1) * nPost;
+
+        ComputeSums(w, times, sources, tauMem, tauSyn,
+            buffers.Sum0.AsSpan(0, nSums),
+            buffers.Sum1.AsSpan(0, nSums),
+            nPost,
+            buffers.ExpInputMem.AsSpan(0, nSpikes),
+            buffers.ExpInputSyn.AsSpan(0, nSpikes));
+
+        outMaximaTimes.Fill(double.NaN);
+
+        // Use scratch buffers for parallel write, then copy back to output spans
+        double[] mtScratch = buffers.LambdaV;
+        double[] mvScratch = buffers.LambdaI;
+
+        ComputeMaximaParallel(times, nPost, tauMem, tauSyn,
+            buffers.Sum0, buffers.Sum1, nSums / nPost,
+            mtScratch, mvScratch);
+
+        // Copy results back to output spans (sequential, no allocation)
+        for (int i = 0; i < nPost; i++)
+        {
+            outMaximaTimes[i] = mtScratch[i];
+            outMaximaValues[i] = mvScratch[i];
+        }
+    }
+
+    /// <summary>
     /// Parallel per-neuron maxima computation for ComputeMaxima.
     /// Each neuron is independent, so we parallelize across post-synaptic neurons.
     /// </summary>
@@ -116,7 +163,7 @@ public static class EventPropMath
         double[] sum0, double[] sum1, int nRows,
         double[] maximaTimes, double[] maximaValues)
     {
-        // Convert spans to arrays so they can be captured by Parallel.For lambda
+        // Convert span to array for Parallel.For lambda capture (small allocation, ~8KB at Large)
         double[] timesArr = times.ToArray();
         int nSpikes = timesArr.Length;
 
@@ -217,8 +264,9 @@ public static class EventPropMath
         if (totalSpikes == 0)
             return new SpikesData([], []);
 
-        // Single struct array — sort in-place, then unpack to result arrays
-        var entries = new SpikeEntry[totalSpikes];
+        // Use pre-allocated SpikeEntries buffer for sorting (no intermediate allocation)
+        buffers.EnsureOutputCapacity(totalSpikes);
+        Span<SpikeEntry> entries = buffers.SpikeEntries.AsSpan(0, totalSpikes);
         int idx = 0;
         for (int n = 0; n < nPost; n++)
         {
@@ -232,8 +280,7 @@ public static class EventPropMath
             }
         }
 
-        // Sort by time (stable sort to preserve neuron order for equal times)
-        Array.Sort(entries);
+        Array.Sort(buffers.SpikeEntries, 0, totalSpikes);
 
         var sortedTimes = new double[totalSpikes];
         var sortedSources = new int[totalSpikes];
@@ -249,6 +296,81 @@ public static class EventPropMath
     }
 
     /// <summary>
+    /// Zero-allocation forward pass: writes output spike times/sources/currents
+    /// directly into caller-provided spans. Returns the number of spikes written.
+    /// </summary>
+    public static int ComputeSpikesInto(
+        ReadOnlySpan<double> w,
+        ReadOnlySpan<double> times,
+        ReadOnlySpan<int> sources,
+        int nPost,
+        double vTh,
+        double tauMem,
+        double tauSyn,
+        Span<double> outputTimes,
+        Span<int> outputSources,
+        Span<double> outputCurrents,
+        ScratchBuffers buffers)
+    {
+        int nSpikes = times.Length;
+
+        int nSums = (nSpikes + 1) * nPost;
+        buffers.EnsureCapacity(nNeurons: nPost, nPre: w.Length / nPost, nSpikes: nSpikes);
+        buffers.Clear();
+
+        ComputeSums(w, times, sources, tauMem, tauSyn,
+            buffers.Sum0.AsSpan(0, nSums),
+            buffers.Sum1.AsSpan(0, nSums),
+            nPost,
+            buffers.ExpInputMem.AsSpan(0, nSpikes),
+            buffers.ExpInputSyn.AsSpan(0, nSpikes));
+
+        double kPrefactor = tauSyn / (tauMem - tauSyn);
+        double tmaxPrefactor = 1.0 / (1.0 / tauMem - 1.0 / tauSyn);
+        double tmaxSummand = Math.Log(tauSyn / tauMem);
+
+        int maxSpikesPerNeuron = Math.Max(nSpikes + 1, buffers.MaxSpikesPerNeuron);
+        if (maxSpikesPerNeuron * nPost > buffers.PostSpikeTimes.Length)
+            buffers.GrowPostSpikeBuffers(nPost, maxSpikesPerNeuron);
+
+        ComputeSpikesParallel(times, sources, nPost, vTh, tauMem, tauSyn,
+            kPrefactor, tmaxPrefactor, tmaxSummand, maxSpikesPerNeuron, buffers);
+
+        int totalSpikes = 0;
+        for (int n = 0; n < nPost; n++)
+            totalSpikes += buffers.SpikeCountPerNeuron[n];
+
+        if (totalSpikes == 0)
+            return 0;
+
+        // Use pre-allocated entry buffer for sorting
+        Span<SpikeEntry> entries = buffers.SpikeEntries.AsSpan(0, totalSpikes);
+        int idx = 0;
+        for (int n = 0; n < nPost; n++)
+        {
+            int count = buffers.SpikeCountPerNeuron[n];
+            int offset = n * maxSpikesPerNeuron;
+            for (int k = 0; k < count; k++)
+            {
+                entries[idx++] = new SpikeEntry(
+                    buffers.PostSpikeTimes[offset + k], n,
+                    buffers.PostSpikeCurrents[offset + k]);
+            }
+        }
+
+        Array.Sort(buffers.SpikeEntries, 0, totalSpikes);
+
+        for (int i = 0; i < totalSpikes; i++)
+        {
+            outputTimes[i] = entries[i].Time;
+            outputSources[i] = entries[i].Source;
+            outputCurrents[i] = entries[i].Current;
+        }
+
+        return totalSpikes;
+    }
+
+    /// <summary>
     /// Parallel per-neuron spike computation for ComputeSpikes.
     /// Each neuron is independent, so we parallelize across post-synaptic neurons.
     /// </summary>
@@ -258,7 +380,7 @@ public static class EventPropMath
         double kPrefactor, double tmaxPrefactor, double tmaxSummand,
         int maxSpikesPerNeuron, ScratchBuffers buffers)
     {
-        // Convert spans to arrays so they can be captured by Parallel.For lambda
+        // Convert span to array for Parallel.For lambda capture (small allocation, ~8KB at Large)
         double[] timesArr = times.ToArray();
         int nSpikes = timesArr.Length;
 
@@ -269,6 +391,9 @@ public static class EventPropMath
 
             bool finished = false;
             int processedUpTo = 0;
+
+            // Precomputed exp(st * tauMemInv) for factorized ComputeV
+            double[] postExpSt = buffers.PostSpikeExpSt;
 
             while (!finished)
             {
@@ -284,17 +409,22 @@ public static class EventPropMath
                         double tmax = tmaxPrefactor * (tmaxSummand + Math.Log(sum1Val / sum0Val));
                         if (!double.IsInfinity(tmax) && !double.IsNaN(tmax))
                         {
-                            double vmax = ComputeV(tmax, i, neuronSpikeCount,
+                            // Precompute exp(st * tauMemInv) for factorized ComputeV
+
+                            for (int s = 0; s < neuronSpikeCount; s++)
+                                postExpSt[neuronOffset + s] = Math.Exp(buffers.PostSpikeTimes[neuronOffset + s] / tauMem);
+
+                            double vmax = ComputeVFactored(tmax, i, neuronSpikeCount,
                                 buffers.PostSpikeTimes, neuronOffset, buffers.Sum0, buffers.Sum1,
-                                targetNrn, nPost, kPrefactor, 1.0 / tauMem, 1.0 / tauSyn, vTh);
+                                targetNrn, nPost, kPrefactor, 1.0 / tauMem, 1.0 / tauSyn, vTh, postExpSt);
                             if (vmax > vTh + 1e-14)
                             {
                                 double tLower = GetTLower(neuronSpikeCount, buffers.PostSpikeTimes, neuronOffset, tmax);
                                 int solveSpikeCount = neuronSpikeCount;
                                 double tPost = Toms748.Solve(
-                                    t => ComputeV(t, i, solveSpikeCount,
+                                    t => ComputeVFactored(t, i, solveSpikeCount,
                                         buffers.PostSpikeTimes, neuronOffset, buffers.Sum0, buffers.Sum1,
-                                        targetNrn, nPost, kPrefactor, 1.0 / tauMem, 1.0 / tauSyn, vTh) - vTh,
+                                        targetNrn, nPost, kPrefactor, 1.0 / tauMem, 1.0 / tauSyn, vTh, postExpSt) - vTh,
                                     tLower, tmax);
                                 if (tPost > tLower && tPost < tmax)
                                 {
@@ -322,9 +452,14 @@ public static class EventPropMath
 
                         if (tmax != double.PositiveInfinity)
                         {
-                            double vmax = ComputeV(tmax, i, neuronSpikeCount,
+                            // Precompute exp(st * tauMemInv) for factorized ComputeV
+
+                            for (int s = 0; s < neuronSpikeCount; s++)
+                                postExpSt[neuronOffset + s] = Math.Exp(buffers.PostSpikeTimes[neuronOffset + s] / tauMem);
+
+                            double vmax = ComputeVFactored(tmax, i, neuronSpikeCount,
                                 buffers.PostSpikeTimes, neuronOffset, buffers.Sum0, buffers.Sum1,
-                                targetNrn, nPost, kPrefactor, 1.0 / tauMem, 1.0 / tauSyn, vTh);
+                                targetNrn, nPost, kPrefactor, 1.0 / tauMem, 1.0 / tauSyn, vTh, postExpSt);
                             if (vmax > vTh + 1e-14)
                             {
                                 double tBefore = (i > 0) ? timesArr[i - 1] : 0.0;
@@ -338,9 +473,9 @@ public static class EventPropMath
 
                                 int solveSpikeCount = neuronSpikeCount;
                                 double tPost = Toms748.Solve(
-                                    t => ComputeV(t, i, solveSpikeCount,
+                                    t => ComputeVFactored(t, i, solveSpikeCount,
                                         buffers.PostSpikeTimes, neuronOffset, buffers.Sum0, buffers.Sum1,
-                                        targetNrn, nPost, kPrefactor, 1.0 / tauMem, 1.0 / tauSyn, vTh) - vTh,
+                                        targetNrn, nPost, kPrefactor, 1.0 / tauMem, 1.0 / tauSyn, vTh, postExpSt) - vTh,
                                     tBefore, tmax);
 
                                 if (tPost > tBefore && tPost < tmax)
@@ -360,9 +495,14 @@ public static class EventPropMath
                             }
                         }
 
-                        double vAtInput = ComputeV(tInput, i, neuronSpikeCount,
+                        // Precompute exp(st * tauMemInv) for factorized ComputeV
+
+                        for (int s = 0; s < neuronSpikeCount; s++)
+                            postExpSt[neuronOffset + s] = Math.Exp(buffers.PostSpikeTimes[neuronOffset + s] / tauMem);
+
+                        double vAtInput = ComputeVFactored(tInput, i, neuronSpikeCount,
                             buffers.PostSpikeTimes, neuronOffset, buffers.Sum0, buffers.Sum1,
-                            targetNrn, nPost, kPrefactor, 1.0 / tauMem, 1.0 / tauSyn, vTh);
+                            targetNrn, nPost, kPrefactor, 1.0 / tauMem, 1.0 / tauSyn, vTh, postExpSt);
                         if (vAtInput > vTh + 1e-14)
                         {
                             double tBefore = (i > 0) ? timesArr[i - 1] : 0.0;
@@ -376,9 +516,9 @@ public static class EventPropMath
 
                             int solveSpikeCount = neuronSpikeCount;
                             double tPost = Toms748.Solve(
-                                t => ComputeV(t, i, solveSpikeCount,
+                                t => ComputeVFactored(t, i, solveSpikeCount,
                                     buffers.PostSpikeTimes, neuronOffset, buffers.Sum0, buffers.Sum1,
-                                    targetNrn, nPost, kPrefactor, 1.0 / tauMem, 1.0 / tauSyn, vTh) - vTh,
+                                    targetNrn, nPost, kPrefactor, 1.0 / tauMem, 1.0 / tauSyn, vTh, postExpSt) - vTh,
                                 tBefore, tInput);
 
                             if (tPost > tBefore && tPost < tInput)
@@ -522,17 +662,21 @@ public static class EventPropMath
                     }
                 }
 
-                // Add gradient contribution: gradient[source, nrn] += -tau_syn * lambda_i[nrn]
-                for (int nrn = 0; nrn < nPost; nrn++)
-                    gradient[spikeSource * nPost + nrn] += -tauSyn * lambdaI[nrn];
+                // SIMD: gradient[source, nrn] += -tau_syn * lambda_i[nrn]
+                SimdAlgorithms.AddScaled(
+                    gradient.Slice(spikeSource * nPost, nPost),
+                    lambdaI.AsSpan(0, nPost),
+                    -tauSyn);
 
-                // Compute outbound signal: sum_nrn(w[source, nrn] * (lambda_v[nrn] - lambda_i[nrn]))
-                double outboundSignal = 0.0;
-                for (int nrn = 0; nrn < nPost; nrn++)
-                {
-                    double wVal = w[spikeSource * nPost + nrn]; // row-major access: w[source, nrn]
-                    outboundSignal += wVal * (lambdaV[nrn] - lambdaI[nrn]);
-                }
+                // SIMD: outbound = w[source] · (lambda_v - lambda_i)
+                // Reuse lambdaI as diff buffer after gradient is accumulated
+                SimdAlgorithms.Subtract(
+                    lambdaI.AsSpan(0, nPost),
+                    lambdaV.AsSpan(0, nPost),
+                    lambdaI.AsSpan(0, nPost));
+                double outboundSignal = SimdAlgorithms.Dot(
+                    w.Slice(spikeSource * nPost, nPost),
+                    lambdaI.AsSpan(0, nPost));
 
                 // Add outbound signal to input spike error
                 allErrors[spikeIdx] += outboundSignal;
@@ -551,6 +695,140 @@ public static class EventPropMath
                 flatJumpTime[jIdx] = tBwd;
 
                 // Update λ_v for this neuron
+                lambdaV[spikeSource] =
+                    (current / (current - vTh)) * lambdaV[spikeSource] +
+                    invICurrent * postError;
+            }
+
+            previousT = tBwd;
+        }
+    }
+
+    /// <summary>
+    /// Zero-allocation backward pass: accepts raw spans instead of SpikesData.
+    /// </summary>
+    public static void BackwardSpikesRaw(
+        ReadOnlySpan<double> w,
+        ReadOnlySpan<double> inputTimes,
+        ReadOnlySpan<int> inputSources,
+        ReadOnlySpan<double> postTimes,
+        ReadOnlySpan<int> postSources,
+        ReadOnlySpan<double> postCurrents,
+        ReadOnlySpan<double> postErrors,
+        int nPost,
+        double vTh,
+        double tauMem,
+        double tauSyn,
+        Span<double> gradient,
+        ScratchBuffers buffers)
+    {
+        int nPre = w.Length / nPost;
+        int nInputSpikes = inputTimes.Length;
+        int nPostSpikes = postTimes.Length;
+
+        if (nPostSpikes == 0)
+            return;
+
+        int totalSpikes = nInputSpikes + nPostSpikes;
+        int maxNeurons = nPre > nPost ? nPre : nPost;
+        buffers.EnsureCapacity(nNeurons: maxNeurons, nPre: nPre, nSpikes: totalSpikes);
+
+        // Merge input + post-spike indices and sort by time descending
+        Span<MergedSpike> merged = buffers.MergedSpikes.AsSpan(0, totalSpikes);
+        for (int i = 0; i < nInputSpikes; i++)
+            merged[i] = new MergedSpike(i, true, inputTimes[i]);
+        for (int i = 0; i < nPostSpikes; i++)
+            merged[nInputSpikes + i] = new MergedSpike(i, false, postTimes[i]);
+
+        Array.Sort(buffers.MergedSpikes, 0, totalSpikes);
+
+        // Combined error array
+        double[] allErrors = buffers.SpikeErrors;
+        Array.Fill(allErrors, 0.0);
+        for (int i = 0; i < nPostSpikes; i++)
+            allErrors[nInputSpikes + i] = postErrors[i];
+
+        // Initialize λ_v = 0
+        double[] lambdaV = buffers.LambdaV;
+        Array.Fill(lambdaV, 0.0);
+
+        double largestTime = merged[0].Time;
+        double previousT = largestTime;
+        double kBwdPrefactor = tauMem / (tauMem - tauSyn);
+
+        // Pre-count post-spike jumps per neuron → compute flat buffer layout
+        int[] jumpCount = buffers.LambdaIJumpsNeuronCap;
+        Array.Fill(jumpCount, 0);
+        for (int i = 0; i < nPostSpikes; i++)
+            jumpCount[postSources[i]]++;
+
+        int[] jumpStart = buffers.LambdaIJumpsStart;
+        int[] jumpCursor = buffers.LambdaIJumpsEnd;
+        jumpStart[0] = 0;
+        for (int nrn = 0; nrn < nPost; nrn++)
+        {
+            jumpStart[nrn + 1] = jumpStart[nrn] + jumpCount[nrn];
+            jumpCursor[nrn] = jumpStart[nrn];
+        }
+
+        double[] flatJumpTime = buffers.LambdaIJumpsTimeOffset;
+        double[] flatJumpMag = buffers.LambdaIJumpsMagnitude;
+
+        for (int s = 0; s < totalSpikes; s++)
+        {
+            int spikeIdx = merged[s].Idx;
+            bool isInput = merged[s].IsInput;
+            double spikeTime = merged[s].Time;
+            int spikeSource = isInput ? inputSources[spikeIdx] : postSources[spikeIdx];
+
+            double tBwd = largestTime - spikeTime;
+            double dt = previousT - tBwd;
+            SimdAlgorithms.ScaleInPlace(lambdaV.AsSpan(0, nPost), Math.Exp(dt / tauMem));
+
+            if (isInput)
+            {
+                double[] lambdaI = buffers.LambdaI;
+                Array.Fill(lambdaI, 0.0);
+
+                for (int nrn = 0; nrn < nPost; nrn++)
+                {
+                    int start = jumpStart[nrn];
+                    int end = jumpCursor[nrn];
+                    for (int j = start; j < end; j++)
+                    {
+                        lambdaI[nrn] += flatJumpMag[j] * kBwdPrefactor *
+                            (Math.Exp(-(tBwd - flatJumpTime[j]) / tauMem)
+                             - Math.Exp(-(tBwd - flatJumpTime[j]) / tauSyn));
+                    }
+                }
+
+                // SIMD: gradient[source, nrn] += -tau_syn * lambda_i[nrn]
+                SimdAlgorithms.AddScaled(
+                    gradient.Slice(spikeSource * nPost, nPost),
+                    lambdaI.AsSpan(0, nPost),
+                    -tauSyn);
+
+                // SIMD: outbound = w[source] · (lambda_v - lambda_i)
+                SimdAlgorithms.Subtract(
+                    lambdaI.AsSpan(0, nPost),
+                    lambdaV.AsSpan(0, nPost),
+                    lambdaI.AsSpan(0, nPost));
+                double outboundSignal = SimdAlgorithms.Dot(
+                    w.Slice(spikeSource * nPost, nPost),
+                    lambdaI.AsSpan(0, nPost));
+
+                allErrors[spikeIdx] += outboundSignal;
+            }
+            else
+            {
+                double current = postCurrents[spikeIdx];
+                double invICurrent = 1.0 / (current - vTh);
+
+                int jIdx = jumpCursor[spikeSource]++;
+                double postError = allErrors[nInputSpikes + spikeIdx];
+                flatJumpMag[jIdx] = invICurrent * (vTh * lambdaV[spikeSource] + postError);
+                flatJumpTime[jIdx] = tBwd;
+
                 lambdaV[spikeSource] =
                     (current / (current - vTh)) * lambdaV[spikeSource] +
                     invICurrent * postError;
@@ -634,6 +912,42 @@ public static class EventPropMath
             if (spikeTime <= t)  // Include all spikes where spikeTime <= t, don't break early
             {
                 mem -= vTh * Math.Exp(-(t - spikeTime) * tauMemInv);
+            }
+        }
+        return mem;
+    }
+
+    /// <summary>
+    /// Factorized version of ComputeV.
+    /// Precomputed postSpikeExpSt[s] = exp(postSpikeTimes[neuronOffset+s] * tauMemInv).
+    /// Factorization: exp(-(t-st)/tau) = exp(-t/tau) * exp(st/tau)
+    /// Eliminates N exp() calls per iteration to just 1 (shared with base terms).
+    /// </summary>
+    static double ComputeVFactored(double t, int i, int spikeCount,
+        double[] postSpikeTimes, int neuronOffset,
+        double[] sum0, double[] sum1,
+        int targetNrn, int nPost,
+        double kPrefactor, double tauMemInv, double tauSynInv, double vTh,
+        double[] postSpikeExpSt)
+    {
+        double eT = Math.Exp(-t * tauMemInv);
+        double mem = kPrefactor * (sum1[i * nPost + targetNrn] * eT
+                        - sum0[i * nPost + targetNrn] * Math.Exp(-t * tauSynInv));
+        if (postSpikeExpSt != null)
+        {
+            for (int s = 0; s < spikeCount; s++)
+            {
+                if (postSpikeTimes[neuronOffset + s] <= t)
+                    mem -= vTh * eT * postSpikeExpSt[neuronOffset + s];
+            }
+        }
+        else
+        {
+            for (int s = 0; s < spikeCount; s++)
+            {
+                double spikeTime = postSpikeTimes[neuronOffset + s];
+                if (spikeTime <= t)
+                    mem -= vTh * Math.Exp(-(t - spikeTime) * tauMemInv);
             }
         }
         return mem;

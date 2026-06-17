@@ -63,6 +63,7 @@ public abstract class BenchBatchBase
     [IterationCleanup]
     public void Cleanup()
     {
+        ManagedLayer?.Dispose();
         NativeLayer?.Dispose();
     }
 }

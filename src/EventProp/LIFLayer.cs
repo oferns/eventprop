@@ -311,6 +311,66 @@ public sealed class LIFLayer : Layer
             _params.VTh, _params.TauMem, _params.TauSyn);
     }
 
+    /// <summary>
+    /// Zero-allocation training step: forward + backward for a single sample.
+    /// Writes output spike times/sources directly into the provided buffers.
+    /// Returns the number of output spikes written.
+    /// </summary>
+    public override int TrainingStep(
+        ReadOnlySpan<double> inputTimes,
+        ReadOnlySpan<int> inputSources,
+        Span<double> outputTimes,
+        Span<int> outputSources,
+        Span<double> outputCurrents)
+    {
+        _buffers.EnsureCapacity(_params.N, _params.NIn, inputTimes.Length);
+        _buffers.Clear();
+
+        return EventPropMath.ComputeSpikesInto(
+            _weights,
+            inputTimes, inputSources,
+            _params.N,
+            _params.VTh,
+            _params.TauMem,
+            _params.TauSyn,
+            outputTimes, outputSources, outputCurrents,
+            _buffers);
+    }
+
+    /// <summary>
+    /// Zero-allocation backward pass after a TrainingStep forward.
+    /// Computes weight gradients into the existing Gradient array (zeroed first).
+    /// </summary>
+    public override void TrainingStepBackward(
+        ReadOnlySpan<double> inputTimes,
+        ReadOnlySpan<int> inputSources,
+        ReadOnlySpan<double> outputTimes,
+        ReadOnlySpan<int> outputSources,
+        ReadOnlySpan<double> outputCurrents,
+        int nOutputSpikes,
+        ReadOnlySpan<double> outputErrors)
+    {
+        Gradient.AsSpan().Clear();
+
+        if (nOutputSpikes == 0)
+            return;
+
+        // Trim spans to actual spike count (no copy — just slice)
+        EventPropMath.BackwardSpikesRaw(
+            _weights,
+            inputTimes, inputSources,
+            outputTimes.Slice(0, nOutputSpikes),
+            outputSources.Slice(0, nOutputSpikes),
+            outputCurrents.Slice(0, nOutputSpikes),
+            outputErrors.Slice(0, nOutputSpikes),
+            _params.N,
+            _params.VTh,
+            _params.TauMem,
+            _params.TauSyn,
+            Gradient.AsSpan(),
+            _buffers);
+    }
+
     /// <summary>Dispose scratch buffers.</summary>
     public void Dispose() => _buffers.Dispose();
 }

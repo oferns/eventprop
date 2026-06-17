@@ -6,7 +6,7 @@ public class ComputeSpikesTests
 {
     private static ScratchBuffers GetBuffers(int nNeurons, int maxSpikesPerNeuron)
     {
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.InitPostSpikeBuffers(nNeurons, maxSpikesPerNeuron);
         return buffers;
     }

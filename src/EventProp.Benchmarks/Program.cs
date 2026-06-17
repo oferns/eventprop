@@ -10,6 +10,7 @@ public abstract class BenchBase
     public int NPre { get; protected set; }
     public int NPost { get; protected set; }
     public int NSpikes { get; protected set; }
+    public int NPostSpikes { get; protected set; }
 
     protected const double TauMem = 0.02;
     protected const double TauSyn = 0.005;
@@ -35,6 +36,12 @@ public abstract class BenchBase
 
     protected double[] GradManaged { get; set; } = null!;
     protected double[] GradNative { get; set; } = null!;
+
+    // Zero-allocation output buffers for ComputeSpikesInto
+    protected double[] OutTimesManaged { get; set; } = null!;
+    protected int[] OutSourcesManaged { get; set; } = null!;
+    protected double[] OutCurrentsManaged { get; set; } = null!;
+    protected double[] OutErrorsManaged { get; set; } = null!;
 
     protected abstract void Configure();
 
@@ -68,20 +75,26 @@ public abstract class BenchBase
         OutSourcesNative = new int[maxOutSpikes];
         OutCurrentsNative = new double[maxOutSpikes];
 
+        // Pre-allocate zero-allocation output buffers for ComputeSpikesInto
+        OutTimesManaged = new double[maxOutSpikes];
+        OutSourcesManaged = new int[maxOutSpikes];
+        OutCurrentsManaged = new double[maxOutSpikes];
+        OutErrorsManaged = new double[maxOutSpikes];
+
         var fwdResult = EventPropMath.ComputeSpikes(
             W, Times, Sources, NPost, VTh, TauMem, TauSyn, Buffers);
 
-        int nPost = fwdResult.NSpikes;
+        NPostSpikes = fwdResult.NSpikes;
         PostSpikesManaged = fwdResult;
-        for (int i = 0; i < nPost; i++)
+        for (int i = 0; i < NPostSpikes; i++)
             PostSpikesManaged.SetError(i, 1.0);
 
-        PostTimesNative = new double[nPost];
-        PostSourcesNative = new int[nPost];
-        PostCurrentsNative = new double[nPost];
-        PostErrorsNative = new double[nPost];
+        PostTimesNative = new double[NPostSpikes];
+        PostSourcesNative = new int[NPostSpikes];
+        PostCurrentsNative = new double[NPostSpikes];
+        PostErrorsNative = new double[NPostSpikes];
         SpikeErrorsNative = new double[NSpikes];
-        for (int i = 0; i < nPost; i++)
+        for (int i = 0; i < NPostSpikes; i++)
         {
             PostTimesNative[i] = fwdResult.Times[i];
             PostSourcesNative[i] = fwdResult.Sources[i];
@@ -91,6 +104,12 @@ public abstract class BenchBase
 
         GradManaged = new double[NPre * NPost];
         GradNative = new double[NPre * NPost];
+    }
+
+    [GlobalCleanup]
+    public virtual void Cleanup()
+    {
+        Buffers?.Dispose();
     }
 }
 
@@ -232,7 +251,7 @@ public class Bench_BackwardSpikes_Small : BenchBase
     {
         using var output = CApi.Api.BackwardSpikes(Times, Sources,
             PostTimesNative, PostSourcesNative, PostCurrentsNative,
-            PostErrorsNative, NSpikes, W, NPre, NPost,  // Use NSpikes as nPostSpikes
+            PostErrorsNative, NPostSpikes, W, NPre, NPost,
             VTh, TauMem, TauSyn);
         var _ = output.Gradient[0]; // Access to prevent optimization
     }
@@ -256,7 +275,7 @@ public class Bench_BackwardSpikes_Medium : BenchBase
     {
         using var output = CApi.Api.BackwardSpikes(Times, Sources,
             PostTimesNative, PostSourcesNative, PostCurrentsNative,
-            PostErrorsNative, NSpikes, W, NPre, NPost,  // Use NSpikes as nPostSpikes
+            PostErrorsNative, NPostSpikes, W, NPre, NPost,
             VTh, TauMem, TauSyn);
         var _ = output.Gradient[0]; // Access to prevent optimization
     }
@@ -280,7 +299,7 @@ public class Bench_BackwardSpikes_Large : BenchBase
     {
         using var output = CApi.Api.BackwardSpikes(Times, Sources,
             PostTimesNative, PostSourcesNative, PostCurrentsNative,
-            PostErrorsNative, NSpikes, W, NPre, NPost,  // Use NSpikes as nPostSpikes
+            PostErrorsNative, NPostSpikes, W, NPre, NPost,
             VTh, TauMem, TauSyn);
         var _ = output.Gradient[0]; // Access to prevent optimization
     }

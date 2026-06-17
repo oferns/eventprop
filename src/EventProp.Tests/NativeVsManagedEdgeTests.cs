@@ -16,7 +16,7 @@ public class NativeVsManagedEdgeTests
         double[] times = [0.05, 0.05];
         int[] sources = [0, 1];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.InitPostSpikeBuffers(nPost, 8);
         var csResult = EventPropMath.ComputeSpikes(w, times, sources, nPost, 1.0, 0.02, 0.005, buffers);
 
@@ -38,7 +38,7 @@ public class NativeVsManagedEdgeTests
         double[] times = [0.01, 0.02, 0.03, 0.04, 0.05];
         int[] sources = [0, 0, 0, 0, 0];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.InitPostSpikeBuffers(nPost, 16);
         var csResult = EventPropMath.ComputeSpikes(w, times, sources, nPost, 1.0, 0.02, 0.005, buffers);
 
@@ -59,7 +59,7 @@ public class NativeVsManagedEdgeTests
         double[] w = [5.0];
         double vTh = 0.001;
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.InitPostSpikeBuffers(nPost, 2048);
         var csResult = EventPropMath.ComputeSpikes(w, [0.01], [0], nPost, vTh, 0.02, 0.005, buffers);
 
@@ -80,7 +80,7 @@ public class NativeVsManagedEdgeTests
         double[] w = [50.0, 40.0];
         double vTh = 100.0;
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.InitPostSpikeBuffers(nPost, 8);
         var csResult = EventPropMath.ComputeSpikes(w, [0.01, 0.02], [0, 1], nPost, vTh, 0.02, 0.005, buffers);
 
@@ -96,7 +96,7 @@ public class NativeVsManagedEdgeTests
         double[] w = [20.0];
 
         // Shorter tau_syn
-        var buffersShort = new ScratchBuffers();
+        using var buffersShort = new ScratchBuffers();
         buffersShort.InitPostSpikeBuffers(nPost, 64);
         var csShort = EventPropMath.ComputeSpikes(w, [0.01], [0], nPost, 1.0, 0.02, 0.003, buffersShort);
         using var nativeShort = Native.Api.ComputeSpikes(w, nPre, nPost, [0.01], [0], 1.0, 0.02, 0.003);
@@ -104,7 +104,7 @@ public class NativeVsManagedEdgeTests
         SyncAssert.That(csShort.NSpikes).IsEqualTo(nativeShort.NSpikes);
 
         // Longer tau_syn
-        var buffersLong = new ScratchBuffers();
+        using var buffersLong = new ScratchBuffers();
         buffersLong.InitPostSpikeBuffers(nPost, 64);
         var csLong = EventPropMath.ComputeSpikes(w, [0.01], [0], nPost, 1.0, 0.02, 0.01, buffersLong);
         using var nativeLong = Native.Api.ComputeSpikes(w, nPre, nPost, [0.01], [0], 1.0, 0.02, 0.01);
@@ -118,7 +118,7 @@ public class NativeVsManagedEdgeTests
         int nPre = 2, nPost = 1;
         double[] w = [3.0, 15.0];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.InitPostSpikeBuffers(nPost, 64);
         var csResult = EventPropMath.ComputeSpikes(w, [0.01, 0.05], [0, 1], nPost, 1.0, 0.02, 0.005, buffers);
         using var nativeOutput = Native.Api.ComputeSpikes(w, nPre, nPost, [0.01, 0.05], [0, 1], 1.0, 0.02, 0.005);
@@ -142,7 +142,7 @@ public class NativeVsManagedEdgeTests
         double[] inputTimes = [0.05, 0.10];
         int[] sources = [0, 1];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.InitPostSpikeBuffers(nPost, 8);
         var csSpikes = EventPropMath.ComputeSpikes(w, inputTimes, sources, nPost, 1.0, 0.02, 0.005, buffers);
 
@@ -170,7 +170,7 @@ public class NativeVsManagedEdgeTests
         double[] inputTimes = [0.01, 0.02, 0.03];
         int[] sources = [0, 1, 0];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.InitPostSpikeBuffers(nPost, 16);
         var csSpikes = EventPropMath.ComputeSpikes(w, inputTimes, sources, nPost, 1.0, 0.02, 0.005, buffers);
 
@@ -195,7 +195,7 @@ public class NativeVsManagedEdgeTests
         double[] inputTimes = [0.01, 0.02, 0.03, 0.04, 0.05];
         int[] sources = [0, 0, 0, 0, 0];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.InitPostSpikeBuffers(nPost, 16);
         var csSpikes = EventPropMath.ComputeSpikes(w, inputTimes, sources, nPost, 1.0, 0.02, 0.005, buffers);
 

@@ -55,7 +55,7 @@ public class NumericalGradientTests
         double[] inputTimes = [0.01, 0.03, 0.05];
         int[] inputSources = [0, 1, 2];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nNeurons: nPost, nPre: nPre, nSpikes: inputTimes.Length);
         buffers.Clear();
 
@@ -104,7 +104,7 @@ public class NumericalGradientTests
         double[] inputTimes = [0.01, 0.02, 0.03, 0.04];
         int[] inputSources = [0, 1, 2, 3];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nNeurons: nPost, nPre: nPre, nSpikes: inputTimes.Length);
         buffers.Clear();
 
@@ -164,7 +164,7 @@ public class NumericalGradientTests
         double[] inputTimes = [0.01, 0.03, 0.05];
         int[] inputSources = [0, 1, 2];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nNeurons: nPost, nPre: nPre, nSpikes: inputTimes.Length);
         buffers.Clear();
 
@@ -222,7 +222,7 @@ public class NumericalGradientTests
             inputSources[i] = i % nPre;
         }
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nNeurons: nPost, nPre: nPre, nSpikes: inputTimes.Length);
         buffers.Clear();
 
@@ -268,7 +268,7 @@ public class NumericalGradientTests
         double[] inputTimes = [0.05, 0.08, 0.12];
         int[] inputSources = [0, 0, 0];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nNeurons: nPost, nPre: nPre, nSpikes: inputTimes.Length);
         buffers.Clear();
 

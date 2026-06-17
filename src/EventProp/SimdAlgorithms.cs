@@ -248,4 +248,42 @@ public static class SimdAlgorithms
         for (int i = 0; i < remainder; i++)
             dest[vecCount * VEC + i] = a[vecCount * VEC + i] * b[vecCount * VEC + i];
     }
+
+    // ========================================================================
+    // Accumulate scaled: dest[j] += src[j] * scalar
+    // Used by BackwardSpikes for gradient accumulation.
+    // ========================================================================
+
+    public static void AddScaled(Span<double> dest, ReadOnlySpan<double> src, double scalar)
+    {
+        if (dest.Length < VEC || !IsAvailable)
+        {
+            for (int i = 0; i < dest.Length; i++)
+                dest[i] += src[i] * scalar;
+            return;
+        }
+
+        var vScalar = Vector256.Create(scalar);
+        int vecCount = dest.Length / VEC;
+        unsafe
+        {
+            void* pDest = Unsafe.AsPointer(ref MemoryMarshal.GetReference(dest));
+            void* pSrc = Unsafe.AsPointer(ref MemoryMarshal.GetReference(src));
+
+            for (int i = 0; i < vecCount; i++)
+            {
+                int offset = i * VEC;
+                double* pD = (double*)pDest + offset;
+                double* pS = (double*)pSrc + offset;
+
+                var d = Vector256.Load<double>(pD);
+                var s = Vector256.Load<double>(pS);
+                (d + s * vScalar).Store(pD);
+            }
+        }
+
+        int remainder = dest.Length - vecCount * VEC;
+        for (int i = 0; i < remainder; i++)
+            dest[vecCount * VEC + i] += src[vecCount * VEC + i] * scalar;
+    }
 }

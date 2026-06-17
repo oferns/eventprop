@@ -43,6 +43,12 @@ public abstract class Bench_TrainingLoop_Base : BenchBase
         OutSourcesNative = new int[maxOutSpikes];
         OutCurrentsNative = new double[maxOutSpikes];
 
+        // Zero-allocation output buffers for ComputeSpikesInto
+        OutTimesManaged = new double[maxOutSpikes];
+        OutSourcesManaged = new int[maxOutSpikes];
+        OutCurrentsManaged = new double[maxOutSpikes];
+        OutErrorsManaged = new double[maxOutSpikes];
+
         GradManaged = new double[NPre * NPost];
         GradNative = new double[NPre * NPost];
 
@@ -71,13 +77,27 @@ public abstract class Bench_TrainingLoop_Base : BenchBase
     {
         Array.Clear(GradManaged);
 
-        // Forward pass (allocation in managed code)
-        var fwdResult = EventPropMath.ComputeSpikes(W, Times, Sources, NPost, VTh, TauMem, TauSyn, Buffers);
-        for (int i = 0; i < fwdResult.NSpikes; i++)
-            fwdResult.SetError(i, 1.0);
+        // Forward pass — zero-allocation with ComputeSpikesInto
+        int nOut = EventPropMath.ComputeSpikesInto(
+            W, Times, Sources, NPost, VTh, TauMem, TauSyn,
+            OutTimesManaged.AsSpan(0, OutTimesManaged.Length),
+            OutSourcesManaged.AsSpan(0, OutSourcesManaged.Length),
+            OutCurrentsManaged.AsSpan(0, OutCurrentsManaged.Length),
+            Buffers);
 
-        // Backward pass (zero-allocation)
-        EventPropMath.BackwardSpikes(W, Times, Sources, fwdResult, NPost, VTh, TauMem, TauSyn, GradManaged, Buffers);
+        // Set errors on output spikes
+        for (int i = 0; i < nOut; i++)
+            OutErrorsManaged[i] = 1.0;
+
+        // Backward pass — zero-allocation with raw spans
+        EventPropMath.BackwardSpikesRaw(
+            W, Times, Sources,
+            OutTimesManaged.AsSpan(0, nOut),
+            OutSourcesManaged.AsSpan(0, nOut),
+            OutCurrentsManaged.AsSpan(0, nOut),
+            OutErrorsManaged.AsSpan(0, nOut),
+            NPost, VTh, TauMem, TauSyn,
+            GradManaged.AsSpan(), Buffers);
     }
 
     [Benchmark]
@@ -86,35 +106,13 @@ public abstract class Bench_TrainingLoop_Base : BenchBase
         Array.Clear(GradNative);
 
         // Forward pass via native (allocation in C++ Eigen)
-        int maxOut = NSpikes * NPost;
-        Array.Clear(OutTimesNative, 0, OutTimesNative.Length);
-        Array.Clear(OutSourcesNative, 0, OutSourcesNative.Length);
-        Array.Clear(OutCurrentsNative, 0, OutCurrentsNative.Length);
-
         using var output = CApi.Api.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn);
-        int nPost = output.NSpikes;
+        int nOut = output.NSpikes;
 
-        // Backward pass via native
+        // Backward pass via native — use actual forward output
         using var backwardOutput = CApi.Api.BackwardSpikes(Times, Sources,
-            OutTimesNative, OutSourcesNative, OutCurrentsNative,
-            PostErrorsNative, nPost, W, NPre, NPost,  // Added nPost parameter
-            VTh, TauMem, TauSyn);
-    }
-
-    [Benchmark]
-    public void Mixed()
-    {
-        Array.Clear(GradManaged);
-
-        // Forward pass via managed (zero-allocation with buffers)
-        var fwdResult = EventPropMath.ComputeSpikes(W, Times, Sources, NPost, VTh, TauMem, TauSyn, Buffers);
-        for (int i = 0; i < fwdResult.NSpikes; i++)
-            fwdResult.SetError(i, 1.0);
-
-        // Backward pass via native (P/Invoke)
-        using var output = CApi.Api.BackwardSpikes(Times, Sources,
-            fwdResult.Times, fwdResult.Sources, fwdResult.Currents,
-            fwdResult.Errors, fwdResult.NSpikes, W, NPre, NPost,  // Added nPost parameter
+            output.Times, output.Sources, output.Currents,
+            PostErrorsNative, nOut, W, NPre, NPost,
             VTh, TauMem, TauSyn);
     }
 }
