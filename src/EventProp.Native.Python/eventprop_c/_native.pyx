@@ -3,6 +3,7 @@
 
 import numpy as np
 cimport numpy as cnp
+from libc.stdlib cimport malloc, free, calloc
 
 cdef object _load_lib(object lib_path):
     import ctypes, os
@@ -39,32 +40,76 @@ cdef object _int_view(int* ptr, ssize_t length):
 
 cdef class BatchSpikeOutput:
     cdef ssize_t _ptr, batch_size
+    cdef double* _errors          # native error buffer (total_post_spikes)
+    cdef int* _error_offsets      # per-sample error offsets (batch_size+1)
+
     def __getitem__(self, int idx):
         if not 0 <= idx < self.batch_size:
             raise IndexError(f"index {idx} out of range")
         cdef SpikeOutput* s = <SpikeOutput*>self._ptr + idx
         return (_double_view(s.times, s.n_spikes), _int_view(s.sources, s.n_spikes),
                 _double_view(s.currents, s.n_spikes))
+
     def __len__(self):
         return self.batch_size
+
     cdef SpikeOutput* get_raw_ptr(self):
         return <SpikeOutput*>self._ptr
+
+    # Return numpy view into native error buffer for sample idx (Python-accessible)
+    def get_error_view(self, int idx):
+        if self._errors == NULL:
+            return np.array([], dtype=np.float64)
+        cdef SpikeOutput* s = <SpikeOutput*>self._ptr + idx
+        cdef double* err_ptr = self._errors + self._error_offsets[idx]
+        return _double_view(err_ptr, s.n_spikes)
+
+    # Total post-spikes across batch (for error buffer sizing)
+    cdef int total_post_spikes(self):
+        cdef int total = 0, i
+        cdef SpikeOutput* base = <SpikeOutput*>self._ptr
+        for i in range(self.batch_size):
+            total += base[i].n_spikes
+        return total
+
     def __dealloc__(self):
+        if self._errors != NULL:
+            free(self._errors)
+            self._errors = NULL
+        if self._error_offsets != NULL:
+            free(self._error_offsets)
+            self._error_offsets = NULL
         if self._ptr != 0:
             eventprop_free_batch_spike_output(<SpikeOutput*>self._ptr, self.batch_size)
 
 cdef class BatchMaximaOutput:
     cdef ssize_t _ptr, batch_size
+    cdef double* _errors          # native error buffer (batch_size * n_post)
+    cdef int n_post               # neurons per sample
+
     def __getitem__(self, int idx):
         if not 0 <= idx < self.batch_size:
             raise IndexError(f"index {idx} out of range")
         cdef MaximaOutput* m = <MaximaOutput*>self._ptr + idx
         return (_double_view(m.times, m.n_post), _double_view(m.values, m.n_post))
+
     def __len__(self):
         return self.batch_size
+
     cdef MaximaOutput* get_raw_ptr(self):
         return <MaximaOutput*>self._ptr
+
+    # Return numpy view into native error buffer for sample idx (Python-accessible)
+    def get_error_view(self, int idx):
+        if self._errors == NULL or self.n_post <= 0:
+            return np.array([], dtype=np.float64)
+        cdef double* err_ptr = self._errors + idx * self.n_post
+        return _double_view(err_ptr, self.n_post)
+
     def __dealloc__(self):
+        if self._errors != NULL:
+            free(self._errors)
+            self._errors = NULL
         if self._ptr != 0:
             eventprop_free_batch_maxima_output(<MaximaOutput*>self._ptr, self.batch_size)
 
@@ -145,6 +190,22 @@ cdef BatchSpikeOutput _compute_spikes_batch_ptrs(list tl, list sl, double[:,:] w
     o._ptr = <ssize_t>eventprop_compute_spikes_batch_ptrs(&ip)
     o.batch_size = bs
     free(pt); free(ps); free(pn)
+
+    # Allocate native error buffer + offsets — zero-copy for backward pass
+    cdef int tot_spikes = o.total_post_spikes()
+    cdef int i, offset
+    if tot_spikes > 0:
+        o._errors = <double*>calloc(tot_spikes, sizeof(double))
+        o._error_offsets = <int*>malloc((bs + 1) * sizeof(int))
+        offset = 0
+        for i in range(bs):
+            o._error_offsets[i] = offset
+            offset += (<SpikeOutput*>o._ptr)[i].n_spikes
+        o._error_offsets[bs] = offset  # sentinel
+    else:
+        o._errors = NULL
+        o._error_offsets = NULL
+
     return o
 
 cdef BatchMaximaOutput _compute_maxima_batch_ptrs(list tl, list sl, double[:,:] w, int np_, int npost,
@@ -162,7 +223,15 @@ cdef BatchMaximaOutput _compute_maxima_batch_ptrs(list tl, list sl, double[:,:] 
     cdef BatchMaximaOutput o = BatchMaximaOutput.__new__(BatchMaximaOutput)
     o._ptr = <ssize_t>eventprop_compute_maxima_batch_ptrs(&ip)
     o.batch_size = bs
+    o.n_post = npost
     free(pt); free(ps); free(pn)
+
+    # Allocate native error buffer — batch_size * n_post (maxima errors are per-neuron)
+    if npost > 0 and bs > 0:
+        o._errors = <double*>calloc(bs * npost, sizeof(double))
+    else:
+        o._errors = NULL
+
     return o
 
 cdef class AccumulatedGradient:
@@ -191,7 +260,7 @@ cdef class AccumulatedGradient:
             self._ptr = 0
 
 cdef AccumulatedGradient _backward_spikes_batch_accumulate_ptrs(
-        list tl, list sl, BatchSpikeOutput fb, double[:] pe,
+        list tl, list sl, BatchSpikeOutput fb,
         double[:,:] w, int np_, int npost, double tm, double ts, double vt):
     cdef int bs = len(tl)
     cdef const double** pt = <const double**>malloc(bs * sizeof(const double*))
@@ -204,22 +273,22 @@ cdef AccumulatedGradient _backward_spikes_batch_accumulate_ptrs(
     ip.w = &w[0,0] if w.shape[0]>0 and w.shape[1]>0 else NULL
     ip.n_pre = np_; ip.n_post = npost; ip.batch_size = bs
     ip.tau_mem = tm; ip.tau_syn = ts; ip.v_th = vt
-    # Build per-sample error pointers from flat all_errors array
-    # Errors are per-output-spike, indexed by cumulative fwd spike counts
+    # Read error pointers directly from native buffer — zero concatenation
     cdef const double** pe2 = <const double**>malloc(bs * sizeof(const double*))
     cdef int* pne = <int*>malloc(bs * sizeof(int))
-    cdef int b, err_off = 0
+    cdef int b
+    cdef SpikeOutput* fwd_base = fb.get_raw_ptr()
+    cdef double* err_base = fb._errors
     for b in range(bs):
-        pe2[b] = &pe[err_off]
-        pne[b] = fb.get_raw_ptr()[b].n_spikes
-        err_off += pne[b]
+        pe2[b] = (<const double*>(err_base + fb._error_offsets[b])) if err_base != NULL else NULL
+        pne[b] = fwd_base[b].n_spikes
     cdef BackwardOutput* r = eventprop_backward_spikes_batch_accumulate_ptrs(
         &ip, fb.get_raw_ptr(), pe2, pne)
     free(pt); free(ps); free(pn); free(pe2); free(pne)
     return AccumulatedGradient.from_result(r, np_, npost, tis)
 
 cdef AccumulatedGradient _backward_maxima_batch_accumulate_ptrs(
-        list tl, list sl, BatchMaximaOutput fb, double[:] me,
+        list tl, list sl, BatchMaximaOutput fb,
         double[:,:] w, int np_, int npost, double tm, double ts, double vt):
     cdef int bs = len(tl)
     cdef const double** pt = <const double**>malloc(bs * sizeof(const double*))
@@ -232,11 +301,11 @@ cdef AccumulatedGradient _backward_maxima_batch_accumulate_ptrs(
     ip.w = &w[0,0] if w.shape[0]>0 and w.shape[1]>0 else NULL
     ip.n_pre = np_; ip.n_post = npost; ip.batch_size = bs
     ip.tau_mem = tm; ip.tau_syn = ts; ip.v_th = vt
-    # Maxima errors are per-neuron (n_post each)
+    # Read error pointers directly from native buffer — zero concatenation
     cdef const double** me2 = <const double**>malloc(bs * sizeof(const double*))
     cdef int b
     for b in range(bs):
-        me2[b] = &me[b * npost]
+        me2[b] = fb._errors + b * npost if fb._errors != NULL else NULL
     cdef BackwardOutput* r = eventprop_backward_maxima_batch_accumulate_ptrs(
         &ip, fb.get_raw_ptr(), me2, npost)
     free(pt); free(ps); free(pn); free(me2)
@@ -377,15 +446,16 @@ def compute_maxima_batch_ptrs(list times_list, list sources_list,
                                       tau_mem, tau_syn, v_th)
 
 def backward_spikes_batch_accumulate_ptrs(list times_list, list sources_list,
-                                          BatchSpikeOutput fwd_batch, double[:] post_errors,
+                                          BatchSpikeOutput fwd_batch,
                                           double[:,:] w, int n_pre, int n_post,
                                           double tau_mem, double tau_syn, double v_th):
-    """Batch backward pass with accumulation — per-sample arrays, iteration in C."""
-    return _backward_spikes_batch_accumulate_ptrs(times_list, sources_list, fwd_batch, post_errors, w, n_pre, n_post, tau_mem, tau_syn, v_th)
+    """Batch backward pass with accumulation — errors read from fwd_batch native buffer."""
+    return _backward_spikes_batch_accumulate_ptrs(times_list, sources_list, fwd_batch, w, n_pre, n_post, tau_mem, tau_syn, v_th)
 
 def backward_maxima_batch_accumulate_ptrs(list times_list, list sources_list,
-                                          BatchMaximaOutput fwd_batch, double[:] maxima_errors,
+                                          BatchMaximaOutput fwd_batch,
                                           double[:,:] w, int n_pre, int n_post,
                                           double tau_mem, double tau_syn, double v_th):
-    """Batch backward pass (maxima) with accumulation — per-sample arrays, iteration in C."""
-    return _backward_maxima_batch_accumulate_ptrs(times_list, sources_list, fwd_batch, maxima_errors, w, n_pre, n_post, tau_mem, tau_syn, v_th)
+    """Batch backward pass (maxima) with accumulation — errors read from fwd_batch native buffer."""
+    return _backward_maxima_batch_accumulate_ptrs(times_list, sources_list, fwd_batch, w, n_pre, n_post, tau_mem, tau_syn, v_th)
+

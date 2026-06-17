@@ -75,13 +75,11 @@ class LILayer(Layer):
         times_list = [inp.times for inp in self.input_batch]
         sources_list = [inp.sources for inp in self.input_batch]
 
-        # Collect errors from cached views (default: zeros per neuron via .errors property)
-        errors_list = [self.maxima_batch[i].errors for i in range(batch_size)]
-        all_errors = np.concatenate(errors_list) if errors_list else np.array([], dtype=np.float64)
-
+        # Errors are already in native memory (BatchMaximaOutput._errors)
+        # backward_maxima_batch_accumulate_ptrs reads them directly — zero concatenation
         result = backward_maxima_batch_accumulate_ptrs(
             times_list, sources_list,
-            self.maxima_batch._batch_output, all_errors,
+            self.maxima_batch._batch_output,
             self.w_in_flat, self.parameters.n_in, self.parameters.n,
             self.parameters.tau_mem, self.parameters.tau_syn, float('inf'),
         )
