@@ -119,6 +119,15 @@ public static class SyncAssert
         }
 
         public void IsCloseTo(double expected, double tolerance) => IsEqualTo(expected, tolerance);
+
+        /// <summary>Compare with relative tolerance (for accumulated sums where FP noise scales with magnitude).</summary>
+        public void IsCloseToRelative(double expected, double relativeTolerance)
+        {
+            if (expected == 0.0 && _value == 0.0) return;
+            double scale = Math.Max(Math.Abs(expected), Math.Abs(_value));
+            if (Math.Abs(_value - expected) > relativeTolerance * scale)
+                throw new InRangeException(expected, _value, expected - relativeTolerance * scale, expected + relativeTolerance * scale);
+        }
     }
 
     // ── Value type chained assertions (int) ───────────────────────────

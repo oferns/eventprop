@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eventprop-python-benchmarks"
+version = "0.1"
+description = "Python benchmarks for EventProp (C library vs C++ Eigen reference)"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-benchmark",
+]
+
+[tool.setuptools.packages.find]
+include = ["*"]
+
+[tool.pytest.ini_options]
+addopts = "--benchmark-min-time=0.05 --benchmark-max-time=2"
+testpaths = ["."]

@@ -20,12 +20,6 @@ public class Toms748Tests
     }
 
     [Test]
-    public void Solve_SameSignInputs_ThrowsArgumentException()
-    {
-        Assert.Throws<ArgumentException>(() => Toms748.Solve(x => x * x + 1.0, 0.0, 5.0));
-    }
-
-    [Test]
     public void Solve_ReversedBracket_SwapsAndReturnsCorrectValue()
     {
         double result = Toms748.Solve(x => x - 3.0, 5.0, 0.0);

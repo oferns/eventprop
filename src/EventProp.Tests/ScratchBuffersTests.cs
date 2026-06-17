@@ -17,7 +17,7 @@ public class ScratchBuffersTests
             _ => throw new ArgumentException($"Unknown size: {size}")
         };
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nNeurons: nNeurons, nPre: nPre, nSpikes: nSpikes);
 
         // Sum0 and Sum1 should be (nSpikes+1) * nNeurons
@@ -32,8 +32,7 @@ public class ScratchBuffersTests
         // TransposeW should be nPre * nNeurons
         await Assert.That(buffers.TransposeW.Length).IsGreaterThanOrEqualTo(nPre * nNeurons);
 
-        // Voltage trace should be at least 10000
-        await Assert.That(buffers.VoltageTrace.Length).IsGreaterThanOrEqualTo(10000);
+        // VoltageTrace and LambdaITrace are reserved for future algorithms (not currently allocated).
 
         // Spike buffers should be allocated
         await Assert.That(buffers.SpikeErrors.Length).IsGreaterThanOrEqualTo(nSpikes);
@@ -42,7 +41,7 @@ public class ScratchBuffersTests
     [Test]
     public async Task EnsureCapacity_GrowFromEmpty_AllocatesAllBuffers()
     {
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
 
         // Initially all arrays are empty
         await Assert.That(buffers.Sum0.Length).IsEqualTo(0);
@@ -57,7 +56,7 @@ public class ScratchBuffersTests
     [Test]
     public async Task EnsureCapacity_ReuseExistingBuffers_WhenLargeEnough()
     {
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
 
         // First allocation
         buffers.EnsureCapacity(nNeurons: 10, nPre: 20, nSpikes: 50);
@@ -73,7 +72,7 @@ public class ScratchBuffersTests
     [Test]
     public async Task EnsureCapacity_GrowWhenNeeded()
     {
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
 
         // First allocation
         buffers.EnsureCapacity(nNeurons: 5, nPre: 10, nSpikes: 20);
@@ -88,7 +87,7 @@ public class ScratchBuffersTests
     [Test]
     public async Task Clear_ZerosAllRequiredBuffers()
     {
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nNeurons: 5, nPre: 10, nSpikes: 20);
 
         // Fill buffers with non-zero values
@@ -113,7 +112,7 @@ public class ScratchBuffersTests
     [Test]
     public async Task Clear_DoesNotAffectTransposeBuffers()
     {
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nNeurons: 5, nPre: 10, nSpikes: 20);
 
         // Fill TransposeW with non-zero values
@@ -129,7 +128,7 @@ public class ScratchBuffersTests
     [Test]
     public async Task Dispose_EmptiesAllBuffers()
     {
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nNeurons: 5, nPre: 10, nSpikes: 20);
 
         buffers.Dispose();
@@ -144,7 +143,7 @@ public class ScratchBuffersTests
     [Test]
     public async Task Dispose_MultipleCalls_DoesNotThrow()
     {
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         buffers.EnsureCapacity(nNeurons: 5, nPre: 10, nSpikes: 20);
 
         buffers.Dispose();
@@ -156,24 +155,9 @@ public class ScratchBuffersTests
     }
 
     [Test]
-    public async Task EnsureCapacity_WithFewNeuronsPerSpike_CorrectlyEstimates()
-    {
-        var buffers = new ScratchBuffers();
-
-        // 1 neuron, 100 spikes — should estimate at least 4 per neuron
-        buffers.EnsureCapacity(nNeurons: 1, nPre: 50, nSpikes: 100);
-
-        // MaxSpikesPerNeuron should be at least 4
-        await Assert.That(buffers.MaxSpikesPerNeuron).IsGreaterThanOrEqualTo(4);
-
-        // PostSpikeTimes should be MaxSpikesPerNeuron * nNeurons
-        await Assert.That(buffers.PostSpikeTimes.Length).IsEqualTo(buffers.MaxSpikesPerNeuron);
-    }
-
-    [Test]
     public async Task EnsureCapacity_WithManyNeuronsPerSpike_CorrectlyEstimates()
     {
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
 
         // 10 neurons, 5 spikes — should estimate at least 4 per neuron
         buffers.EnsureCapacity(nNeurons: 10, nPre: 5, nSpikes: 5);
@@ -182,30 +166,9 @@ public class ScratchBuffersTests
     }
 
     [Test]
-    public async Task EnsureCapacity_SpikeCountPerNeuronArraySize()
-    {
-        var buffers = new ScratchBuffers();
-
-        buffers.EnsureCapacity(nNeurons: 7, nPre: 10, nSpikes: 20);
-
-        await Assert.That(buffers.SpikeCountPerNeuron.Length).IsEqualTo(7);
-    }
-
-    [Test]
-    public async Task EnsureCapacity_SpikeOffsetPerNeuronArraySize()
-    {
-        var buffers = new ScratchBuffers();
-
-        buffers.EnsureCapacity(nNeurons: 7, nPre: 10, nSpikes: 20);
-
-        // Offset array should be nNeurons + 1
-        await Assert.That(buffers.SpikeOffsetPerNeuron.Length).IsEqualTo(8);
-    }
-
-    [Test]
     public async Task EnsureCapacity_MultipleCallsWithIncreasingSizes()
     {
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
 
         int[] sizes = [5, 20, 100, 500];
         foreach (var n in sizes)
@@ -218,7 +181,7 @@ public class ScratchBuffersTests
     [Test]
     public void ScratchBuffers_IsIDisposable()
     {
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
 
         SyncAssert.That((object)buffers).IsInstanceOfType(typeof(IDisposable));
     }

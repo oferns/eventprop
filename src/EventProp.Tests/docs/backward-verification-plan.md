@@ -41,7 +41,7 @@ The backward functions require complex state management (spike errors, adjoint a
 ## 2. Implementation Checklist (Prerequisites for Comparison Tests)
 
 ### Priority 1: Implement `eventprop_backward_spikes` in C++ ✅ DONE
-**File**: `src/cpp/eventprop_c_api.cpp`
+**File**: `src/EventProp.Cpp.Wrapper/eventprop_c_api.cpp`
 
 Done: Full implementation ported from C# `BackwardSpikes` algorithm. Added `post_errors` parameter to C++ API.
 
@@ -484,7 +484,7 @@ This two-step verification ensures the C++ port is correct even before we can co
 
 | File | Change | Priority |
 |------|--------|----------|
-| `src/cpp/eventprop_c_api.cpp` (line 369) | Replace stub with full `eventprop_backward_spikes` implementation | P1 |
+| `src/EventProp.Cpp.Wrapper/eventprop_c_api.cpp` (line 369) | Replace stub with full `eventprop_backward_spikes` implementation | P1 |
 | `src/EventProp/EventPropMath.cs` (new method) | Add `BackwardMaxima` static method | P2 |
 | `src/EventProp.Tests/CxxNativeTests.cs` (new tests) | Add 14 comparison test methods (7 per function) | P1b/P2b |
 | `src/EventProp.Tests/docs/backward-verification-plan.md` | This document (keep updated) | — |

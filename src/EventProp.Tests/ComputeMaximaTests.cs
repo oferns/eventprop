@@ -80,7 +80,7 @@ public class ComputeMaximaTests
         double[] times = [];
         int[] sources = [];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         var maxima = EventPropMath.ComputeMaxima(w, times, sources, nPost, 0.02, 0.005, buffers);
 
         for (int i = 0; i < nPost; i++)
@@ -98,7 +98,7 @@ public class ComputeMaximaTests
         double[] times = [0.01];
         int[] sources = [0];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         var maxima = EventPropMath.ComputeMaxima(w, times, sources, nPost, 0.02, 0.005, buffers);
 
         // Post-neuron 0 should have a non-NaN max time
@@ -128,7 +128,7 @@ public class ComputeMaximaTests
         double[] times = [0.01, 0.02];
         int[] sources = [0, 1];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         var maxima = EventPropMath.ComputeMaxima(w, times, sources, nPost, 0.02, 0.005, buffers);
 
         // Both neurons receive input from both spikes
@@ -154,7 +154,7 @@ public class ComputeMaximaTests
         double[] weights = [0.01, 0.5, 1.0, 5.0];
         double[] ratios = new double[weights.Length];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         for (int i = 0; i < weights.Length; i++)
         {
             var maxima = EventPropMath.ComputeMaxima([weights[i]], times, sources, nPost, 0.02, 0.005, buffers);
@@ -189,7 +189,7 @@ public class ComputeMaximaTests
         }
 
         // Should not throw — buffer reused across calls
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         var maxima = EventPropMath.ComputeMaxima(w, times, sources, nPost, 0.02, 0.005, buffers);
 
         await Assert.That(maxima.NNeurons).IsEqualTo(nPost);
@@ -207,7 +207,7 @@ public class ComputeMaximaTests
         double[] times = [0.01, 0.1];
         int[] sources = [0, 0];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         var maxima = EventPropMath.ComputeMaxima(w, times, sources, nPost, 0.02, 0.005, buffers);
 
         await Assert.That(maxima.Times[0]).IsNotNaN();
@@ -225,7 +225,7 @@ public class ComputeMaximaTests
         double[] times = [0.01];
         int[] sources = [0];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         // Test with base weight
         var maxima1 = EventPropMath.ComputeMaxima([baseWeight], times, sources, nPost, 0.02, 0.005, buffers);
 
@@ -251,7 +251,7 @@ public class ComputeMaximaTests
         int[] sources = [0];
 
         // tauMem ≈ tauSyn → formula divides by (tauMem - tauSyn) and logs ratio near 1
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         var maxima = EventPropMath.ComputeMaxima(w, times, sources, nPost, 0.01, 0.009, buffers);
 
         // Should not produce NaN or Infinity despite numerical sensitivity
@@ -268,7 +268,7 @@ public class ComputeMaximaTests
         double[] times = [0.01, 0.02];
         int[] sources = [0, 1];
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         var maxima = EventPropMath.ComputeMaxima(w, times, sources, nPost, 0.02, 0.005, buffers);
 
         // Zero weights → zero membrane potential → max value is 0 (or negative boundary)
@@ -286,7 +286,7 @@ public class ComputeMaximaTests
         double[] times = [0.01];
         int[] sources = [0]; // Only spike from neuron 0
 
-        var buffers = new ScratchBuffers();
+        using var buffers = new ScratchBuffers();
         var maxima = EventPropMath.ComputeMaxima(w, times, sources, nPost, 0.02, 0.005, buffers);
 
         // Post-neuron 0 gets input → valid max time

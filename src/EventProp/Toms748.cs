@@ -1,3 +1,5 @@
+using System;
+
 namespace CW.EventProp;
 
 /// <summary>
@@ -25,8 +27,11 @@ public static class Toms748
         double fa = f(a);
         double fb = f(b);
 
-        if (fa * fb > 0.0)
-            throw new ArgumentException("f(a) and f(b) must have opposite signs.");
+        // Guard: if endpoints are not finite, abort immediately
+        if (!double.IsFinite(fa) || !double.IsFinite(fb)) return a;
+
+        // Precondition: bracket must contain sign change
+        if (fa * fb > 0) return double.NaN;
 
         // Ensure a < b
         if (a > b)
@@ -79,8 +84,9 @@ public static class Toms748
                         double mVal = 0.5 * (b - a);
                         bool smallStep = Math.Abs(s - b) < mVal;
 
-                        // Stagnation check: if previous step was bisection, force bisection
-                        bool prevWasBisect = iter == 0 || Math.Abs(d - mVal) < tolerance * 100;
+                        // Stagnation check: if the step size is comparable to bisection,
+                        // prefer bisection for guaranteed convergence.
+                        bool prevWasBisect = Math.Abs(d - mVal) < tolerance * 100;
 
                         if (inBracket && smallStep && !prevWasBisect)
                             useBisection = false;
@@ -94,9 +100,13 @@ public static class Toms748
                 s = a + m; // = b - m since m = 0.5*(b-a)
             }
 
+            double f_oldB = fb;   // save before updating — avoids redundant fn call below
             double prevB = b;
             b = s;
             fb = f(b);
+
+            // Guard: abort on NaN/Inf at any evaluation point
+            if (!double.IsFinite(fb)) return prevB;
 
             // Check convergence
             if (Math.Abs(fb) <= tolerance || Math.Abs(b - prevB) <= tolerance * Math.Max(1.0, Math.Abs(prevB)))
@@ -106,27 +116,29 @@ public static class Toms748
             if (fa * fb < 0.0)
             {
                 // Root between a and new b — shrink from right, keep a fixed
-                c = prevB; fc = f(prevB);
+                c = prevB; fc = f_oldB;
             }
             else if (fb * fc < 0.0)
             {
                 // Root between new b and c — shrink from left, keep c fixed
-                a = prevB; fa = f(prevB);
+                a = prevB; fa = f_oldB;
             }
             else
             {
                 // All three have same sign — bracketing broken.
-                // The root must be between prevB and new_b (since f(prevB) had
-                // opposite sign to initial fa, and f(new_b) has same sign as fa).
                 // Restore bracketing: set a = prevB (opposite sign to new b)
-                a = prevB; fa = f(prevB);
+                a = prevB; fa = f_oldB;
             }
+
+            // Guard: abort if bracketing values become NaN/Inf
+            if (!double.IsFinite(fa) || !double.IsFinite(fc)) return prevB;
 
             // Track step size for stagnation detection in next iteration
             d = b - prevB;
         }
-    
-    // Should never reach here if bracketing is maintained correctly
+
+    // MaxIterations exceeded — return the best estimate found so far.
+    // This should not happen for well-behaved functions with valid brackets.
     return b;
 }
 }

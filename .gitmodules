@@ -1,0 +1,3 @@
+[submodule "src/EventProp.Python"]
+	path = src/EventProp.Python
+	url = git@github.com:timowunderlich/eventprop.git

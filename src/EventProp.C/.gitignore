@@ -1,0 +1,17 @@
+# Build artifacts
+test_runner*
+*.o
+libeventprop_c_api.dylib
+benchmarks/build/
+CMakeCache.txt
+CMakeFiles/
+
+# Debug symbols (macOS)
+*.dSYM/
+
+# ASAN build
+build_asan/
+
+# Stress test binaries
+test_batch_stress
+test_batch_stress.c

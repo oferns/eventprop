@@ -6,7 +6,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EventProp", "src\EventProp\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EventProp.Tests", "src\EventProp.Tests\EventProp.Tests.csproj", "{B2C3D4E5-F6A7-8901-BCDE-F12345678901}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EventProp.CxxReference", "src\EventProp.CxxReference\EventProp.CxxReference.csproj", "{C3D4E5F6-A7B8-9012-CDEF-234567890123}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EventProp.Native", "src\EventProp.Native\EventProp.Native.csproj", "{C3D4E5F6-A7B8-9012-CDEF-234567890123}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
