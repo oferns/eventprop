@@ -9,6 +9,7 @@ namespace EventProp.Benchmarks;
 // Measures the combined cost of one training step.
 // ============================================================
 
+[MemoryDiagnoser]
 public abstract class Bench_TrainingLoop_Base : BenchBase
 {
     protected SpikesData? PostSpikes { get; set; }
