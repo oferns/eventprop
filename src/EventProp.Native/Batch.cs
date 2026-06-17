@@ -25,10 +25,28 @@ public static unsafe partial class Batch
         public IntPtr Sources;    // int* (malloc'd)
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BatchEventPropInputPtrs
+    {
+        public IntPtr Times;       // const double**
+        public IntPtr Sources;     // const int**
+        public IntPtr NSpikes;     // const int*
+        public IntPtr W;           // const double*
+        public int NPre;
+        public int NPost;
+        public int BatchSize;
+        public double TauMem;
+        public double TauSyn;
+        public double VTh;
+    }
+
     // ── Native function declarations — struct-based only ───────
 
     [LibraryImport(Lib)]
     private static partial IntPtr eventprop_compute_spikes_batch(IntPtr input);
+
+    [LibraryImport(Lib)]
+    private static partial IntPtr eventprop_compute_spikes_batch_ptrs(IntPtr input);
 
     [LibraryImport(Lib)]
     private static partial IntPtr eventprop_backward_spikes_batch(IntPtr input, IntPtr fwdBatch, IntPtr postErrors);
@@ -37,13 +55,22 @@ public static unsafe partial class Batch
     private static partial IntPtr eventprop_backward_spikes_batch_accumulate(IntPtr input, IntPtr fwdBatch, IntPtr postErrors);
 
     [LibraryImport(Lib)]
+    private static partial IntPtr eventprop_backward_spikes_batch_accumulate_ptrs(IntPtr input, IntPtr fwdBatch, IntPtr postErrors, IntPtr nPostErrors);
+
+    [LibraryImport(Lib)]
     private static partial IntPtr eventprop_compute_maxima_batch(IntPtr input);
+
+    [LibraryImport(Lib)]
+    private static partial IntPtr eventprop_compute_maxima_batch_ptrs(IntPtr input);
 
     [LibraryImport(Lib)]
     private static partial IntPtr eventprop_backward_maxima_batch(IntPtr input, IntPtr fwdBatch, IntPtr maximaErrors);
 
     [LibraryImport(Lib)]
     private static partial IntPtr eventprop_backward_maxima_batch_accumulate(IntPtr input, IntPtr fwdBatch, IntPtr maximaErrors);
+
+    [LibraryImport(Lib)]
+    private static partial IntPtr eventprop_backward_maxima_batch_accumulate_ptrs(IntPtr input, IntPtr fwdBatch, IntPtr maximaErrors, int nPost);
 
     [LibraryImport(Lib)]
     private static partial IntPtr eventprop_dropout_spikes_batch(IntPtr input, double pDrop, int seed);
@@ -60,7 +87,126 @@ public static unsafe partial class Batch
     [LibraryImport(Lib)]
     public static partial void eventprop_free_dropout_output(IntPtr output, int batchSize);
 
-  // ── Flat-array batch (concatenated input) ────────────────────
+  // ── Pointer-based batch (per-sample pointers, no flattening) ──
+
+    /// <summary>Batch forward pass (spikes) using per-sample pointers — zero-copy.</summary>
+    public static OwnedBatchSpikeOutput ComputeSpikesBatchPtrs(
+        ReadOnlySpan<double> w, int nPre, int nPost,
+        IntPtr[] timesPtrs, IntPtr[] sourcesPtrs, ReadOnlySpan<int> nSpikes,
+        double vTh, double tauMem, double tauSyn)
+    {
+        fixed (double* pw = w)
+        fixed (IntPtr* pt = timesPtrs)
+        fixed (IntPtr* ps = sourcesPtrs)
+        fixed (int* pnsps = nSpikes)
+        {
+            BatchEventPropInputPtrs* input = stackalloc BatchEventPropInputPtrs[1];
+            input->Times = (IntPtr)pt;
+            input->Sources = (IntPtr)ps;
+            input->NSpikes = (IntPtr)pnsps;
+            input->W = (IntPtr)pw;
+            input->NPre = nPre;
+            input->NPost = nPost;
+            input->BatchSize = nSpikes.Length;
+            input->TauMem = tauMem;
+            input->TauSyn = tauSyn;
+            input->VTh = vTh;
+
+            return new OwnedBatchSpikeOutput(eventprop_compute_spikes_batch_ptrs((IntPtr)input), nSpikes.Length);
+        }
+    }
+
+    /// <summary>Batch forward pass (maxima) using per-sample pointers — zero-copy.</summary>
+    public static OwnedBatchMaximaOutput ComputeMaximaBatchPtrs(
+        ReadOnlySpan<double> w, int nPre, int nPost,
+        IntPtr[] timesPtrs, IntPtr[] sourcesPtrs, ReadOnlySpan<int> nSpikes,
+        double tauMem, double tauSyn)
+    {
+        fixed (double* pw = w)
+        fixed (IntPtr* pt = timesPtrs)
+        fixed (IntPtr* ps = sourcesPtrs)
+        fixed (int* pnsps = nSpikes)
+        {
+            BatchEventPropInputPtrs* input = stackalloc BatchEventPropInputPtrs[1];
+            input->Times = (IntPtr)pt;
+            input->Sources = (IntPtr)ps;
+            input->NSpikes = (IntPtr)pnsps;
+            input->W = (IntPtr)pw;
+            input->NPre = nPre;
+            input->NPost = nPost;
+            input->BatchSize = nSpikes.Length;
+            input->TauMem = tauMem;
+            input->TauSyn = tauSyn;
+            input->VTh = 0;
+
+            return new OwnedBatchMaximaOutput(eventprop_compute_maxima_batch_ptrs((IntPtr)input), nSpikes.Length);
+        }
+    }
+
+    /// <summary>Batch backward pass (spikes, accumulated gradient) using per-sample pointers — zero-copy.</summary>
+    public static Api.OwnedBackwardOutput BackwardSpikesBatchAccumulatePtrs(
+        ReadOnlySpan<double> w, int nPre, int nPost,
+        IntPtr[] timesPtrs, IntPtr[] sourcesPtrs, ReadOnlySpan<int> nSpikes,
+        IntPtr fwdBatchPtr,
+        IntPtr[] errorPtrs, ReadOnlySpan<int> nErrors,
+        double vTh, double tauMem, double tauSyn)
+    {
+        fixed (double* pw = w)
+        fixed (IntPtr* pt = timesPtrs)
+        fixed (IntPtr* ps = sourcesPtrs)
+        fixed (int* pnsps = nSpikes)
+        fixed (IntPtr* pe = errorPtrs)
+        fixed (int* pne = nErrors)
+        {
+            BatchEventPropInputPtrs* input = stackalloc BatchEventPropInputPtrs[1];
+            input->Times = (IntPtr)pt;
+            input->Sources = (IntPtr)ps;
+            input->NSpikes = (IntPtr)pnsps;
+            input->W = (IntPtr)pw;
+            input->NPre = nPre;
+            input->NPost = nPost;
+            input->BatchSize = nSpikes.Length;
+            input->TauMem = tauMem;
+            input->TauSyn = tauSyn;
+            input->VTh = vTh;
+
+            return new Api.OwnedBackwardOutput(
+                eventprop_backward_spikes_batch_accumulate_ptrs((IntPtr)input, fwdBatchPtr, (IntPtr)pe, (IntPtr)pne),
+                nSpikes.Length);
+        }
+    }
+
+    /// <summary>Batch backward pass (maxima, accumulated gradient) using per-sample pointers — zero-copy.</summary>
+    public static Api.OwnedBackwardOutput BackwardMaximaBatchAccumulatePtrs(
+        ReadOnlySpan<double> w, int nPre, int nPost,
+        IntPtr[] timesPtrs, IntPtr[] sourcesPtrs, ReadOnlySpan<int> nSpikes,
+        IntPtr fwdBatchPtr,
+        IntPtr[] errorPtrs, int nPostErrors,
+        double tauMem, double tauSyn)
+    {
+        fixed (double* pw = w)
+        fixed (IntPtr* pt = timesPtrs)
+        fixed (IntPtr* ps = sourcesPtrs)
+        fixed (int* pnsps = nSpikes)
+        fixed (IntPtr* pe = errorPtrs)
+        {
+            BatchEventPropInputPtrs* input = stackalloc BatchEventPropInputPtrs[1];
+            input->Times = (IntPtr)pt;
+            input->Sources = (IntPtr)ps;
+            input->NSpikes = (IntPtr)pnsps;
+            input->W = (IntPtr)pw;
+            input->NPre = nPre;
+            input->NPost = nPost;
+            input->BatchSize = nSpikes.Length;
+            input->TauMem = tauMem;
+            input->TauSyn = tauSyn;
+            input->VTh = 0;
+
+            return new Api.OwnedBackwardOutput(
+                eventprop_backward_maxima_batch_accumulate_ptrs((IntPtr)input, fwdBatchPtr, (IntPtr)pe, nPostErrors),
+                nSpikes.Length);
+        }
+    }
 
     /// <summary>Batch forward pass (spikes) using concatenated flat arrays.</summary>
     public static OwnedBatchSpikeOutput ComputeSpikesBatch(
