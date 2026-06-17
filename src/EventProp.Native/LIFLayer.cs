@@ -1,13 +1,18 @@
+using System.Runtime.InteropServices;
+
 namespace CW.EventProp.Native;
 
 /// <summary>
 /// Leaky Integrate-and-Fire (LIF) layer backed by the C library via P/Invoke.
 /// 
-/// Forward pass: computes post-synaptic spike times using batch operations
-/// (single C call for the entire batch via OpenMP parallelization).
+/// Zero-allocation hot path: Forward uses _ptrs batch API (no flattening),
+/// errors are written to native memory, Backward passes native pointers directly.
 /// 
-/// Backward pass: computes weight gradients via the adjoint method,
-/// accumulating across all samples in a single C call.
+/// Usage:
+///   layer.Forward(inputBatch);
+///   for (int i = 0; i < layer.PostSpikes[i].NSpikes; i++)
+///       layer.SetError(i, spikeIdx, 1.0);  // writes to native buffer
+///   layer.Backward();
 /// </summary>
 public sealed unsafe class LIFLayer : Layer
 {
@@ -21,6 +26,12 @@ public sealed unsafe class LIFLayer : Layer
 
     /// <summary>Zero-copy view over native forward output.</summary>
     private NativeSpikesVector? _outputNative;
+
+    /// <summary>Native errors buffer (malloc'd, one per sample via pointer array).</summary>
+    private IntPtr[] _errorBuffers = Array.Empty<IntPtr>();
+
+    /// <summary>Spike count per sample (for error buffer offsets).</summary>
+    private int[] _postSpikesPerSample = Array.Empty<int>();
 
     /// <summary>
     /// Create a LIF layer with the given parameters.
@@ -76,20 +87,70 @@ public sealed unsafe class LIFLayer : Layer
         weights.CopyTo(_weights);
     }
 
+    /// <summary>Number of samples in the last forward pass.</summary>
+    public int BatchSize => _outputNative?.Count ?? 0;
+
+    /// <summary>
+    /// Get zero-copy view of post-synaptic spikes for a sample.
+    /// Use this to read spike times/sources and determine error count.
+    /// </summary>
+    public NativeSpikesSample this[int batchIdx]
+    {
+        get
+        {
+            if (_outputNative is null)
+                throw new InvalidOperationException("Run Forward() first.");
+            return _outputNative[batchIdx];
+        }
+    }
+
+    /// <summary>
+    /// Set error signal for a specific spike in a sample.
+    /// Writes directly to native memory — zero allocation.
+    /// </summary>
+    public void SetError(int batchIdx, int spikeIdx, double error)
+    {
+        if (_outputNative is null)
+            throw new InvalidOperationException("Run Forward() first.");
+        if (batchIdx < 0 || batchIdx >= _outputNative.Count)
+            throw new ArgumentOutOfRangeException(nameof(batchIdx));
+
+        var errors = GetErrorSpan(batchIdx);
+        if (spikeIdx < 0 || spikeIdx >= errors.Length)
+            throw new ArgumentOutOfRangeException(nameof(spikeIdx));
+        errors[spikeIdx] = error;
+    }
+
+    /// <summary>
+    /// Get mutable span over error buffer for a sample.
+    /// Write errors here before calling Backward().
+    /// </summary>
+    public Span<double> GetErrorSpan(int batchIdx)
+    {
+        if (_outputNative is null)
+            throw new InvalidOperationException("Run Forward() first.");
+        if (batchIdx < 0 || batchIdx >= _outputNative.Count)
+            throw new ArgumentOutOfRangeException(nameof(batchIdx));
+
+        int nSpikes = _postSpikesPerSample[batchIdx];
+        return new Span<double>((double*)_errorBuffers[batchIdx].ToPointer(), nSpikes);
+    }
+
     /// <summary>
     /// Run forward pass: compute post-synaptic spike times given input spikes.
-    /// Uses batch C API — single call for entire batch. Zero-copy: no flattening, no output copy.
+    /// Zero-allocation: _ptrs batch API, no flattening, no managed output copy.
     /// </summary>
     public override void Forward(SpikesVector inputBatch)
     {
         _inputBatch = inputBatch;
 
-        // Free previous forward output
+        // Free previous forward output and error buffers
         if (_fwdBatchPtr != IntPtr.Zero)
         {
-            Batch.eventprop_free_batch_spike_output(_fwdBatchPtr, inputBatch.Count);
+            Batch.eventprop_free_batch_spike_output(_fwdBatchPtr, _outputNative?.Count ?? 1);
             _fwdBatchPtr = IntPtr.Zero;
         }
+        FreeErrorBuffers();
 
         int batchSize = inputBatch.Count;
         var timesPtrs = new IntPtr[batchSize];
@@ -97,14 +158,14 @@ public sealed unsafe class LIFLayer : Layer
         var nSpikes = new int[batchSize];
 
         // Pin all sample arrays for the duration of the C call
-        var handles = new System.Runtime.InteropServices.GCHandle[batchSize * 2];
+        var handles = new GCHandle[batchSize * 2];
         try
         {
             for (int i = 0; i < batchSize; i++)
             {
                 var sample = inputBatch[i];
-                handles[i * 2] = System.Runtime.InteropServices.GCHandle.Alloc(sample.Times, System.Runtime.InteropServices.GCHandleType.Pinned);
-                handles[i * 2 + 1] = System.Runtime.InteropServices.GCHandle.Alloc(sample.Sources, System.Runtime.InteropServices.GCHandleType.Pinned);
+                handles[i * 2] = GCHandle.Alloc(sample.Times, GCHandleType.Pinned);
+                handles[i * 2 + 1] = GCHandle.Alloc(sample.Sources, GCHandleType.Pinned);
                 timesPtrs[i] = handles[i * 2].AddrOfPinnedObject();
                 sourcesPtrs[i] = handles[i * 2 + 1].AddrOfPinnedObject();
                 nSpikes[i] = sample.NSpikes;
@@ -126,24 +187,25 @@ public sealed unsafe class LIFLayer : Layer
         // Zero-copy output view over native memory
         _outputNative = new NativeSpikesVector(_fwdBatchPtr, batchSize);
 
-        // Managed output view for backward pass (errors set by user)
-        _output = new SpikesVector(batchSize);
+        // Allocate native error buffers (one per sample)
+        _errorBuffers = new IntPtr[batchSize];
+        _postSpikesPerSample = new int[batchSize];
         for (int i = 0; i < batchSize; i++)
         {
-            var sample = _outputNative[i];
-            var times = new double[sample.NSpikes];
-            var sources = new int[sample.NSpikes];
-            sample.Times.CopyTo(times);
-            sample.Sources.CopyTo(sources);
-            _output.Add(new SpikesData(times, sources));
+            int nPostSpikes = _outputNative[i].NSpikes;
+            _postSpikesPerSample[i] = nPostSpikes;
+            _errorBuffers[i] = nPostSpikes > 0
+                ? Marshal.AllocHGlobal(nPostSpikes * sizeof(double))
+                : IntPtr.Zero;
         }
 
+        _output = null; // No managed output — use this[batchIdx] and SetError()
         _ranForward = true;
     }
 
     /// <summary>
     /// Run backward pass: compute weight gradients via the adjoint method.
-    /// Uses batch C API — single call for entire batch (accumulated gradient).
+    /// Zero-allocation: _ptrs batch API for input, native error pointers for output.
     /// </summary>
     public override void Backward()
     {
@@ -156,56 +218,46 @@ public sealed unsafe class LIFLayer : Layer
         if (_inputBatch is null || _outputNative is null)
             throw new InvalidOperationException("Forward has not been run.");
 
-        // Flatten input batch (temporary — _ptrs backward crashes at Large scale)
-        var (flatTimes, flatSources, nSpikesPerSample) = FlattenSpikes(_inputBatch);
+        int batchSize = _inputBatch.Count;
+        var timesPtrs = new IntPtr[batchSize];
+        var sourcesPtrs = new IntPtr[batchSize];
+        var nSpikes = new int[batchSize];
 
-        // Copy errors from managed output into flat array
-        int totalPostSpikes = 0;
-        for (int i = 0; i < _outputNative.Count; i++)
-            totalPostSpikes += _outputNative[i].NSpikes;
-        var flatErrors = new double[totalPostSpikes];
-        int offset = 0;
-        for (int i = 0; i < _output!.Count; i++)
+        // Pin all input arrays for the duration of the C call
+        var handles = new GCHandle[batchSize * 2];
+        try
         {
-            System.Array.Copy(_output[i].Errors, 0, flatErrors, offset, _output[i].NSpikes);
-            offset += _output[i].NSpikes;
+            for (int i = 0; i < batchSize; i++)
+            {
+                var inputSample = _inputBatch[i];
+                handles[i * 2] = GCHandle.Alloc(inputSample.Times, GCHandleType.Pinned);
+                handles[i * 2 + 1] = GCHandle.Alloc(inputSample.Sources, GCHandleType.Pinned);
+                timesPtrs[i] = handles[i * 2].AddrOfPinnedObject();
+                sourcesPtrs[i] = handles[i * 2 + 1].AddrOfPinnedObject();
+                nSpikes[i] = inputSample.NSpikes;
+            }
+
+            // Error pointers are native — no pinning needed
+            var nErrors = new int[batchSize];
+            for (int i = 0; i < batchSize; i++)
+                nErrors[i] = _postSpikesPerSample[i];
+
+            using var result = Batch.BackwardSpikesBatchAccumulatePtrs(
+                _weights, _params.NIn, _params.N,
+                timesPtrs, sourcesPtrs, nSpikes,
+                _fwdBatchPtr,
+                _errorBuffers, nErrors,
+                _params.VTh, _params.TauMem, _params.TauSyn);
+
+            result.Gradient.CopyTo(Gradient.AsSpan());
+        }
+        finally
+        {
+            for (int i = 0; i < handles.Length; i++)
+                if (handles[i].IsAllocated) handles[i].Free();
         }
 
-        // Batch backward pass — flat array variant (stable)
-        using var result = Batch.BackwardSpikesBatchAccumulate(
-            _weights, _params.NIn, _params.N,
-            flatTimes, flatSources, nSpikesPerSample,
-            _fwdBatchPtr,
-            flatErrors,
-            _params.VTh, _params.TauMem, _params.TauSyn);
-
-        result.Gradient.CopyTo(Gradient.AsSpan());
         _ranBackward = true;
-    }
-
-    /// <summary>Flatten a SpikesVector into concatenated arrays + per-sample counts.</summary>
-    private static (double[] times, int[] sources, int[] nSpikesPerSample) FlattenSpikes(SpikesVector batch)
-    {
-        int totalSpikes = 0;
-        var nSpikesPerSample = new int[batch.Count];
-        for (int i = 0; i < batch.Count; i++)
-        {
-            nSpikesPerSample[i] = batch[i].NSpikes;
-            totalSpikes += batch[i].NSpikes;
-        }
-
-        var times = new double[totalSpikes];
-        var sources = new int[totalSpikes];
-        int offset = 0;
-        for (int i = 0; i < batch.Count; i++)
-        {
-            var sample = batch[i];
-            System.Array.Copy(sample.Times, 0, times, offset, sample.NSpikes);
-            System.Array.Copy(sample.Sources, 0, sources, offset, sample.NSpikes);
-            offset += sample.NSpikes;
-        }
-
-        return (times, sources, nSpikesPerSample);
     }
 
     /// <summary>Zero the weight gradient.</summary>
@@ -255,7 +307,6 @@ public sealed unsafe class LIFLayer : Layer
 
         var postSample = _outputNative[batchIdx];
 
-        // λ_i(t) = Σ_{spike times > t} vTh * exp((t - t_spike) / tauMem) / tauMem
         double lambdaI = 0;
         double expFactor = 1.0 / _params.TauMem;
         for (int s = 0; s < postSample.NSpikes; s++)
@@ -300,11 +351,18 @@ public sealed unsafe class LIFLayer : Layer
     {
         if (_fwdBatchPtr != IntPtr.Zero)
         {
-            int batchSize = _inputBatch?.Count ?? 1;
-            Batch.eventprop_free_batch_spike_output(_fwdBatchPtr, batchSize);
+            Batch.eventprop_free_batch_spike_output(_fwdBatchPtr, _outputNative?.Count ?? 1);
             _fwdBatchPtr = IntPtr.Zero;
         }
+        FreeErrorBuffers();
     }
 
-    // ── Helpers ────────────────────────────────────────────────
+    private void FreeErrorBuffers()
+    {
+        foreach (var ptr in _errorBuffers)
+            if (ptr != IntPtr.Zero)
+                Marshal.FreeHGlobal(ptr);
+        _errorBuffers = Array.Empty<IntPtr>();
+        _postSpikesPerSample = Array.Empty<int>();
+    }
 }

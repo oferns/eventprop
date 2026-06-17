@@ -174,10 +174,9 @@ public class Bench_Batch_TrainingStep_4 : BenchBatchBase
         for (int b = 0; b < BatchSize; b++)
             batch.Add(new CApi.SpikesData(BatchTimes[b], BatchSources[b]));
         NativeLayer!.Forward(batch);
-        var post = NativeLayer.Output;
         for (int b = 0; b < BatchSize; b++)
-            for (int i = 0; i < post[b].NSpikes; i++)
-                post[b].SetError(i, 1.0);
+            for (int i = 0; i < NativeLayer[b].NSpikes; i++)
+                NativeLayer.SetError(b, i, 1.0);
         NativeLayer.Backward();
     }
 }
@@ -208,10 +207,9 @@ public class Bench_Batch_TrainingStep_8 : BenchBatchBase
         for (int b = 0; b < BatchSize; b++)
             batch.Add(new CApi.SpikesData(BatchTimes[b], BatchSources[b]));
         NativeLayer!.Forward(batch);
-        var post = NativeLayer.Output;
         for (int b = 0; b < BatchSize; b++)
-            for (int i = 0; i < post[b].NSpikes; i++)
-                post[b].SetError(i, 1.0);
+            for (int i = 0; i < NativeLayer[b].NSpikes; i++)
+                NativeLayer.SetError(b, i, 1.0);
         NativeLayer.Backward();
     }
 }

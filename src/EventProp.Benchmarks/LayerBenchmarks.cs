@@ -132,9 +132,8 @@ public class Bench_LIF_Backward_Small : BenchLayerBase
     public void Native()
     {
         NativeLayer!.Forward(NativeInput);
-        var post = NativeLayer.Output;
-        for (int i = 0; i < post[0].NSpikes; i++)
-            post[0].SetError(i, 1.0);
+        for (int i = 0; i < NativeLayer[0].NSpikes; i++)
+            NativeLayer.SetError(0, i, 1.0);
         NativeLayer.Backward();
     }
 }
@@ -158,9 +157,8 @@ public class Bench_LIF_Backward_Medium : BenchLayerBase
     public void Native()
     {
         NativeLayer!.Forward(NativeInput);
-        var post = NativeLayer.Output;
-        for (int i = 0; i < post[0].NSpikes; i++)
-            post[0].SetError(i, 1.0);
+        for (int i = 0; i < NativeLayer[0].NSpikes; i++)
+            NativeLayer.SetError(0, i, 1.0);
         NativeLayer.Backward();
     }
 }
@@ -184,9 +182,8 @@ public class Bench_LIF_Backward_Large : BenchLayerBase
     public void Native()
     {
         NativeLayer!.Forward(NativeInput);
-        var post = NativeLayer.Output;
-        for (int i = 0; i < post[0].NSpikes; i++)
-            post[0].SetError(i, 1.0);
+        for (int i = 0; i < NativeLayer[0].NSpikes; i++)
+            NativeLayer.SetError(0, i, 1.0);
         NativeLayer.Backward();
     }
 }

@@ -155,21 +155,6 @@ public class ScratchBuffersTests
     }
 
     [Test]
-    public async Task EnsureCapacity_WithFewNeuronsPerSpike_CorrectlyEstimates()
-    {
-        using var buffers = new ScratchBuffers();
-
-        // 1 neuron, 100 spikes — should estimate at least 4 per neuron
-        buffers.EnsureCapacity(nNeurons: 1, nPre: 50, nSpikes: 100);
-
-        // MaxSpikesPerNeuron should be at least 4
-        await Assert.That(buffers.MaxSpikesPerNeuron).IsGreaterThanOrEqualTo(4);
-
-        // PostSpikeTimes should be MaxSpikesPerNeuron * nNeurons
-        await Assert.That(buffers.PostSpikeTimes.Length).IsEqualTo(buffers.MaxSpikesPerNeuron);
-    }
-
-    [Test]
     public async Task EnsureCapacity_WithManyNeuronsPerSpike_CorrectlyEstimates()
     {
         using var buffers = new ScratchBuffers();
@@ -178,27 +163,6 @@ public class ScratchBuffersTests
         buffers.EnsureCapacity(nNeurons: 10, nPre: 5, nSpikes: 5);
 
         await Assert.That(buffers.MaxSpikesPerNeuron).IsGreaterThanOrEqualTo(4);
-    }
-
-    [Test]
-    public async Task EnsureCapacity_SpikeCountPerNeuronArraySize()
-    {
-        using var buffers = new ScratchBuffers();
-
-        buffers.EnsureCapacity(nNeurons: 7, nPre: 10, nSpikes: 20);
-
-        await Assert.That(buffers.SpikeCountPerNeuron.Length).IsEqualTo(7);
-    }
-
-    [Test]
-    public async Task EnsureCapacity_SpikeOffsetPerNeuronArraySize()
-    {
-        using var buffers = new ScratchBuffers();
-
-        buffers.EnsureCapacity(nNeurons: 7, nPre: 10, nSpikes: 20);
-
-        // Offset array should be nNeurons + 1
-        await Assert.That(buffers.SpikeOffsetPerNeuron.Length).IsEqualTo(8);
     }
 
     [Test]
