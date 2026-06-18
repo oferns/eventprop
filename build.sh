@@ -84,9 +84,9 @@ if [ -f ".venv/bin/activate" ]; then
 fi
 echo "  → eventprop-python-benchmarks (editable install)"
 
-# ── 5. Python ctypes bindings
+# ── 5. Python Cython bindings
 echo ""
-echo "[5/9] Building Python ctypes bindings (EventProp.Native.Python)..."
+echo "[5/9] Building Python cython bindings (EventProp.Native.Python)..."
 cd "$SCRIPT_DIR/src/EventProp.Native.Python"
 if [ -f ".venv/bin/activate" ]; then
   source .venv/bin/activate

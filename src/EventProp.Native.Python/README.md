@@ -1,11 +1,11 @@
-# EventProp Python Bindings (ctypes)
+# EventProp Python Bindings (Cython)
 
-Zero-copy access to the EventProp C library using Python ctypes. No numpy required.
+Zero-copy access to the EventProp C library using Python Cython. No numpy required.
 
 ## Features
 
 - **Zero-copy memory access** — Direct pointer access to C-allocated arrays
-- **No external dependencies** — Only uses Python standard library (ctypes)
+- **No external dependencies** — Only uses Python standard library (Cython)
 - **Automatic cleanup** — C memory freed on garbage collection
 - **Memoryview support** — Compatible with Python's built-in memoryview
 
@@ -51,7 +51,7 @@ times_list = output.times.to_list()
 
 ## API Reference
 
-### NativeApi (EventPropCtypes)
+### NativeApi (EventProp_c)
 
 Main library wrapper providing access to all alloc functions:
 

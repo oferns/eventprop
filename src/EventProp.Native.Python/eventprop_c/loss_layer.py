@@ -1,4 +1,4 @@
-"""Loss layers for ctypes library — calls C library directly via NativeApi."""
+"""Loss layers for Cython library — delegates to LIFLayer/LILayer forward/backward."""
 
 from typing import NamedTuple
 import numpy as np

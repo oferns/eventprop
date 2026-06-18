@@ -51,8 +51,8 @@ if [[ "$TARGET" == "all" || "$TARGET" == "python" ]]; then
   echo "[4/8] Cleaning EventProp.Native.Python..."
   cd "$SCRIPT_DIR/src/EventProp.Native.Python"
   pip uninstall eventprop_c -y --quiet 2>/dev/null || true
-  rm -rf build/ *.egg-info/ eventprop_c/*.so eventprop_cffi/*.so \
-         eventprop_c/__pycache__ eventprop_cffi/__pycache__
+  rm -rf build/ *.egg-info/ eventprop_c/*.so \
+         eventprop_c/__pycache__ 
   find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
 fi
 
