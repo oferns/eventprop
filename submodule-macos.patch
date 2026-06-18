@@ -12,10 +12,10 @@ index 9209c56..a7217c7 100644
          for batch_idx, spikes in enumerate(self.post_batch):
              self.first_spike_times[batch_idx, :] = self.post_batch[
 diff --git a/setup.py b/setup.py
-index a53268b..e2d8763 100644
+index a53268b..7b09385 100644
 --- a/setup.py
 +++ b/setup.py
-@@ -3,18 +3,19 @@ import setuptools
+@@ -3,18 +3,18 @@ import setuptools
  cpp_ext = setuptools.Extension(
      name="eventprop.eventprop_cpp",
      sources=["src/eventprop_cpp.cpp"],
@@ -26,7 +26,7 @@ index a53268b..e2d8763 100644
      extra_compile_args=[
          "-std=c++17",
          "-O3",
-         "-march=native",
+-        "-march=native",
 -        "-fopenmp",
 +        "-Xpreprocessor", "-fopenmp",
          "-freciprocal-math",
