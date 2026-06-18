@@ -8,9 +8,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(EIGEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.Python/src/eigen")
 
 # ── Boost (header-only: math) ───────────────────────────────────
-find_path(BOOST_INCLUDE_DIR NAMES boost/math/tools/roots.hpp PATHS /opt/homebrew/include NO_DEFAULT_PATH)
+find_path(BOOST_INCLUDE_DIR NAMES boost/math/tools/roots.hpp PATHS /opt/homebrew/include /usr/include NO_DEFAULT_PATH)
 if(NOT BOOST_INCLUDE_DIR)
-    message(FATAL_ERROR "Boost not found at /opt/homebrew/include")
+    message(FATAL_ERROR "Boost not found. Install libboost-dev (Linux) or boost (macOS)")
 endif()
 
 # ── OpenMP (optional, for parallelization) ─────────────────────
@@ -31,7 +31,7 @@ include(FetchContent)
 FetchContent_Declare(
     benchmark
     GIT_REPOSITORY https://github.com/google/benchmark.git
-    GIT_TAG v1.9.1
+    GIT_TAG v1.9.5
 )
 set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
 set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
@@ -77,8 +77,12 @@ target_include_directories(eventprop_eigen_core PRIVATE
 )
 
 # Performance optimizations (same as C library for fair comparison)
-target_compile_options(eventprop_eigen_core PRIVATE -O3 -ffast-math -march=native
-                                                     -fvectorize -fslp-vectorize)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_compile_options(eventprop_eigen_core PRIVATE -O3 -ffast-math -march=native
+                                                         -fvectorize -fslp-vectorize)
+else()
+    target_compile_options(eventprop_eigen_core PRIVATE -O3 -ffast-math -march=native)
+endif()
 
 # OpenMP for parallelization
 if(APPLE AND _BREW_FAIL EQUAL 0)

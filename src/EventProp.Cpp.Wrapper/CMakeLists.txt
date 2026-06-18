@@ -11,9 +11,10 @@ if(NOT EXISTS "${EIGEN_DIR}")
 endif()
 
 # ── Boost (header-only: math) ───────────────────────────────────
-find_path(BOOST_INCLUDE_DIR NAMES boost/math/tools/roots.hpp PATHS /opt/homebrew/include NO_DEFAULT_PATH)
+find_path(BOOST_INCLUDE_DIR NAMES boost/math/tools/roots.hpp
+          PATHS /opt/homebrew/include /usr/include NO_DEFAULT_PATH)
 if(NOT BOOST_INCLUDE_DIR)
-    message(FATAL_ERROR "Boost not found at /opt/homebrew/include")
+    message(FATAL_ERROR "Boost not found. Install libboost-dev (Linux) or boost (macOS Homebrew)")
 endif()
 
 # ── OpenMP (optional, for parallelization) ─────────────────────
@@ -31,6 +32,7 @@ endif()
 
 # ── Eigen core (stripped copy without pybind11) — build as static lib
 add_library(eventprop_eigen_core STATIC eventprop_eigen_core_stripped.cpp)
+set_target_properties(eventprop_eigen_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(eventprop_eigen_core PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
     ${EIGEN_DIR}

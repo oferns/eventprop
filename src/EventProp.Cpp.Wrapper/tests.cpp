@@ -70,7 +70,7 @@ static void test_backward_spikes(void)
     Spikes fwd = compute_spikes(w, input, 1.0, 0.02, 0.005);
     for (int i = 0; i < fwd.n_spikes; i++) fwd.set_error(i, 1.0);
     auto [grad, se] = backward(input, fwd, w, 1.0, 0.02, 0.005);
-    for (int i = 0; i < grad.size(); i++) { ASSERT(!isnan(grad.data()[i]), "NaN"); ASSERT(!isinf(grad.data()[i]), "Inf"); }
+    for (int i = 0; i < grad.size(); i++) { ASSERT(!std::isnan(grad.data()[i]), "NaN"); ASSERT(!std::isinf(grad.data()[i]), "Inf"); }
     TEST_END;
 }
 
@@ -78,7 +78,7 @@ static void test_compute_maxima(void)
 {
     TEST("ComputeMaxima Tiny");
     Maxima maxima = compute_maxima(gen_weights(10, 5), gen_data(10, 5, 20), 0.02, 0.005);
-    for (int i = 0; i < 5; i++) ASSERT(!isnan(maxima.times[i]) || isnan(maxima.values[i]), "mismatch");
+    for (int i = 0; i < 5; i++) ASSERT(!std::isnan(maxima.times[i]) || std::isnan(maxima.values[i]), "mismatch");
     TEST_END;
 }
 
@@ -91,7 +91,7 @@ static void test_backward_maxima(void)
     for (int i = 0; i < 5; i++) maxima.set_error(i, 1.0);
     auto [grad, se] = backward(input, maxima, w, 0.02, 0.005);
     double gs = 0;
-    for (int i = 0; i < grad.size(); i++) { ASSERT(!isnan(grad.data()[i]), "NaN"); gs += fabs(grad.data()[i]); }
+    for (int i = 0; i < grad.size(); i++) { ASSERT(!std::isnan(grad.data()[i]), "NaN"); gs += fabs(grad.data()[i]); }
     ASSERT(gs > 1e-12, "all gradients zero");
     TEST_END;
 }
@@ -136,7 +136,7 @@ static void test_compute_first_spike(void)
     }
     int count = 0;
     for (int j = 0; j < 5; j++) {
-        if (!isnan(first_times[j])) {
+        if (!std::isnan(first_times[j])) {
             ASSERT(first_idxs[j] >= 0 && first_times[j] > 0.0, "bad first spike"); count++; }
     }
     ASSERT(count > 0, "no neurons fired");
@@ -244,7 +244,7 @@ static void test_compute_sums_large(void)
     Spikes input(std::move(times), std::move(sources));
     auto [sum0, sum1] = compute_sums(w, input, 0.02, 0.005);
     ASSERT(sum0.cols() == 80, "bad sums cols");
-    for (int i = 0; i < sum0.size(); i++) { ASSERT(!isnan(sum0.data()[i]), "NaN in sums"); }
+    for (int i = 0; i < sum0.size(); i++) { ASSERT(!std::isnan(sum0.data()[i]), "NaN in sums"); }
     TEST_END;
 }
 
@@ -260,7 +260,7 @@ static void test_backward_spikes_large(void)
     for (int i = 0; i < fwd.n_spikes; i++) fwd.set_error(i, 1.0);
     auto [grad, se] = backward(input, fwd, w, 1.0, 0.02, 0.005);
     ASSERT(grad.rows() == 200 && grad.cols() == 80, "bad gradient shape");
-    for (int i = 0; i < grad.size(); i++) { ASSERT(!isnan(grad.data()[i]), "NaN"); }
+    for (int i = 0; i < grad.size(); i++) { ASSERT(!std::isnan(grad.data()[i]), "NaN"); }
     TEST_END;
 }
 
@@ -289,7 +289,7 @@ static void test_backward_maxima_large(void)
     for (int i = 0; i < 80; i++) maxima.set_error(i, 1.0);
     auto [grad, se] = backward(input, maxima, w, 0.02, 0.005);
     ASSERT(grad.rows() == 200 && grad.cols() == 80, "bad gradient shape");
-    for (int i = 0; i < grad.size(); i++) { ASSERT(!isnan(grad.data()[i]), "NaN"); }
+    for (int i = 0; i < grad.size(); i++) { ASSERT(!std::isnan(grad.data()[i]), "NaN"); }
     TEST_END;
 }
 

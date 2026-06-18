@@ -290,19 +290,22 @@ static void vadd_scaled_simd(double* dest, const double* src, double scalar, int
 
 #if defined(HAVE_AVX512F) || defined(HAVE_AVX2)
     {
-        __m256d sc = _mm256_set1_pd(scalar);
-        for (int i = 0; i < vec_count; i++) {
 #if defined(HAVE_AVX512F)
+        __m512d sc = _mm512_set1_pd(scalar);
+        for (int i = 0; i < vec_count; i++) {
             __m512d d = _mm512_loadu_pd(dest + i * vec);
             __m512d s = _mm512_loadu_pd(src + i * vec);
             _mm512_storeu_pd(dest + i * vec, _mm512_add_pd(d, _mm512_mul_pd(s, sc)));
+        }
 #else
+        __m256d sc = _mm256_set1_pd(scalar);
+        for (int i = 0; i < vec_count; i++) {
             __m256d d = _mm256_loadu_pd(dest + i * vec);
             __m256d s = _mm256_loadu_pd(src + i * vec);
             d = _mm256_add_pd(d, _mm256_mul_pd(s, sc));
             _mm256_storeu_pd(dest + i * vec, d);
-#endif
         }
+#endif
     }
 #elif defined(__ARM_NEON)
     {
@@ -334,33 +337,33 @@ static double dot_product_simd(const double* a, const double* b, int n)
 
 #if defined(HAVE_AVX512F) || defined(HAVE_AVX2)
     {
-        __m256d acc = _mm256_setzero_pd();
-        for (int i = 0; i < vec_count; i++) {
 #if defined(HAVE_AVX512F)
+        __m512d acc = _mm512_setzero_pd();
+        for (int i = 0; i < vec_count; i++) {
             __m512d va = _mm512_loadu_pd(a + i * vec);
             __m512d vb = _mm512_loadu_pd(b + i * vec);
             acc = _mm512_add_pd(acc, _mm512_mul_pd(va, vb));
-#else
-            __m256d va = _mm256_loadu_pd(a + i * vec);
-            __m256d vb = _mm256_loadu_pd(b + i * vec);
-            acc = _mm256_add_pd(acc, _mm256_mul_pd(va, vb));
-#endif
         }
         double result[8];
-#if defined(HAVE_AVX512F)
         _mm512_storeu_pd(result, acc);
-#else
-        _mm256_storeu_pd(result, acc);
-#endif
-        double sum = result[0] + result[1];
-#if defined(HAVE_AVX512F)
-        sum += result[2] + result[3] + result[4] + result[5] + result[6] + result[7];
-#else
-        sum += result[2] + result[3];
-#endif
+        double sum = result[0] + result[1] + result[2] + result[3] + result[4] + result[5] + result[6] + result[7];
         for (int j = vec_count * vec; j < n; j++)
             sum += a[j] * b[j];
         return sum;
+#else
+        __m256d acc = _mm256_setzero_pd();
+        for (int i = 0; i < vec_count; i++) {
+            __m256d va = _mm256_loadu_pd(a + i * vec);
+            __m256d vb = _mm256_loadu_pd(b + i * vec);
+            acc = _mm256_add_pd(acc, _mm256_mul_pd(va, vb));
+        }
+        double result[4];
+        _mm256_storeu_pd(result, acc);
+        double sum = result[0] + result[1] + result[2] + result[3];
+        for (int j = vec_count * vec; j < n; j++)
+            sum += a[j] * b[j];
+        return sum;
+#endif
     }
 #elif defined(__ARM_NEON)
     {

@@ -107,7 +107,7 @@ static void test_compute_maxima(void) {
     gen_uniform(n_pre, n_post, n_spikes, w, times, sources); sort_spikes(times, sources, n_spikes);
     double* max_times = (double*)malloc(n_post * sizeof(double)); double* max_values = (double*)malloc(n_post * sizeof(double));
     eventprop_compute_maxima(w, n_pre, n_post, times, sources, n_spikes, 0.02, 0.005, max_times, max_values);
-    int has_valid = 0; for (int i = 0; i < n_post; i++) { if (!isnan(max_times[i])) has_valid++; }
+    int has_valid = 0; for (int i = 0; i < n_post; i++) { if (!std::isnan(max_times[i])) has_valid++; }
     ASSERT(has_valid > 0 || n_spikes == 0, "should have at least one valid maximum or zero spikes");
     free(w); free(times); free(sources); free(max_times); free(max_values); TEST_END;
 }
@@ -235,7 +235,7 @@ static void test_compute_maxima_large(void) {
     for (int i = 0; i < n_spikes; i++) { times[i] = 0.01 + (i + 1.0) / 501.0 * 0.09; sources[i] = i % n_pre; }
     double* max_times = (double*)malloc(n_post * sizeof(double)); double* max_values = (double*)malloc(n_post * sizeof(double));
     eventprop_compute_maxima(w, n_pre, n_post, times, sources, n_spikes, 0.02, 0.005, max_times, max_values);
-    int has_valid = 0; for (int i = 0; i < n_post; i++) { if (!isnan(max_times[i])) has_valid++; } ASSERT(has_valid > 0, "should have valid maxima");
+    int has_valid = 0; for (int i = 0; i < n_post; i++) { if (!std::isnan(max_times[i])) has_valid++; } ASSERT(has_valid > 0, "should have valid maxima");
     free(w); free(times); free(sources); free(max_times); free(max_values); TEST_END;
 }
 

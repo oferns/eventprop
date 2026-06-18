@@ -1,0 +1,64 @@
+diff --git a/eventprop/loss_layer.py b/eventprop/loss_layer.py
+index 9209c56..a7217c7 100644
+--- a/eventprop/loss_layer.py
++++ b/eventprop/loss_layer.py
+@@ -40,7 +40,7 @@ class TTFSCrossEntropyLoss(LIFLayer):
+             (self.n_batch, self.parameters.n),
+         )
+         self.first_spike_idxs = np.empty(
+-            (self.n_batch, self.parameters.n), dtype=np.int
++            (self.n_batch, self.parameters.n), dtype=int
+         )
+         for batch_idx, spikes in enumerate(self.post_batch):
+             self.first_spike_times[batch_idx, :] = self.post_batch[
+diff --git a/setup.py b/setup.py
+index a53268b..57eae6f 100644
+--- a/setup.py
++++ b/setup.py
+@@ -15,6 +15,7 @@ cpp_ext = setuptools.Extension(
+         "-fno-signed-zeros",
+         "-funroll-loops",
+     ],
++    extra_link_args=["-fopenmp"],
+ )
+ 
+ yin_yang_dir = "eventprop/yin_yang_data_set/publication_data"
+diff --git a/src/eventprop_cpp.cpp b/src/eventprop_cpp.cpp
+index c604ff4..45d9ce9 100644
+--- a/src/eventprop_cpp.cpp
++++ b/src/eventprop_cpp.cpp
+@@ -2,9 +2,6 @@
+ 
+ #define __APPLE__
+ 
+-#ifndef __APPLE__
+-#include <execution>
+-#endif
+ #include <Eigen/Core>
+ #include <algorithm>
+ #include <boost/format.hpp>
+@@ -261,7 +258,7 @@ compute_spikes(Eigen::Ref<RowMatrixXd const> w, Spikes const &spikes,
+               return a.first.first < b.first.first;
+             });
+   #else
+-  std::sort(std::execution::par_unseq, all_post_spikes.begin(), all_post_spikes.end(),
++  std::sort( all_post_spikes.begin(), all_post_spikes.end(),
+             [](std::pair<std::pair<double, double>, int> a, std::pair<std::pair<double, double>, int> b) {
+               return a.first.first < b.first.first;
+             });
+@@ -276,7 +273,7 @@ compute_spikes(Eigen::Ref<RowMatrixXd const> w, Spikes const &spikes,
+       #ifdef __APPLE__
+       auto find_result = std::distance(all_post_spikes.begin(), std::find_if(all_post_spikes.begin(), all_post_spikes.end(), [&](std::pair<std::pair<double, double>, int> spike) -> bool { return spike.second == nrn_idx; }));
+       #else
+-      auto find_result = std::distance(all_post_spikes.begin(), std::find_if(std::execution::par_unseq, all_post_spikes.begin(), all_post_spikes.end(), [&](std::pair<std::pair<double, double>, int> spike) -> bool { return spike.second == nrn_idx; }));
++      auto find_result = std::distance(all_post_spikes.begin(), std::find_if( all_post_spikes.begin(), all_post_spikes.end(), [&](std::pair<std::pair<double, double>, int> spike) -> bool { return spike.second == nrn_idx; }));
+       #endif
+ 
+       first_spike_idxs.at(nrn_idx) = find_result;
+diff --git a/src/pybind11 b/src/pybind11
+index 5443043..a2e59f0 160000
+--- a/src/pybind11
++++ b/src/pybind11
+@@ -1 +1 @@
+-Subproject commit 54430436fee2afc4f8443691075a6208f9ea8eba
++Subproject commit a2e59f0e7065404b44dfe92a28aca47ba1378dc4

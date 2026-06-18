@@ -13,8 +13,8 @@
 #include <vector>
 
 #ifdef USE_CPP_WRAPPER
-// C++ Eigen functions (bare header, no pybind11/Python dependency)
-#include "eventprop_cpp_bare.h"
+// C++ Eigen functions (stripped header, no pybind11/Python dependency)
+#include "eventprop_eigen_stripped.h"
 #else
 // C library functions (consolidated header)
 #include "eventprop.h"
@@ -504,7 +504,7 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
 #define BATCHTRAINING_BENCH(SizeName, NP, NPO, NS)                                              \
     BENCHMARK_CAPTURE(BM_BatchTrainingStep, SizeName##_uniform,                                 \
         {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->ArgNames({"batch_size"}) \
-        ->RangeMultiplier(1)->DenseRange(4, 32, 4)->Name("BatchTrainingStep/" #SizeName "/uniform/default")
+        ->DenseRange(4, 32, 4)->Name("BatchTrainingStep/" #SizeName "/uniform/default")
 
 BATCHTRAINING_BENCH(Small,   50,   20,  100);
 BATCHTRAINING_BENCH(Medium,  200,  80,  500);
@@ -551,7 +551,7 @@ static void BM_ComputeSpikesVth(benchmark::State& state)
 }
 
 BENCHMARK(BM_ComputeSpikesVth)->ArgNames({"v_th"})
-    ->RangeMultiplier(1)
+    
     ->DenseRange(5, 20, 5);
 
 // BackwardSpikes with v_th variation (Small size, uniform)
@@ -618,7 +618,7 @@ static void BM_BackwardSpikesVth(benchmark::State& state)
 }
 
 BENCHMARK(BM_BackwardSpikesVth)->ArgNames({"v_th"})
-    ->RangeMultiplier(1)
+    
     ->DenseRange(5, 20, 5);
 
 // ============================================================

@@ -11,13 +11,18 @@ if(NOT EXISTS "${EIGEN_DIR}")
 endif()
 
 # ── Boost (header-only: math) ───────────────────────────────────
-find_path(BOOST_INCLUDE_DIR NAMES boost/math/tools/roots.hpp PATHS /opt/homebrew/include NO_DEFAULT_PATH)
+find_path(BOOST_INCLUDE_DIR NAMES boost/math/tools/roots.hpp PATHS /opt/homebrew/include /usr/include NO_DEFAULT_PATH)
 if(NOT BOOST_INCLUDE_DIR)
-    message(FATAL_ERROR "Boost not found at /opt/homebrew/include")
+    message(FATAL_ERROR "Boost not found. Install libboost-dev (Linux) or boost (macOS)")
 endif()
 
 # ── Pre-built C library (imported) ─────────────────────────────
-set(C_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.C/build/libeventprop_c_api.dylib")
+if(APPLE)
+    set(C_LIBRARY_EXT ".dylib")
+else()
+    set(C_LIBRARY_EXT ".so")
+endif()
+set(C_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.C/build/libeventprop_c_api${C_LIBRARY_EXT}")
 if(NOT EXISTS "${C_LIBRARY}")
     message(FATAL_ERROR "C library not found at ${C_LIBRARY}. Build EventProp.C first.")
 endif()
@@ -39,6 +44,7 @@ set_target_properties(eventprop_eigen_core PROPERTIES
 )
 
 # ── Parity test executable ─────────────────────────────────────
+find_package(OpenMP QUIET)
 add_executable(parity_test parity_main.cpp)
 
 target_include_directories(parity_test PRIVATE
@@ -49,6 +55,9 @@ target_include_directories(parity_test PRIVATE
 )
 
 target_link_libraries(parity_test PRIVATE eventprop_c_api eventprop_eigen_core m)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(parity_test PRIVATE OpenMP::OpenMP_CXX)
+endif()
 
 # macOS rpath for runtime library loading
 if(APPLE)

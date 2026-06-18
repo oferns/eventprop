@@ -32,9 +32,11 @@ static void gen_data(int n_pre, int n_post, int n_spikes,
 {
     for (int i = 0; i < n_pre * n_post; i++)
         w[i] = 5.0 + sin((double)i * 0.1);
+    if (!times || n_spikes == 0) return;
     double t_end = fmin(0.1, (double)n_spikes / 50.0);
     for (int i = 0; i < n_spikes; i++)
         times[i] = 0.01 + (i + 1.0) / (n_spikes + 1.0) * (t_end - 0.01);
+    if (!sources) return;
     for (int i = 0; i < n_spikes; i++)
         sources[i] = i % n_pre;
 }

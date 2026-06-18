@@ -205,7 +205,7 @@ static void test_compute_maxima(const TestCase& tc) {
     double* max_values_e = (double*)malloc(tc.n_post * sizeof(double));
     for (int i = 0; i < tc.n_post; i++) { max_times_e[i] = maxima_eig.times(i); max_values_e[i] = maxima_eig.values(i); }
     for (int i = 0; i < tc.n_post; i++) { 
-        bool c_nan = isnan(maxima_c->times[i]); 
+        bool c_nan = std::isnan(maxima_c->times[i]); 
         bool e_nan = std::isnan(max_times_e[i]); 
         if (c_nan && e_nan) continue; 
         if (c_nan != e_nan) { printf("FAIL [maxima[%d]: C NaN=%d, Eigen NaN=%d]\n", i, c_nan, e_nan); tests_failed++; free(w); free(times); free(sources); eventprop_free_maxima_output(maxima_c); free(max_times_e); free(max_values_e); return; } 
