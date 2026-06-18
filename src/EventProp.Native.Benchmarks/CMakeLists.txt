@@ -55,7 +55,6 @@ target_include_directories(bench_c PRIVATE
 )
 target_link_libraries(bench_c PRIVATE
     ${LIB_EVENTPROP_C}
-    benchmark::benchmark
     benchmark::benchmark_main
 )
 
@@ -95,7 +94,6 @@ endif()
 
 target_link_libraries(bench_cpp PRIVATE
     ${LIB_EVENTPROP_EIGEN}
-    benchmark::benchmark
     benchmark::benchmark_main
 )
 
@@ -126,7 +124,6 @@ endif()
 
 target_link_libraries(bench_rootfind PRIVATE
     ${LIB_EVENTPROP_EIGEN}
-    benchmark::benchmark
     benchmark::benchmark_main
 )
 
