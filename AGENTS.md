@@ -34,7 +34,6 @@ eventprop.net/
 ├── clean.sh                    # Clean all or individual targets
 ├── src/
 │   ├── EventProp.Python/       # Reference library (git submodule, read-only)
-│   │   └── submodule.patch     # Patch for macOS build (OpenMP, include paths)
 │   ├── EventProp.C/            # Pure C implementation (libeventprop_c_api)
 │   ├── EventProp.Cpp.Wrapper/  # C++ Eigen core (convenience copy, no pybind11)
 │   │   ├── tests.cpp           # Eigen direct unit tests (23 tests)
@@ -92,20 +91,22 @@ clean.sh benchmarks   # only native benchmarks (C vs C++)
 clean.sh all          # same as clean.sh (no args)
 ```
 
-### Submodule Patch
+### Submodule Patches
 
-Before building `EventProp.Python`, apply the macOS compatibility patch:
+Platform-specific patches are applied automatically by `build.sh`. They live in the repo root:
 
+| Patch | Platform | Fixes |
+|-------|----------|-------|
+| `submodule-macos.patch` | macOS (AppleClang + Homebrew) | Homebrew include paths, `-Xpreprocessor -fopenmp`, link args, NumPy deprecation |
+| `submodule-linux.patch` | Linux (GCC/Clang) | OpenMP link flag, remove C++17 `<execution>` parallel policies, NumPy deprecation |
+
+To apply manually:
 ```bash
 cd src/EventProp.Python
-patch -p0 < submodule.patch
+patch -p1 < ../../submodule-macos.patch   # or submodule-linux.patch
 ```
 
-The patch fixes:
-1. Homebrew include paths for libomp and boost in `include_dirs`
-2. `-fopenmp` → `-Xpreprocessor -fopenmp` (macOS clang requirement)
-3. Adds `extra_link_args=["-L/opt/homebrew/opt/libomp/lib", "-lomp"]`
-4. Fixes `dtype=np.int` → `dtype=int` (NumPy deprecation)
+**Note**: The `src/pybind11` nested submodule may need updating separately (`git submodule update --init`). The patches don't include submodule pointer changes since `patch` can't handle them.
 
 The submodule is read-only — patches must be reapplied after pulling from upstream.
 

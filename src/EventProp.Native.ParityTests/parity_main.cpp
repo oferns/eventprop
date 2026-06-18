@@ -168,7 +168,7 @@ static void test_backward_spikes(const TestCase& tc) {
     for (int i = 0; i < fwd_c->n_spikes; i++) post_errors_c[i] = 1.0;
     
     EventPropInput fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
-    BackwardSpikesInput bsi = {{&fi_base}, fwd_c->times, fwd_c->sources, fwd_c->currents, post_errors_c, fwd_c->n_spikes};
+    BackwardSpikesInput bsi = {&fi_base, fwd_c->times, fwd_c->sources, fwd_c->currents, post_errors_c, fwd_c->n_spikes};
     BackwardOutput* backward_c = eventprop_backward_spikes(&bsi);
     
     RowMatrixXd w_mat = make_w_mat(w, tc.n_pre, tc.n_post); 
@@ -228,7 +228,7 @@ static void test_backward_maxima(const TestCase& tc) {
     double* max_errors_c = (double*)malloc(tc.n_post * sizeof(double)); 
     for (int i = 0; i < tc.n_post; i++) max_errors_c[i] = 1.0; 
     
-    BackwardMaximaInput bmi = {{&fi_base}, maxima_c->times, maxima_c->values, max_errors_c, tc.n_post};
+    BackwardMaximaInput bmi = {&fi_base, maxima_c->times, maxima_c->values, max_errors_c, tc.n_post};
     BackwardOutput* backward_c = eventprop_backward_maxima(&bmi);
     
     RowMatrixXd w_mat = make_w_mat(w, tc.n_pre, tc.n_post); 

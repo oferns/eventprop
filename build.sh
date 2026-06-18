@@ -43,15 +43,35 @@ cmake .. -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE"
 make -j$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
 echo "  → libeventprop_cpp_wrapper.dylib"
 
-# ── 3. Python Package (EventProp.Python) pybind11 bindings
+# ── 3. Python Package (EventProp.Python) pybind11 bindings — reference library only
 echo ""
 echo "[3/9] Building Python package (EventProp.Python)..."
 cd "$SCRIPT_DIR/src/EventProp.Python"
 
-# Install required Python dependencies
-python3 -m pip install --break-system-packages setuptools numpy pytest > /dev/null 2>&1 || true
-python3 -m pip install --break-system-packages -e . > /dev/null 2>&1 || true
-echo "  → eventprop.eventprop_cpp (editable install)"
+# Check if the compiled extension already exists (one-time build)
+if ls eventprop/eventprop_cpp.*.so 1>/dev/null 2>&1 || ls eventprop/eventprop_cpp.*.dylib 1>/dev/null 2>&1; then
+  echo "  → eventprop.eventprop_cpp already built (skipping)"
+else
+  # Reset patched files to upstream state, apply platform patch, then build
+  git checkout -- eventprop/loss_layer.py setup.py 2>/dev/null || true
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    PATCH_FILE="$SCRIPT_DIR/submodule-macos.patch"
+  elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    PATCH_FILE="$SCRIPT_DIR/submodule-linux.patch"
+  else
+    echo "WARNING: Unknown platform ($OSTYPE) — skipping submodule patch"
+    PATCH_FILE=""
+  fi
+  if [[ -n "${PATCH_FILE:-}" && -f "$PATCH_FILE" ]]; then
+    patch -p1 < "$PATCH_FILE" || true
+    echo "  → Applied $(basename $PATCH_FILE)"
+  fi
+
+  # Install required Python dependencies and build
+  python3 -m pip install --break-system-packages setuptools numpy pytest > /dev/null 2>&1 || true
+  python3 -m pip install --break-system-packages -e . > /dev/null 2>&1 || true
+  echo "  → eventprop.eventprop_cpp (editable install)"
+fi
 
 # ── 4. Python Benchmarks
 echo ""
