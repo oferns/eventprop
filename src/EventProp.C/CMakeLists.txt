@@ -47,6 +47,13 @@ add_library(eventprop_c_api SHARED
 # CPU-specific optimization (kept for performance)
 target_compile_options(eventprop_c_api PRIVATE -march=native)
 target_compile_options(eventprop_c_api PRIVATE -ffp-contract=fast)
+# Aggressive FP math optimizations — matches EventProp.Python's C++ flags.
+# Subset of -ffast-math but without -ffinite-math-only (avoids NaN/infinity UB).
+target_compile_options(eventprop_c_api PRIVATE
+    -freciprocal-math   # x / y → x * (1/y) — many exp-decay divisions benefit
+    -fno-signed-zeros   # treat ±0 as identical, enables more FP simplifications
+    -funroll-loops      # unroll small per-neuron/per-spike loops
+)
 target_link_libraries(eventprop_c_api PRIVATE m)
 if(OpenMP_C_FOUND)
     target_link_libraries(eventprop_c_api PRIVATE OpenMP::OpenMP_C)
