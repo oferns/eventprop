@@ -27,10 +27,12 @@ if(NOT BOOST_INCLUDE_DIR)
     message(FATAL_ERROR "Boost not found. Install libboost-dev (Linux) or boost (macOS)")
 endif()
 
-# ── OpenMP (for rpath on macOS) ────────────────────────────────
+# ── OpenMP (needed by both C and Eigen libraries) ─────────────
 if(APPLE)
     execute_process(COMMAND brew --prefix libomp OUTPUT_STRIP_TRAILING_WHITESPACE
                     OUTPUT_VARIABLE _OPENMP_PREFIX RESULT_VARIABLE _BREW_FAIL)
+else()
+    find_package(OpenMP)
 endif()
 
 # Fetch Google Benchmark
@@ -58,12 +60,15 @@ target_link_libraries(bench_c PRIVATE
     benchmark::benchmark_main
 )
 
-# Add libomp to rpath on macOS (needed for OpenMP parallelization in the C library)
+# Link OpenMP runtime (needed by the C library)
 if(APPLE AND _BREW_FAIL EQUAL 0)
+    target_link_libraries(bench_c PRIVATE ${_OPENMP_PREFIX}/lib/libomp.dylib)
     set_target_properties(bench_c PROPERTIES
         INSTALL_RPATH "${_OPENMP_PREFIX}/lib"
         BUILD_WITH_INSTALL_RPATH FALSE
     )
+elseif(OpenMP_CXX_FOUND)
+    target_link_libraries(bench_c PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
 # Copy C library to output directory (so it's found at runtime)
@@ -104,6 +109,8 @@ if(APPLE AND _BREW_FAIL EQUAL 0)
         INSTALL_RPATH "${_OPENMP_PREFIX}/lib"
         BUILD_WITH_INSTALL_RPATH FALSE
     )
+elseif(OpenMP_CXX_FOUND)
+    target_link_libraries(bench_cpp PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
 # ============================================================
@@ -134,4 +141,6 @@ if(APPLE AND _BREW_FAIL EQUAL 0)
         INSTALL_RPATH "${_OPENMP_PREFIX}/lib"
         BUILD_WITH_INSTALL_RPATH FALSE
     )
+elseif(OpenMP_CXX_FOUND)
+    target_link_libraries(bench_rootfind PRIVATE OpenMP::OpenMP_CXX)
 endif()
