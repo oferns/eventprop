@@ -102,7 +102,22 @@ src/cpp_benchmarks/test_threshold
 src/cpp_benchmarks/verify_poisson*
 src/benchmark_results_5x/
 
+# vcpkg (C++ package manager)
+tools/vcpkg/buildtrees/
+tools/vcpkg/downloads/
+tools/vcpkg/installed/
+tools/vcpkg/packages/
+tools/vcpkg/*.exe
+
+# vcpkg (C++ package manager)
+tools/vcpkg/buildtrees/
+tools/vcpkg/downloads/
+tools/vcpkg/installed/
+tools/vcpkg/packages/
+tools/vcpkg/*.exe
+
 # Python
 __pycache__/
 *.pyc
 .benchmarks/
+.venv/

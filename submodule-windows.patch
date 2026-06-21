@@ -1,0 +1,33 @@
+diff --git a/eventprop/loss_layer.py b/eventprop/loss_layer.py
+index 9209c56..a7217c7 100644
+--- a/eventprop/loss_layer.py
++++ b/eventprop/loss_layer.py
+@@ -40,7 +40,7 @@ class TTFSCrossEntropyLoss(LIFLayer):
+             (self.n_batch, self.parameters.n),
+         )
+         self.first_spike_idxs = np.empty(
+-            (self.n_batch, self.parameters.n), dtype=np.int
++            (self.n_batch, self.parameters.n), dtype=int
+         )
+         for batch_idx, spikes in enumerate(self.post_batch):
+             self.first_spike_times[batch_idx, :] = self.post_batch[
+diff --git a/setup.py b/setup.py
+index a53268b..d4e7f1a 100644
+--- a/setup.py
++++ b/setup.py
+@@ -9,13 +9,13 @@ cpp_ext = setuptools.Extension(
+     language="c++",
+     # extra_compile_args=["-std=c++17", "-O0", "-g"]
+     extra_compile_args=[
+-        "-std=c++17",
+-        "-O3",
+-        "-march=native",
+-        "-fopenmp",
+-        "-freciprocal-math",
+-        "-fno-signed-zeros",
+-        "-funroll-loops",
++        "/std:c++17",
++        "/O2",
++        "/openmp",
+     ],
+ )
