@@ -188,9 +188,27 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
 
 COMPUTESPIKES_BENCH(Tiny,    10,   5,   20);
 COMPUTESPIKES_BENCH(Small,   50,   20,  100);
-COMPUTESPIKES_BENCH(Medium,  200,  80,  500);
-COMPUTESPIKES_BENCH(Large,   500,  200, 1000);
-COMPUTESPIKES_BENCH(XL,      2000, 500, 5000);
+// Medium — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_ComputeSpikes, Medium_uniform,
+    {"Medium", 200, 80, 500}, GenerateUniformData)->UseRealTime()->Name(
+    "ComputeSpikes/Medium/uniform/default");
+BENCHMARK_CAPTURE(BM_ComputeSpikes, Medium_poisson,
+    {"Medium", 200, 80, 500}, GeneratePoissonData)->UseRealTime()->Name(
+    "ComputeSpikes/Medium/poisson/default");
+// Large — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_ComputeSpikes, Large_uniform,
+    {"Large", 500, 200, 1000}, GenerateUniformData)->UseRealTime()->Name(
+    "ComputeSpikes/Large/uniform/default");
+BENCHMARK_CAPTURE(BM_ComputeSpikes, Large_poisson,
+    {"Large", 500, 200, 1000}, GeneratePoissonData)->UseRealTime()->Name(
+    "ComputeSpikes/Large/poisson/default");
+// XL — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_ComputeSpikes, XL_uniform,
+    {"XL", 2000, 500, 5000}, GenerateUniformData)->UseRealTime()->Name(
+    "ComputeSpikes/XL/uniform/default");
+BENCHMARK_CAPTURE(BM_ComputeSpikes, XL_poisson,
+    {"XL", 2000, 500, 5000}, GeneratePoissonData)->UseRealTime()->Name(
+    "ComputeSpikes/XL/poisson/default");
 
 // ============================================================
 // Benchmark: BackwardSpikes (backward pass)
@@ -274,9 +292,27 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
 
 BACKWARDSPIKES_BENCH(Tiny,    10,   5,   20);
 BACKWARDSPIKES_BENCH(Small,   50,   20,  100);
-BACKWARDSPIKES_BENCH(Medium,  200,  80,  500);
-BACKWARDSPIKES_BENCH(Large,   500,  200, 1000);
-BACKWARDSPIKES_BENCH(XL,      2000, 500, 5000);
+// Medium — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_BackwardSpikes, Medium_uniform,
+    {"Medium", 200, 80, 500}, GenerateUniformData)->UseRealTime()->Name(
+    "BackwardSpikes/Medium/uniform/default");
+BENCHMARK_CAPTURE(BM_BackwardSpikes, Medium_poisson,
+    {"Medium", 200, 80, 500}, GeneratePoissonData)->UseRealTime()->Name(
+    "BackwardSpikes/Medium/poisson/default");
+// Large — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_BackwardSpikes, Large_uniform,
+    {"Large", 500, 200, 1000}, GenerateUniformData)->UseRealTime()->Name(
+    "BackwardSpikes/Large/uniform/default");
+BENCHMARK_CAPTURE(BM_BackwardSpikes, Large_poisson,
+    {"Large", 500, 200, 1000}, GeneratePoissonData)->UseRealTime()->Name(
+    "BackwardSpikes/Large/poisson/default");
+// XL — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_BackwardSpikes, XL_uniform,
+    {"XL", 2000, 500, 5000}, GenerateUniformData)->UseRealTime()->Name(
+    "BackwardSpikes/XL/uniform/default");
+BENCHMARK_CAPTURE(BM_BackwardSpikes, XL_poisson,
+    {"XL", 2000, 500, 5000}, GeneratePoissonData)->UseRealTime()->Name(
+    "BackwardSpikes/XL/poisson/default");
 // ============================================================
 // Benchmark: FullTrainingStep (composite — Sums → Spikes → Backward)
 // Measures the full forward + backward training pipeline end-to-end.
@@ -380,9 +416,27 @@ static void BM_FullTrainingStep(benchmark::State& state, const ProblemSize& sz, 
 
 FULLTRAINING_BENCH(Tiny,    10,   5,   20);
 FULLTRAINING_BENCH(Small,   50,   20,  100);
-FULLTRAINING_BENCH(Medium,  200,  80,  500);
-FULLTRAINING_BENCH(Large,   500,  200, 1000);
-FULLTRAINING_BENCH(XL,      2000, 500, 5000);
+// Medium — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_FullTrainingStep, Medium_uniform,
+    {"Medium", 200, 80, 500}, GenerateUniformData)->UseRealTime()->Name(
+    "FullTrainingStep/Medium/uniform/default");
+BENCHMARK_CAPTURE(BM_FullTrainingStep, Medium_poisson,
+    {"Medium", 200, 80, 500}, GeneratePoissonData)->UseRealTime()->Name(
+    "FullTrainingStep/Medium/poisson/default");
+// Large — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_FullTrainingStep, Large_uniform,
+    {"Large", 500, 200, 1000}, GenerateUniformData)->UseRealTime()->Name(
+    "FullTrainingStep/Large/uniform/default");
+BENCHMARK_CAPTURE(BM_FullTrainingStep, Large_poisson,
+    {"Large", 500, 200, 1000}, GeneratePoissonData)->UseRealTime()->Name(
+    "FullTrainingStep/Large/poisson/default");
+// XL — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_FullTrainingStep, XL_uniform,
+    {"XL", 2000, 500, 5000}, GenerateUniformData)->UseRealTime()->Name(
+    "FullTrainingStep/XL/uniform/default");
+BENCHMARK_CAPTURE(BM_FullTrainingStep, XL_poisson,
+    {"XL", 2000, 500, 5000}, GeneratePoissonData)->UseRealTime()->Name(
+    "FullTrainingStep/XL/poisson/default");
 
 // ============================================================
 // Benchmark: BatchTrainingStep (multi-sample forward + backward)
@@ -691,9 +745,27 @@ static void BM_ComputeSums(benchmark::State& state, const ProblemSize& sz, DataG
 
 COMPUTESUMS_BENCH(Tiny,    10,   5,   20);
 COMPUTESUMS_BENCH(Small,   50,   20,  100);
-COMPUTESUMS_BENCH(Medium,  200,  80,  500);
-COMPUTESUMS_BENCH(Large,   500,  200, 1000);
-COMPUTESUMS_BENCH(XL,      2000, 500, 5000);
+// Medium — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_ComputeSums, Medium_uniform,
+    {"Medium", 200, 80, 500}, GenerateUniformData)->UseRealTime()->Name(
+    "ComputeSums/Medium/uniform/default");
+BENCHMARK_CAPTURE(BM_ComputeSums, Medium_poisson,
+    {"Medium", 200, 80, 500}, GeneratePoissonData)->UseRealTime()->Name(
+    "ComputeSums/Medium/poisson/default");
+// Large — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_ComputeSums, Large_uniform,
+    {"Large", 500, 200, 1000}, GenerateUniformData)->UseRealTime()->Name(
+    "ComputeSums/Large/uniform/default");
+BENCHMARK_CAPTURE(BM_ComputeSums, Large_poisson,
+    {"Large", 500, 200, 1000}, GeneratePoissonData)->UseRealTime()->Name(
+    "ComputeSums/Large/poisson/default");
+// XL — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_ComputeSums, XL_uniform,
+    {"XL", 2000, 500, 5000}, GenerateUniformData)->UseRealTime()->Name(
+    "ComputeSums/XL/uniform/default");
+BENCHMARK_CAPTURE(BM_ComputeSums, XL_poisson,
+    {"XL", 2000, 500, 5000}, GeneratePoissonData)->UseRealTime()->Name(
+    "ComputeSums/XL/poisson/default");
 
 // ============================================================
 // Benchmark: ComputeMaxima (membrane potential maxima)
@@ -765,9 +837,27 @@ static void BM_ComputeMaxima(benchmark::State& state, const ProblemSize& sz, Dat
 
 COMPUTEMAXIMA_BENCH(Tiny,    10,   5,   20);
 COMPUTEMAXIMA_BENCH(Small,   50,   20,  100);
-COMPUTEMAXIMA_BENCH(Medium,  200,  80,  500);
-COMPUTEMAXIMA_BENCH(Large,   500,  200, 1000);
-COMPUTEMAXIMA_BENCH(XL,      2000, 500, 5000);
+// Medium — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_ComputeMaxima, Medium_uniform,
+    {"Medium", 200, 80, 500}, GenerateUniformData)->UseRealTime()->Name(
+    "ComputeMaxima/Medium/uniform/default");
+BENCHMARK_CAPTURE(BM_ComputeMaxima, Medium_poisson,
+    {"Medium", 200, 80, 500}, GeneratePoissonData)->UseRealTime()->Name(
+    "ComputeMaxima/Medium/poisson/default");
+// Large — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_ComputeMaxima, Large_uniform,
+    {"Large", 500, 200, 1000}, GenerateUniformData)->UseRealTime()->Name(
+    "ComputeMaxima/Large/uniform/default");
+BENCHMARK_CAPTURE(BM_ComputeMaxima, Large_poisson,
+    {"Large", 500, 200, 1000}, GeneratePoissonData)->UseRealTime()->Name(
+    "ComputeMaxima/Large/poisson/default");
+// XL — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_ComputeMaxima, XL_uniform,
+    {"XL", 2000, 500, 5000}, GenerateUniformData)->UseRealTime()->Name(
+    "ComputeMaxima/XL/uniform/default");
+BENCHMARK_CAPTURE(BM_ComputeMaxima, XL_poisson,
+    {"XL", 2000, 500, 5000}, GeneratePoissonData)->UseRealTime()->Name(
+    "ComputeMaxima/XL/poisson/default");
 
 // ============================================================
 // Benchmark: BackwardMaxima (backward pass via maxima)
@@ -844,9 +934,27 @@ static void BM_BackwardMaxima(benchmark::State& state, const ProblemSize& sz, Da
 
 BACKWARDMAXIMA_BENCH(Tiny,    10,   5,   20);
 BACKWARDMAXIMA_BENCH(Small,   50,   20,  100);
-BACKWARDMAXIMA_BENCH(Medium,  200,  80,  500);
-BACKWARDMAXIMA_BENCH(Large,   500,  200, 1000);
-BACKWARDMAXIMA_BENCH(XL,      2000, 500, 5000);
+// Medium — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_BackwardMaxima, Medium_uniform,
+    {"Medium", 200, 80, 500}, GenerateUniformData)->UseRealTime()->Name(
+    "BackwardMaxima/Medium/uniform/default");
+BENCHMARK_CAPTURE(BM_BackwardMaxima, Medium_poisson,
+    {"Medium", 200, 80, 500}, GeneratePoissonData)->UseRealTime()->Name(
+    "BackwardMaxima/Medium/poisson/default");
+// Large — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_BackwardMaxima, Large_uniform,
+    {"Large", 500, 200, 1000}, GenerateUniformData)->UseRealTime()->Name(
+    "BackwardMaxima/Large/uniform/default");
+BENCHMARK_CAPTURE(BM_BackwardMaxima, Large_poisson,
+    {"Large", 500, 200, 1000}, GeneratePoissonData)->UseRealTime()->Name(
+    "BackwardMaxima/Large/poisson/default");
+// XL — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_BackwardMaxima, XL_uniform,
+    {"XL", 2000, 500, 5000}, GenerateUniformData)->UseRealTime()->Name(
+    "BackwardMaxima/XL/uniform/default");
+BENCHMARK_CAPTURE(BM_BackwardMaxima, XL_poisson,
+    {"XL", 2000, 500, 5000}, GeneratePoissonData)->UseRealTime()->Name(
+    "BackwardMaxima/XL/poisson/default");
 
 // ============================================================
 // Benchmark: Dropout (batch)
@@ -929,7 +1037,19 @@ static void BM_Dropout(benchmark::State& state, const ProblemSize& sz, DataGener
 
 DROPOUT_BENCH(Tiny,    10,   5,   20);
 DROPOUT_BENCH(Small,   50,   20,  100);
-DROPOUT_BENCH(Medium,  200,  80,  500);
-DROPOUT_BENCH(Large,   500,  200, 1000);
+// Medium — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_Dropout, Medium_uniform,
+    {"Medium", 200, 80, 500}, GenerateUniformData)->UseRealTime()->Name(
+    "Dropout/Medium/uniform");
+BENCHMARK_CAPTURE(BM_Dropout, Medium_poisson,
+    {"Medium", 200, 80, 500}, GeneratePoissonData)->UseRealTime()->Name(
+    "Dropout/Medium/poisson");
+// Large — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_Dropout, Large_uniform,
+    {"Large", 500, 200, 1000}, GenerateUniformData)->UseRealTime()->Name(
+    "Dropout/Large/uniform");
+BENCHMARK_CAPTURE(BM_Dropout, Large_poisson,
+    {"Large", 500, 200, 1000}, GeneratePoissonData)->UseRealTime()->Name(
+    "Dropout/Large/poisson");
 
 BENCHMARK_MAIN();

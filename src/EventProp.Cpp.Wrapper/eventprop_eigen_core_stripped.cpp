@@ -1,10 +1,11 @@
 #include "eventprop_eigen_stripped.h"
 #include <algorithm>
-#include <boost/format.hpp>
+// #include <boost/format.hpp>  // unused
 #include <boost/math/tools/roots.hpp>
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <numeric>
 #include <random>
 
 
@@ -182,12 +183,12 @@ compute_spikes(Eigen::Ref<RowMatrixXd const> w, Spikes const &spikes,
   return current;
   };
 
-#pragma omp parallel for
+// // #pragma omp parallel for  // DISABLED  // DISABLED: MSVC OpenMP runtime crash on exit
   for (int target_nrn_idx = 0; target_nrn_idx < n; target_nrn_idx++) {
     bool finished = false;
     int processed_up_to = 0;
     double tmax, vmax, t_before, t_pre, t_post;
-    while (not finished) {
+    while (!finished) {
       for (int i = processed_up_to; i < n_spikes + 1; i++) {
         if (i == n_spikes) {
           t_pre = inf;
@@ -263,9 +264,9 @@ compute_spikes(Eigen::Ref<RowMatrixXd const> w, Spikes const &spikes,
   auto all_sources_array = Eigen::ArrayXi(all_post_spikes.size());
   auto all_currents_array = Eigen::ArrayXd(all_post_spikes.size());
   std::vector<int> first_spike_idxs(n);
-  #pragma omp parallel for
+  // #pragma omp parallel for  // DISABLED
   for (int nrn_idx=0; nrn_idx<n; nrn_idx++) {
-    if (not std::isnan(first_spike_times.at(nrn_idx))) {
+    if (!std::isnan(first_spike_times.at(nrn_idx))) {
       #ifdef __APPLE__
       auto find_result = std::distance(all_post_spikes.begin(), std::find_if(all_post_spikes.begin(), all_post_spikes.end(), [&](std::pair<std::pair<double, double>, int> spike) -> bool { return spike.second == nrn_idx; }));
       #else
@@ -275,7 +276,7 @@ compute_spikes(Eigen::Ref<RowMatrixXd const> w, Spikes const &spikes,
       first_spike_idxs.at(nrn_idx) = find_result;
     }
   }
-#pragma omp parallel for
+// #pragma omp parallel for  // DISABLED
   for (int i = 0; i < all_post_spikes.size(); i++) {
     all_times_array(i) = all_post_spikes.at(i).first.first;
     all_sources_array(i) = all_post_spikes.at(i).second;
@@ -289,7 +290,7 @@ compute_spikes_batch(Eigen::Ref<RowMatrixXd const> w,
                      std::vector<Spikes> const &batch, double v_th,
                      double tau_mem, double tau_syn) {
   auto result = std::vector<Spikes>(batch.size());
-#pragma omp parallel for
+// #pragma omp parallel for  // DISABLED
   for (int batch_idx = 0; batch_idx < batch.size(); batch_idx++) {
     result.at(batch_idx) =
         compute_spikes(w, batch[batch_idx], v_th, tau_mem, tau_syn);
@@ -391,7 +392,7 @@ void backward_spikes_batch(std::vector<Spikes> &input_batch,
                     double tau_mem, double tau_syn) {
   auto const n_batch = input_batch.size();
   std::vector<std::pair<RowMatrixXd, Eigen::ArrayXd>> partial_grads(n_batch);
-#pragma omp parallel for
+// #pragma omp parallel for  // DISABLED
   for (int batch_idx = 0; batch_idx < n_batch; batch_idx++) {
     if (post_batch[batch_idx].n_spikes > 0) {
       partial_grads.at(batch_idx) = backward(input_batch[batch_idx], post_batch[batch_idx], w, v_th,
@@ -454,7 +455,7 @@ Maxima compute_maxima(Eigen::Ref<RowMatrixXd const> w, Spikes const& spikes, dou
   for (int i=0; i<n; i++) {
     maxima_times[i] = NAN;
   }
-#pragma omp parallel for
+// // #pragma omp parallel for  // DISABLED  // DISABLED: MSVC OpenMP runtime crash on exit
   for (int target_nrn_idx = 0; target_nrn_idx < n; target_nrn_idx++) {
     double tmax, vmax, t_pre;
       for (int i = 0; i < n_spikes + 1; i++) {
@@ -510,7 +511,7 @@ std::pair<RowMatrixXd, Eigen::ArrayXd> backward(Spikes & input_spikes, Maxima co
 std::vector<Maxima>
 compute_maxima_batch(Eigen::Ref<RowMatrixXd const> w, std::vector<Spikes> const& batch, double tau_mem, double tau_syn) {
   auto result = std::vector<Maxima>(batch.size());
-  #pragma omp parallel for
+  // #pragma omp parallel for  // DISABLED
     for (int batch_idx = 0; batch_idx < batch.size(); batch_idx++) {
     result.at(batch_idx) =
         compute_maxima(w, batch[batch_idx], tau_mem, tau_syn);
@@ -522,7 +523,7 @@ void
 backward_maxima_batch(std::vector<Spikes> &input_batch, std::vector<Maxima> const& maxima, Eigen::Ref<RowMatrixXd const> w, Eigen::Ref<RowMatrixXd> gradient, double tau_mem, double tau_syn) {
   auto const n_batch = input_batch.size();
   std::vector<std::pair<RowMatrixXd, Eigen::ArrayXd>> partial_grads(n_batch);
-#pragma omp parallel for
+// #pragma omp parallel for  // DISABLED
   for (int batch_idx = 0; batch_idx < n_batch; batch_idx++) {
     if (input_batch[batch_idx].n_spikes > 0) {
       partial_grads.at(batch_idx) = backward(input_batch[batch_idx], maxima[batch_idx], w,

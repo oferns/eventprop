@@ -11,10 +11,15 @@ if(NOT EXISTS "${EIGEN_DIR}")
 endif()
 
 # ── Boost (header-only: math) ───────────────────────────────────
-find_path(BOOST_INCLUDE_DIR NAMES boost/math/tools/roots.hpp
-          PATHS /opt/homebrew/include /usr/include NO_DEFAULT_PATH)
-if(NOT BOOST_INCLUDE_DIR)
-    message(FATAL_ERROR "Boost not found. Install libboost-dev (Linux) or boost (macOS Homebrew)")
+if(WIN32)
+    # Use vcpkg-installed Boost on Windows (4 levels up from src/EventProp.Cpp.Wrapper to repo root)
+    set(BOOST_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/vcpkg/installed/x64-windows/include")
+else()
+    find_path(BOOST_INCLUDE_DIR NAMES boost/math/tools/roots.hpp
+              PATHS /opt/homebrew/include /usr/include NO_DEFAULT_PATH)
+endif()
+if(NOT BOOST_INCLUDE_DIR OR NOT EXISTS "${BOOST_INCLUDE_DIR}/boost/math/tools/roots.hpp")
+    message(FATAL_ERROR "Boost not found at ${BOOST_INCLUDE_DIR}. Install libboost-dev (Linux) or boost (macOS Homebrew), or use vcpkg on Windows")
 endif()
 
 # ── OpenMP (optional, for parallelization) ─────────────────────
@@ -42,12 +47,15 @@ target_include_directories(eventprop_eigen_core PRIVATE
 # OpenMP for parallelization (no CPU-specific flags — let compiler auto-detect)
 if(APPLE AND _BREW_FAIL EQUAL 0)
     target_include_directories(eventprop_eigen_core PRIVATE ${OpenMP_CXX_INCLUDE_DIRS})
-    target_link_libraries(eventprop_eigen_core PRIVATE ${OpenMP_CXX_LIBRARIES})
+    # PUBLIC so consumers (tests, wrapper DLL) get the OpenMP runtime linked
+    target_link_libraries(eventprop_eigen_core PUBLIC ${OpenMP_CXX_LIBRARIES})
 elseif(OpenMP_CXX_FOUND)
-    target_link_libraries(eventprop_eigen_core PRIVATE OpenMP::OpenMP_CXX)
+    # PUBLIC so consumers (tests, wrapper DLL) get the OpenMP runtime linked
+    target_link_libraries(eventprop_eigen_core PUBLIC OpenMP::OpenMP_CXX)
 endif()
 
 # ── C API wrapper as a shared library ───────────────────────────
+set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 add_library(eventprop_c_api SHARED eventprop_c_api.cpp)
 set_target_properties(eventprop_c_api PROPERTIES OUTPUT_NAME "eventprop_cpp_wrapper")
 target_include_directories(eventprop_c_api PRIVATE

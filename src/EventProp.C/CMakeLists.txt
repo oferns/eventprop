@@ -39,6 +39,7 @@ endif()
 # Pure C shared library (no external dependencies)
 # Optional OpenMP for parallel neuron processing in ComputeSpikes
 find_package(OpenMP QUIET)
+set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 add_library(eventprop_c_api SHARED
     eventprop.c
     eventprop_diag.c
@@ -54,7 +55,10 @@ target_compile_options(eventprop_c_api PRIVATE
     -fno-signed-zeros   # treat ±0 as identical, enables more FP simplifications
     -funroll-loops      # unroll small per-neuron/per-spike loops
 )
-target_link_libraries(eventprop_c_api PRIVATE m)
+# libm is separate on Unix, built-in on Windows
+if(NOT WIN32)
+    target_link_libraries(eventprop_c_api PRIVATE m)
+endif()
 if(OpenMP_C_FOUND)
     target_link_libraries(eventprop_c_api PRIVATE OpenMP::OpenMP_C)
     message(STATUS "OpenMP found — enabling parallel neuron processing")
@@ -79,5 +83,9 @@ install(FILES eventprop.h eventprop_diag.h eventprop_batch.h DESTINATION include
 
 # Unit tests
 add_executable(test_runner tests.c)
-target_link_libraries(test_runner PRIVATE eventprop_c_api m)
+if(NOT WIN32)
+    target_link_libraries(test_runner PRIVATE eventprop_c_api m)
+else()
+    target_link_libraries(test_runner PRIVATE eventprop_c_api)
+endif()
 add_test(NAME EventPropCTests COMMAND test_runner)

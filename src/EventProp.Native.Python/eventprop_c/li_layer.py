@@ -48,10 +48,13 @@ class LILayer(Layer):
         times_list = [inp.times for inp in input_batch]
         sources_list = [inp.sources for inp in input_batch]
 
+        # Forward-only path: skip error buffer allocation.
+        # Errors are allocated lazily by backward() if/when needed.
         c_output = compute_maxima_batch_ptrs(
             times_list, sources_list,
             self.w_in_flat, self.parameters.n_in, self.parameters.n,
             self.parameters.tau_mem, self.parameters.tau_syn, float('inf'),  # LI: no threshold
+            alloc_errors=False,
         )
 
         # Wrap in MaximaVector (zero-copy, keeps C memory alive via _batch_output)

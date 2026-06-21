@@ -6,16 +6,23 @@ cimport numpy as cnp
 from libc.stdlib cimport malloc, free, calloc
 
 cdef object _load_lib(object lib_path):
-    import ctypes, os
+    import ctypes, os, sys
     from ctypes import cdll
     if lib_path is not None:
         return cdll.LoadLibrary(lib_path)
-    for suffix in ('.so', '.dylib'):
+    for suffix in ('.dll', '.so', '.dylib'):
         path = os.path.join(os.path.dirname(__file__), f"libeventprop_c_api{suffix}")
         try:
             return cdll.LoadLibrary(path)
         except OSError:
             continue
+    # Windows: DLL may be named eventprop_c_api.dll (no lib prefix)
+    if sys.platform == 'win32':
+        path = os.path.join(os.path.dirname(__file__), "eventprop_c_api.dll")
+        try:
+            return cdll.LoadLibrary(path)
+        except OSError:
+            pass
     for dir_ in ('.', '/usr/local/lib', '/opt/homebrew/lib'):
         path = os.path.join(dir_, 'libeventprop_c_api.dylib')
         try:
@@ -38,6 +45,59 @@ cdef object _int_view(int* ptr, ssize_t length):
     cdef object arr = cnp.PyArray_SimpleNewFromData(1, [length], cnp.NPY_INT32, ptr)
     return np.asarray(arr)
 
+# ================================================================
+# ForwardSpikeOutput — lightweight forward-only output class.
+#
+# Uses Cython memoryviews for zero-copy access (no numpy array creation).
+# No error buffer allocation (forward pass doesn't need errors).
+# ~10x less Python overhead than BatchSpikeOutput per call.
+# ================================================================
+
+cdef class ForwardSpikeOutput:
+    """Lightweight forward-only spike output — memoryviews, no numpy arrays."""
+    cdef ssize_t _ptr
+    cdef int batch_size
+
+    def __len__(self):
+        return self.batch_size
+
+    def __getitem__(self, int idx):
+        if not 0 <= idx < self.batch_size:
+            raise IndexError(f"index {idx} out of range")
+        cdef SpikeOutput* s = <SpikeOutput*>self._ptr + idx
+        # Handle zero-spike case (NULL pointer from C library)
+        if s.times == NULL or s.n_spikes <= 0:
+            return (np.array([], dtype=np.float64), np.array([], dtype=np.int32))
+        # Typed memoryviews from raw pointers — zero-copy, no numpy overhead
+        cdef double[:] times_mv = <double[:s.n_spikes]>s.times
+        cdef int[:] sources_mv = <int[:s.n_spikes]>(<int*>s.sources)
+        return (times_mv, sources_mv)
+
+    def __dealloc__(self):
+        if self._ptr != 0:
+            eventprop_free_batch_spike_output(<SpikeOutput*>self._ptr, self.batch_size)
+            self._ptr = 0
+
+cdef ForwardSpikeOutput _compute_spikes_forward(list tl, list sl,
+                                                 double[:,:] w, int np_, int npost,
+                                                 double tm, double ts, double vt):
+    """Forward-only compute — no error buffers, memoryview output."""
+    cdef int bs = len(tl)
+    cdef const double** pt = <const double**>malloc(bs * sizeof(const double*))
+    cdef const int** ps = <const int**>malloc(bs * sizeof(const int*))
+    cdef int* pn = <int*>malloc(bs * sizeof(int))
+    _build_ptrs(tl, sl, bs, pt, ps, pn)
+    cdef BatchEventPropInputPtrs ip
+    ip.times = pt; ip.sources = ps; ip.n_spikes = pn
+    ip.w = &w[0,0] if w.shape[0]>0 and w.shape[1]>0 else NULL
+    ip.n_pre = np_; ip.n_post = npost; ip.batch_size = bs
+    ip.tau_mem = tm; ip.tau_syn = ts; ip.v_th = vt
+    cdef ForwardSpikeOutput o = ForwardSpikeOutput.__new__(ForwardSpikeOutput)
+    o._ptr = <ssize_t>eventprop_compute_spikes_batch_ptrs(&ip)
+    o.batch_size = bs
+    free(pt); free(ps); free(pn)
+    return o
+
 cdef class BatchSpikeOutput:
     cdef ssize_t _ptr, batch_size
     cdef double* _errors          # native error buffer (total_post_spikes)
@@ -58,6 +118,7 @@ cdef class BatchSpikeOutput:
 
     # Return numpy view into native error buffer for sample idx (Python-accessible)
     def get_error_view(self, int idx):
+        self.ensure_errors()  # Lazy allocation on first access
         if self._errors == NULL:
             return np.array([], dtype=np.float64)
         cdef SpikeOutput* s = <SpikeOutput*>self._ptr + idx
@@ -71,6 +132,22 @@ cdef class BatchSpikeOutput:
         for i in range(self.batch_size):
             total += base[i].n_spikes
         return total
+
+    # Lazy error buffer allocation — called by backward() if needed.
+    cdef void ensure_errors(self):
+        if self._errors != NULL:
+            return  # Already allocated
+        cdef int tot_spikes = self.total_post_spikes()
+        cdef int i, offset
+        if tot_spikes > 0:
+            self._errors = <double*>calloc(tot_spikes, sizeof(double))
+            self._error_offsets = <int*>malloc((self.batch_size + 1) * sizeof(int))
+            offset = 0
+            for i in range(self.batch_size):
+                self._error_offsets[i] = offset
+                offset += (<SpikeOutput*>self._ptr)[i].n_spikes
+            self._error_offsets[self.batch_size] = offset
+
 
     def __dealloc__(self):
         if self._errors != NULL:
@@ -99,8 +176,17 @@ cdef class BatchMaximaOutput:
     cdef MaximaOutput* get_raw_ptr(self):
         return <MaximaOutput*>self._ptr
 
+    # Lazy error buffer allocation — called by backward() if needed.
+    cdef void ensure_errors(self):
+        if self._errors != NULL:
+            return  # Already allocated
+        cdef int total_errs = self.batch_size * self.n_post
+        if total_errs > 0:
+            self._errors = <double*>calloc(total_errs, sizeof(double))
+
     # Return numpy view into native error buffer for sample idx (Python-accessible)
     def get_error_view(self, int idx):
+        self.ensure_errors()  # Lazy allocation on first access
         if self._errors == NULL or self.n_post <= 0:
             return np.array([], dtype=np.float64)
         cdef double* err_ptr = self._errors + idx * self.n_post
@@ -175,7 +261,8 @@ cdef ssize_t _total_spikes(list tl):
     return t
 
 cdef BatchSpikeOutput _compute_spikes_batch_ptrs(list tl, list sl, double[:,:] w, int np_, int npost,
-                                                  double tm, double ts, double vt):
+                                                  double tm, double ts, double vt,
+                                                  bint alloc_errors=True):
     cdef int bs = len(tl)
     cdef const double** pt = <const double**>malloc(bs * sizeof(const double*))
     cdef const int** ps = <const int**>malloc(bs * sizeof(const int*))
@@ -191,17 +278,22 @@ cdef BatchSpikeOutput _compute_spikes_batch_ptrs(list tl, list sl, double[:,:] w
     o.batch_size = bs
     free(pt); free(ps); free(pn)
 
-    # Allocate native error buffer + offsets — zero-copy for backward pass
-    cdef int tot_spikes = o.total_post_spikes()
-    cdef int i, offset
-    if tot_spikes > 0:
-        o._errors = <double*>calloc(tot_spikes, sizeof(double))
-        o._error_offsets = <int*>malloc((bs + 1) * sizeof(int))
-        offset = 0
-        for i in range(bs):
-            o._error_offsets[i] = offset
-            offset += (<SpikeOutput*>o._ptr)[i].n_spikes
-        o._error_offsets[bs] = offset  # sentinel
+    # Allocate native error buffer + offsets — zero-copy for backward pass.
+    # Lazy allocation: skip if alloc_errors=False (forward-only path).
+    cdef int tot_spikes, i, offset
+    if alloc_errors:
+        tot_spikes = o.total_post_spikes()
+        if tot_spikes > 0:
+            o._errors = <double*>calloc(tot_spikes, sizeof(double))
+            o._error_offsets = <int*>malloc((bs + 1) * sizeof(int))
+            offset = 0
+            for i in range(bs):
+                o._error_offsets[i] = offset
+                offset += (<SpikeOutput*>o._ptr)[i].n_spikes
+            o._error_offsets[bs] = offset  # sentinel
+        else:
+            o._errors = NULL
+            o._error_offsets = NULL
     else:
         o._errors = NULL
         o._error_offsets = NULL
@@ -209,7 +301,8 @@ cdef BatchSpikeOutput _compute_spikes_batch_ptrs(list tl, list sl, double[:,:] w
     return o
 
 cdef BatchMaximaOutput _compute_maxima_batch_ptrs(list tl, list sl, double[:,:] w, int np_, int npost,
-                                                   double tm, double ts, double vt):
+                                                   double tm, double ts, double vt,
+                                                   bint alloc_errors=True):
     cdef int bs = len(tl)
     cdef const double** pt = <const double**>malloc(bs * sizeof(const double*))
     cdef const int** ps = <const int**>malloc(bs * sizeof(const int*))
@@ -226,9 +319,14 @@ cdef BatchMaximaOutput _compute_maxima_batch_ptrs(list tl, list sl, double[:,:] 
     o.n_post = npost
     free(pt); free(ps); free(pn)
 
-    # Allocate native error buffer — batch_size * n_post (maxima errors are per-neuron)
-    if npost > 0 and bs > 0:
-        o._errors = <double*>calloc(bs * npost, sizeof(double))
+    # Lazy error buffer allocation — skip if alloc_errors=False.
+    cdef int total_errs
+    if alloc_errors:
+        total_errs = bs * npost
+        if total_errs > 0:
+            o._errors = <double*>calloc(total_errs, sizeof(double))
+        else:
+            o._errors = NULL
     else:
         o._errors = NULL
 
@@ -273,6 +371,8 @@ cdef AccumulatedGradient _backward_spikes_batch_accumulate_ptrs(
     ip.w = &w[0,0] if w.shape[0]>0 and w.shape[1]>0 else NULL
     ip.n_pre = np_; ip.n_post = npost; ip.batch_size = bs
     ip.tau_mem = tm; ip.tau_syn = ts; ip.v_th = vt
+    # Lazy error buffer allocation — allocate on first backward() call
+    fb.ensure_errors()
     # Read error pointers directly from native buffer — zero concatenation
     cdef const double** pe2 = <const double**>malloc(bs * sizeof(const double*))
     cdef int* pne = <int*>malloc(bs * sizeof(int))
@@ -301,6 +401,8 @@ cdef AccumulatedGradient _backward_maxima_batch_accumulate_ptrs(
     ip.w = &w[0,0] if w.shape[0]>0 and w.shape[1]>0 else NULL
     ip.n_pre = np_; ip.n_post = npost; ip.batch_size = bs
     ip.tau_mem = tm; ip.tau_syn = ts; ip.v_th = vt
+    # Lazy error buffer allocation — allocate on first backward() call
+    fb.ensure_errors()
     # Read error pointers directly from native buffer — zero concatenation
     cdef const double** me2 = <const double**>malloc(bs * sizeof(const double*))
     cdef int b
@@ -431,19 +533,41 @@ def dropout_spikes_batch(double[:] times, int[:] sources, int[:] n_spikes_per_sa
 # Accept per-sample lists of numpy arrays, iterate in C via _ptrs
 # ================================================================
 
+def compute_spikes_forward(list times_list, list sources_list,
+                           double[:,:] w, int n_pre, int n_post,
+                           double tau_mem, double tau_syn, double v_th):
+    """Forward-only batch pass — no error buffers, memoryview output.
+
+    Returns ForwardSpikeOutput (lightweight, ~10x less Python overhead).
+    Use this for inference or when backward() is not needed.
+    For training (forward + backward), use compute_spikes_batch_ptrs instead.
+    """
+    return _compute_spikes_forward(times_list, sources_list, w, n_pre, n_post,
+                                   tau_mem, tau_syn, v_th)
+
 def compute_spikes_batch_ptrs(list times_list, list sources_list,
                               double[:,:] w, int n_pre, int n_post,
-                              double tau_mem, double tau_syn, double v_th):
-    """Batch forward pass — per-sample arrays, iteration in C (no Python concatenation)."""
+                              double tau_mem, double tau_syn, double v_th,
+                              bint alloc_errors=True):
+    """Batch forward pass — per-sample arrays, iteration in C (no Python concatenation).
+
+    Returns BatchSpikeOutput with error buffers for backward().
+    Set alloc_errors=False to skip error buffer allocation (lazy, allocated on first backward()).
+    For inference-only, use compute_spikes_forward instead.
+    """
     return _compute_spikes_batch_ptrs(times_list, sources_list, w, n_pre, n_post,
-                                      tau_mem, tau_syn, v_th)
+                                      tau_mem, tau_syn, v_th, alloc_errors)
 
 def compute_maxima_batch_ptrs(list times_list, list sources_list,
                               double[:,:] w, int n_pre, int n_post,
-                              double tau_mem, double tau_syn, double v_th):
-    """Batch forward pass (maxima) — per-sample arrays, iteration in C."""
+                              double tau_mem, double tau_syn, double v_th,
+                              bint alloc_errors=True):
+    """Batch forward pass (maxima) — per-sample arrays, iteration in C.
+
+    Set alloc_errors=False to skip error buffer allocation (lazy, allocated on first backward()).
+    """
     return _compute_maxima_batch_ptrs(times_list, sources_list, w, n_pre, n_post,
-                                      tau_mem, tau_syn, v_th)
+                                      tau_mem, tau_syn, v_th, alloc_errors)
 
 def backward_spikes_batch_accumulate_ptrs(list times_list, list sources_list,
                                           BatchSpikeOutput fwd_batch,

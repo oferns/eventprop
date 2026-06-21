@@ -3,9 +3,9 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "eventprop"
+name = "eventprop_c"
 version = "0.1"
-description = "EventProp: Event-based backpropagation for Spiking Neural Networks (C library bindings via ctypes)"
+description = "EventProp C-library bindings via Cython"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"

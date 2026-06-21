@@ -115,6 +115,21 @@ class SpikesVector:
         obj._n_spikes_per_sample = None
         return obj
 
+    @classmethod
+    def _from_dropout_output(cls, batch_output) -> 'SpikesVector':
+        """Create from Cython DropoutBatchOutput (zero-copy, owns memory).
+
+        Dropout output has no error buffers — just times and sources.
+        """
+        obj = object.__new__(cls)
+        obj._spikes = None
+        obj._batch_output = batch_output  # keeps C memory alive via __dealloc__
+        obj._cached_views = {}
+        obj._flat_times = None
+        obj._flat_sources = None
+        obj._n_spikes_per_sample = None
+        return obj
+
     def __len__(self) -> int:
         if self._batch_output is not None:
             return len(self._batch_output)
@@ -123,7 +138,14 @@ class SpikesVector:
     def __getitem__(self, idx: int):
         if self._batch_output is not None:
             if idx not in self._cached_views:
-                times, sources, currents = self._batch_output[idx]
+                result = self._batch_output[idx]
+                # DropoutBatchOutput returns (times, sources) — no error buffer
+                # BatchSpikeOutput returns (times, sources, errors)
+                if len(result) == 2:
+                    times, sources = result
+                    currents = None
+                else:
+                    times, sources, currents = result
                 self._cached_views[idx] = _CythonSpikesView(
                     times, sources, currents,
                     batch_output=self._batch_output,
@@ -206,7 +228,7 @@ class _CythonSpikesView:
     in the BatchSpikeOutput native buffer — writing here goes directly to C memory.
     """
 
-    __slots__ = ('_times', '_sources', '_currents', '_batch_output', '_sample_idx')
+    __slots__ = ('_times', '_sources', '_currents', '_batch_output', '_sample_idx', '_errors_buf')
 
     def __init__(self, times: np.ndarray, sources: np.ndarray, currents: np.ndarray,
                  batch_output=None, sample_idx: int = 0):
@@ -231,10 +253,33 @@ class _CythonSpikesView:
     @property
     def errors(self) -> np.ndarray:
         # Return view into native error buffer — zero-copy, writes go to C memory
-        if self._batch_output is not None:
+        if self._batch_output is not None and self._currents is not None:
             return self._batch_output.get_error_view(self._sample_idx)
-        # Fallback: allocate Python array (shouldn't happen in normal flow)
+        # Check for fallback buffer (set via _errors setter on dropout output)
+        errors_buf = getattr(self, '_errors_buf', None)
+        if errors_buf is not None:
+            return errors_buf
+        # Fallback: allocate Python array (dropout output has no error buffer)
         return np.zeros(self.n_spikes, dtype=np.float64)
+
+    @property
+    def _errors(self) -> np.ndarray:
+        """Backward compatibility — layer backward() reads this directly."""
+        return self.errors
+
+    @_errors.setter
+    def _errors(self, value: np.ndarray):
+        """Backward compatibility — layer backward() sets this directly.
+
+        For batch output views, copy into the native error buffer.
+        For dropout views (no error buffer), allocate a Python array.
+        """
+        if self._batch_output is not None and self._currents is not None:
+            # Write into native error buffer via get_error_view
+            self._batch_output.get_error_view(self._sample_idx)[:] = value
+        else:
+            # Dropout output or standalone view — allocate Python array
+            object.__setattr__(self, '_errors_buf', np.asarray(value, dtype=np.float64))
 
     def set_error(self, spike_idx: int, error: float):
         self.errors[spike_idx] = error

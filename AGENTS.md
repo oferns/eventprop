@@ -440,3 +440,45 @@ Added `eventprop_compute_spikes_batch_alloc()` to C library for batch processing
 ### SIMD Audit (2026-06-09)
 
 Existing SIMD helpers: `fma_row_simd`, `scale_inplace_simd`, `vadd_scaled_simd`, `dot_product_simd`. Added `vsub_simd` (<2% impact). Remaining scalar loops are inherently sequential (root-finding) or lack cross-platform SIMD transcendental support.
+
+---
+
+## Temporary: Cython Forward Pass Overhead (2026-06-18)
+
+### Problem
+
+Python benchmarks (`EventProp.Python.Benchmarks`) show Cython (`eventprop_c`) forward pass is **10–100x slower** than pybind11 (`EventProp.Python`), while backward pass is comparable or faster.
+
+**Small uniform forward (Mean μs):**
+| Backend | LIF | LI | TTFS | VMax |
+|---------|-----|----|----|
+| pybind11 | 99 | 94 | 123 | 102 |
+| Cython | 1083 | 1084 | 1102 | 1023 |
+
+**Small uniform backward (Mean μs):**
+| Backend | LIF | LI | TTFS | VMax |
+|---------|-----|----|------|
+| pybind11 | 4.27 | 24.5 | 32.6 | 75.7 |
+| Cython | 4.63 | 17.3 | 22.2 | 26.0 |
+
+Cython backward is actually **1.4–3x faster** than pybind11.
+
+### Investigation
+
+- `ctypes` is imported in `_native.pyx` but used **only** for DLL loading (`cdll.LoadLibrary`) at module init. C function calls use proper `cdef extern from` declarations in `_native.pxd` (zero-overhead Cython FFI).
+- The C library itself is fast — native benchmarks (`bench_c.exe`) confirm this.
+- Forward pass timing is suspiciously flat (~1ms) across all operations and patterns in Cython, suggesting fixed overhead rather than computation cost.
+- Backward pass has similar C API structure but is fast, ruling out general ctypes/FFI overhead.
+
+### Suspected Causes (unconfirmed)
+
+1. **Output wrapping**: Forward creates `BatchSpikeOutput` with per-sample numpy views (`_double_view`, `_int_view`) via `PyArray_SimpleNewFromData` + `np.asarray()`. The `np.asarray()` call may trigger an eager copy instead of a zero-copy view.
+2. **Error buffer allocation**: Forward allocates `calloc(tot_spikes)` + `malloc(bs+1)` error buffers in Python-space after C call. Backward reads from pre-allocated buffers.
+3. **Python list handling**: Forward extracts `times_list = [inp.times for inp in input_batch]` before C call. pybind11 passes `SpikesVector` directly and iterates in C++.
+
+### Next Steps
+
+1. Profile Cython forward path to pinpoint exact overhead location
+2. Check if `_double_view`/`_int_view` are copying data (they shouldn't be)
+3. Compare with pybind11's `compute_spikes_batch_cpp` data flow
+4. Consider moving output wrapping to lazy evaluation (only create numpy views when accessed)

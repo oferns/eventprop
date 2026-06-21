@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 project(eventprop_cpp_vs_c LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ── Paths to pre-built libraries (built by steps 1 & 2 of build.sh) ──
@@ -11,18 +11,19 @@ set(EVENTPROP_CPP_BUILD "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.Cpp.Wrapper/bu
 set(EIGEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.Python/src/eigen")
 
 # Locate pre-built libraries
-find_library(LIB_EVENTPROP_C eventprop_c_api PATHS "${EVENTPROP_C_BUILD}" NO_DEFAULT_PATH)
+# On Windows MSVC, outputs go into build/Release or build/Debug subdirectories
+find_library(LIB_EVENTPROP_C eventprop_c_api PATHS "${EVENTPROP_C_BUILD}" "${EVENTPROP_C_BUILD}/Release" "${EVENTPROP_C_BUILD}/Debug" NO_DEFAULT_PATH)
 if(NOT LIB_EVENTPROP_C)
     message(FATAL_ERROR "Pre-built C library not found at ${EVENTPROP_C_BUILD}. Run build.sh first.")
 endif()
 
-find_library(LIB_EVENTPROP_EIGEN eventprop_eigen_core PATHS "${EVENTPROP_CPP_BUILD}" NO_DEFAULT_PATH)
+find_library(LIB_EVENTPROP_EIGEN eventprop_eigen_core PATHS "${EVENTPROP_CPP_BUILD}" "${EVENTPROP_CPP_BUILD}/Release" "${EVENTPROP_CPP_BUILD}/Debug" NO_DEFAULT_PATH)
 if(NOT LIB_EVENTPROP_EIGEN)
     message(FATAL_ERROR "Pre-built Eigen library not found at ${EVENTPROP_CPP_BUILD}. Run build.sh first.")
 endif()
 
 # ── Boost (header-only: math) ───────────────────────────────────
-find_path(BOOST_INCLUDE_DIR NAMES boost/math/tools/roots.hpp PATHS /opt/homebrew/include /usr/include NO_DEFAULT_PATH)
+find_path(BOOST_INCLUDE_DIR NAMES boost/math/tools/roots.hpp PATHS /opt/homebrew/include /usr/include "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/vcpkg/installed/x64-windows/include" NO_DEFAULT_PATH)
 if(NOT BOOST_INCLUDE_DIR)
     message(FATAL_ERROR "Boost not found. Install libboost-dev (Linux) or boost (macOS)")
 endif()
@@ -68,6 +69,15 @@ endif()
 
 # Copy C library to output directory (so it's found at runtime)
 if(APPLE)
+    add_custom_command(TARGET bench_c POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${LIB_EVENTPROP_C}
+            $<TARGET_FILE_DIR:bench_c>
+    )
+endif()
+if(WIN32)
+    # MSVC OpenMP is built into the compiler, no separate library needed
+    target_compile_options(bench_c PRIVATE /openmp)
     add_custom_command(TARGET bench_c POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${LIB_EVENTPROP_C}

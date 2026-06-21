@@ -28,8 +28,12 @@ class build_ext(_build_ext):
                         so_path,
                     ])
 
-# Find the C library
-c_lib_dir = os.path.join(os.path.dirname(__file__), '..', 'EventProp.C', 'build')
+# Find the C library — check platform-specific locations
+import glob as _glob
+_c_build_base = os.path.join(os.path.dirname(__file__), '..', 'EventProp.C', 'build')
+# Windows: .lib/.dll in build/Release or build/Debug
+_win_libs = _glob.glob(os.path.join(_c_build_base, '*', 'eventprop_c_api.lib')) if sys.platform == 'win32' else []
+c_lib_dir = os.path.dirname(_win_libs[0]) if _win_libs else _c_build_base
 c_lib_path = os.path.join(c_lib_dir, 'libeventprop_c_api.dylib')
 
 if not os.path.exists(c_lib_path):
@@ -61,7 +65,7 @@ ext_modules = [
 ]
 
 setup(
-    name="eventprop",
+    name="eventprop_c",
     version="0.1.0",
     description="EventProp Cython bindings — zero-copy access to C library",
     cmdclass={'build_ext': build_ext},

@@ -39,47 +39,51 @@
 #define TOMS748_TOL 1e-14
 
 
-#define COMPUTE_V_INLINE(t, i, spike_count, post_spike_times, neuron_offset, \
-                        sum0, sum1, target_nrn, input, k_prefactor) \
-({ \
-    double mem = k_prefactor * (sum1[i * input->n_post + target_nrn] * exp(-t / input->tau_mem) \
-                    - sum0[i * input->n_post + target_nrn] * exp(-t / input->tau_syn)); \
-    for (int s = 0; s < spike_count; s++) { \
-        double st = post_spike_times[neuron_offset + s]; \
-        if (st <= t) {  /* Include all spikes where st <= t, don't break early */ \
-            mem -= input->v_th * exp(-(t - st) / input->tau_mem); \
-        } \
-    } \
-    mem; \
-})
+// Inline functions replacing GCC statement expressions ({ ... }) for MSVC compatibility.
+// compute_v_inline — direct evaluation, no precomputed exponentials.
+static inline double compute_v_inline(double t, int i, int spike_count,
+    const double* post_spike_times, int neuron_offset,
+    const double* sum0, const double* sum1, int target_nrn,
+    const EventPropInput* input, double k_prefactor)
+{
+    double mem = k_prefactor * (sum1[i * input->n_post + target_nrn] * exp(-t / input->tau_mem)
+                    - sum0[i * input->n_post + target_nrn] * exp(-t / input->tau_syn));
+    for (int s = 0; s < spike_count; s++) {
+        double st = post_spike_times[neuron_offset + s];
+        if (st <= t) {  /* Include all spikes where st <= t, don't break early */
+            mem -= input->v_th * exp(-(t - st) / input->tau_mem);
+        }
+    }
+    return mem;
+}
 
-/* Factored version: exp(-(t-st)*tau-1) = exp(-t*tau-1) × exp(st*tau-1)
- * Precomputed post_spike_exp_st[s] = exp(post_spike_times[neuron_offset+s] * tau_mem_inv).
- * Eliminates N exp() calls per iteration → just 1 (shared with base terms). */
-#define COMPUTE_V_FACTORED(t, i, spike_count, post_spike_times, neuron_offset, \
-                         sum0, sum1, target_nrn, n_post, k_prefactor, tau_mem_inv, \
-                         tau_syn_inv, v_th, post_spike_exp_st) \
-({ \
-    double e_t = exp(-(t) * tau_mem_inv); \
-    double mem = k_prefactor * (sum1[i * n_post + target_nrn] * e_t \
-                    - sum0[i * n_post + target_nrn] * exp(-(t) * tau_syn_inv)); \
-    if (post_spike_exp_st) { \
-        for (int s = 0; s < spike_count; s++) { \
-            double st = post_spike_times[neuron_offset + s]; \
-            if (st <= t) { \
-                mem -= v_th * e_t * post_spike_exp_st[s]; \
-            } \
-        } \
-    } else { \
-        for (int s = 0; s < spike_count; s++) { \
-            double st = post_spike_times[neuron_offset + s]; \
-            if (st <= t) { \
-                mem -= v_th * exp(-(t - st) * tau_mem_inv); \
-            } \
-        } \
-    } \
-    mem; \
-})
+// compute_v_factored — uses precomputed exp(st*tau-1) to share one exp() call.
+static inline double compute_v_factored(double t, int i, int spike_count,
+    const double* post_spike_times, int neuron_offset,
+    const double* sum0, const double* sum1, int target_nrn, int n_post,
+    double k_prefactor, double tau_mem_inv, double tau_syn_inv,
+    double v_th, const double* post_spike_exp_st)
+{
+    double e_t = exp(-(t) * tau_mem_inv);
+    double mem = k_prefactor * (sum1[i * n_post + target_nrn] * e_t
+                    - sum0[i * n_post + target_nrn] * exp(-(t) * tau_syn_inv));
+    if (post_spike_exp_st) {
+        for (int s = 0; s < spike_count; s++) {
+            double st = post_spike_times[neuron_offset + s];
+            if (st <= t) {
+                mem -= v_th * e_t * post_spike_exp_st[s];
+            }
+        }
+    } else {
+        for (int s = 0; s < spike_count; s++) {
+            double st = post_spike_times[neuron_offset + s];
+            if (st <= t) {
+                mem -= v_th * exp(-(t - st) * tau_mem_inv);
+            }
+        }
+    }
+    return mem;
+}
 
 typedef struct RootContext {
     const double* sum0; const double* sum1;
@@ -488,7 +492,7 @@ static int cmp_spike_asc(const void* a, const void* b) {
 
 /* Inline voltage computation — eliminates callback indirection */
 #define VOLTAGE(c, t) \
-    (COMPUTE_V_FACTORED(t, (c)->i, (c)->spike_count, (c)->post_spike_times, (c)->neuron_offset, \
+    (compute_v_factored(t, (c)->i, (c)->spike_count, (c)->post_spike_times, (c)->neuron_offset, \
                  (c)->sum0, (c)->sum1, (c)->target_nrn, (c)->n_post, \
                  (c)->k_prefactor, (c)->tau_mem_inv, (c)->tau_syn_inv, (c)->v_th, \
                  (c)->post_spike_exp_st) - (c)->v_th)
@@ -584,10 +588,11 @@ SpikeOutput* eventprop_compute_spikes(const EventPropInput* input)
         spike_caps[n]       = initial_cap;
     }
 
+    int target_nrn;
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
-    for (int target_nrn = 0; target_nrn < input->n_post; target_nrn++) {
+    for (target_nrn = 0; target_nrn < input->n_post; target_nrn++) {
         if (target_nrn == 0) {
         }
 
@@ -609,7 +614,7 @@ SpikeOutput* eventprop_compute_spikes(const EventPropInput* input)
 
                     double tmax = tmax_prefactor * (tmax_summand + log(s1 / s0));
                     if (!isinf(tmax)) {
-                        double v = COMPUTE_V_INLINE(tmax, i, count, p_times, 0, sum0, sum1,
+                        double v = compute_v_inline(tmax, i, count, p_times, 0, sum0, sum1,
                                              target_nrn, input, k_prefactor);
                         if (v > input->v_th + 1e-14) {
                             double t_lower = count > 0 ? p_times[count - 1] : 0.0;
@@ -651,7 +656,7 @@ SpikeOutput* eventprop_compute_spikes(const EventPropInput* input)
                                                tmax_prefactor, tmax_summand, input->tau_mem, input->v_th);
 
                     if (!isinf(tmax)) {
-                        double v = COMPUTE_V_INLINE(tmax, i, count, p_times, 0, sum0, sum1,
+                        double v = compute_v_inline(tmax, i, count, p_times, 0, sum0, sum1,
                                              target_nrn, input, k_prefactor);
                         if (v > input->v_th + 1e-14) {
                             double t_before = (i > 0) ? input->times[i-1] : 0.0;
@@ -692,7 +697,7 @@ SpikeOutput* eventprop_compute_spikes(const EventPropInput* input)
                     }
 
                     /* Check at input spike time */
-                    double v_at_input = COMPUTE_V_INLINE(t_input, i, count, p_times, 0,
+                    double v_at_input = compute_v_inline(t_input, i, count, p_times, 0,
                                                           sum0, sum1, target_nrn, input,
                                                           k_prefactor);
                     if (v_at_input > input->v_th + 1e-14) {
@@ -879,10 +884,11 @@ MaximaOutput* eventprop_compute_maxima(const EventPropInput* input)
         return result;
     }
 
+    int target_nrn;
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
-    for (int target_nrn = 0; target_nrn < input->n_post; target_nrn++) {
+    for (target_nrn = 0; target_nrn < input->n_post; target_nrn++) {
         for (int i = 0; i <= input->n_spikes; i++) {
             double t_input = (i == input->n_spikes) ? INFINITY : input->times[i];
             double s0 = sum0[i * input->n_post + target_nrn];
