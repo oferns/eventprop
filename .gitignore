@@ -121,3 +121,4 @@ __pycache__/
 *.pyc
 .benchmarks/
 .venv/
+tools/vcpkg/

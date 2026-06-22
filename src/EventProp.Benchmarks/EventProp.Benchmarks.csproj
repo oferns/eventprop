@@ -24,5 +24,19 @@
       <TargetPath>libeventprop_c_api.dylib</TargetPath>
     </None>
   </ItemGroup>
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <!-- C library (NativeApi) -->
+    <None Include="..\EventProp.C\build\Release\eventprop_c_api.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>eventprop_c_api.dll</TargetPath>
+    </None>
+  </ItemGroup>
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+    <!-- C library (NativeApi) -->
+    <None Include="..\EventProp.C\build\libeventprop_c_api.so">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>libeventprop_c_api.so</TargetPath>
+    </None>
+  </ItemGroup>
 
 </Project>

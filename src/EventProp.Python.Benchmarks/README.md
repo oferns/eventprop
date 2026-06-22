@@ -86,3 +86,44 @@ EventProp.Python.Benchmarks/
 ```
 
 Both libraries are imported simultaneously via `sys.path` manipulation — no reinstall needed.
+
+## Unified Benchmark Report (Python + .NET)
+
+Generate a single HTML report combining **pytest-benchmark** (Python) and **BenchmarkDotNet** (.NET) results:
+
+```bash
+cd src/EventProp.Python.Benchmarks
+
+# Option 1: Run all benchmarks and generate report in one step
+./run_benchmarks.sh all
+
+# Option 2: Run separately, then combine
+./run_benchmarks.sh python    # → results_py.json
+./run_benchmarks.sh dotnet    # → BenchmarkDotNet.Artifacts/results/*.json
+./run_benchmarks.sh report    # → benchmark_report.html
+
+# Option 3: Manual generation from existing JSON files
+python generate_report.py \
+    .benchmarks/*/0002_baseline.json \
+    ../EventProp.Benchmarks/BenchmarkDotNet.Artifacts/results/*.json
+```
+
+The HTML report shows:
+- **Comparison tables** grouped by operation (LIF Forward, ComputeSums, etc.)
+- **Backend columns**: pybind11 (Eigen), Cython (C lib), Managed (.NET), Native (C lib)
+- **Ratio column**: slowdown vs fastest backend for each row
+- **Summary cards**: total benchmarks, categories, backends compared
+
+### What's Compared
+
+| Backend | Engine | FFI Layer |
+|---------|--------|-----------|
+| pybind11 (Eigen) | C++ Eigen core | Python ↔ C++ via pybind11 |
+| Cython (C lib) | Pure C library | Python ↔ C via Cython memory views |
+| Managed (.NET) | Fully managed C# implementation | None (pure .NET) |
+| Native (C lib) | Same pure C library as Cython | .NET P/Invoke via LibraryImport |
+
+This isolates:
+- **Engine comparison**: Eigen vs C algorithm efficiency
+- **FFI overhead**: pybind11 vs Cython memory views vs P/Invoke
+- **Managed code cost**: .NET implementation vs native paths

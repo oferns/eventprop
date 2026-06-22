@@ -442,6 +442,62 @@ class TestDropout:
 
 
 # ============================================================
+# Full training step — single layer, forward + set errors + backward
+# Matches .NET Bench_Batch_TrainingStep_4/8 exactly:
+#   NPre=50, NPost=20, NSpikes=100 per sample, batch sizes 4 & 8
+# ============================================================
+
+class TestTrainingStepSmall:
+    """Benchmark a full training step: forward -> set errors -> backward.
+
+    Problem size matches .NET Bench_Batch_TrainingStep_4/8 for direct comparison."""
+
+    @pytest.mark.parametrize("batch_size", [4, 8])
+    def test_pybind11_training_step(self, benchmark, batch_size):
+        n_in, n_out = 50, 20
+        w = make_weights(n_in, n_out)
+
+        layer = PyLIFLayer(PyLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
+
+        rng = np.random.default_rng(42)
+        spikes = [PySpikes(
+            np.sort(rng.uniform(0.001, 1.0, size=100)),
+            rng.integers(0, n_in, 100, dtype=np.int32),
+        ) for _ in range(batch_size)]
+
+        def step():
+            post = layer.forward(PySpikesVector(spikes))
+            for b in range(batch_size):
+                for i in range(post[b].n_spikes):
+                    post[b].set_error(i, 1.0)
+            layer.backward()
+
+        benchmark(step)
+
+    @pytest.mark.parametrize("batch_size", [4, 8])
+    def test_cython_training_step(self, benchmark, batch_size):
+        n_in, n_out = 50, 20
+        w = make_weights(n_in, n_out)
+
+        layer = CyLIFLayer(CyLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
+
+        rng = np.random.default_rng(42)
+        spikes = [CySpikes(
+            times=np.sort(rng.uniform(0.001, 1.0, size=100)),
+            sources=rng.integers(0, n_in, 100, dtype=np.int32),
+        ) for _ in range(batch_size)]
+
+        def step():
+            post = layer.forward(CySpikesVector(spikes))
+            for b in range(batch_size):
+                for i in range(post[b].n_spikes):
+                    post[b].set_error(i, 1.0)
+            layer.backward()
+
+        benchmark(step)
+
+
+# ============================================================
 # Full training step — forward + backward chain (2-layer TTFS/VMax)
 # ============================================================
 
