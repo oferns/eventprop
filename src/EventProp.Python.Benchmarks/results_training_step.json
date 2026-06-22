@@ -1,0 +1,475 @@
+{
+    "machine_info": {
+        "node": "BRAIN",
+        "processor": "Intel64 Family 6 Model 151 Stepping 2, GenuineIntel",
+        "machine": "AMD64",
+        "python_compiler": "MSC v.1938 64 bit (AMD64)",
+        "python_implementation": "CPython",
+        "python_implementation_version": "3.11.9",
+        "python_version": "3.11.9",
+        "python_build": [
+            "tags/v3.11.9:de54cf5",
+            "Apr  2 2024 10:12:12"
+        ],
+        "release": "10",
+        "system": "Windows",
+        "cpu": {
+            "python_version": "3.11.9.final.0 (64 bit)",
+            "cpuinfo_version": [
+                9,
+                0,
+                0
+            ],
+            "cpuinfo_version_string": "9.0.0",
+            "arch": "X86_64",
+            "bits": 64,
+            "count": 20,
+            "arch_string_raw": "AMD64",
+            "vendor_id_raw": "GenuineIntel",
+            "brand_raw": "12th Gen Intel(R) Core(TM) i7-12700K",
+            "hz_actual_friendly": "3.6000 GHz",
+            "hz_actual": [
+                3600000000,
+                0
+            ],
+            "l2_cache_size": 12582912,
+            "stepping": 2,
+            "model": 151,
+            "family": 6,
+            "l3_cache_size": 26214400,
+            "hz_advertised_friendly": "3.6100 GHz",
+            "hz_advertised": [
+                3610000000,
+                0
+            ],
+            "flags": [
+                "3dnow",
+                "3dnowprefetch",
+                "abm",
+                "acpi",
+                "adx",
+                "aes",
+                "apic",
+                "avx",
+                "avx2",
+                "bmi1",
+                "bmi2",
+                "clflush",
+                "clflushopt",
+                "clwb",
+                "cmov",
+                "cx16",
+                "cx8",
+                "de",
+                "dts",
+                "erms",
+                "est",
+                "f16c",
+                "fma",
+                "fpu",
+                "fxsr",
+                "gfni",
+                "ht",
+                "hypervisor",
+                "ia64",
+                "intel_pt",
+                "invpcid",
+                "lahf_lm",
+                "mca",
+                "mce",
+                "mmx",
+                "monitor",
+                "movbe",
+                "msr",
+                "mtrr",
+                "osxsave",
+                "pae",
+                "pat",
+                "pbe",
+                "pcid",
+                "pclmulqdq",
+                "pdcm",
+                "pge",
+                "pni",
+                "popcnt",
+                "pse",
+                "pse36",
+                "rdpid",
+                "rdrnd",
+                "rdseed",
+                "sep",
+                "serial",
+                "sha",
+                "smap",
+                "smep",
+                "ss",
+                "sse",
+                "sse2",
+                "sse4_1",
+                "sse4_2",
+                "ssse3",
+                "tm",
+                "tm2",
+                "tsc",
+                "tscdeadline",
+                "umip",
+                "vaes",
+                "vme",
+                "vpclmulqdq",
+                "x2apic",
+                "xsave",
+                "xtpr"
+            ],
+            "l2_cache_line_size": 1280,
+            "l2_cache_associativity": 7
+        }
+    },
+    "commit_info": {
+        "id": "d69099e47bd440e9b7970a88a04f597418767f77",
+        "time": "2026-06-22T18:28:06+01:00",
+        "author_time": "2026-06-22T18:28:06+01:00",
+        "dirty": true,
+        "project": "eventprop.net",
+        "branch": "f/linux"
+    },
+    "benchmarks": [
+        {
+            "group": null,
+            "name": "test_pybind11_training_step[Tiny]",
+            "fullname": "test_benchmarks.py::TestTrainingStepLIF::test_pybind11_training_step[Tiny]",
+            "params": {
+                "size_name": "Tiny"
+            },
+            "param": "Tiny",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 1.4121490000979974e-05,
+                "max": 1.4853070001117885e-05,
+                "mean": 1.4512806667092567e-05,
+                "stddev": 3.6845237981095527e-07,
+                "rounds": 3,
+                "median": 1.456385999917984e-05,
+                "iqr": 5.486850001034322e-07,
+                "q1": 1.4232082500529942e-05,
+                "q3": 1.4780767500633374e-05,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 1.4121490000979974e-05,
+                "hd15iqr": 1.4853070001117885e-05,
+                "ops": 68904.65937698154,
+                "total": 4.3538420001277696e-05,
+                "data": [
+                    1.4121490000979974e-05,
+                    1.4853070001117885e-05,
+                    1.456385999917984e-05
+                ],
+                "iterations": 10000
+            }
+        },
+        {
+            "group": null,
+            "name": "test_pybind11_training_step[Small]",
+            "fullname": "test_benchmarks.py::TestTrainingStepLIF::test_pybind11_training_step[Small]",
+            "params": {
+                "size_name": "Small"
+            },
+            "param": "Small",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00010203769998042844,
+                "max": 0.00010368820000439883,
+                "mean": 0.00010269396666747828,
+                "stddev": 8.756161685351525e-07,
+                "rounds": 3,
+                "median": 0.00010235600001760759,
+                "iqr": 1.2378750179777953e-06,
+                "q1": 0.00010211727498972322,
+                "q3": 0.00010335515000770102,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00010203769998042844,
+                "hd15iqr": 0.00010368820000439883,
+                "ops": 9737.670405097768,
+                "total": 0.00030808190000243486,
+                "data": [
+                    0.00010368820000439883,
+                    0.00010235600001760759,
+                    0.00010203769998042844
+                ],
+                "iterations": 1000
+            }
+        },
+        {
+            "group": null,
+            "name": "test_pybind11_training_step[Medium]",
+            "fullname": "test_benchmarks.py::TestTrainingStepLIF::test_pybind11_training_step[Medium]",
+            "params": {
+                "size_name": "Medium"
+            },
+            "param": "Medium",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.08929579998948611,
+                "max": 0.09011369998916052,
+                "mean": 0.08976599999004975,
+                "stddev": 0.0004224864378105094,
+                "rounds": 3,
+                "median": 0.08988849999150261,
+                "iqr": 0.0006134249997558072,
+                "q1": 0.08944397498999024,
+                "q3": 0.09005739998974605,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.08929579998948611,
+                "hd15iqr": 0.09011369998916052,
+                "ops": 11.140075308143913,
+                "total": 0.26929799997014925,
+                "data": [
+                    0.09011369998916052,
+                    0.08988849999150261,
+                    0.08929579998948611
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_pybind11_training_step[Large]",
+            "fullname": "test_benchmarks.py::TestTrainingStepLIF::test_pybind11_training_step[Large]",
+            "params": {
+                "size_name": "Large"
+            },
+            "param": "Large",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.6841085000196472,
+                "max": 0.7013243999972474,
+                "mean": 0.6905081000101442,
+                "stddev": 0.009419513371437992,
+                "rounds": 3,
+                "median": 0.6860914000135381,
+                "iqr": 0.012911924983200151,
+                "q1": 0.6846042250181199,
+                "q3": 0.6975161500013201,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.6841085000196472,
+                "hd15iqr": 0.7013243999972474,
+                "ops": 1.4482089348196046,
+                "total": 2.0715243000304326,
+                "data": [
+                    0.7013243999972474,
+                    0.6860914000135381,
+                    0.6841085000196472
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_cython_training_step[Tiny]",
+            "fullname": "test_benchmarks.py::TestTrainingStepLIF::test_cython_training_step[Tiny]",
+            "params": {
+                "size_name": "Tiny"
+            },
+            "param": "Tiny",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.000787918999849353,
+                "max": 0.0008031869999831542,
+                "mean": 0.000795239333237987,
+                "stddev": 7.653307610216826e-06,
+                "rounds": 3,
+                "median": 0.0007946119998814539,
+                "iqr": 1.1451000100350822e-05,
+                "q1": 0.0007895922498573783,
+                "q3": 0.0008010432499577291,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.000787918999849353,
+                "hd15iqr": 0.0008031869999831542,
+                "ops": 1257.4830723328112,
+                "total": 0.002385717999713961,
+                "data": [
+                    0.000787918999849353,
+                    0.0007946119998814539,
+                    0.0008031869999831542
+                ],
+                "iterations": 100
+            }
+        },
+        {
+            "group": null,
+            "name": "test_cython_training_step[Small]",
+            "fullname": "test_benchmarks.py::TestTrainingStepLIF::test_cython_training_step[Small]",
+            "params": {
+                "size_name": "Small"
+            },
+            "param": "Small",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0007974069999181666,
+                "max": 0.0008141939999768511,
+                "mean": 0.0008072146666624273,
+                "stddev": 8.743594526012648e-06,
+                "rounds": 3,
+                "median": 0.0008100430000922643,
+                "iqr": 1.2590250044013421e-05,
+                "q1": 0.000800565999961691,
+                "q3": 0.0008131562500057044,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0007974069999181666,
+                "hd15iqr": 0.0008141939999768511,
+                "ops": 1238.8278376242567,
+                "total": 0.002421643999987282,
+                "data": [
+                    0.0008141939999768511,
+                    0.0008100430000922643,
+                    0.0007974069999181666
+                ],
+                "iterations": 100
+            }
+        },
+        {
+            "group": null,
+            "name": "test_cython_training_step[Medium]",
+            "fullname": "test_benchmarks.py::TestTrainingStepLIF::test_cython_training_step[Medium]",
+            "params": {
+                "size_name": "Medium"
+            },
+            "param": "Medium",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.02493970000068657,
+                "max": 0.026092850006534718,
+                "mean": 0.025582550006220117,
+                "stddev": 0.0005878910289412079,
+                "rounds": 3,
+                "median": 0.025715100011439063,
+                "iqr": 0.0008648625043861102,
+                "q1": 0.025133550003374694,
+                "q3": 0.025998412507760804,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.02493970000068657,
+                "hd15iqr": 0.026092850006534718,
+                "ops": 39.08914473955336,
+                "total": 0.07674765001866035,
+                "data": [
+                    0.025715100011439063,
+                    0.02493970000068657,
+                    0.026092850006534718
+                ],
+                "iterations": 2
+            }
+        },
+        {
+            "group": null,
+            "name": "test_cython_training_step[Large]",
+            "fullname": "test_benchmarks.py::TestTrainingStepLIF::test_cython_training_step[Large]",
+            "params": {
+                "size_name": "Large"
+            },
+            "param": "Large",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.25404230001731776,
+                "max": 0.2618256999994628,
+                "mean": 0.2577092333328134,
+                "stddev": 0.003911123751029051,
+                "rounds": 3,
+                "median": 0.25725969998165965,
+                "iqr": 0.005837549986608792,
+                "q1": 0.25484665000840323,
+                "q3": 0.260684199995012,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.25404230001731776,
+                "hd15iqr": 0.2618256999994628,
+                "ops": 3.8803421478832703,
+                "total": 0.7731276999984402,
+                "data": [
+                    0.2618256999994628,
+                    0.25725969998165965,
+                    0.25404230001731776
+                ],
+                "iterations": 1
+            }
+        }
+    ],
+    "datetime": "2026-06-22T17:41:31.441373+00:00",
+    "version": "5.2.3"
+}

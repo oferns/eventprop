@@ -119,7 +119,7 @@ def _parse_pytest_name(name: str) -> tuple[str | None, str | None]:
         ('vmax_backward', 'VMax Backward'),
         ('batch', 'Batch Forward'),
         ('dropout', 'Dropout'),
-        ('training_step', 'Training Step (Small)'),  # new: matches .NET Bench_Batch_TrainingStep
+        ('training_step', 'Training Step'),  # size extracted from param
         ('ttfs_step', 'Training Step (TTFS)'),
         ('vmax_step', 'Training Step (VMax)'),
     ]
@@ -218,7 +218,8 @@ def _parse_bdn_name(full_name: str) -> tuple[str | None, str | None, str | None]
         'BackwardSpikes': 'Backward (Spikes)',
         'LIF_Forward': 'LIF Forward',
         'LIF_Backward': 'LIF Backward',
-        'Batch_TrainingStep': 'Training Step (Small)',  # matches Python TestTrainingStepSmall
+        'TrainingLoop': 'Training Step',  # matches Python TestTrainingStepLIF
+        'Batch_TrainingStep': 'Training Step (Small)',  # legacy batch benchmarks
         'Batch_Forward': 'Batch Forward',
     }
 
