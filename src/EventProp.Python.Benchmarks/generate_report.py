@@ -119,8 +119,7 @@ def _parse_pytest_name(name: str) -> tuple[str | None, str | None]:
         ('vmax_backward', 'VMax Backward'),
         ('batch', 'Batch Forward'),
         ('dropout', 'Dropout'),
-        ('sweep_spikes', 'Sweep (fixed neurons, varying spikes)'),  # param = spike count
-        ('sweep_neurons', 'Sweep (fixed spikes, varying neurons)'),  # param = size name
+        ('sweep', 'Sweep (neurons x spikes)'),  # full matrix: size_name-spike_count
         ('training_step', 'Training Step'),  # size extracted from param
         ('ttfs_step', 'Training Step (TTFS)'),
         ('vmax_step', 'Training Step (VMax)'),
@@ -203,12 +202,21 @@ def _parse_bdn_name(full_name: str) -> tuple[str | None, str | None, str | None]
         return None, None, None
 
     # Parse class name: Bench_Category_Size → category, size
-    # Also handle batch benchmarks and sweep spike counts (numeric suffixes)
+    # Also handle batch benchmarks and full matrix sweep (e.g. TrainingLoopSweep_Tiny_10)
     m = re.search(r'Bench_(.+?)_(Small|Medium|Large|Tiny|XL)$', class_part)
+    if not m:
+        m = re.search(r'Bench_(TrainingLoopSweep)_(Small|Medium|Large|Tiny|XL)_(\d+)$', class_part)
+        if m:
+            raw_cat = m.group(1)
+            size = f"{m.group(2)}-{m.group(3)}"
+            cat_map_local = {
+                'TrainingLoopSweep': 'Sweep (neurons x spikes)',
+            }
+            return cat_map_local.get(raw_cat, raw_cat.replace('_', ' ')), size, backend
     if not m:
         m = re.search(r'Bench_(Batch_.+?)_(\d+)$', class_part)  # batch sizes
     if not m:
-        m = re.search(r'Bench_(.+?)_(\d+)$', class_part)  # sweep spike counts, etc.
+        m = re.search(r'Bench_(.+?)_(\d+)$', class_part)  # other numeric suffixes
     if not m:
         return None, None, None
 
@@ -225,8 +233,7 @@ def _parse_bdn_name(full_name: str) -> tuple[str | None, str | None, str | None]
         'TrainingLoop': 'Training Step',  # matches Python TestTrainingStepLIF
         'Batch_TrainingStep': 'Training Step (Small)',  # legacy batch benchmarks
         'Batch_Forward': 'Batch Forward',
-        'TrainingLoopSweepSpikes': 'Sweep (fixed neurons, varying spikes)',
-        'TrainingLoopSweepNeurons': 'Sweep (fixed spikes, varying neurons)',
+        'TrainingLoopSweep': 'Sweep (neurons x spikes)',  # full matrix
     }
 
     return cat_map.get(raw_cat, raw_cat.replace('_', ' ')), size, backend
