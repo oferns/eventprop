@@ -58,6 +58,9 @@ public sealed class LILayer : Layer
 
     public LILayerParameters Parameters => _params;
 
+    /// <summary>Membrane potential maxima from the forward pass.</summary>
+    public MaximaVector? MaximaBatch => _maximaBatch;
+
     /// <summary>Weight matrix (row-major, nIn × nOut).</summary>
     public double[] Weights => _weights;
 
