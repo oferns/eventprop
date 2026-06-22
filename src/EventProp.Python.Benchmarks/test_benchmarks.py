@@ -490,6 +490,91 @@ class TestTrainingStepLIF:
 
 
 # ============================================================
+# Parameter sweep — isolate neuron count vs spike count effects
+# ============================================================
+
+class TestTrainingStepSweep:
+    """Benchmark training step with one variable held constant.
+
+    Sweep A: Fixed neurons (50x20), varying spikes (10/100/500/1000)
+    Sweep B: Fixed spikes (100), varying neurons (10->5 / 50->20 / 200->80 / 500->200)"""
+
+    # --- Sweep A: fixed neurons, varying spike count ---
+
+    @pytest.mark.parametrize("spike_count", [10, 100, 500, 1000])
+    def test_pybind11_sweep_spikes(self, benchmark, spike_count):
+        n_in, n_out = 50, 20
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spike_count, "uniform")
+
+        layer = PyLIFLayer(PyLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
+        batch = PySpikesVector([PySpikes(times, sources)])
+
+        def step():
+            post = layer.forward(batch)
+            for i in range(post[0].n_spikes):
+                post[0].set_error(i, 1.0)
+            layer.backward()
+
+        benchmark(step)
+
+    @pytest.mark.parametrize("spike_count", [10, 100, 500, 1000])
+    def test_cython_sweep_spikes(self, benchmark, spike_count):
+        n_in, n_out = 50, 20
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spike_count, "uniform")
+
+        layer = CyLIFLayer(CyLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
+        batch = CySpikesVector([CySpikes(times=times, sources=sources)])
+
+        def step():
+            post = layer.forward(batch)
+            for i in range(post[0].n_spikes):
+                post[0].set_error(i, 1.0)
+            layer.backward()
+
+        benchmark(step)
+
+    # --- Sweep B: fixed spikes (100), varying neuron count ---
+
+    @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    def test_pybind11_sweep_neurons(self, benchmark, size_name):
+        cfg = SIZES[size_name]
+        n_in, n_out = cfg["n_in"], cfg["n_out"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, 100, "uniform")
+
+        layer = PyLIFLayer(PyLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
+        batch = PySpikesVector([PySpikes(times, sources)])
+
+        def step():
+            post = layer.forward(batch)
+            for i in range(post[0].n_spikes):
+                post[0].set_error(i, 1.0)
+            layer.backward()
+
+        benchmark(step)
+
+    @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    def test_cython_sweep_neurons(self, benchmark, size_name):
+        cfg = SIZES[size_name]
+        n_in, n_out = cfg["n_in"], cfg["n_out"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, 100, "uniform")
+
+        layer = CyLIFLayer(CyLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
+        batch = CySpikesVector([CySpikes(times=times, sources=sources)])
+
+        def step():
+            post = layer.forward(batch)
+            for i in range(post[0].n_spikes):
+                post[0].set_error(i, 1.0)
+            layer.backward()
+
+        benchmark(step)
+
+
+# ============================================================
 # Full training step — 2-layer network with loss computation
 # (TTFS/VMax cross-entropy, batch sizes 4 & 8)
 # ============================================================

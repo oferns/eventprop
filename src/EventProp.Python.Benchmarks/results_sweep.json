@@ -1,0 +1,811 @@
+{
+    "machine_info": {
+        "node": "BRAIN",
+        "processor": "Intel64 Family 6 Model 151 Stepping 2, GenuineIntel",
+        "machine": "AMD64",
+        "python_compiler": "MSC v.1938 64 bit (AMD64)",
+        "python_implementation": "CPython",
+        "python_implementation_version": "3.11.9",
+        "python_version": "3.11.9",
+        "python_build": [
+            "tags/v3.11.9:de54cf5",
+            "Apr  2 2024 10:12:12"
+        ],
+        "release": "10",
+        "system": "Windows",
+        "cpu": {
+            "python_version": "3.11.9.final.0 (64 bit)",
+            "cpuinfo_version": [
+                9,
+                0,
+                0
+            ],
+            "cpuinfo_version_string": "9.0.0",
+            "arch": "X86_64",
+            "bits": 64,
+            "count": 20,
+            "arch_string_raw": "AMD64",
+            "vendor_id_raw": "GenuineIntel",
+            "brand_raw": "12th Gen Intel(R) Core(TM) i7-12700K",
+            "hz_actual_friendly": "3.6000 GHz",
+            "hz_actual": [
+                3600000000,
+                0
+            ],
+            "l2_cache_size": 12582912,
+            "stepping": 2,
+            "model": 151,
+            "family": 6,
+            "l3_cache_size": 26214400,
+            "hz_advertised_friendly": "3.6100 GHz",
+            "hz_advertised": [
+                3610000000,
+                0
+            ],
+            "flags": [
+                "3dnow",
+                "3dnowprefetch",
+                "abm",
+                "acpi",
+                "adx",
+                "aes",
+                "apic",
+                "avx",
+                "avx2",
+                "bmi1",
+                "bmi2",
+                "clflush",
+                "clflushopt",
+                "clwb",
+                "cmov",
+                "cx16",
+                "cx8",
+                "de",
+                "dts",
+                "erms",
+                "est",
+                "f16c",
+                "fma",
+                "fpu",
+                "fxsr",
+                "gfni",
+                "ht",
+                "hypervisor",
+                "ia64",
+                "intel_pt",
+                "invpcid",
+                "lahf_lm",
+                "mca",
+                "mce",
+                "mmx",
+                "monitor",
+                "movbe",
+                "msr",
+                "mtrr",
+                "osxsave",
+                "pae",
+                "pat",
+                "pbe",
+                "pcid",
+                "pclmulqdq",
+                "pdcm",
+                "pge",
+                "pni",
+                "popcnt",
+                "pse",
+                "pse36",
+                "rdpid",
+                "rdrnd",
+                "rdseed",
+                "sep",
+                "serial",
+                "sha",
+                "smap",
+                "smep",
+                "ss",
+                "sse",
+                "sse2",
+                "sse4_1",
+                "sse4_2",
+                "ssse3",
+                "tm",
+                "tm2",
+                "tsc",
+                "tscdeadline",
+                "umip",
+                "vaes",
+                "vme",
+                "vpclmulqdq",
+                "x2apic",
+                "xsave",
+                "xtpr"
+            ],
+            "l2_cache_line_size": 1280,
+            "l2_cache_associativity": 7
+        }
+    },
+    "commit_info": {
+        "id": "168572d70dd4e3eb3fa835959bb0c25678621be1",
+        "time": "2026-06-22T19:00:59+01:00",
+        "author_time": "2026-06-22T19:00:59+01:00",
+        "dirty": true,
+        "project": "eventprop.net",
+        "branch": "f/linux"
+    },
+    "benchmarks": [
+        {
+            "group": null,
+            "name": "test_pybind11_sweep_spikes[10]",
+            "fullname": "test_benchmarks.py::TestTrainingStepSweep::test_pybind11_sweep_spikes[10]",
+            "params": {
+                "spike_count": 10
+            },
+            "param": "10",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 1.9835250001051462e-05,
+                "max": 2.120864999887999e-05,
+                "mean": 2.043652333280382e-05,
+                "stddev": 7.024599881103724e-07,
+                "rounds": 3,
+                "median": 2.0265669998480006e-05,
+                "iqr": 1.0300499983713983e-06,
+                "q1": 1.9942855000408597e-05,
+                "q3": 2.0972904998779995e-05,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 1.9835250001051462e-05,
+                "hd15iqr": 2.120864999887999e-05,
+                "ops": 48932.001970944024,
+                "total": 6.130956999841146e-05,
+                "data": [
+                    1.9835250001051462e-05,
+                    2.0265669998480006e-05,
+                    2.120864999887999e-05
+                ],
+                "iterations": 10000
+            }
+        },
+        {
+            "group": null,
+            "name": "test_pybind11_sweep_spikes[100]",
+            "fullname": "test_benchmarks.py::TestTrainingStepSweep::test_pybind11_sweep_spikes[100]",
+            "params": {
+                "spike_count": 100
+            },
+            "param": "100",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00010246779999579303,
+                "max": 0.00010321820000535809,
+                "mean": 0.00010274563333950937,
+                "stddev": 4.11358534189268e-07,
+                "rounds": 3,
+                "median": 0.00010255090001737699,
+                "iqr": 5.628000071738006e-07,
+                "q1": 0.00010248857500118902,
+                "q3": 0.00010305137500836282,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00010246779999579303,
+                "hd15iqr": 0.00010321820000535809,
+                "ops": 9732.773719887755,
+                "total": 0.0003082369000185281,
+                "data": [
+                    0.00010321820000535809,
+                    0.00010255090001737699,
+                    0.00010246779999579303
+                ],
+                "iterations": 1000
+            }
+        },
+        {
+            "group": null,
+            "name": "test_pybind11_sweep_spikes[500]",
+            "fullname": "test_benchmarks.py::TestTrainingStepSweep::test_pybind11_sweep_spikes[500]",
+            "params": {
+                "spike_count": 500
+            },
+            "param": "500",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.022207680001156405,
+                "max": 0.022960640001110734,
+                "mean": 0.02264057666761801,
+                "stddev": 0.00038895463894193945,
+                "rounds": 3,
+                "median": 0.022753410000586883,
+                "iqr": 0.0005647199999657473,
+                "q1": 0.022344112501014025,
+                "q3": 0.022908832500979772,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.022207680001156405,
+                "hd15iqr": 0.022960640001110734,
+                "ops": 44.16848628375546,
+                "total": 0.06792173000285402,
+                "data": [
+                    0.022753410000586883,
+                    0.022207680001156405,
+                    0.022960640001110734
+                ],
+                "iterations": 10
+            }
+        },
+        {
+            "group": null,
+            "name": "test_pybind11_sweep_spikes[1000]",
+            "fullname": "test_benchmarks.py::TestTrainingStepSweep::test_pybind11_sweep_spikes[1000]",
+            "params": {
+                "spike_count": 1000
+            },
+            "param": "1000",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.08538730000145733,
+                "max": 0.08825980001711287,
+                "mean": 0.08692013334560518,
+                "stddev": 0.0014459595801921347,
+                "rounds": 3,
+                "median": 0.08711330001824535,
+                "iqr": 0.0021543750117416494,
+                "q1": 0.08581880000565434,
+                "q3": 0.08797317501739599,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.08538730000145733,
+                "hd15iqr": 0.08825980001711287,
+                "ops": 11.504814379700461,
+                "total": 0.26076040003681555,
+                "data": [
+                    0.08711330001824535,
+                    0.08825980001711287,
+                    0.08538730000145733
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "test_cython_sweep_spikes[10]",
+            "fullname": "test_benchmarks.py::TestTrainingStepSweep::test_cython_sweep_spikes[10]",
+            "params": {
+                "spike_count": 10
+            },
+            "param": "10",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0008852660001139156,
+                "max": 0.0009296160002122633,
+                "mean": 0.0009132593334652483,
+                "stddev": 2.4357537527958217e-05,
+                "rounds": 3,
+                "median": 0.000924896000069566,
+                "iqr": 3.326250007376088e-05,
+                "q1": 0.0008951735001028282,
+                "q3": 0.000928436000176589,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0008852660001139156,
+                "hd15iqr": 0.0009296160002122633,
+                "ops": 1094.979228085877,
+                "total": 0.002739778000395745,
+                "data": [
+                    0.0009296160002122633,
+                    0.0008852660001139156,
+                    0.000924896000069566
+                ],
+                "iterations": 100
+            }
+        },
+        {
+            "group": null,
+            "name": "test_cython_sweep_spikes[100]",
+            "fullname": "test_benchmarks.py::TestTrainingStepSweep::test_cython_sweep_spikes[100]",
+            "params": {
+                "spike_count": 100
+            },
+            "param": "100",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.000870895000116434,
+                "max": 0.0008865759999025613,
+                "mean": 0.0008805346666486002,
+                "stddev": 8.437087196355756e-06,
+                "rounds": 3,
+                "median": 0.0008841329999268055,
+                "iqr": 1.1760749839595346e-05,
+                "q1": 0.0008742045000690269,
+                "q3": 0.0008859652499086223,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.000870895000116434,
+                "hd15iqr": 0.0008865759999025613,
+                "ops": 1135.673628621683,
+                "total": 0.002641603999945801,
+                "data": [
+                    0.0008865759999025613,
+                    0.0008841329999268055,
+                    0.000870895000116434
+                ],
+                "iterations": 100
+            }
+        },
+        {
+            "group": null,
+            "name": "test_cython_sweep_spikes[500]",
+            "fullname": "test_benchmarks.py::TestTrainingStepSweep::test_cython_sweep_spikes[500]",
+            "params": {
+                "spike_count": 500
+            },
+            "param": "500",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.006656779997865669,
+                "max": 0.006763749997480773,
+                "mean": 0.006694539999201273,
+                "stddev": 6.002059592541653e-05,
+                "rounds": 3,
+                "median": 0.0066630900022573766,
+                "iqr": 8.02274997113283e-05,
+                "q1": 0.006658357498963596,
+                "q3": 0.006738584998674925,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.006656779997865669,
+                "hd15iqr": 0.006763749997480773,
+                "ops": 149.37546121455847,
+                "total": 0.02008361999760382,
+                "data": [
+                    0.006763749997480773,
+                    0.0066630900022573766,
+                    0.006656779997865669
+                ],
+                "iterations": 10
+            }
+        },
+        {
+            "group": null,
+            "name": "test_cython_sweep_spikes[1000]",
+            "fullname": "test_benchmarks.py::TestTrainingStepSweep::test_cython_sweep_spikes[1000]",
+            "params": {
+                "spike_count": 1000
+            },
+            "param": "1000",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.02481775000342168,
+                "max": 0.025845349999144673,
+                "mean": 0.02532489999915318,
+                "stddev": 0.000513929085952003,
+                "rounds": 3,
+                "median": 0.025311599994893186,
+                "iqr": 0.0007706999967922457,
+                "q1": 0.024941212501289556,
+                "q3": 0.0257119124980818,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.02481775000342168,
+                "hd15iqr": 0.025845349999144673,
+                "ops": 39.48682916945134,
+                "total": 0.07597469999745954,
+                "data": [
+                    0.025311599994893186,
+                    0.02481775000342168,
+                    0.025845349999144673
+                ],
+                "iterations": 2
+            }
+        },
+        {
+            "group": null,
+            "name": "test_pybind11_sweep_neurons[Tiny]",
+            "fullname": "test_benchmarks.py::TestTrainingStepSweep::test_pybind11_sweep_neurons[Tiny]",
+            "params": {
+                "size_name": "Tiny"
+            },
+            "param": "Tiny",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 3.4214100813618746e-05,
+                "max": 3.795258854931393e-05,
+                "mean": 3.546966394263833e-05,
+                "stddev": 2.150322018933745e-06,
+                "rounds": 3,
+                "median": 3.4242302464982316e-05,
+                "iqr": 2.803865801771389e-06,
+                "q1": 3.422115122645964e-05,
+                "q3": 3.702501702823103e-05,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 3.4214100813618746e-05,
+                "hd15iqr": 3.795258854931393e-05,
+                "ops": 28193.106131966844,
+                "total": 0.00010640899182791499,
+                "data": [
+                    3.795258854931393e-05,
+                    3.4242302464982316e-05,
+                    3.4214100813618746e-05
+                ],
+                "iterations": 1468
+            }
+        },
+        {
+            "group": null,
+            "name": "test_pybind11_sweep_neurons[Small]",
+            "fullname": "test_benchmarks.py::TestTrainingStepSweep::test_pybind11_sweep_neurons[Small]",
+            "params": {
+                "size_name": "Small"
+            },
+            "param": "Small",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00011347539999405854,
+                "max": 0.00013892539998050778,
+                "mean": 0.00012505696665418022,
+                "stddev": 1.2878196464929367e-05,
+                "rounds": 3,
+                "median": 0.00012277009998797438,
+                "iqr": 1.908749998983693e-05,
+                "q1": 0.0001157990749925375,
+                "q3": 0.00013488657498237443,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00011347539999405854,
+                "hd15iqr": 0.00013892539998050778,
+                "ops": 7996.35579491783,
+                "total": 0.0003751708999625407,
+                "data": [
+                    0.00011347539999405854,
+                    0.00012277009998797438,
+                    0.00013892539998050778
+                ],
+                "iterations": 1000
+            }
+        },
+        {
+            "group": null,
+            "name": "test_pybind11_sweep_neurons[Medium]",
+            "fullname": "test_benchmarks.py::TestTrainingStepSweep::test_pybind11_sweep_neurons[Medium]",
+            "params": {
+                "size_name": "Medium"
+            },
+            "param": "Medium",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00040256400010548534,
+                "max": 0.0004327535999473184,
+                "mean": 0.0004140634666352222,
+                "stddev": 1.632887783142785e-05,
+                "rounds": 3,
+                "median": 0.00040687279985286294,
+                "iqr": 2.2642199881374762e-05,
+                "q1": 0.00040364120004232975,
+                "q3": 0.0004262833999237045,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00040256400010548534,
+                "hd15iqr": 0.0004327535999473184,
+                "ops": 2415.0887015612284,
+                "total": 0.0012421903999056667,
+                "data": [
+                    0.0004327535999473184,
+                    0.00040687279985286294,
+                    0.00040256400010548534
+                ],
+                "iterations": 125
+            }
+        },
+        {
+            "group": null,
+            "name": "test_pybind11_sweep_neurons[Large]",
+            "fullname": "test_benchmarks.py::TestTrainingStepSweep::test_pybind11_sweep_neurons[Large]",
+            "params": {
+                "size_name": "Large"
+            },
+            "param": "Large",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0009547810000367462,
+                "max": 0.0013893600000301376,
+                "mean": 0.0011629600000257294,
+                "stddev": 0.00021786172320989664,
+                "rounds": 3,
+                "median": 0.0011447390000103041,
+                "iqr": 0.0003259342499950435,
+                "q1": 0.0010022705000301358,
+                "q3": 0.0013282047500251793,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0009547810000367462,
+                "hd15iqr": 0.0013893600000301376,
+                "ops": 859.8748022097716,
+                "total": 0.003488880000077188,
+                "data": [
+                    0.0013893600000301376,
+                    0.0009547810000367462,
+                    0.0011447390000103041
+                ],
+                "iterations": 100
+            }
+        },
+        {
+            "group": null,
+            "name": "test_cython_sweep_neurons[Tiny]",
+            "fullname": "test_benchmarks.py::TestTrainingStepSweep::test_cython_sweep_neurons[Tiny]",
+            "params": {
+                "size_name": "Tiny"
+            },
+            "param": "Tiny",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0008636570000089705,
+                "max": 0.0008704529999522492,
+                "mean": 0.0008662743332873409,
+                "stddev": 3.6571471484204253e-06,
+                "rounds": 3,
+                "median": 0.000864712999900803,
+                "iqr": 5.0969999574590735e-06,
+                "q1": 0.0008639209999819285,
+                "q3": 0.0008690179999393876,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0008636570000089705,
+                "hd15iqr": 0.0008704529999522492,
+                "ops": 1154.3687277507074,
+                "total": 0.002598822999862023,
+                "data": [
+                    0.0008636570000089705,
+                    0.0008704529999522492,
+                    0.000864712999900803
+                ],
+                "iterations": 100
+            }
+        },
+        {
+            "group": null,
+            "name": "test_cython_sweep_neurons[Small]",
+            "fullname": "test_benchmarks.py::TestTrainingStepSweep::test_cython_sweep_neurons[Small]",
+            "params": {
+                "size_name": "Small"
+            },
+            "param": "Small",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0008640560001367704,
+                "max": 0.0008793660000083037,
+                "mean": 0.0008707836667114559,
+                "stddev": 7.821691984750493e-06,
+                "rounds": 3,
+                "median": 0.0008689289999892936,
+                "iqr": 1.1482499903650101e-05,
+                "q1": 0.0008652742500999012,
+                "q3": 0.0008767567500035513,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0008640560001367704,
+                "hd15iqr": 0.0008793660000083037,
+                "ops": 1148.3908555342268,
+                "total": 0.002612351000134368,
+                "data": [
+                    0.0008793660000083037,
+                    0.0008640560001367704,
+                    0.0008689289999892936
+                ],
+                "iterations": 100
+            }
+        },
+        {
+            "group": null,
+            "name": "test_cython_sweep_neurons[Medium]",
+            "fullname": "test_benchmarks.py::TestTrainingStepSweep::test_cython_sweep_neurons[Medium]",
+            "params": {
+                "size_name": "Medium"
+            },
+            "param": "Medium",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.000876910999941174,
+                "max": 0.0009034429999883286,
+                "mean": 0.0008873999999680867,
+                "stddev": 1.4111057492972662e-05,
+                "rounds": 3,
+                "median": 0.0008818459999747574,
+                "iqr": 1.9899000035366004e-05,
+                "q1": 0.0008781447499495699,
+                "q3": 0.0008980437499849359,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.000876910999941174,
+                "hd15iqr": 0.0009034429999883286,
+                "ops": 1126.8875366643708,
+                "total": 0.00266219999990426,
+                "data": [
+                    0.0009034429999883286,
+                    0.000876910999941174,
+                    0.0008818459999747574
+                ],
+                "iterations": 100
+            }
+        },
+        {
+            "group": null,
+            "name": "test_cython_sweep_neurons[Large]",
+            "fullname": "test_benchmarks.py::TestTrainingStepSweep::test_cython_sweep_neurons[Large]",
+            "params": {
+                "size_name": "Large"
+            },
+            "param": "Large",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 3,
+                "max_time": 0.15,
+                "min_time": 0.05,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.001451539999980014,
+                "max": 0.0016243389999726788,
+                "mean": 0.0015178323332414342,
+                "stddev": 9.315453860082675e-05,
+                "rounds": 3,
+                "median": 0.00147761799977161,
+                "iqr": 0.00012959924999449862,
+                "q1": 0.001458059499927913,
+                "q3": 0.0015876587499224115,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.001451539999980014,
+                "hd15iqr": 0.0016243389999726788,
+                "ops": 658.8342981628491,
+                "total": 0.004553496999724302,
+                "data": [
+                    0.0016243389999726788,
+                    0.00147761799977161,
+                    0.001451539999980014
+                ],
+                "iterations": 100
+            }
+        }
+    ],
+    "datetime": "2026-06-22T18:18:34.607793+00:00",
+    "version": "5.2.3"
+}

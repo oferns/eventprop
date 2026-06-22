@@ -119,6 +119,8 @@ def _parse_pytest_name(name: str) -> tuple[str | None, str | None]:
         ('vmax_backward', 'VMax Backward'),
         ('batch', 'Batch Forward'),
         ('dropout', 'Dropout'),
+        ('sweep_spikes', 'Sweep (fixed neurons, varying spikes)'),  # param = spike count
+        ('sweep_neurons', 'Sweep (fixed spikes, varying neurons)'),  # param = size name
         ('training_step', 'Training Step'),  # size extracted from param
         ('ttfs_step', 'Training Step (TTFS)'),
         ('vmax_step', 'Training Step (VMax)'),
@@ -201,10 +203,12 @@ def _parse_bdn_name(full_name: str) -> tuple[str | None, str | None, str | None]
         return None, None, None
 
     # Parse class name: Bench_Category_Size → category, size
-    # Also handle batch benchmarks: Bench_Batch_TrainingStep_4, Bench_Batch_Forward_8 etc.
+    # Also handle batch benchmarks and sweep spike counts (numeric suffixes)
     m = re.search(r'Bench_(.+?)_(Small|Medium|Large|Tiny|XL)$', class_part)
     if not m:
-        m = re.search(r'Bench_(Batch_.+?)_(\d+)$', class_part)
+        m = re.search(r'Bench_(Batch_.+?)_(\d+)$', class_part)  # batch sizes
+    if not m:
+        m = re.search(r'Bench_(.+?)_(\d+)$', class_part)  # sweep spike counts, etc.
     if not m:
         return None, None, None
 
@@ -221,6 +225,8 @@ def _parse_bdn_name(full_name: str) -> tuple[str | None, str | None, str | None]
         'TrainingLoop': 'Training Step',  # matches Python TestTrainingStepLIF
         'Batch_TrainingStep': 'Training Step (Small)',  # legacy batch benchmarks
         'Batch_Forward': 'Batch Forward',
+        'TrainingLoopSweepSpikes': 'Sweep (fixed neurons, varying spikes)',
+        'TrainingLoopSweepNeurons': 'Sweep (fixed spikes, varying neurons)',
     }
 
     return cat_map.get(raw_cat, raw_cat.replace('_', ' ')), size, backend
