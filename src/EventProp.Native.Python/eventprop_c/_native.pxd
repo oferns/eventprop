@@ -120,6 +120,10 @@ cdef extern from "eventprop_batch.h":
         double tau_syn
         double v_th
 
+    ctypedef struct BatchEventPropInputDirect:
+        const EventPropInput* inputs
+        int batch_size
+
     ctypedef struct DropoutOutput:
         int n_spikes
         double* times
@@ -147,6 +151,10 @@ cdef extern from "eventprop_batch.h":
         const double** maxima_errors, int n_post)
     DropoutOutput* eventprop_dropout_spikes_batch(
         const BatchEventPropInput* input, double p_drop, int seed)
+
+    # Direct batch functions (array of EventPropInput structs)
+    SpikeOutput* eventprop_compute_spikes_batch_direct(const BatchEventPropInputDirect* input)
+    MaximaOutput* eventprop_compute_maxima_batch_direct(const BatchEventPropInputDirect* input)
 
     void eventprop_free_batch_spike_output(SpikeOutput* output, int batch_size)
     void eventprop_free_backward_batch_output(BackwardOutput* output, int batch_size)

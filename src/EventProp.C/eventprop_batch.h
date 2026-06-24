@@ -51,6 +51,18 @@ typedef struct BatchEventPropInputPtrs {
 } BatchEventPropInputPtrs;
 
 /**
+ * Direct batch input — array of EventPropInput structs.
+ *
+ * Each sample's data is passed as a complete EventPropInput struct, eliminating
+ * the need for separate pointer arrays (const double**, const int**). This is
+ * the most efficient API for Cython/Python bindings.
+ */
+typedef struct BatchEventPropInputDirect {
+    const EventPropInput* inputs; /* Array of EventPropInput structs (length: batch_size) */
+    int batch_size;               /* Number of samples */
+} BatchEventPropInputDirect;
+
+/**
  * Dropout output — per-sample surviving spikes.
  */
 typedef struct DropoutOutput {
@@ -83,6 +95,12 @@ SpikeOutput* eventprop_compute_spikes_batch(const BatchEventPropInput* input);
  * No flattening required — each sample's data is a separate pointer.
  */
 SpikeOutput* eventprop_compute_spikes_batch_ptrs(const BatchEventPropInputPtrs* input);
+
+/**
+ * Direct batch forward pass (spikes) — array of EventPropInput structs.
+ * Most efficient API for Cython/Python bindings — no pointer array allocation needed.
+ */
+SpikeOutput* eventprop_compute_spikes_batch_direct(const BatchEventPropInputDirect* input);
 
 /* ── Batch backward pass (spikes) ────────────────────────────────── */
 
@@ -136,6 +154,11 @@ MaximaOutput* eventprop_compute_maxima_batch(const BatchEventPropInput* input);
  * Pointer-based batch forward pass (maxima).
  */
 MaximaOutput* eventprop_compute_maxima_batch_ptrs(const BatchEventPropInputPtrs* input);
+
+/**
+ * Direct batch forward pass (maxima) — array of EventPropInput structs.
+ */
+MaximaOutput* eventprop_compute_maxima_batch_direct(const BatchEventPropInputDirect* input);
 
 /* ── Batch backward pass (maxima) ────────────────────────────────── */
 

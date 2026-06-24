@@ -37,13 +37,13 @@ cdef object _double_view(double* ptr, ssize_t length):
     if ptr == NULL or length == 0:
         return np.array([], dtype=np.float64)
     cdef object arr = cnp.PyArray_SimpleNewFromData(1, [length], cnp.NPY_FLOAT64, ptr)
-    return np.asarray(arr)
+    return arr  # Return numpy array directly — zero-copy view
 
 cdef object _int_view(int* ptr, ssize_t length):
     if ptr == NULL or length == 0:
         return np.array([], dtype=np.int32)
     cdef object arr = cnp.PyArray_SimpleNewFromData(1, [length], cnp.NPY_INT32, ptr)
-    return np.asarray(arr)
+    return arr  # Return numpy array directly — zero-copy view
 
 # ================================================================
 # ForwardSpikeOutput — lightweight forward-only output class.
@@ -83,10 +83,21 @@ cdef ForwardSpikeOutput _compute_spikes_forward(list tl, list sl,
                                                  double tm, double ts, double vt):
     """Forward-only compute — no error buffers, memoryview output."""
     cdef int bs = len(tl)
+    # Allocate pointer arrays for C library
     cdef const double** pt = <const double**>malloc(bs * sizeof(const double*))
     cdef const int** ps = <const int**>malloc(bs * sizeof(const int*))
     cdef int* pn = <int*>malloc(bs * sizeof(int))
-    _build_ptrs(tl, sl, bs, pt, ps, pn)
+    # Build pointers directly — zero Python overhead
+    cdef int b
+    cdef const double[:] tv
+    cdef const int[:] sv
+    for b in range(bs):
+        tv = tl[b]
+        sv = sl[b]
+        pt[b] = &tv[0] if tv.shape[0] > 0 else NULL
+        ps[b] = &sv[0] if sv.shape[0] > 0 else NULL
+        pn[b] = tv.shape[0]
+    
     cdef BatchEventPropInputPtrs ip
     ip.times = pt; ip.sources = ps; ip.n_spikes = pn
     ip.w = &w[0,0] if w.shape[0]>0 and w.shape[1]>0 else NULL
@@ -124,6 +135,14 @@ cdef class BatchSpikeOutput:
         cdef SpikeOutput* s = <SpikeOutput*>self._ptr + idx
         cdef double* err_ptr = self._errors + self._error_offsets[idx]
         return _double_view(err_ptr, s.n_spikes)
+
+    # Return flat numpy view of entire error buffer (for struct-based batch API)
+    def get_flat_errors(self):
+        self.ensure_errors()
+        if self._errors == NULL:
+            return np.array([], dtype=np.float64)
+        cdef int tot = self.total_post_spikes()
+        return _double_view(self._errors, tot)
 
     # Total post-spikes across batch (for error buffer sizing)
     cdef int total_post_spikes(self):
@@ -191,6 +210,14 @@ cdef class BatchMaximaOutput:
             return np.array([], dtype=np.float64)
         cdef double* err_ptr = self._errors + idx * self.n_post
         return _double_view(err_ptr, self.n_post)
+
+    # Return flat numpy view of entire error buffer (for struct-based batch API)
+    def get_flat_errors(self):
+        self.ensure_errors()
+        if self._errors == NULL or self.n_post <= 0:
+            return np.array([], dtype=np.float64)
+        cdef int total_errs = self.batch_size * self.n_post
+        return _double_view(self._errors, total_errs)
 
     def __dealloc__(self):
         if self._errors != NULL:
@@ -308,17 +335,6 @@ cdef void _fill_input(EventPropInput* inp, const double[:,:] w, int n_pre, int n
     inp.tau_syn = tau_syn
     inp.v_th = v_th
 
-cdef void _build_ptrs(list tl, list sl, int bs, const double** pt, const int** ps, int* pn):
-    cdef int b
-    cdef const double[:] tv
-    cdef const int[:] sv
-    for b in range(bs):
-        tv = tl[b]
-        sv = sl[b]
-        pt[b] = &tv[0] if tv.shape[0] > 0 else NULL
-        ps[b] = &sv[0] if sv.shape[0] > 0 else NULL
-        pn[b] = tv.shape[0]
-
 cdef ssize_t _total_spikes(list tl):
     cdef ssize_t t = 0
     for item in tl:
@@ -329,10 +345,21 @@ cdef BatchSpikeOutput _compute_spikes_batch_ptrs(list tl, list sl, double[:,:] w
                                                   double tm, double ts, double vt,
                                                   bint alloc_errors=True):
     cdef int bs = len(tl)
+    # Allocate pointer arrays for C library
     cdef const double** pt = <const double**>malloc(bs * sizeof(const double*))
     cdef const int** ps = <const int**>malloc(bs * sizeof(const int*))
     cdef int* pn = <int*>malloc(bs * sizeof(int))
-    _build_ptrs(tl, sl, bs, pt, ps, pn)
+    # Build pointers directly — zero Python overhead
+    cdef int b
+    cdef const double[:] tv
+    cdef const int[:] sv
+    for b in range(bs):
+        tv = tl[b]
+        sv = sl[b]
+        pt[b] = &tv[0] if tv.shape[0] > 0 else NULL
+        ps[b] = &sv[0] if sv.shape[0] > 0 else NULL
+        pn[b] = tv.shape[0]
+    
     cdef BatchEventPropInputPtrs ip
     ip.times = pt; ip.sources = ps; ip.n_spikes = pn
     ip.w = &w[0,0] if w.shape[0]>0 and w.shape[1]>0 else NULL
@@ -369,10 +396,21 @@ cdef BatchMaximaOutput _compute_maxima_batch_ptrs(list tl, list sl, double[:,:] 
                                                    double tm, double ts, double vt,
                                                    bint alloc_errors=True):
     cdef int bs = len(tl)
+    # Allocate pointer arrays for C library
     cdef const double** pt = <const double**>malloc(bs * sizeof(const double*))
     cdef const int** ps = <const int**>malloc(bs * sizeof(const int*))
     cdef int* pn = <int*>malloc(bs * sizeof(int))
-    _build_ptrs(tl, sl, bs, pt, ps, pn)
+    # Build pointers directly — zero Python overhead
+    cdef int b
+    cdef const double[:] tv
+    cdef const int[:] sv
+    for b in range(bs):
+        tv = tl[b]
+        sv = sl[b]
+        pt[b] = &tv[0] if tv.shape[0] > 0 else NULL
+        ps[b] = &sv[0] if sv.shape[0] > 0 else NULL
+        pn[b] = tv.shape[0]
+    
     cdef BatchEventPropInputPtrs ip
     ip.times = pt; ip.sources = ps; ip.n_spikes = pn
     ip.w = &w[0,0] if w.shape[0]>0 and w.shape[1]>0 else NULL
@@ -426,10 +464,20 @@ cdef AccumulatedGradient _backward_spikes_batch_accumulate_ptrs(
         list tl, list sl, BatchSpikeOutput fb,
         double[:,:] w, int np_, int npost, double tm, double ts, double vt):
     cdef int bs = len(tl)
+    # Allocate pointer arrays for C library
     cdef const double** pt = <const double**>malloc(bs * sizeof(const double*))
     cdef const int** ps = <const int**>malloc(bs * sizeof(const int*))
     cdef int* pn = <int*>malloc(bs * sizeof(int))
-    _build_ptrs(tl, sl, bs, pt, ps, pn)
+    # Build pointers directly — zero Python overhead
+    cdef int b
+    cdef const double[:] tv
+    cdef const int[:] sv
+    for b in range(bs):
+        tv = tl[b]
+        sv = sl[b]
+        pt[b] = &tv[0] if tv.shape[0] > 0 else NULL
+        ps[b] = &sv[0] if sv.shape[0] > 0 else NULL
+        pn[b] = tv.shape[0]
     cdef ssize_t tis = _total_spikes(tl)
     cdef BatchEventPropInputPtrs ip
     ip.times = pt; ip.sources = ps; ip.n_spikes = pn
@@ -441,7 +489,6 @@ cdef AccumulatedGradient _backward_spikes_batch_accumulate_ptrs(
     # Read error pointers directly from native buffer — zero concatenation
     cdef const double** pe2 = <const double**>malloc(bs * sizeof(const double*))
     cdef int* pne = <int*>malloc(bs * sizeof(int))
-    cdef int b
     cdef SpikeOutput* fwd_base = fb.get_raw_ptr()
     cdef double* err_base = fb._errors
     for b in range(bs):
@@ -456,10 +503,20 @@ cdef AccumulatedGradient _backward_maxima_batch_accumulate_ptrs(
         list tl, list sl, BatchMaximaOutput fb,
         double[:,:] w, int np_, int npost, double tm, double ts, double vt):
     cdef int bs = len(tl)
+    # Allocate pointer arrays for C library
     cdef const double** pt = <const double**>malloc(bs * sizeof(const double*))
     cdef const int** ps = <const int**>malloc(bs * sizeof(const int*))
     cdef int* pn = <int*>malloc(bs * sizeof(int))
-    _build_ptrs(tl, sl, bs, pt, ps, pn)
+    # Build pointers directly — zero Python overhead
+    cdef int b
+    cdef const double[:] tv
+    cdef const int[:] sv
+    for b in range(bs):
+        tv = tl[b]
+        sv = sl[b]
+        pt[b] = &tv[0] if tv.shape[0] > 0 else NULL
+        ps[b] = &sv[0] if sv.shape[0] > 0 else NULL
+        pn[b] = tv.shape[0]
     cdef ssize_t tis = _total_spikes(tl)
     cdef BatchEventPropInputPtrs ip
     ip.times = pt; ip.sources = ps; ip.n_spikes = pn
@@ -470,13 +527,184 @@ cdef AccumulatedGradient _backward_maxima_batch_accumulate_ptrs(
     fb.ensure_errors()
     # Read error pointers directly from native buffer — zero concatenation
     cdef const double** me2 = <const double**>malloc(bs * sizeof(const double*))
-    cdef int b
     for b in range(bs):
         me2[b] = fb._errors + b * npost if fb._errors != NULL else NULL
     cdef BackwardOutput* r = eventprop_backward_maxima_batch_accumulate_ptrs(
         &ip, fb.get_raw_ptr(), me2, npost)
     free(pt); free(ps); free(pn); free(me2)
     return AccumulatedGradient.from_result(r, np_, npost, tis)
+
+# ================================================================
+# Public API — Spikes list direct binding (zero Python overhead)
+# Takes list of Spikes objects directly, extracts pointers in Cython
+# ================================================================
+
+def compute_spikes_batch_from_spikes_list(list spikes_list,
+                                          double[:,:] w, int n_pre, int n_post,
+                                          double tau_mem, double tau_syn, double v_th):
+    """Batch forward pass — takes list of Spikes objects directly.
+    
+    Extracts numpy array pointers from each Spikes object in Cython,
+    without creating Python lists or C structs. Most efficient binding.
+    """
+    cdef int bs = len(spikes_list)
+    # Allocate pointer arrays for C library
+    cdef const double** pt = <const double**>malloc(bs * sizeof(const double*))
+    cdef const int** ps = <const int**>malloc(bs * sizeof(const int*))
+    cdef int* pn = <int*>malloc(bs * sizeof(int))
+    
+    # Extract pointers directly from Spikes objects — zero Python overhead
+    cdef int b
+    cdef object spike
+    cdef double[:] tv
+    cdef int[:] sv
+    for b in range(bs):
+        spike = spikes_list[b]
+        tv = spike._times
+        sv = spike._sources
+        pt[b] = &tv[0] if tv.shape[0] > 0 else NULL
+        ps[b] = &sv[0] if sv.shape[0] > 0 else NULL
+        pn[b] = tv.shape[0]
+    
+    cdef BatchEventPropInputPtrs ip
+    ip.times = pt; ip.sources = ps; ip.n_spikes = pn
+    ip.w = &w[0,0] if w.shape[0]>0 and w.shape[1]>0 else NULL
+    ip.n_pre = n_pre; ip.n_post = n_post; ip.batch_size = bs
+    ip.tau_mem = tau_mem; ip.tau_syn = tau_syn; ip.v_th = v_th
+    
+    cdef BatchSpikeOutput output = BatchSpikeOutput.__new__(BatchSpikeOutput)
+    output._ptr = <ssize_t>eventprop_compute_spikes_batch_ptrs(&ip)
+    output.batch_size = bs
+    free(pt); free(ps); free(pn)
+    
+    # Allocate native error buffer + offsets
+    cdef int tot_spikes, i, offset
+    cdef SpikeOutput* s_ptr
+    tot_spikes = 0
+    for b in range(bs):
+        tot_spikes += pn[b]
+    
+    if tot_spikes > 0:
+        output._errors = <double*>calloc(tot_spikes, sizeof(double))
+        output._error_offsets = <int*>malloc((bs + 1) * sizeof(int))
+        offset = 0
+        for b in range(bs):
+            output._error_offsets[b] = offset
+            s_ptr = <SpikeOutput*>output._ptr + b
+            offset += s_ptr.n_spikes
+        output._error_offsets[bs] = offset
+    else:
+        output._errors = NULL
+        output._error_offsets = NULL
+    
+    return output
+
+# ================================================================
+# Public API — Direct spikes list binding (zero Python iteration overhead)
+# Takes list of Spikes objects, extracts pointers via C-level slots
+# ================================================================
+
+def compute_spikes_batch_from_spikes_list_direct(list spikes_list,
+                                                 double[:,:] w, int n_pre, int n_post,
+                                                 double tau_mem, double tau_syn, double v_th):
+    """Batch forward pass — takes list of Spikes objects directly.
+    
+    Extracts numpy array pointers from each Spikes object via C-level slots,
+    without Python iteration overhead. Most efficient binding option.
+    """
+    cdef int bs = len(spikes_list)
+    
+    # Allocate array of EventPropInput structs
+    cdef EventPropInput* inputs = <EventPropInput*>malloc(bs * sizeof(EventPropInput))
+    
+    # Fill EventPropInput structs directly from Spikes objects
+    cdef int b
+    cdef object spike_obj
+    cdef object times_obj, sources_obj
+    cdef double[:] tv
+    cdef int[:] sv
+    for b in range(bs):
+        spike_obj = spikes_list[b]
+        times_obj = spike_obj._times
+        sources_obj = spike_obj._sources
+        
+        # Convert to memoryviews for pointer extraction
+        tv = times_obj if isinstance(times_obj, np.ndarray) else np.asarray(times_obj, dtype=np.float64)
+        sv = sources_obj if isinstance(sources_obj, np.ndarray) else np.asarray(sources_obj, dtype=np.int32)
+        
+        inputs[b].w = &w[0,0] if w.shape[0]>0 and w.shape[1]>0 else NULL
+        inputs[b].n_pre = n_pre
+        inputs[b].n_post = n_post
+        inputs[b].times = &tv[0] if tv.shape[0] > 0 else NULL
+        inputs[b].sources = &sv[0] if sv.shape[0] > 0 else NULL
+        inputs[b].n_spikes = tv.shape[0]
+        inputs[b].tau_mem = tau_mem
+        inputs[b].tau_syn = tau_syn
+        inputs[b].v_th = v_th
+    
+    # Build direct input struct
+    cdef BatchEventPropInputDirect ip
+    ip.inputs = inputs
+    ip.batch_size = bs
+    
+    cdef BatchSpikeOutput output = BatchSpikeOutput.__new__(BatchSpikeOutput)
+    output._ptr = <ssize_t>eventprop_compute_spikes_batch_direct(&ip)
+    output.batch_size = bs
+    free(inputs)
+    
+    # Allocate native error buffer + offsets
+    cdef int tot_spikes, i, offset
+    cdef SpikeOutput* s_ptr
+    tot_spikes = 0
+    for b in range(bs):
+        # Get n_spikes from the C output
+        s_ptr = <SpikeOutput*>output._ptr + b
+        tot_spikes += s_ptr.n_spikes
+    
+    if tot_spikes > 0:
+        output._errors = <double*>calloc(tot_spikes, sizeof(double))
+        output._error_offsets = <int*>malloc((bs + 1) * sizeof(int))
+        offset = 0
+        for b in range(bs):
+            output._error_offsets[b] = offset
+            s_ptr = <SpikeOutput*>output._ptr + b
+            offset += s_ptr.n_spikes
+        output._error_offsets[bs] = offset
+    else:
+        output._errors = NULL
+        output._error_offsets = NULL
+    
+    return output
+
+# ================================================================
+# Public API — SpikesVector direct binding (zero Python overhead)
+# Takes SpikesVector directly, uses pre-built flat buffers
+# ================================================================
+
+def compute_spikes_batch_from_vector(object vector,
+                                     double[:,:] w, int n_pre, int n_post,
+                                     double tau_mem, double tau_syn, double v_th):
+    """Batch forward pass — takes SpikesVector directly, uses pre-built flat buffers.
+    
+    This is the most efficient binding option: SpikesVector already has
+    _flat_times, _flat_sources, and _n_spikes_per_sample pre-built at construction.
+    No Python list creation or array concatenation overhead.
+    """
+    cdef EventPropInput inp
+    # Convert numpy arrays to memoryviews for C access
+    cdef double[:] flat_times = vector._flat_times
+    cdef int[:] flat_sources = vector._flat_sources
+    cdef int[:] n_spikes_per_sample = vector._n_spikes_per_sample
+    _fill_input(&inp, w, n_pre, n_post, flat_times, flat_sources,
+                tau_mem, tau_syn, v_th)
+    cdef BatchEventPropInput batch_inp
+    batch_inp.input = &inp
+    batch_inp.n_spikes_per_sample = <int*>(&n_spikes_per_sample[0])
+    batch_inp.batch_size = n_spikes_per_sample.shape[0]
+    cdef BatchSpikeOutput output = BatchSpikeOutput.__new__(BatchSpikeOutput)
+    output._ptr = <ssize_t>eventprop_compute_spikes_batch(&batch_inp)
+    output.batch_size = batch_inp.batch_size
+    return output
 
 # ================================================================
 # Public API — pointer-based batch functions (hot path, zero-copy)
@@ -521,6 +749,26 @@ def compute_spikes_batch_obj(BatchInput inp):
     output.batch_size = inp.batch_size
     return output
 
+def compute_maxima_batch_from_vector(object vector,
+                                     double[:,:] w, int n_pre, int n_post,
+                                     double tau_mem, double tau_syn, double v_th):
+    """Batch forward pass (maxima) — takes SpikesVector directly, uses pre-built flat buffers."""
+    cdef EventPropInput inp
+    # Convert numpy arrays to memoryviews for C access
+    cdef double[:] flat_times = vector._flat_times
+    cdef int[:] flat_sources = vector._flat_sources
+    cdef int[:] n_spikes_per_sample = vector._n_spikes_per_sample
+    _fill_input(&inp, w, n_pre, n_post, flat_times, flat_sources,
+                tau_mem, tau_syn, v_th)
+    cdef BatchEventPropInput batch_inp
+    batch_inp.input = &inp
+    batch_inp.n_spikes_per_sample = <int*>(&n_spikes_per_sample[0])
+    batch_inp.batch_size = n_spikes_per_sample.shape[0]
+    cdef BatchMaximaOutput output = BatchMaximaOutput.__new__(BatchMaximaOutput)
+    output._ptr = <ssize_t>eventprop_compute_maxima_batch(&batch_inp)
+    output.batch_size = batch_inp.batch_size
+    return output
+
 def compute_maxima_batch(double[:] times, int[:] sources, int[:] n_spikes_per_sample,
                          double[:,:] w, int n_pre, int n_post,
                          double tau_mem, double tau_syn, double v_th):
@@ -552,6 +800,27 @@ def backward_spikes_batch(double[:] times, int[:] sources, int[:] n_spikes_per_s
         &batch_inp, fwd_batch.get_raw_ptr(), &post_errors[0])
     output.batch_size = batch_inp.batch_size
     return output
+
+def backward_spikes_batch_accumulate_from_vector(object vector,
+                                                   BatchSpikeOutput fwd_batch, double[:] post_errors,
+                                                   double[:,:] w, int n_pre, int n_post,
+                                                   double tau_mem, double tau_syn, double v_th):
+    """Batch backward pass with gradient accumulation — takes SpikesVector directly."""
+    cdef EventPropInput inp
+    # Convert numpy arrays to memoryviews for C access
+    cdef double[:] flat_times = vector._flat_times
+    cdef int[:] flat_sources = vector._flat_sources
+    cdef int[:] n_spikes_per_sample = vector._n_spikes_per_sample
+    _fill_input(&inp, w, n_pre, n_post, flat_times, flat_sources,
+                tau_mem, tau_syn, v_th)
+    cdef BatchEventPropInput batch_inp
+    batch_inp.input = &inp
+    batch_inp.n_spikes_per_sample = <int*>(&n_spikes_per_sample[0])
+    batch_inp.batch_size = n_spikes_per_sample.shape[0]
+    cdef const double* ep = &post_errors[0] if post_errors.shape[0] > 0 else NULL
+    cdef BackwardOutput* r = eventprop_backward_spikes_batch_accumulate(
+        &batch_inp, fwd_batch.get_raw_ptr(), ep)
+    return AccumulatedGradient.from_result(r, n_pre, n_post, flat_times.shape[0])
 
 def backward_spikes_batch_accumulate(double[:] times, int[:] sources, int[:] n_spikes_per_sample,
                                      BatchSpikeOutput fwd_batch, double[:] post_errors,
@@ -585,6 +854,27 @@ def backward_maxima_batch(double[:] times, int[:] sources, int[:] n_spikes_per_s
         &batch_inp, fwd_batch.get_raw_ptr(), &maxima_errors[0])
     output.batch_size = batch_inp.batch_size
     return output
+
+def backward_maxima_batch_accumulate_from_vector(object vector,
+                                                 BatchMaximaOutput fwd_batch, double[:] maxima_errors,
+                                                 double[:,:] w, int n_pre, int n_post,
+                                                 double tau_mem, double tau_syn, double v_th):
+    """Batch backward pass (maxima) with gradient accumulation — takes SpikesVector directly."""
+    cdef EventPropInput inp
+    # Convert numpy arrays to memoryviews for C access
+    cdef double[:] flat_times = vector._flat_times
+    cdef int[:] flat_sources = vector._flat_sources
+    cdef int[:] n_spikes_per_sample = vector._n_spikes_per_sample
+    _fill_input(&inp, w, n_pre, n_post, flat_times, flat_sources,
+                tau_mem, tau_syn, v_th)
+    cdef BatchEventPropInput batch_inp
+    batch_inp.input = &inp
+    batch_inp.n_spikes_per_sample = <int*>(&n_spikes_per_sample[0])
+    batch_inp.batch_size = n_spikes_per_sample.shape[0]
+    cdef const double* ep = &maxima_errors[0] if maxima_errors.shape[0] > 0 else NULL
+    cdef BackwardOutput* r = eventprop_backward_maxima_batch_accumulate(
+        &batch_inp, fwd_batch.get_raw_ptr(), ep)
+    return AccumulatedGradient.from_result(r, n_pre, n_post, flat_times.shape[0])
 
 def backward_maxima_batch_accumulate(double[:] times, int[:] sources, int[:] n_spikes_per_sample,
                                      BatchMaximaOutput fwd_batch, double[:] maxima_errors,

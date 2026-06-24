@@ -5,7 +5,7 @@ from typing import NamedTuple, Tuple
 
 from .layer import GaussianDistribution, Layer, WeightDistribution
 from ._native import (
-    compute_spikes_batch_ptrs, backward_spikes_batch_accumulate_ptrs,
+    compute_spikes_batch, backward_spikes_batch_accumulate,
 )
 from .spikes import Spikes, SpikesVector
 
@@ -44,20 +44,16 @@ class LIFLayer(Layer):
     def forward(self, input_batch: SpikesVector) -> SpikesVector:
         super().forward(input_batch)
 
-        # Extract per-sample arrays — C iterates via pointer array (no Python concatenation)
-        times_list = [inp.times for inp in input_batch]
-        sources_list = [inp.sources for inp in input_batch]
+        # Use flat array API — SpikesVector already has _flat_times, _flat_sources,
+        # and _n_spikes_per_sample pre-built at construction.
+        times, sources, n_per_sample = SpikesVector._extract_flat_buffers(input_batch)
 
-        # Forward-only path: skip error buffer allocation.
-        # Errors are allocated lazily by backward() if/when needed.
-        c_output = compute_spikes_batch_ptrs(
-            times_list, sources_list,
+        c_output = compute_spikes_batch(
+            times, sources, n_per_sample,
             self.w_in_flat, self.parameters.n_in, self.parameters.n,
             self.parameters.tau_mem, self.parameters.tau_syn, self.parameters.v_th,
-            alloc_errors=False,
         )
 
-        # Wrap in SpikesVector (zero-copy, keeps C memory alive via _batch_output)
         self.post_batch = SpikesVector._from_batch_output(c_output)
         self._ran_forward = True
 
@@ -75,15 +71,12 @@ class LIFLayer(Layer):
     def backward(self):
         batch_size = len(self.input_batch)
 
-        # Extract per-sample arrays — C iterates via pointer array (no Python concatenation)
-        times_list = [inp.times for inp in self.input_batch]
-        sources_list = [inp.sources for inp in self.input_batch]
+        times, sources, n_per_sample = SpikesVector._extract_flat_buffers(self.input_batch)
+        errors = self.post_batch._batch_output.get_flat_errors()
 
-        # Errors are already in native memory (BatchSpikeOutput._errors)
-        # backward_spikes_batch_accumulate_ptrs reads them directly — zero concatenation
-        result = backward_spikes_batch_accumulate_ptrs(
-            times_list, sources_list,
-            self.post_batch._batch_output,
+        result = backward_spikes_batch_accumulate(
+            times, sources, n_per_sample,
+            self.post_batch._batch_output, errors,
             self.w_in_flat, self.parameters.n_in, self.parameters.n,
             self.parameters.tau_mem, self.parameters.tau_syn, self.parameters.v_th,
         )

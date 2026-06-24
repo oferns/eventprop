@@ -430,6 +430,54 @@ MaximaOutput* eventprop_compute_maxima_batch_ptrs(const BatchEventPropInputPtrs*
 }
 
 /**
+ * ── Direct batch functions (array of EventPropInput structs) ───────
+ *
+ * Most efficient API for Cython/Python bindings — no pointer array allocation needed.
+ */
+
+/**
+ * Direct batch forward pass (spikes) — array of EventPropInput structs.
+ */
+SpikeOutput* eventprop_compute_spikes_batch_direct(const BatchEventPropInputDirect* input)
+{
+    int batch_size = input->batch_size;
+
+    /* Allocate result array */
+    SpikeOutput* result = (SpikeOutput*)calloc(batch_size, sizeof(SpikeOutput));
+
+    /* Process each sample in parallel */
+    int b;
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static) if(batch_size >= 2)
+#endif
+    for (b = 0; b < batch_size; b++) {
+        result[b] = *eventprop_compute_spikes(&input->inputs[b]);
+    }
+    return result;
+}
+
+/**
+ * Direct batch forward pass (maxima) — array of EventPropInput structs.
+ */
+MaximaOutput* eventprop_compute_maxima_batch_direct(const BatchEventPropInputDirect* input)
+{
+    int batch_size = input->batch_size;
+
+    /* Allocate result array */
+    MaximaOutput* result = (MaximaOutput*)calloc(batch_size, sizeof(MaximaOutput));
+
+    /* Process each sample in parallel */
+    int b;
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static) if(batch_size >= 2)
+#endif
+    for (b = 0; b < batch_size; b++) {
+        result[b] = *eventprop_compute_maxima(&input->inputs[b]);
+    }
+    return result;
+}
+
+/**
  * Pointer-based batch backward pass (spikes) with gradient accumulation.
  */
 BackwardOutput* eventprop_backward_spikes_batch_accumulate_ptrs(

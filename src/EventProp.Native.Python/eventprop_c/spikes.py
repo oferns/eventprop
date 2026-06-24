@@ -86,20 +86,12 @@ class SpikesVector:
         self._batch_output = None
         self._cached_views = {}
 
-        # Flatten once at construction — outside any benchmark loop.
-        # forward() and backward() just read these pre-built buffers (zero copies in hot path).
-        if self._spikes:
-            times_list = [np.asarray(s.times, dtype=np.float64) for s in self._spikes]
-            sources_list = [np.asarray(s.sources, dtype=np.int32) for s in self._spikes]
-            self._flat_times = np.concatenate(times_list)
-            self._flat_sources = np.concatenate(sources_list)
-            self._n_spikes_per_sample = np.array(
-                [len(t) for t in times_list], dtype=np.intc
-            )
-        else:
-            self._flat_times = np.array([], dtype=np.float64)
-            self._flat_sources = np.array([], dtype=np.int32)
-            self._n_spikes_per_sample = np.array([], dtype=np.intc)
+        # Skip flat buffer creation — eliminates Python-level list comprehension
+        # and np.concatenate overhead. Flat buffers are created on-demand or
+        # provided directly by the Python layer via _from_flat_arrays().
+        self._flat_times = None
+        self._flat_sources = None
+        self._n_spikes_per_sample = None
 
     @classmethod
     def _from_batch_output(cls, batch_output) -> 'SpikesVector':
@@ -128,6 +120,23 @@ class SpikesVector:
         obj._flat_times = None
         obj._flat_sources = None
         obj._n_spikes_per_sample = None
+        return obj
+
+    @classmethod
+    def _from_flat_arrays(cls, flat_times: np.ndarray, flat_sources: np.ndarray,
+                          n_spikes_per_sample: np.ndarray) -> 'SpikesVector':
+        """Create from flat numpy arrays — zero Python overhead.
+        
+        This is the most efficient way to create a SpikesVector for the C batch API.
+        No list comprehension or np.concatenate overhead.
+        """
+        obj = object.__new__(cls)
+        obj._spikes = None
+        obj._batch_output = None
+        obj._cached_views = {}
+        obj._flat_times = flat_times
+        obj._flat_sources = flat_sources
+        obj._n_spikes_per_sample = n_spikes_per_sample
         return obj
 
     def __len__(self) -> int:
@@ -181,13 +190,31 @@ class SpikesVector:
     def _extract_flat_buffers(batch: 'SpikesVector') -> tuple:
         """Extract (times, sources, n_spikes) as flat arrays.
 
-        For input-mode vectors this returns the pre-built buffers directly.
+        For input-mode vectors this returns the pre-built buffers directly,
+        or creates them on-demand from the _spikes list.
         For output-mode vectors (from C batch output) it iterates per-sample
         views and concatenates once, then caches for subsequent calls —
         needed for layer chains where one layer's output becomes the next layer's input.
         """
         if batch._batch_output is None:
-            # Input mode: pre-built buffers available directly
+            # Input mode: check for pre-built buffers first
+            if batch._flat_times is not None:
+                return batch._flat_times, batch._flat_sources, batch._n_spikes_per_sample
+            
+            # Create flat buffers from _spikes list on-demand
+            if batch._spikes:
+                times_list = [np.asarray(s.times, dtype=np.float64) for s in batch._spikes]
+                sources_list = [np.asarray(s.sources, dtype=np.int32) for s in batch._spikes]
+                batch._flat_times = np.concatenate(times_list)
+                batch._flat_sources = np.concatenate(sources_list)
+                batch._n_spikes_per_sample = np.array(
+                    [len(t) for t in times_list], dtype=np.intc
+                )
+            else:
+                batch._flat_times = np.array([], dtype=np.float64)
+                batch._flat_sources = np.array([], dtype=np.int32)
+                batch._n_spikes_per_sample = np.array([], dtype=np.intc)
+            
             return batch._flat_times, batch._flat_sources, batch._n_spikes_per_sample
 
         # Output mode (C-owned): cache on first extraction to avoid repeated concatenation
