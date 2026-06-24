@@ -203,13 +203,20 @@ class SpikesVector:
             
             # Create flat buffers from _spikes list on-demand
             if batch._spikes:
-                times_list = [np.asarray(s.times, dtype=np.float64) for s in batch._spikes]
-                sources_list = [np.asarray(s.sources, dtype=np.int32) for s in batch._spikes]
-                batch._flat_times = np.concatenate(times_list)
-                batch._flat_sources = np.concatenate(sources_list)
-                batch._n_spikes_per_sample = np.array(
-                    [len(t) for t in times_list], dtype=np.intc
-                )
+                # Optimize for single-sample batch: avoid list comprehension and np.concatenate overhead
+                if len(batch._spikes) == 1:
+                    s = batch._spikes[0]
+                    batch._flat_times = np.asarray(s.times, dtype=np.float64)
+                    batch._flat_sources = np.asarray(s.sources, dtype=np.int32)
+                    batch._n_spikes_per_sample = np.array([len(batch._flat_times)], dtype=np.intc)
+                else:
+                    times_list = [np.asarray(s.times, dtype=np.float64) for s in batch._spikes]
+                    sources_list = [np.asarray(s.sources, dtype=np.int32) for s in batch._spikes]
+                    batch._flat_times = np.concatenate(times_list)
+                    batch._flat_sources = np.concatenate(sources_list)
+                    batch._n_spikes_per_sample = np.array(
+                        [len(t) for t in times_list], dtype=np.intc
+                    )
             else:
                 batch._flat_times = np.array([], dtype=np.float64)
                 batch._flat_sources = np.array([], dtype=np.int32)
@@ -219,24 +226,31 @@ class SpikesVector:
 
         # Output mode (C-owned): cache on first extraction to avoid repeated concatenation
         if batch._flat_times is None:
-            times_list = []
-            sources_list = []
-            counts = []
-            for i in range(len(batch)):
-                sample = batch[i]
-                t = np.asarray(sample.times, dtype=np.float64)
-                s = np.asarray(sample.sources, dtype=np.int32)
-                times_list.append(t)
-                sources_list.append(s)
-                counts.append(len(t))
+            # Optimize for single-sample batch: avoid list comprehension and np.concatenate overhead
+            if len(batch) == 1:
+                sample = batch[0]
+                batch._flat_times = np.asarray(sample.times, dtype=np.float64)
+                batch._flat_sources = np.asarray(sample.sources, dtype=np.int32)
+                batch._n_spikes_per_sample = np.array([len(batch._flat_times)], dtype=np.intc)
+            else:
+                times_list = []
+                sources_list = []
+                counts = []
+                for i in range(len(batch)):
+                    sample = batch[i]
+                    t = np.asarray(sample.times, dtype=np.float64)
+                    s = np.asarray(sample.sources, dtype=np.int32)
+                    times_list.append(t)
+                    sources_list.append(s)
+                    counts.append(len(t))
 
-            batch._flat_times = (
-                np.concatenate(times_list) if times_list else np.array([], dtype=np.float64)
-            )
-            batch._flat_sources = (
-                np.concatenate(sources_list) if sources_list else np.array([], dtype=np.int32)
-            )
-            batch._n_spikes_per_sample = np.array(counts, dtype=np.intc)
+                batch._flat_times = (
+                    np.concatenate(times_list) if times_list else np.array([], dtype=np.float64)
+                )
+                batch._flat_sources = (
+                    np.concatenate(sources_list) if sources_list else np.array([], dtype=np.int32)
+                )
+                batch._n_spikes_per_sample = np.array(counts, dtype=np.intc)
 
         return batch._flat_times, batch._flat_sources, batch._n_spikes_per_sample
 
