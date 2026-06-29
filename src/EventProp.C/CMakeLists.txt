@@ -45,16 +45,24 @@ add_library(eventprop_c_api SHARED
     eventprop_diag.c
     eventprop_batch.c
 )
-# CPU-specific optimization (kept for performance)
-target_compile_options(eventprop_c_api PRIVATE -march=native)
-target_compile_options(eventprop_c_api PRIVATE -ffp-contract=fast)
-# Aggressive FP math optimizations — matches EventProp.Python's C++ flags.
-# Subset of -ffast-math but without -ffinite-math-only (avoids NaN/infinity UB).
-target_compile_options(eventprop_c_api PRIVATE
-    -freciprocal-math   # x / y → x * (1/y) — many exp-decay divisions benefit
-    -fno-signed-zeros   # treat ±0 as identical, enables more FP simplifications
-    -funroll-loops      # unroll small per-neuron/per-spike loops
-)
+# CPU-specific optimization and aggressive FP math optimizations
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    # GCC/Clang flags
+    target_compile_options(eventprop_c_api PRIVATE -march=native)
+    target_compile_options(eventprop_c_api PRIVATE -ffp-contract=fast)
+    # Aggressive FP math optimizations — matches EventProp.Python's C++ flags.
+    # Subset of -ffast-math but without -ffinite-math-only (avoids NaN/infinity UB).
+    target_compile_options(eventprop_c_api PRIVATE
+        -freciprocal-math   # x / y → x * (1/y) — many exp-decay divisions benefit
+        -fno-signed-zeros   # treat ±0 as identical, enables more FP simplifications
+        -funroll-loops      # unroll small per-neuron/per-spike loops
+    )
+elseif(CMAKE_C_COMPILER_ID MATCHES "MSVC")
+    # MSVC equivalent optimizations:
+    # /Ox = Optimize for maximum speed (/O2 + /Ob2 /Oi /Ot /Op /Gy /GF)
+    # /fp:fast = Fast floating-point math (equivalent to -ffp-contract=fast, -freciprocal-math, -fno-signed-zeros)
+    target_compile_options(eventprop_c_api PRIVATE /Ox /fp:fast)
+endif()
 # libm is separate on Unix, built-in on Windows
 if(NOT WIN32)
     target_link_libraries(eventprop_c_api PRIVATE m)
