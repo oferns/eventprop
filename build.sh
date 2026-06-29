@@ -30,8 +30,8 @@ cd "$SCRIPT_DIR/src/EventProp.C"
 rm -rf "$CMAKE_BUILD_DIR"
 mkdir -p "$CMAKE_BUILD_DIR" && cd "$CMAKE_BUILD_DIR"
 cmake .. -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE"
-make -j$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
-echo "  → libeventprop_c_api.dylib"
+cmake --build . --config "$CMAKE_BUILD_TYPE"
+echo "  → libeventprop_c_api"
 
 # ── 2. C++ Wrapper Library (EventProp.Cpp.Wrapper)
 echo ""
@@ -40,8 +40,8 @@ cd "$SCRIPT_DIR/src/EventProp.Cpp.Wrapper"
 rm -rf "$CMAKE_BUILD_DIR"
 mkdir -p "$CMAKE_BUILD_DIR" && cd "$CMAKE_BUILD_DIR"
 cmake .. -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE"
-make -j$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
-echo "  → libeventprop_cpp_wrapper.dylib"
+cmake --build . --config "$CMAKE_BUILD_TYPE"
+echo "  → libeventprop_cpp_wrapper"
 
 # ── 3. Python Package (EventProp.Python) pybind11 bindings — reference library only
 echo ""
@@ -122,7 +122,7 @@ cd "$SCRIPT_DIR/src/EventProp.Native.ParityTests"
 rm -rf build
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE"
-make -j$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
+cmake --build . --config "$CMAKE_BUILD_TYPE"
 echo "  → parity_test built"
 
 # ── 9. Native Benchmarks (C vs C++)
@@ -132,7 +132,7 @@ cd "$SCRIPT_DIR/src/EventProp.Native.Benchmarks"
 rm -rf build
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE"
-make -j$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
+cmake --build . --config "$CMAKE_BUILD_TYPE"
 echo "  → bench_c + bench_cpp built"
 
 # ── Done ───────────────────────────────────────────────────
