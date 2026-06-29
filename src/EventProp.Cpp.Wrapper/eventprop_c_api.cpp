@@ -6,7 +6,9 @@
 #include <Eigen/Dense>
 #include <boost/math/tools/roots.hpp>
 #include <boost/system/error_code.hpp>
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 // ============================================================
 // Helpers: flat array ↔ Eigen/Spikes conversion
@@ -137,6 +139,7 @@ void eventprop_backward_spikes(
     double* gradient,      // row-major n_pre x n_post, caller zero-initialized
     double* spike_errors)  // output: n_input_spikes (mutated)
 {
+#ifdef _WIN32
     fprintf(stderr, "DEBUG_API: entered eventprop_backward_spikes [thread=%lu]\n", (unsigned long)GetCurrentThreadId());
     {
         void* frames[16];
@@ -144,6 +147,10 @@ void eventprop_backward_spikes(
         fprintf(stderr, "DEBUG_API: stack depth=%d\n", n); fflush(stderr);
     }
     fflush(stderr);
+#else
+    fprintf(stderr, "DEBUG_API: entered eventprop_backward_spikes\n");
+    fflush(stderr);
+#endif
     auto w_mat = make_matrix(w, n_pre, n_post);
     fprintf(stderr, "DEBUG_API: after make_matrix\n"); fflush(stderr);
 
