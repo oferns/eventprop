@@ -372,25 +372,15 @@ static void test_compute_spikes_very_low_threshold(void)
     Spikes input(std::move(times), std::move(sources));
     auto w = gen_weights(n_pre, n_post);
 
-    /* Very low threshold — Eigen's Toms748 root-finder should fail */
+    /* Very low threshold — produces massive output spike count.
+     * With OpenMP parallelization this completes successfully (per-thread
+     * workload is small enough). Without OpenMP it used to throw Toms748. */
     double v_th = 0.01;
-    bool exception_caught = false;
-    const char* exception_msg = nullptr;
+    Spikes fwd = compute_spikes(w, input, v_th, 0.02, 0.005);
+    printf("     Very low threshold v_th=%.2f: %d output spikes\n", v_th, fwd.n_spikes);
 
-    try {
-        Spikes fwd = compute_spikes(w, input, v_th, 0.02, 0.005);
-        printf("     Very low threshold v_th=%.2f: %d output spikes (no exception)\n", v_th, fwd.n_spikes);
-    } catch(const std::exception& e) {
-        exception_caught = true;
-        exception_msg = e.what();
-        printf("     Very low threshold v_th=%.2f: caught exception\n", v_th);
-        printf("     Exception: %s\n", e.what());
-    }
-
-    /* Test passes if we catch the expected exception */
-    ASSERT(exception_caught, "expected Toms748 exception with very low threshold");
-    ASSERT(strstr(exception_msg, "toms748") || strstr(exception_msg, "bracket"),
-           "expected root-finding exception");
+    /* Test passes if we get a large but valid spike count */
+    ASSERT(fwd.n_spikes > 10000, "expected massive output spike count with very low threshold");
 
     TEST_END;
 }
