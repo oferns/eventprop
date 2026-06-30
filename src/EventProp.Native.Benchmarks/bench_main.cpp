@@ -186,8 +186,31 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
         {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(                      \
         "ComputeSpikes/" #SizeName "/burst/default")
 
+#ifndef USE_CPP_WRAPPER
+#define COMPUTESPIKES_BENCH_NOBURST(SizeName, NP, NPO, NS)                                     \
+    BENCHMARK_CAPTURE(BM_ComputeSpikes, SizeName##_uniform,                                     \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(                    \
+        "ComputeSpikes/" #SizeName "/uniform/default");                                          \
+    BENCHMARK_CAPTURE(BM_ComputeSpikes, SizeName##_poisson,                                     \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(                    \
+        "ComputeSpikes/" #SizeName "/poisson/default")
+#else
+#define COMPUTESPIKES_BENCH_NOBURST(SizeName, NP, NPO, NS)                                     \
+    BENCHMARK_CAPTURE(BM_ComputeSpikes, SizeName##_uniform,                                     \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(                    \
+        "ComputeSpikes/" #SizeName "/uniform/default");                                          \
+    BENCHMARK_CAPTURE(BM_ComputeSpikes, SizeName##_poisson,                                     \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(                    \
+        "ComputeSpikes/" #SizeName "/poisson/default")
+#endif
+
+#ifndef USE_CPP_WRAPPER
 COMPUTESPIKES_BENCH(Tiny,    10,   5,   20);
 COMPUTESPIKES_BENCH(Small,   50,   20,  100);
+#else
+COMPUTESPIKES_BENCH_NOBURST(Tiny,    10,   5,   20);
+COMPUTESPIKES_BENCH_NOBURST(Small,   50,   20,  100);
+#endif
 // Medium — burst excluded (Toms748 throws on MSVC)
 BENCHMARK_CAPTURE(BM_ComputeSpikes, Medium_uniform,
     {"Medium", 200, 80, 500}, GenerateUniformData)->UseRealTime()->Name(
@@ -290,8 +313,31 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
         {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(                      \
         "BackwardSpikes/" #SizeName "/burst/default")
 
+#ifndef USE_CPP_WRAPPER
+#define BACKWARDSPIKES_BENCH_NOBURST(SizeName, NP, NPO, NS)                                     \
+    BENCHMARK_CAPTURE(BM_BackwardSpikes, SizeName##_uniform,                                     \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(                    \
+        "BackwardSpikes/" #SizeName "/uniform/default");                                          \
+    BENCHMARK_CAPTURE(BM_BackwardSpikes, SizeName##_poisson,                                     \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(                    \
+        "BackwardSpikes/" #SizeName "/poisson/default")
+#else
+#define BACKWARDSPIKES_BENCH_NOBURST(SizeName, NP, NPO, NS)                                     \
+    BENCHMARK_CAPTURE(BM_BackwardSpikes, SizeName##_uniform,                                     \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(                    \
+        "BackwardSpikes/" #SizeName "/uniform/default");                                          \
+    BENCHMARK_CAPTURE(BM_BackwardSpikes, SizeName##_poisson,                                     \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(                    \
+        "BackwardSpikes/" #SizeName "/poisson/default")
+#endif
+
+#ifndef USE_CPP_WRAPPER
 BACKWARDSPIKES_BENCH(Tiny,    10,   5,   20);
 BACKWARDSPIKES_BENCH(Small,   50,   20,  100);
+#else
+BACKWARDSPIKES_BENCH_NOBURST(Tiny,    10,   5,   20);
+BACKWARDSPIKES_BENCH_NOBURST(Small,   50,   20,  100);
+#endif
 // Medium — burst excluded (Toms748 throws on MSVC)
 BENCHMARK_CAPTURE(BM_BackwardSpikes, Medium_uniform,
     {"Medium", 200, 80, 500}, GenerateUniformData)->UseRealTime()->Name(
@@ -414,8 +460,31 @@ static void BM_FullTrainingStep(benchmark::State& state, const ProblemSize& sz, 
         {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(                      \
         "FullTrainingStep/" #SizeName "/burst/default")
 
+#ifndef USE_CPP_WRAPPER
+#define FULLTRAINING_BENCH_NOBURST(SizeName, NP, NPO, NS)                                     \
+    BENCHMARK_CAPTURE(BM_FullTrainingStep, SizeName##_uniform,                                 \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(                    \
+        "FullTrainingStep/" #SizeName "/uniform/default");                                      \
+    BENCHMARK_CAPTURE(BM_FullTrainingStep, SizeName##_poisson,                                 \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(                    \
+        "FullTrainingStep/" #SizeName "/poisson/default")
+#else
+#define FULLTRAINING_BENCH_NOBURST(SizeName, NP, NPO, NS)                                     \
+    BENCHMARK_CAPTURE(BM_FullTrainingStep, SizeName##_uniform,                                 \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(                    \
+        "FullTrainingStep/" #SizeName "/uniform/default");                                      \
+    BENCHMARK_CAPTURE(BM_FullTrainingStep, SizeName##_poisson,                                 \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(                    \
+        "FullTrainingStep/" #SizeName "/poisson/default")
+#endif
+
+#ifndef USE_CPP_WRAPPER
 FULLTRAINING_BENCH(Tiny,    10,   5,   20);
 FULLTRAINING_BENCH(Small,   50,   20,  100);
+#else
+FULLTRAINING_BENCH_NOBURST(Tiny,    10,   5,   20);
+FULLTRAINING_BENCH_NOBURST(Small,   50,   20,  100);
+#endif
 // Medium — burst excluded (Toms748 throws on MSVC)
 BENCHMARK_CAPTURE(BM_FullTrainingStep, Medium_uniform,
     {"Medium", 200, 80, 500}, GenerateUniformData)->UseRealTime()->Name(
@@ -743,8 +812,31 @@ static void BM_ComputeSums(benchmark::State& state, const ProblemSize& sz, DataG
         {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(   \
         "ComputeSums/" #SizeName "/burst/default")
 
+#ifndef USE_CPP_WRAPPER
+#define COMPUTESUMS_BENCH_NOBURST(SizeName, NP, NPO, NS)                                  \
+    BENCHMARK_CAPTURE(BM_ComputeSums, SizeName##_uniform,                                  \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(   \
+        "ComputeSums/" #SizeName "/uniform/default");                                      \
+    BENCHMARK_CAPTURE(BM_ComputeSums, SizeName##_poisson,                                  \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(   \
+        "ComputeSums/" #SizeName "/poisson/default")
+#else
+#define COMPUTESUMS_BENCH_NOBURST(SizeName, NP, NPO, NS)                                  \
+    BENCHMARK_CAPTURE(BM_ComputeSums, SizeName##_uniform,                                  \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(   \
+        "ComputeSums/" #SizeName "/uniform/default");                                      \
+    BENCHMARK_CAPTURE(BM_ComputeSums, SizeName##_poisson,                                  \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(   \
+        "ComputeSums/" #SizeName "/poisson/default")
+#endif
+
+#ifndef USE_CPP_WRAPPER
 COMPUTESUMS_BENCH(Tiny,    10,   5,   20);
 COMPUTESUMS_BENCH(Small,   50,   20,  100);
+#else
+COMPUTESUMS_BENCH_NOBURST(Tiny,    10,   5,   20);
+COMPUTESUMS_BENCH_NOBURST(Small,   50,   20,  100);
+#endif
 // Medium — burst excluded (Toms748 throws on MSVC)
 BENCHMARK_CAPTURE(BM_ComputeSums, Medium_uniform,
     {"Medium", 200, 80, 500}, GenerateUniformData)->UseRealTime()->Name(
@@ -835,8 +927,31 @@ static void BM_ComputeMaxima(benchmark::State& state, const ProblemSize& sz, Dat
         {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(   \
         "ComputeMaxima/" #SizeName "/burst/default")
 
+#ifndef USE_CPP_WRAPPER
+#define COMPUTEMAXIMA_BENCH_NOBURST(SizeName, NP, NPO, NS)                                \
+    BENCHMARK_CAPTURE(BM_ComputeMaxima, SizeName##_uniform,                                \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(   \
+        "ComputeMaxima/" #SizeName "/uniform/default");                                    \
+    BENCHMARK_CAPTURE(BM_ComputeMaxima, SizeName##_poisson,                                \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(   \
+        "ComputeMaxima/" #SizeName "/poisson/default")
+#else
+#define COMPUTEMAXIMA_BENCH_NOBURST(SizeName, NP, NPO, NS)                                \
+    BENCHMARK_CAPTURE(BM_ComputeMaxima, SizeName##_uniform,                                \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(   \
+        "ComputeMaxima/" #SizeName "/uniform/default");                                    \
+    BENCHMARK_CAPTURE(BM_ComputeMaxima, SizeName##_poisson,                                \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(   \
+        "ComputeMaxima/" #SizeName "/poisson/default")
+#endif
+
+#ifndef USE_CPP_WRAPPER
 COMPUTEMAXIMA_BENCH(Tiny,    10,   5,   20);
 COMPUTEMAXIMA_BENCH(Small,   50,   20,  100);
+#else
+COMPUTEMAXIMA_BENCH_NOBURST(Tiny,    10,   5,   20);
+COMPUTEMAXIMA_BENCH_NOBURST(Small,   50,   20,  100);
+#endif
 // Medium — burst excluded (Toms748 throws on MSVC)
 BENCHMARK_CAPTURE(BM_ComputeMaxima, Medium_uniform,
     {"Medium", 200, 80, 500}, GenerateUniformData)->UseRealTime()->Name(
@@ -932,8 +1047,31 @@ static void BM_BackwardMaxima(benchmark::State& state, const ProblemSize& sz, Da
         {#SizeName, NP, NPO, NS}, GenerateBurstData)->UseRealTime()->Name(   \
         "BackwardMaxima/" #SizeName "/burst/default")
 
+#ifndef USE_CPP_WRAPPER
+#define BACKWARDMAXIMA_BENCH_NOBURST(SizeName, NP, NPO, NS)                                \
+    BENCHMARK_CAPTURE(BM_BackwardMaxima, SizeName##_uniform,                                \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(   \
+        "BackwardMaxima/" #SizeName "/uniform/default");                                    \
+    BENCHMARK_CAPTURE(BM_BackwardMaxima, SizeName##_poisson,                                \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(   \
+        "BackwardMaxima/" #SizeName "/poisson/default")
+#else
+#define BACKWARDMAXIMA_BENCH_NOBURST(SizeName, NP, NPO, NS)                                \
+    BENCHMARK_CAPTURE(BM_BackwardMaxima, SizeName##_uniform,                                \
+        {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->Name(   \
+        "BackwardMaxima/" #SizeName "/uniform/default");                                    \
+    BENCHMARK_CAPTURE(BM_BackwardMaxima, SizeName##_poisson,                                \
+        {#SizeName, NP, NPO, NS}, GeneratePoissonData)->UseRealTime()->Name(   \
+        "BackwardMaxima/" #SizeName "/poisson/default")
+#endif
+
+#ifndef USE_CPP_WRAPPER
 BACKWARDMAXIMA_BENCH(Tiny,    10,   5,   20);
 BACKWARDMAXIMA_BENCH(Small,   50,   20,  100);
+#else
+BACKWARDMAXIMA_BENCH_NOBURST(Tiny,    10,   5,   20);
+BACKWARDMAXIMA_BENCH_NOBURST(Small,   50,   20,  100);
+#endif
 // Medium — burst excluded (Toms748 throws on MSVC)
 BENCHMARK_CAPTURE(BM_BackwardMaxima, Medium_uniform,
     {"Medium", 200, 80, 500}, GenerateUniformData)->UseRealTime()->Name(
