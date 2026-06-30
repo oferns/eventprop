@@ -18,7 +18,8 @@ fi
 
 mkdir -p "$OUT_DIR"
 
-# Filter to Tiny|Small — Medium+ crashes C (segfault) and times out C++ on Windows
+# Filter to Tiny|Small — C segfaults on Medium+ due to OpenMP contention
+# (see AGENTS.md historical notes). Both backends have 36 benchmarks at this scale.
 FILTER="Tiny|Small"
 
 echo "Running $NUM_RUNS iterations of C vs C++ benchmarks (min_time=${MIN_TIME}s, filter=$FILTER)"
@@ -26,18 +27,20 @@ echo ""
 
 for i in $(seq 1 "$NUM_RUNS"); do
     echo "[C]   Run $i/$NUM_RUNS..."
-    cd "$BUILD_DIR" && ./Release/bench_c.exe \
-        --benchmark_min_time="${MIN_TIME}s" \
-        --benchmark_filter="$FILTER" \
-        --benchmark_format=json \
-        > "$OUT_DIR/c_run_${i}.json" 2>/dev/null || true
+    cd "$BUILD_DIR"
+    if [ -n "$FILTER" ]; then
+        ./Release/bench_c.exe --benchmark_min_time="${MIN_TIME}s" --benchmark_filter="$FILTER" --benchmark_format=json > "$OUT_DIR/c_run_${i}.json" 2>/dev/null || true
+    else
+        ./Release/bench_c.exe --benchmark_min_time="${MIN_TIME}s" --benchmark_format=json > "$OUT_DIR/c_run_${i}.json" 2>/dev/null || true
+    fi
 
     echo "[CPP] Run $i/$NUM_RUNS..."
-    cd "$BUILD_DIR" && ./Release/bench_cpp.exe \
-        --benchmark_min_time="${MIN_TIME}s" \
-        --benchmark_filter="$FILTER" \
-        --benchmark_format=json \
-        > "$OUT_DIR/cpp_run_${i}.json" 2>/dev/null || true
+    cd "$BUILD_DIR"
+    if [ -n "$FILTER" ]; then
+        ./Release/bench_cpp.exe --benchmark_min_time="${MIN_TIME}s" --benchmark_filter="$FILTER" --benchmark_format=json > "$OUT_DIR/cpp_run_${i}.json" 2>/dev/null || true
+    else
+        ./Release/bench_cpp.exe --benchmark_min_time="${MIN_TIME}s" --benchmark_format=json > "$OUT_DIR/cpp_run_${i}.json" 2>/dev/null || true
+    fi
 done
 
 echo ""
