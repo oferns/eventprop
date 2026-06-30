@@ -4,6 +4,7 @@
  */
 
 #include "eventprop_diag.h"
+#include "eventprop.h"   /* MatrixView helpers */
 #include <stdlib.h>
 #include <math.h>
 
@@ -32,6 +33,7 @@ VoltageTraceOutput* eventprop_compute_voltage_trace(const VoltageTraceInput* inp
     result->ts      = calloc(n_t, sizeof(double));
 
     double k_prefactor = fwd->tau_syn / (fwd->tau_mem - fwd->tau_syn);
+    MatrixView w = mv(fwd->w, fwd->n_pre, fwd->n_post);
 
     for (int ti = 0; ti < n_t; ti++) {
         double t = input->dt * ti;
@@ -41,7 +43,7 @@ VoltageTraceOutput* eventprop_compute_voltage_trace(const VoltageTraceInput* inp
         /* Pre-synaptic contribution */
         for (int i = 0; i < fwd->n_spikes; i++) {
             if (fwd->times[i] > t) break;
-            mem += fwd->w[fwd->sources[i] * fwd->n_post + input->target_nrn_idx] *
+            mem += *mv_at(w, fwd->sources[i], input->target_nrn_idx) *
                    k_prefactor * (exp(-(t - fwd->times[i]) / fwd->tau_mem) -
                                   exp(-(t - fwd->times[i]) / fwd->tau_syn));
         }

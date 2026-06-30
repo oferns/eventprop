@@ -835,14 +835,14 @@ SumsOutput* eventprop_compute_sums(const EventPropInput* input)
     }
 
     /* Accumulate sums using SIMD-accelerated FMA */
+    MutableMatrixView s0 = mv_mut(result->sum0, n_rows, input->n_post);
+    MutableMatrixView s1 = mv_mut(result->sum1, n_rows, input->n_post);
+    MatrixView w         = mv(input->w, input->n_pre, input->n_post);
+
     for (int i = 0; i < input->n_spikes; i++) {
         int src = input->sources[i];
-        fma_row_simd(result->sum0 + (i + 1) * input->n_post,
-                           result->sum0 + i * input->n_post,
-                           input->w + src * input->n_post, exp_syn[i], input->n_post);
-        fma_row_simd(result->sum1 + (i + 1) * input->n_post,
-                           result->sum1 + i * input->n_post,
-                           input->w + src * input->n_post, exp_mem[i], input->n_post);
+        fma_row_simd(mv_row_mut(s0, i + 1), mv_row_mut(s0, i), mv_row(w, src), exp_syn[i], input->n_post);
+        fma_row_simd(mv_row_mut(s1, i + 1), mv_row_mut(s1, i), mv_row(w, src), exp_mem[i], input->n_post);
     }
 
     free(exp_mem);
@@ -884,6 +884,9 @@ MaximaOutput* eventprop_compute_maxima(const EventPropInput* input)
         return result;
     }
 
+    MatrixView s0 = mv(sum0, n_rows, input->n_post);
+    MatrixView s1 = mv(sum1, n_rows, input->n_post);
+
     int target_nrn;
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
@@ -891,17 +894,17 @@ MaximaOutput* eventprop_compute_maxima(const EventPropInput* input)
     for (target_nrn = 0; target_nrn < input->n_post; target_nrn++) {
         for (int i = 0; i <= input->n_spikes; i++) {
             double t_input = (i == input->n_spikes) ? INFINITY : input->times[i];
-            double s0 = sum0[i * input->n_post + target_nrn];
-            double s1 = sum1[i * input->n_post + target_nrn];
+            double s0v = *mv_at(s0, i, target_nrn);
+            double s1v = *mv_at(s1, i, target_nrn);
 
-            /* Analytical tmax from log(s1/s0) */
-            if (s0 > 0 && s1 > 0) {
-                double tmax = tmax_pref * (tmax_sum + log(s1 / s0));
+            /* Analytical tmax from log(s1v/s0v) */
+            if (s0v > 0 && s1v > 0) {
+                double tmax = tmax_pref * (tmax_sum + log(s1v / s0v));
 
                 if (!isinf(tmax) && (i == 0 || input->times[i-1] <= tmax) &&
                     (i == input->n_spikes || tmax <= t_input)) {
-                    double vmax = k_pref * (s1 * exp(-tmax/input->tau_mem) -
-                                            s0 * exp(-tmax/input->tau_syn));
+                    double vmax = k_pref * (s1v * exp(-tmax/input->tau_mem) -
+                                            s0v * exp(-tmax/input->tau_syn));
                     if (vmax > result->values[target_nrn]) {
                         result->values[target_nrn] = vmax;
                         result->times[target_nrn]  = tmax;
@@ -910,9 +913,9 @@ MaximaOutput* eventprop_compute_maxima(const EventPropInput* input)
             }
 
             /* Also check voltage at input spike time */
-            if (t_input < INFINITY && (s0 != 0 || s1 != 0)) {
-                double v_at_input = k_pref * (s1 * exp(-t_input/input->tau_mem) -
-                                              s0 * exp(-t_input/input->tau_syn));
+            if (t_input < INFINITY && (s0v != 0 || s1v != 0)) {
+                double v_at_input = k_pref * (s1v * exp(-t_input/input->tau_mem) -
+                                              s0v * exp(-t_input/input->tau_syn));
                 if (v_at_input > result->values[target_nrn]) {
                     result->values[target_nrn] = v_at_input;
                     result->times[target_nrn]  = t_input;
@@ -1015,6 +1018,9 @@ BackwardOutput* eventprop_backward_spikes(const BackwardSpikesInput* input)
         jump_mag[i]  = malloc(jump_cap[i] * sizeof(double));
     }
 
+    MutableMatrixView grad = mv_mut(result->grad, input->input->n_pre, input->input->n_post);
+    MatrixView w           = mv(input->input->w, input->input->n_pre, input->input->n_post);
+
     double largest_time = merged[0].time, previous_t = largest_time;
     double k_bwd = input->input->tau_mem / (input->input->tau_mem - input->input->tau_syn);
 
@@ -1037,7 +1043,7 @@ BackwardOutput* eventprop_backward_spikes(const BackwardSpikesInput* input)
                 }
             }
 
-            vadd_scaled_simd(result->grad + spike_source * input->input->n_post, lambda_i, -input->input->tau_syn, input->input->n_post);
+            vadd_scaled_simd(mv_row_mut(grad, spike_source), lambda_i, -input->input->tau_syn, input->input->n_post);
 
             /* Compute dot product: w[row] · (lambda_v - lambda_i)
                Use stack allocation for small n_post, heap otherwise. */
@@ -1047,7 +1053,7 @@ BackwardOutput* eventprop_backward_spikes(const BackwardSpikesInput* input)
             double* diff = use_stack ? stack_diff : malloc(input->input->n_post * sizeof(double));
 
             vsub_simd(diff, lambda_v, lambda_i, input->input->n_post);
-            double outbound = dot_product_simd(input->input->w + spike_source * input->input->n_post, diff, input->input->n_post);
+            double outbound = dot_product_simd(mv_row(w, spike_source), diff, input->input->n_post);
             all_errors[spike_idx] += outbound;
 
             if (!use_stack) free(diff);
