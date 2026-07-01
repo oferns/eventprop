@@ -164,11 +164,11 @@ static void test_backward_spikes(const TestCase& tc) {
     SpikeOutput* fwd_c = eventprop_compute_spikes(&fi_spikes);
     if (fwd_c->n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
     
-    double* post_errors_c = (double*)calloc(fwd_c->n_spikes, sizeof(double)); 
-    for (int i = 0; i < fwd_c->n_spikes; i++) post_errors_c[i] = 1.0;
-    
+    // Write errors into fwd_c->errors (allocated by forward pass)
+    for (int i = 0; i < fwd_c->n_spikes; i++) fwd_c->errors[i] = 1.0;
+
     EventPropInput fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
-    BackwardSpikesInput bsi = {&fi_base, fwd_c->times, fwd_c->sources, fwd_c->currents, post_errors_c, fwd_c->n_spikes};
+    BackwardSpikesInput bsi = {&fi_base, fwd_c->times, fwd_c->sources, fwd_c->currents, fwd_c->errors, fwd_c->n_spikes};
     BackwardOutput* backward_c = eventprop_backward_spikes(&bsi);
     
     RowMatrixXd w_mat = make_w_mat(w, tc.n_pre, tc.n_post); 
@@ -188,7 +188,6 @@ static void test_backward_spikes(const TestCase& tc) {
     
     free(w); free(times); free(sources); 
     eventprop_free_spike_output(fwd_c);
-    free(post_errors_c); 
     eventprop_free_backward_output(backward_c);
     free(grad_eig); 
     TEST_END;

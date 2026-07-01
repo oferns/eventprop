@@ -111,8 +111,7 @@ SpikeOutput* eventprop_compute_spikes_batch_direct(const BatchEventPropInputDire
  */
 BackwardOutput* eventprop_backward_spikes_batch(
     const BatchEventPropInput* input,
-    SpikeOutput* fwd_batch,        /* Forward spike outputs from compute_spikes_batch */
-    const double* post_errors
+    SpikeOutput* fwd_batch         /* Forward spike outputs — errors written into fwd_batch[i].errors before call */
     );
 
 /**
@@ -124,8 +123,7 @@ BackwardOutput* eventprop_backward_spikes_batch(
  */
 BackwardOutput* eventprop_backward_spikes_batch_accumulate(
     const BatchEventPropInput* input,
-    SpikeOutput* fwd_batch,
-    const double* post_errors
+    SpikeOutput* fwd_batch         /* Forward spike outputs — errors written into fwd_batch[i].errors before call */
     );
 
 /**
@@ -133,9 +131,7 @@ BackwardOutput* eventprop_backward_spikes_batch_accumulate(
  */
 BackwardOutput* eventprop_backward_spikes_batch_accumulate_ptrs(
     const BatchEventPropInputPtrs* input,
-    SpikeOutput* fwd_batch,
-    const double** post_errors,     /* Array of pointers: one per sample's errors */
-    const int* n_post_errors        /* Error count per sample (length: batch_size) */
+    SpikeOutput* fwd_batch          /* Forward spike outputs — errors written into fwd_batch[i].errors before call */
     );
 
 /* ── Batch forward pass (maxima) ─────────────────────────────────── */

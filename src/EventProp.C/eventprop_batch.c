@@ -4,7 +4,7 @@
 /**
  * Batch backward pass (spikes).
  */
-BackwardOutput* eventprop_backward_spikes_batch(const BatchEventPropInput* input, SpikeOutput* fwd_batch, const double* post_errors)
+BackwardOutput* eventprop_backward_spikes_batch(const BatchEventPropInput* input, SpikeOutput* fwd_batch)
 {
     int batch_size = input->batch_size;
     const EventPropInput* base = input->input;
@@ -13,22 +13,17 @@ BackwardOutput* eventprop_backward_spikes_batch(const BatchEventPropInput* input
     /* Allocate array of BackwardOutput structs */
     BackwardOutput* result = (BackwardOutput*)calloc(batch_size, sizeof(BackwardOutput));
 
-    /* Compute input sample offsets and forward error offsets */
+    /* Compute input sample offsets */
     int* offsets = (int*)malloc(batch_size * sizeof(int));
-    int* err_offsets = (int*)malloc(batch_size * sizeof(int));
     offsets[0] = 0;
-    err_offsets[0] = 0;
     for (int i = 1; i < batch_size; i++) {
         offsets[i] = offsets[i-1] + n_spikes_per_sample[i-1];
-        err_offsets[i] = err_offsets[i-1] + fwd_batch[i-1].n_spikes;
     }
 
     /* Process each sample in parallel */
     int b;
 #ifdef _OPENMP
-#pragma omp parallel for schedule(static) shared(base, offsets, err_offsets, n_spikes_per_sample,\
-            batch_size, result, fwd_batch, post_errors) \
-          if(batch_size >= 2)
+#pragma omp parallel for schedule(static) shared(base, offsets, n_spikes_per_sample, batch_size, result, fwd_batch) if(batch_size >= 2)
 #endif
     for (b = 0; b < batch_size; b++) {
         int offset = offsets[b];
@@ -47,21 +42,20 @@ BackwardOutput* eventprop_backward_spikes_batch(const BatchEventPropInput* input
             .fwd_times=fwd_batch[b].times,
             .fwd_sources=fwd_batch[b].sources,
             .fwd_currents=fwd_batch[b].currents,
-            .post_errors=post_errors + err_offsets[b],
+            .errors=fwd_batch[b].errors,
             .n_post_spikes=n_fwd_spikes,
         };
         result[b] = *eventprop_backward_spikes(&backward_input);
     }
 
     free(offsets);
-    free(err_offsets);
     return result;
 }
 
 /**
  * Batch backward pass (spikes) with gradient accumulation.
  */
-BackwardOutput* eventprop_backward_spikes_batch_accumulate(const BatchEventPropInput* input, SpikeOutput* fwd_batch, const double* post_errors)
+BackwardOutput* eventprop_backward_spikes_batch_accumulate(const BatchEventPropInput* input, SpikeOutput* fwd_batch)
 {
     int batch_size = input->batch_size;
     const EventPropInput* base = input->input;
@@ -80,18 +74,15 @@ BackwardOutput* eventprop_backward_spikes_batch_accumulate(const BatchEventPropI
 
     /* Compute offsets */
     int* offsets = (int*)malloc(batch_size * sizeof(int));
-    int* err_offsets = (int*)malloc(batch_size * sizeof(int));
     offsets[0] = 0;
-    err_offsets[0] = 0;
     for (int i = 1; i < batch_size; i++) {
         offsets[i] = offsets[i-1] + input->n_spikes_per_sample[i-1];
-        err_offsets[i] = err_offsets[i-1] + fwd_batch[i-1].n_spikes;
     }
 
     /* Process each sample in parallel, accumulate gradients */
     int b;
 #ifdef _OPENMP
-#pragma omp parallel for schedule(static) shared(base, offsets, err_offsets, batch_size, grad_acc, fwd_batch, post_errors) if(batch_size >= 2)
+#pragma omp parallel for schedule(static) shared(base, offsets, batch_size, grad_acc, fwd_batch) if(batch_size >= 2)
 #endif
     for (b = 0; b < batch_size; b++) {
         int offset = offsets[b];
@@ -107,7 +98,7 @@ BackwardOutput* eventprop_backward_spikes_batch_accumulate(const BatchEventPropI
             .fwd_times=fwd_batch[b].times,
             .fwd_sources=fwd_batch[b].sources,
             .fwd_currents=fwd_batch[b].currents,
-            .post_errors=post_errors + err_offsets[b],
+            .errors=fwd_batch[b].errors,
             .n_post_spikes=fwd_batch[b].n_spikes,
         };
         BackwardOutput* sample_result = eventprop_backward_spikes(&backward_input);
@@ -130,7 +121,6 @@ BackwardOutput* eventprop_backward_spikes_batch_accumulate(const BatchEventPropI
     }
 
     free(offsets);
-    free(err_offsets);
 
     /* Build result */
     BackwardOutput* result = (BackwardOutput*)malloc(sizeof(BackwardOutput));
@@ -482,9 +472,7 @@ MaximaOutput* eventprop_compute_maxima_batch_direct(const BatchEventPropInputDir
  */
 BackwardOutput* eventprop_backward_spikes_batch_accumulate_ptrs(
     const BatchEventPropInputPtrs* input,
-    SpikeOutput* fwd_batch,
-    const double** post_errors,
-    const int* n_post_errors
+    SpikeOutput* fwd_batch
 )
 {
     int batch_size = input->batch_size;
@@ -530,8 +518,8 @@ BackwardOutput* eventprop_backward_spikes_batch_accumulate_ptrs(
             .fwd_times=fwd_batch[b].times,
             .fwd_sources=fwd_batch[b].sources,
             .fwd_currents=fwd_batch[b].currents,
-            .post_errors=post_errors[b],
-            .n_post_spikes=n_post_errors[b],
+            .errors=fwd_batch[b].errors,
+            .n_post_spikes=fwd_batch[b].n_spikes,
         };
         BackwardOutput* sample_result = eventprop_backward_spikes(&backward_input);
 

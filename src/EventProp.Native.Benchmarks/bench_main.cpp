@@ -253,9 +253,9 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
     SpikeOutput* fwd_result = eventprop_compute_spikes(&fi);
 
     int n_post_spikes = fwd_result->n_spikes;
-    
-    // Post-spike errors (all 1.0)
-    std::vector<double> post_errors(n_post_spikes, 1.0);
+
+    // Write errors into fwd_result->errors (allocated by forward pass)
+    for (int i = 0; i < n_post_spikes; i++) fwd_result->errors[i] = 1.0;
 
     for (auto _ : state) {
         EventPropInput base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
@@ -263,7 +263,7 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
         BackwardSpikesInput backward_input = {
             .input = &base,
             .fwd_times=fwd_result->times, .fwd_sources=fwd_result->sources,
-            .fwd_currents=fwd_result->currents, .post_errors=post_errors.data(),
+            .fwd_currents=fwd_result->currents, .errors=fwd_result->errors,
             .n_post_spikes=n_post_spikes
         };
         BackwardOutput* result = eventprop_backward_spikes(&backward_input);
@@ -377,8 +377,8 @@ static void BM_FullTrainingStep(benchmark::State& state, const ProblemSize& sz, 
                     .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
         SpikeOutput* fwd = eventprop_compute_spikes(&fi);
 
-        // Set errors for backward pass (all -1.0)
-        std::vector<double> post_errors(fwd->n_spikes, -1.0);
+        // Write errors into fwd->errors (allocated by forward pass)
+        for (int i = 0; i < fwd->n_spikes; i++) fwd->errors[i] = -1.0;
 
         // Backward: gradient computation
         EventPropInput base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
@@ -386,7 +386,7 @@ static void BM_FullTrainingStep(benchmark::State& state, const ProblemSize& sz, 
         BackwardSpikesInput backward_input = {
             .input = &base,
             .fwd_times=fwd->times, .fwd_sources=fwd->sources,
-            .fwd_currents=fwd->currents, .post_errors=post_errors.data(),
+            .fwd_currents=fwd->currents, .errors=fwd->errors,
             .n_post_spikes=fwd->n_spikes
         };
         BackwardOutput* result = eventprop_backward_spikes(&backward_input);
@@ -518,22 +518,16 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
                 .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
     BatchEventPropInput batch = { .input = &input_data, .n_spikes_per_sample = n_spikes_per_sample.data(), .batch_size = batch_size };
 
-    // Warmup run to determine total output spike count (deterministic from fixed input)
-    SpikeOutput* warmup_fwd = eventprop_compute_spikes_batch(&batch);
-    int total_fwd_spikes = 0;
-    for (int b = 0; b < batch_size; b++)
-        total_fwd_spikes += warmup_fwd[b].n_spikes;
-    std::vector<double> post_errors(total_fwd_spikes, -1.0);  // allocated once
-    eventprop_free_batch_spike_output(warmup_fwd, batch_size);
-
     for (auto _ : state) {
         SpikeOutput* fwd_batch = eventprop_compute_spikes_batch(&batch);
 
-        // Fill errors in-place (no allocation)
-        std::fill(post_errors.begin(), post_errors.end(), -1.0);
+        // Write errors into fwd_batch[b].errors (allocated by forward pass)
+        for (int b = 0; b < batch_size; b++)
+            for (int i = 0; i < fwd_batch[b].n_spikes; i++)
+                fwd_batch[b].errors[i] = -1.0;
 
         BackwardOutput* result_batch = eventprop_backward_spikes_batch(
-            &batch, fwd_batch, post_errors.data());
+            &batch, fwd_batch);
 
         benchmark::DoNotOptimize(result_batch[0].grad);
 
@@ -635,7 +629,8 @@ static void BM_BackwardSpikesVth(benchmark::State& state)
                 .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
     SpikeOutput* fwd = eventprop_compute_spikes(&fi);
 
-    std::vector<double> post_errors(fwd->n_spikes, -1.0);
+    // Write errors into fwd->errors (allocated by forward pass)
+    for (int i = 0; i < fwd->n_spikes; i++) fwd->errors[i] = -1.0;
 #endif
 
     for (auto _ : state) {
@@ -648,7 +643,7 @@ static void BM_BackwardSpikesVth(benchmark::State& state)
         BackwardSpikesInput backward_input = {
             .input = &base,
             .fwd_times=fwd->times, .fwd_sources=fwd->sources,
-            .fwd_currents=fwd->currents, .post_errors=post_errors.data(),
+            .fwd_currents=fwd->currents, .errors=fwd->errors,
             .n_post_spikes=fwd->n_spikes
         };
         BackwardOutput* result = eventprop_backward_spikes(&backward_input);

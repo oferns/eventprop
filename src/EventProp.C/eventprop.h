@@ -79,6 +79,7 @@ typedef struct SpikeOutput {
     double* times;           /* Output spike times (malloc'd) */
     int* sources;        /* Output source neurons (malloc'd) */
     double* currents;        /* Synaptic currents at spike times (malloc'd) */
+    double* errors;          /* Post-synaptic errors (malloc'd, same size as n_spikes) — written by caller before backward pass */
 } SpikeOutput;
 
 typedef struct SumsOutput {
@@ -99,7 +100,7 @@ typedef struct BackwardSpikesInput {
     const double* fwd_times;           /* Forward spike times (borrowed) */
     const int* fwd_sources;        /* Forward spike sources (borrowed) */
     const double* fwd_currents;         /* Forward spike currents (borrowed) */
-    const double* post_errors;          /* Post-synaptic errors (borrowed) */
+    const double* errors;             /* Post-synaptic errors (borrowed, from SpikeOutput.errors) */
     int n_post_spikes;                  /* Number of post-synaptic spikes */
 } BackwardSpikesInput;
 

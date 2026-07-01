@@ -116,9 +116,11 @@ void eventprop_free_spike_output(SpikeOutput* output)
     free(output->times);
     free(output->sources);
     free(output->currents);
+    free(output->errors);
     output->times = NULL;
     output->sources = NULL;
     output->currents = NULL;
+    output->errors = NULL;
     output->n_spikes = 0;
 }
 void eventprop_free_sums_output(SumsOutput* output)
@@ -759,6 +761,7 @@ SpikeOutput* eventprop_compute_spikes(const EventPropInput* input)
         result->times = NULL;
         result->sources = NULL;
         result->currents = NULL;
+        result->errors = NULL;
 
         for (int n = 0; n < input->n_post; n++) {
             free(post_times_arr[n]);
@@ -792,6 +795,7 @@ SpikeOutput* eventprop_compute_spikes(const EventPropInput* input)
     result->times = malloc(result->n_spikes * sizeof(double));
     result->sources = malloc(result->n_spikes * sizeof(int));
     result->currents = malloc(result->n_spikes * sizeof(double));
+    result->errors = calloc(result->n_spikes, sizeof(double));
 
     for (int i = 0; i < result->n_spikes; i++) {
         result->times[i]     = entries[i].time;
@@ -1002,7 +1006,7 @@ BackwardOutput* eventprop_backward_spikes(const BackwardSpikesInput* input)
     qsort(merged, total, sizeof(MergedSpike), cmp_merged_desc);
 
     double* all_errors = calloc(total, sizeof(double));
-    for (int i = 0; i < input->n_post_spikes; i++) all_errors[input->input->n_spikes + i] = input->post_errors[i];
+    for (int i = 0; i < input->n_post_spikes; i++) all_errors[input->input->n_spikes + i] = input->errors[i];
 
     double* lambda_v = calloc(input->input->n_post, sizeof(double));
     double* lambda_i = malloc(input->input->n_post * sizeof(double));
