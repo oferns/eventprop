@@ -45,6 +45,10 @@ FetchContent_Declare(
 )
 set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
 set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+# MSVC: /EHsc required for Google Benchmark (C4530 warning treated as error)
+if(MSVC)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHsc")
+endif()
 FetchContent_MakeAvailable(benchmark)
 
 # ============================================================
