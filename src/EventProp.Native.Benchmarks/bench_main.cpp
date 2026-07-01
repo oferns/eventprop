@@ -499,51 +499,28 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
         }
     }
 
-    // Warmup: run forward pass to determine max output sizes
-    {
-        EventPropInput fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
-                    .times=times.data(), .sources=sources.data(),
-                    .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
-        BatchEventPropInput batch = { .input = &fi, .n_spikes_per_sample = n_spikes_per_sample.data(), .batch_size = batch_size };
-        SpikeOutput* warmup = eventprop_compute_spikes_batch(&batch);
-        int total_fwd = 0;
-        for (int b = 0; b < batch_size; b++)
-            total_fwd += warmup[b].n_spikes;
-        // Pre-allocate buffers large enough for all samples
-        std::vector<double> fwd_times(total_fwd);
-        std::vector<int> fwd_sources(total_fwd);
-        std::vector<double> fwd_currents(total_fwd);
-        std::vector<double> post_errors(total_fwd, -1.0);
-        eventprop_free_batch_spike_output(warmup, batch_size);
-    }
+    // NOTE: The C API allocates internally and returns pointers.
+    // There is no way to pre-allocate output buffers without a `_direct` variant.
+    // This means the benchmark measures malloc/calloc/free overhead on top of computation.
+    // For fair comparison, see FullTrainingStep (single-sample) benchmarks instead.
 
-    // Pre-allocate buffers outside loop (reuse each iteration)
-    std::vector<double> fwd_times(batch_size * sz.n_spikes);
-    std::vector<int> fwd_sources(batch_size * sz.n_spikes);
-    std::vector<double> fwd_currents(batch_size * sz.n_spikes);
-    std::vector<double> post_errors(batch_size * sz.n_spikes, -1.0);
-    std::vector<int> n_fwd_spikes_per_sample(batch_size);
+    EventPropInput input_data = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+                .times=times.data(), .sources=sources.data(),
+                .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
+    BatchEventPropInput batch = { .input = &input_data, .n_spikes_per_sample = n_spikes_per_sample.data(), .batch_size = batch_size };
 
     for (auto _ : state) {
-        // Forward: batch compute spikes
-        EventPropInput fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
-                    .times=times.data(), .sources=sources.data(),
-                    .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
-        BatchEventPropInput batch = { .input = &fi, .n_spikes_per_sample = n_spikes_per_sample.data(), .batch_size = batch_size };
         SpikeOutput* fwd_batch = eventprop_compute_spikes_batch(&batch);
 
-        // Set errors for backward pass
-        int total_fwd = 0;
+        // Count total output spikes across all samples
+        int total_fwd_spikes = 0;
         for (int b = 0; b < batch_size; b++)
-            total_fwd += fwd_batch[b].n_spikes;
-        std::vector<double> post_errors(total_fwd, -1.0);
+            total_fwd_spikes += fwd_batch[b].n_spikes;
 
-        // Backward: batch gradient computation (pass fwd_batch directly, no copying)
-        EventPropInput base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
-                                  .tau_mem=0.02, .tau_syn=0.005 };
-        BatchEventPropInput batch_bwd = { .input = &base, .n_spikes_per_sample = n_spikes_per_sample.data(), .batch_size = batch_size };
+        std::vector<double> post_errors(total_fwd_spikes, -1.0);
+
         BackwardOutput* result_batch = eventprop_backward_spikes_batch(
-            &batch_bwd, fwd_batch, post_errors.data());
+            &batch, fwd_batch, post_errors.data());
         
         benchmark::DoNotOptimize(result_batch[0].grad);
         
@@ -560,6 +537,7 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
         {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->ArgNames({"batch_size"}) \
         ->DenseRange(4, 32, 4)->Name("BatchTrainingStep/" #SizeName "/uniform/default")
 
+BATCHTRAINING_BENCH(Large,  250,  123,  500);
 BATCHTRAINING_BENCH(Small,   50,   20,  100);
 BATCHTRAINING_BENCH(Medium,  200,  80,  500);
 

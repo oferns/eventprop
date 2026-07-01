@@ -413,6 +413,48 @@ The C library and Eigen core **both use OpenMP** (`#pragma omp parallel for` in 
 
 **Workaround**: Keep parity tests at ≤50×20 scale. Validate large-scale correctness via isolated unit test suites.
 
+### BatchTrainingStep/Large Segfault (2026-06-30)
+
+`bench_c.exe` segfaults on `BatchTrainingStep/Large/uniform/default` with parameters `250×123, 500 spikes, batch_size=4`. The crash is a hard segfault (exit code 139) that occurs immediately — no hang or timeout.
+
+**Reproduce**:
+```bash
+cd src/EventProp.Native.Benchmarks/build
+./bench_c.exe --benchmark_filter="BatchTrainingStep/Large" 2>/dev/null
+```
+
+**Binary search results** (all `batch_size=4`, uniform data):
+| Pre | Post | Spikes | Result |
+|-----|------|--------|--------|
+| 200 | 80   | 500    | ✅ Medium works (~94μs) |
+| 250 | 100  | 500    | ✅ halved Large works (~125μs) |
+| 250 | 122  | 500    | ✅ just under boundary |
+| **250** | **123** | **500** | ❌ **crash** |
+| 250 | 150  | 500    | ❌ crash |
+| 250 | 200  | 500    | ❌ crash |
+
+Post-synaptic neuron count is the trigger: ≥123 crashes, ≤122 works.
+
+**What does NOT crash**:
+- Same parameters in standalone test (`tests.c` `test_batch_large_crash()`): **passes**
+- C++ benchmark at same scale: **works fine**
+- Single-sample benchmarks (`ComputeSpikes/Large`, `BackwardSpikes/Large`) with 500×200/1000 spikes: **work fine**
+
+**Benchmark code path** (C branch of `BM_BatchTrainingStep`):
+```cpp
+SpikeOutput* fwd_batch = eventprop_compute_spikes_batch(&batch);
+int total_fwd_spikes = 0;
+for (int b = 0; b < batch_size; b++)
+    total_fwd_spikes += fwd_batch[b].n_spikes;
+std::vector<double> post_errors(total_fwd_spikes, -1.0);
+BackwardOutput* result_batch = eventprop_backward_spikes_batch(
+    &batch, fwd_batch, post_errors.data());
+eventprop_free_backward_batch_output(result_batch, batch_size);
+eventprop_free_batch_spike_output(fwd_batch, batch_size);
+```
+
+All allocations are dynamic (no fixed-size arrays). The crash is specific to the benchmark binary — identical conditions in `tests.c` pass. Needs investigation on macOS/Linux to determine if this is platform-specific.
+
 ### C Library Optimization Campaign (2026-06-01)
 
 The C library was optimised to match or exceed the C++ Eigen core. Key changes:
