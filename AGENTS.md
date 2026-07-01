@@ -413,37 +413,6 @@ The C library and Eigen core **both use OpenMP** (`#pragma omp parallel for` in 
 
 **Workaround**: Keep parity tests at ≤50×20 scale. Validate large-scale correctness via isolated unit test suites.
 
-### BatchTrainingStep/Large Segfault (2026-06-30)
-
-`bench_c.exe` segfaults on `BatchTrainingStep/Large/uniform/default` with parameters `250×123, 500 spikes, batch_size=4`. The crash is a hard segfault (exit code 139) that occurs immediately — no hang or timeout.
-
-**Reproduce**:
-```bash
-cd src/EventProp.Native.Benchmarks/build
-./bench_c.exe --benchmark_filter="BatchTrainingStep/Large" 2>/dev/null
-```
-
-**Binary search results** (all `batch_size=4`, uniform data):
-| Pre | Post | Spikes | Result |
-|-----|------|--------|--------|
-| 200 | 80   | 500    | ✅ Medium works (~94μs) |
-| 250 | 100  | 500    | ✅ halved Large works (~125μs) |
-| 250 | 122  | 500    | ✅ just under boundary |
-| **250** | **123** | **500** | ❌ **crash** |
-| 250 | 150  | 500    | ❌ crash |
-| 250 | 200  | 500    | ❌ crash |
-
-Post-synaptic neuron count is the trigger: ≥123 crashes, ≤122 works.
-
-**What does NOT crash**:
-- Same parameters in standalone test (`tests.c` `test_batch_large_crash()`): **passes**
-- C++ benchmark at same scale: **works fine**
-- Single-sample benchmarks (`ComputeSpikes/Large`, `BackwardSpikes/Large`) with 500×200/1000 spikes: **work fine**
-
-**Root cause**: Stale build artifacts. MSVC's warning-as-error (C4530) prevented Google Benchmark from rebuilding, so `bench_c.exe` linked against an outdated benchmark library version. Adding `/EHsc` to CMakeLists.txt fixed it.
-
-**Resolution**: Added `if(MSVC) set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHsc") endif()` before `FetchContent_MakeAvailable(benchmark)` in `src/EventProp.Native.Benchmarks/CMakeLists.txt` (commit `77f42a5`).
-
 ### C Library Optimization Campaign (2026-06-01)
 
 The C library was optimised to match or exceed the C++ Eigen core. Key changes:
