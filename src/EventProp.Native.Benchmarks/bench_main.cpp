@@ -537,7 +537,7 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
         {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->ArgNames({"batch_size"}) \
         ->DenseRange(4, 32, 4)->Name("BatchTrainingStep/" #SizeName "/uniform/default")
 
-BATCHTRAINING_BENCH(Large,  250,  123,  500);
+BATCHTRAINING_BENCH(Large,  500,  200, 1000);
 BATCHTRAINING_BENCH(Small,   50,   20,  100);
 BATCHTRAINING_BENCH(Medium,  200,  80,  500);
 

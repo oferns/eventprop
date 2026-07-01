@@ -440,20 +440,9 @@ Post-synaptic neuron count is the trigger: ≥123 crashes, ≤122 works.
 - C++ benchmark at same scale: **works fine**
 - Single-sample benchmarks (`ComputeSpikes/Large`, `BackwardSpikes/Large`) with 500×200/1000 spikes: **work fine**
 
-**Benchmark code path** (C branch of `BM_BatchTrainingStep`):
-```cpp
-SpikeOutput* fwd_batch = eventprop_compute_spikes_batch(&batch);
-int total_fwd_spikes = 0;
-for (int b = 0; b < batch_size; b++)
-    total_fwd_spikes += fwd_batch[b].n_spikes;
-std::vector<double> post_errors(total_fwd_spikes, -1.0);
-BackwardOutput* result_batch = eventprop_backward_spikes_batch(
-    &batch, fwd_batch, post_errors.data());
-eventprop_free_backward_batch_output(result_batch, batch_size);
-eventprop_free_batch_spike_output(fwd_batch, batch_size);
-```
+**Root cause**: Stale build artifacts. MSVC's warning-as-error (C4530) prevented Google Benchmark from rebuilding, so `bench_c.exe` linked against an outdated benchmark library version. Adding `/EHsc` to CMakeLists.txt fixed it.
 
-All allocations are dynamic (no fixed-size arrays). The crash is specific to the benchmark binary — identical conditions in `tests.c` pass. Needs investigation on macOS/Linux to determine if this is platform-specific.
+**Resolution**: Added `if(MSVC) set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHsc") endif()` before `FetchContent_MakeAvailable(benchmark)` in `src/EventProp.Native.Benchmarks/CMakeLists.txt` (commit `77f42a5`).
 
 ### C Library Optimization Campaign (2026-06-01)
 
