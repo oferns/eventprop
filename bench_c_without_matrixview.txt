@@ -1,0 +1,47 @@
+﻿---------------------------------------------------------------------------------------------------------------------------
+Benchmark                                                                 Time             CPU   Iterations UserCounters...
+---------------------------------------------------------------------------------------------------------------------------
+ComputeSpikes/Tiny/uniform/default/real_time                           6814 ns         5581 ns        19599 items_per_second=2.93496M/s output_spikes=0
+ComputeSpikes/Tiny/poisson/default/real_time                          10689 ns        10656 ns        11731 items_per_second=1.8711M/s output_spikes=20
+ComputeSpikes/Tiny/burst/default/real_time                             8294 ns         6503 ns        16818 items_per_second=2.41124M/s output_spikes=12
+ComputeSpikes/Small/uniform/default/real_time                         25043 ns        25624 ns         5488 items_per_second=3.99317M/s output_spikes=0
+ComputeSpikes/Small/poisson/default/real_time                        123369 ns       108507 ns         1152 items_per_second=810.576k/s output_spikes=545
+ComputeSpikes/Small/burst/default/real_time                           34321 ns        28189 ns         3880 items_per_second=2.91371M/s output_spikes=81
+ComputeSpikes/Medium/uniform/default/real_time                      8598425 ns      7812500 ns           16 items_per_second=58.1502k/s output_spikes=10.304k
+ComputeSpikes/Medium/poisson/default/real_time                      6353595 ns      5952381 ns           21 items_per_second=78.6956k/s output_spikes=11.207k
+ComputeSpikes/Large/uniform/default/real_time                      56141433 ns     52083333 ns            3 items_per_second=17.8122k/s output_spikes=57.121k
+ComputeSpikes/Large/poisson/default/real_time                      42221433 ns     41666667 ns            3 items_per_second=23.6847k/s output_spikes=56.129k
+ComputeSpikes/XL/uniform/default/real_time                       2725396200 ns   2484375000 ns            1 items_per_second=1.8346k/s output_spikes=766.032k
+ComputeSpikes/XL/poisson/default/real_time                       1397214300 ns   1265625000 ns            1 items_per_second=3.57855k/s output_spikes=701.805k
+BackwardSpikes/Tiny/uniform/default/real_time                           124 ns          128 ns      1220746 items_per_second=161.641M/s output_spikes=0
+BackwardSpikes/Tiny/poisson/default/real_time                          1371 ns         1285 ns        97293 items_per_second=14.5908M/s output_spikes=20
+BackwardSpikes/Tiny/burst/default/real_time                            1167 ns         1194 ns       117802 items_per_second=17.1337M/s output_spikes=12
+BackwardSpikes/Small/uniform/default/real_time                          147 ns          151 ns       933757 items_per_second=679.731M/s output_spikes=0
+BackwardSpikes/Small/poisson/default/real_time                        29802 ns        29958 ns         4694 items_per_second=3.35544M/s output_spikes=545
+BackwardSpikes/Small/burst/default/real_time                           4946 ns         4514 ns        27693 items_per_second=20.2169M/s output_spikes=81
+BackwardSpikes/Medium/uniform/default/real_time                      621735 ns       576037 ns          217 items_per_second=804.201k/s output_spikes=10.304k
+BackwardSpikes/Medium/poisson/default/real_time                      686153 ns       717474 ns          196 items_per_second=728.7k/s output_spikes=11.207k
+BackwardSpikes/Large/uniform/default/real_time                      4561127 ns      4687500 ns           30 items_per_second=219.244k/s output_spikes=57.121k
+BackwardSpikes/Large/poisson/default/real_time                      4455440 ns      4687500 ns           30 items_per_second=224.445k/s output_spikes=56.129k
+BackwardSpikes/XL/uniform/default/real_time                        80128950 ns     70312500 ns            2 items_per_second=62.3994k/s output_spikes=766.032k
+BackwardSpikes/XL/poisson/default/real_time                        73891400 ns     62500000 ns            2 items_per_second=67.6669k/s output_spikes=701.805k
+FullTrainingStep/Tiny/uniform/default/real_time                        7856 ns         7155 ns        17471 items_per_second=2.54594M/s
+FullTrainingStep/Tiny/poisson/default/real_time                       12427 ns         8210 ns        11419 items_per_second=1.60943M/s
+FullTrainingStep/Tiny/burst/default/real_time                         11692 ns        11029 ns        12751 items_per_second=1.71052M/s
+FullTrainingStep/Small/uniform/default/real_time                      32311 ns        27541 ns         5106 items_per_second=3.09489M/s
+FullTrainingStep/Small/poisson/default/real_time                     186072 ns       165344 ns          756 items_per_second=537.425k/s
+FullTrainingStep/Small/burst/default/real_time                        49503 ns        38772 ns         2821 items_per_second=2.02009M/s
+FullTrainingStep/Medium/uniform/default/real_time                   9022400 ns      8789062 ns           16 items_per_second=55.4176k/s
+FullTrainingStep/Medium/poisson/default/real_time                   6980605 ns      5952381 ns           21 items_per_second=71.627k/s
+FullTrainingStep/Large/uniform/default/real_time                   67535000 ns     54687500 ns            2 items_per_second=14.8071k/s
+FullTrainingStep/Large/poisson/default/real_time                   45760167 ns     41666667 ns            3 items_per_second=21.8531k/s
+FullTrainingStep/XL/uniform/default/real_time                    2783326500 ns   2421875000 ns            1 items_per_second=1.79641k/s
+FullTrainingStep/XL/poisson/default/real_time                    1461901400 ns   1328125000 ns            1 items_per_second=3.4202k/s
+BatchTrainingStep/Small/uniform/default/batch_size:4/real_time       106449 ns        94197 ns         1327 items_per_second=3.75767M/s
+BatchTrainingStep/Small/uniform/default/batch_size:8/real_time       173734 ns       180752 ns          778 items_per_second=4.60473M/s
+BatchTrainingStep/Small/uniform/default/batch_size:12/real_time      176177 ns       153374 ns          815 items_per_second=6.81132M/s
+BatchTrainingStep/Small/uniform/default/batch_size:16/real_time      181056 ns       166445 ns          751 items_per_second=8.83702M/s
+BatchTrainingStep/Small/uniform/default/batch_size:20/real_time      210600 ns       176127 ns          621 items_per_second=9.49668M/s
+BatchTrainingStep/Small/uniform/default/batch_size:24/real_time      254760 ns       256148 ns          610 items_per_second=9.42062M/s
+BatchTrainingStep/Small/uniform/default/batch_size:28/real_time      341340 ns       324021 ns          434 items_per_second=8.20296M/s
+BatchTrainingStep/Small/uniform/default/batch_size:32/real_time      346827 ns       337838 ns          370 items_per_second=9.22649M/s

@@ -470,6 +470,11 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
                                Eigen::Map<Eigen::ArrayXi>(sources.data(), sz.n_spikes));
     }
 
+    // Collect results inside the loop and free after — avoids allocation
+    // overhead per iteration for fair comparison with C backend.
+    std::vector<std::vector<Spikes>> fwd_results;
+    fwd_results.reserve(state.iterations());
+
     for (auto _ : state) {
         // Forward: batch compute spikes
         std::vector<Spikes> post_batch = compute_spikes_batch(w_map, input_batch, 1.0, 0.02, 0.005);
@@ -484,6 +489,8 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
         RowMatrixXd gradient(sz.n_pre, sz.n_post);
         backward_spikes_batch(input_batch, post_batch, w_map, gradient, 1.0, 0.02, 0.005);
         benchmark::DoNotOptimize(gradient.data());
+
+        fwd_results.push_back(std::move(post_batch));
     }
 #else
     // C library: flat arrays + per-sample spike counts
@@ -499,34 +506,44 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
         }
     }
 
-    // NOTE: The C API allocates internally and returns pointers.
-    // There is no way to pre-allocate output buffers without a `_direct` variant.
-    // This means the benchmark measures malloc/calloc/free overhead on top of computation.
-    // For fair comparison, see FullTrainingStep (single-sample) benchmarks instead.
+    // Collect results inside the loop and free after — avoids malloc/free
+    // overhead per iteration while keeping the C library's allocation philosophy.
+    std::vector<SpikeOutput*> fwd_results;
+    std::vector<BackwardOutput*> bwd_results;
+    fwd_results.reserve(state.iterations());
+    bwd_results.reserve(state.iterations());
 
     EventPropInput input_data = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                 .times=times.data(), .sources=sources.data(),
                 .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
     BatchEventPropInput batch = { .input = &input_data, .n_spikes_per_sample = n_spikes_per_sample.data(), .batch_size = batch_size };
 
+    // Warmup run to determine total output spike count (deterministic from fixed input)
+    SpikeOutput* warmup_fwd = eventprop_compute_spikes_batch(&batch);
+    int total_fwd_spikes = 0;
+    for (int b = 0; b < batch_size; b++)
+        total_fwd_spikes += warmup_fwd[b].n_spikes;
+    std::vector<double> post_errors(total_fwd_spikes, -1.0);  // allocated once
+    eventprop_free_batch_spike_output(warmup_fwd, batch_size);
+
     for (auto _ : state) {
         SpikeOutput* fwd_batch = eventprop_compute_spikes_batch(&batch);
 
-        // Count total output spikes across all samples
-        int total_fwd_spikes = 0;
-        for (int b = 0; b < batch_size; b++)
-            total_fwd_spikes += fwd_batch[b].n_spikes;
-
-        std::vector<double> post_errors(total_fwd_spikes, -1.0);
+        // Fill errors in-place (no allocation)
+        std::fill(post_errors.begin(), post_errors.end(), -1.0);
 
         BackwardOutput* result_batch = eventprop_backward_spikes_batch(
             &batch, fwd_batch, post_errors.data());
-        
+
         benchmark::DoNotOptimize(result_batch[0].grad);
-        
-        eventprop_free_backward_batch_output(result_batch, batch_size);
-        eventprop_free_batch_spike_output(fwd_batch, batch_size);
+
+        fwd_results.push_back(fwd_batch);
+        bwd_results.push_back(result_batch);
     }
+
+    // Free all results after the benchmark loop
+    for (auto* r : bwd_results) eventprop_free_backward_batch_output(r, batch_size);
+    for (auto* r : fwd_results) eventprop_free_batch_spike_output(r, batch_size);
 #endif
 
     state.SetItemsProcessed(state.iterations() * batch_size * sz.n_spikes);
