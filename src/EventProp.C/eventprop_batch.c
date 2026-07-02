@@ -113,12 +113,26 @@ BackwardsBatch eventprop_backward_maxima_batch(const EventPropInput* inputs, con
     return batch;
 }
 
-double* eventprop_accumulate_gradients(BackwardsBatch batch, int grad_size)
+void eventprop_free_gradient_output(GradientOutput* output)
 {
-    double* grad = (double*)calloc(grad_size, sizeof(double));
+    if (output == NULL) return;
+    free(output->data);
+    output->data = NULL;
+    output->rows = 0;
+    output->cols = 0;
+}
+
+GradientOutput eventprop_accumulate_gradients(BackwardsBatch batch, int n_pre, int n_post)
+{
+    GradientOutput result;
+    result.rows = n_pre;
+    result.cols = n_post;
+    result.data = (double*)calloc(n_pre * n_post, sizeof(double));
+
     for (int b = 0; b < batch.batch_size; b++) {
-        for (int i = 0; i < grad_size; i++)
-            grad[i] += batch.outputs[b].grad[i];
+        for (int i = 0; i < n_pre * n_post; i++)
+            result.data[i] += batch.outputs[b].grad[i];
     }
-    return grad;
+
+    return result;
 }

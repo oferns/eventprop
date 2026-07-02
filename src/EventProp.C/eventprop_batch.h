@@ -78,10 +78,21 @@ MaximaBatch eventprop_compute_maxima_batch(const EventPropInput* inputs, const S
 BackwardsBatch eventprop_backward_maxima_batch(const EventPropInput* inputs, const SpikesBatch spikes_batch);
 
 /**
- * Sum per-sample gradients into a single tensor.
- * Returns malloc'd array of size grad_size — caller must free.
+ * Accumulated gradient output with dimensions.
  */
-double* eventprop_accumulate_gradients(BackwardsBatch batch, int grad_size);
+typedef struct GradientOutput {
+    double* data;     /* malloc'd, size = rows * cols (row-major) */
+    int rows;         /* n_pre */
+    int cols;         /* n_post */
+} GradientOutput;
+
+void eventprop_free_gradient_output(GradientOutput* output);
+
+/**
+ * Sum per-sample gradients into a single tensor.
+ * Caller must free via eventprop_free_gradient_output().
+ */
+GradientOutput eventprop_accumulate_gradients(BackwardsBatch batch, int n_pre, int n_post);
 
 #ifdef __cplusplus
 }
