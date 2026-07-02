@@ -28,12 +28,11 @@ typedef struct SpikesBatch {
 void eventprop_free_spikes_batch(SpikesBatch* batch);
 
 /**
- * Batch backward output — per-sample results plus pre-summed gradient.
+ * Batch backward output — per-sample results.
  */
 typedef struct BackwardsBatch {
     int batch_size;                    /* Number of samples in the batch */
     BackwardOutput* outputs;           /* Per-sample outputs (malloc'd, length = batch_size) */
-    double* grad;                      /* Pre-summed gradient across batch (malloc'd, size = n_pre * n_post) */
 } BackwardsBatch;
 
 void eventprop_free_backwards_batch(BackwardsBatch* batch);
@@ -64,7 +63,7 @@ typedef struct DropoutOutput {
 SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, int batch_size);
 
 /**
- * Batch backward pass (spike loss) — per-sample gradients + pre-summed gradient tensor.
+ * Batch backward pass (spike loss) — returns per-sample gradients.
  */
 BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs, const SpikesBatch spikes_batch);
 
@@ -74,9 +73,15 @@ BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs, con
 MaximaBatch eventprop_compute_maxima_batch(const EventPropInput* inputs, const SpikesBatch spikes_batch);
 
 /**
- * Batch backward pass (maxima loss) — per-sample gradients + pre-summed gradient tensor.
+ * Batch backward pass (maxima loss) — returns per-sample gradients.
  */
 BackwardsBatch eventprop_backward_maxima_batch(const EventPropInput* inputs, const SpikesBatch spikes_batch);
+
+/**
+ * Sum per-sample gradients into a single tensor.
+ * Returns malloc'd array of size grad_size — caller must free.
+ */
+double* eventprop_accumulate_gradients(BackwardsBatch batch, int grad_size);
 
 #ifdef __cplusplus
 }

@@ -30,9 +30,7 @@ void eventprop_free_backwards_batch(BackwardsBatch* batch)
         eventprop_free_backward_output(&batch->outputs[b]);
     }
     free(batch->outputs);
-    free(batch->grad);
     batch->outputs = NULL;
-    batch->grad = NULL;
     batch->batch_size = 0;
 }
 
@@ -70,14 +68,6 @@ BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs, con
 #endif
     for (b = 0; b < batch_size; b++) {
         batch.outputs[b] = eventprop_backward_spikes(inputs[b], spikes_batch.spikes[b]);
-    }
-
-    /* Sum gradients across batch */
-    int grad_size = inputs[0].n_pre * inputs[0].n_post;
-    batch.grad = (double*)calloc(grad_size, sizeof(double));
-    for (b = 0; b < batch_size; b++) {
-        for (int i = 0; i < grad_size; i++)
-            batch.grad[i] += batch.outputs[b].grad[i];
     }
 
     return batch;
@@ -120,13 +110,15 @@ BackwardsBatch eventprop_backward_maxima_batch(const EventPropInput* inputs, con
         batch.outputs[b] = eventprop_backward_maxima(inputs[b], spikes_batch.spikes[b]);
     }
 
-    /* Sum gradients across batch */
-    int grad_size = inputs[0].n_pre * inputs[0].n_post;
-    batch.grad = (double*)calloc(grad_size, sizeof(double));
-    for (b = 0; b < batch_size; b++) {
-        for (int i = 0; i < grad_size; i++)
-            batch.grad[i] += batch.outputs[b].grad[i];
-    }
-
     return batch;
+}
+
+double* eventprop_accumulate_gradients(BackwardsBatch batch, int grad_size)
+{
+    double* grad = (double*)calloc(grad_size, sizeof(double));
+    for (int b = 0; b < batch.batch_size; b++) {
+        for (int i = 0; i < grad_size; i++)
+            grad[i] += batch.outputs[b].grad[i];
+    }
+    return grad;
 }
