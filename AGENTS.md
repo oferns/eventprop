@@ -13,10 +13,10 @@ This repository implements the **EventProp** algorithm — an event-based backpr
 | Project | Language | Role |
 |---------|----------|------|
 | **EventProp.Python/** | Python + C++ (Eigen/pybind11) | Reference library (git submodule, read-only) |
-| **EventProp.C/** | C | Pure C reimplementation of the Eigen core. Has 2 sets of batch functions — one general-purpose, one designed specifically for the Cython bindings in EventProp.Native.Python |
-| **EventProp.Cpp.Wrapper/** | C++ (Eigen) | Convenience copy of the C++ code from EventProp.Python minus pybind11 bindings. Used for native benchmarks and parity tests |
-| **EventProp.Native.Python/** | Python + Cython | The Python layer from EventProp.Python rewritten to use the C library via Cython bindings (`eventprop_c/_native.pyx`) |
-| **EventProp.Native/** | C# (.NET 10) | P/Invoke bindings wrapping EventProp.C via `LibraryImport` + `[UnmanagedCallConv]` |
+| **EventProp.C/** | C | Pure C reimplementation with batch API and flat-array FFI variants |
+| **EventProp.Cpp.Wrapper/** | C++ (Eigen) | Convenience copy of the C++ core. Used for native benchmarks and parity tests |
+| **EventProp.Native.Python/** | Python + Cython | Python layer using C library via Cython bindings (`eventprop_c/_native.pyx`) |
+| **EventProp.Native/** | C# (.NET 10) | P/Invoke bindings wrapping EventProp.C via `LibraryImport` |
 | **EventProp/** | C# (.NET 10) | Self-contained, fully managed .NET implementation of EventProp.Python |
 | **EventProp.Tests/** | C# (.NET 10) | TUnit test suite for .NET projects (correctness + parity) |
 | **EventProp.Benchmarks/** | C# (.NET 10) | BenchmarkDotNet project comparing native vs managed .NET libraries |
@@ -28,32 +28,21 @@ This repository implements the **EventProp** algorithm — an event-based backpr
 
 ```
 eventprop.net/
-├── EventProp.slnx              # .NET 10 solution (XML-based)
-├── EventProp.sln               # Traditional solution (CLI compatibility)
 ├── build.sh                    # Build all targets (C, C++, Python, .NET)
 ├── clean.sh                    # Clean all or individual targets
 ├── src/
 │   ├── EventProp.Python/       # Reference library (git submodule, read-only)
 │   ├── EventProp.C/            # Pure C implementation (libeventprop_c_api)
+│   │   ├── eventprop.h/.c      # Core algorithm + single-sample functions
+│   │   ├── eventprop_batch.h/.c# Batch API with flat-array FFI variants
+│   │   └── tests.c             # Unit tests (being rewritten to Google Test)
 │   ├── EventProp.Cpp.Wrapper/  # C++ Eigen core (convenience copy, no pybind11)
-│   │   ├── tests.cpp           # Eigen direct unit tests (23 tests)
-│   │   └── tests_capi.cpp      # C API wrapper unit tests (14 tests)
 │   ├── EventProp.Native/       # .NET P/Invoke bindings (C library)
-│   │   └── NativeApi.cs        # LibraryImport + UnmanagedCallConv
 │   ├── EventProp/              # Managed .NET implementation
-│   │   ├── SpikesData.cs       # Spike event container
-│   │   ├── MaximaData.cs       # Membrane potential maxima
-│   │   ├── ScratchBuffers.cs   # Reusable pre-allocated buffers
-│   │   ├── EventPropMath.cs    # Core algorithm implementations
-│   │   ├── Layer.cs            # Abstract layer + chain composition
-│   │   ├── LIFLayer.cs         # Leaky Integrate-and-Fire layer
-│   │   ├── LILayer.cs          # Integrate-and-Fire layer
-│   │   ├── WeightInitializer.cs# Diagonal weight initialization
-│   │   └── BatchVectors.cs     # Per-batch state vectors
 │   ├── EventProp.Tests/        # TUnit test suite (correctness + parity)
 │   ├── EventProp.Benchmarks/   # BenchmarkDotNet (native vs managed .NET)
 │   ├── EventProp.Native.Python/  # Python + Cython bindings (C library)
-│   │   └── eventprop_c/        # Cython package (_native.pyx → _native.so)
+│   │   └── eventprop_c/_native.pyx  # Thin Cython wrappers, zero-copy numpy views
 │   ├── EventProp.Native.Benchmarks/  # Google Benchmark (C vs C++)
 │   ├── EventProp.Native.ParityTests/ # Standalone parity tests (C vs Eigen)
 │   └── EventProp.Python.Benchmarks/  # pytest-benchmark (pybind11 vs Cython)
@@ -67,14 +56,13 @@ eventprop.net/
 - **Root namespace**: `CW.EventProp` (library), `CW.EventProp.Tests` (tests)
 - **Nullable**: enabled across all projects
 - **Implicit usings**: enabled
-- **Test framework**: TUnit 1.45+ (Microsoft Testing Platform)
+- **Test framework**: TUnit 1.45+ (Microsoft Testing Platform) for .NET; Google Test planned for C/C++
 - **Coverage**: TUnit `--coverage --coverage-output-format=cobertura` + ReportGenerator
-- **Platform**: Developed and tested on macOS. Linux support intended; Windows if feasible.
 
 ## Building
 
 ```bash
-# Build everything (C, C++, Python, .NET, parity tests, benchmarks) — Release mode
+# Build everything — Release mode
 ./build.sh release
 
 # Build everything — Debug mode
@@ -86,9 +74,6 @@ clean.sh c            # only C library
 clean.sh cpp          # only C++ wrapper
 clean.sh python       # only Python package
 clean.sh dotnet       # only .NET projects
-clean.sh parity       # only parity tests (C vs Eigen)
-clean.sh benchmarks   # only native benchmarks (C vs C++)
-clean.sh all          # same as clean.sh (no args)
 ```
 
 ### Submodule Patches
@@ -100,194 +85,32 @@ Platform-specific patches are applied automatically by `build.sh`. They live in 
 | `submodule-macos.patch` | macOS (AppleClang + Homebrew) | Homebrew include paths, `-Xpreprocessor -fopenmp`, link args, NumPy deprecation |
 | `submodule-linux.patch` | Linux (GCC/Clang) | OpenMP link flag, remove C++17 `<execution>` parallel policies, NumPy deprecation |
 
-To apply manually:
-```bash
-cd src/EventProp.Python
-patch -p1 < ../../submodule-macos.patch   # or submodule-linux.patch
-```
-
-**Note**: The `src/pybind11` nested submodule may need updating separately (`git submodule update --init`). The patches don't include submodule pointer changes since `patch` can't handle them.
-
 The submodule is read-only — patches must be reapplied after pulling from upstream.
 
 ## Running Tests & Coverage
 
-### Quick Reference — Copy-Paste Ready Commands
+### .NET Tests (TUnit on .NET 10)
 
 ```bash
-# ── .NET Tests (TUnit on .NET 10) ────────────────────────────────
-# Debug (fast, different FP ordering — NOT for parity tests)
-cd src/EventProp.Tests && dotnet run --
-
-# Release (required for parity tests — matches C/C++ FP ordering)
+# All tests — Release mode (required for parity tests)
 cd src/EventProp.Tests && dotnet run -c Release --
 
-# With filter (Release mode)
-cd src/EventProp.Tests && dotnet run -c Release -- --treenode-filter "/*/*/ComputeSumsTests/*"
-
-# ── C/C++ Parity Tests (C vs Eigen, standalone) ─────────────────
-cd src/EventProp.Native.ParityTests && rm -rf build && mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build . && ./parity_test ../../EventProp.C/build/libeventprop_c_api.dylib
-
-# ── C API Wrapper Tests (C++ flat-array → Eigen) ───────────────
-cd src/EventProp.Cpp.Wrapper && rm -rf build && mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build . && ./eventprop_capi_tests
-
-# ── C/C++ Benchmarks (C vs Eigen performance) ───────────────────
-cd src/EventProp.Native.Benchmarks && rm -rf build && mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build . && ./bench_c --benchmark_min_time=0.1s
-
-# ── Python Benchmarks (pybind11 vs Cython) ─────────────────────
-cd src/EventProp.Python.Benchmarks && pytest test_benchmarks.py -v
-
-# ── .NET Benchmarks (native vs managed) ────────────────────────
-cd src/EventProp.Benchmarks && dotnet run -c Release -- --iteration-time 250
-```
-
-### ⚠️ How to Run .NET Tests on .NET 10
-
-TUnit uses the Microsoft Testing Platform — **not VSTest**. `dotnet test` does NOT work.
-
-**The `-c` flag goes BEFORE `--`, TUnit flags go AFTER `--`.** The `dotnet run` CLI splits on `--`: everything before is a dotnet build option, everything after goes to the test runner.
-
-```bash
-# ── CORRECT: -c before --, TUnit flags after -- ─────────────────
-cd src/EventProp.Tests && dotnet run -c Release --                          # all tests, release
-cd src/EventProp.Tests && dotnet run -c Release -- --treenode-filter "/*/*/BackwardSpikes/*"  # filtered
-
-# ── WRONG: -c after -- (TUnit rejects it as unknown flag): ─────────
-# cd src/EventProp.Tests && dotnet run -- -c Release   ← BROKEN
-# cd src/EventProp.Tests && dotnet test                ← BROKEN (VSTest unsupported)
-```
-
-### ⚠️ TUnit vs VSTest — Critical Difference
-
-TUnit runs on Microsoft.Testing.Platform (MTP), **not VSTest**. If you come from xUnit/NUnit/MSTest:
-
-- **`--filter` is silently rejected** — the flag is ignored, MTP help prints, and zero tests run
-- This looks like a "test failure" when it's actually just an unrecognised flag
-- **Always use `--treenode-filter` instead**
-
-| VSTest (xUnit/NUnit/MSTest) | TUnit (MTP) |
-|------------------------------|-------------|
-| `--filter "Category=Integration"` | `--treenode-filter "/*/*/*/*[Category=Integration]"` |
-| `--filter "FullyQualifiedName~LoginTests"` | `--treenode-filter "/*/*/LoginTests/*"` |
-| `--filter "Name=AcceptCookiesTest"` | `--treenode-filter "/*/*/*/AcceptCookiesTest"` |
-
-### TUnit Flags Reference (Passed after `--`, NOT before)
-
-Everything **before** `--` is a dotnet CLI option (e.g. `-c Release`). Everything **after** `--` goes to TUnit.
-
-| Flag | Effect | Example |
-|------|--------|---------|
-| `--no-progress` | Suppress the ASCII spinner, cleaner output for grep/parsing | `dotnet run -c Release -- --no-progress` |
-| `--treenode-filter "/*/*/BackwardSpikes/*"` | Run only tests matching pattern | `dotnet run -c Release -- --treenode-filter "/*/*/BackwardSpikes/*"` |
-| `--list-tests` | List all test names without running | `dotnet run -c Release -- --list-tests` |
-| `--output Detailed` | Show full failure details in output | `dotnet run -c Release -- --output Detailed` |
-| `--fail-fast` | Stop after first failure | `dotnet run -c Release -- --fail-fast` |
-| `--coverage` | Enable coverage collection | `dotnet run -c Release -- --coverage` |
-| `--coverage-output <file>` | Specify coverage output file path | `dotnet run -c Release -- --coverage --coverage-output coverage.cobertura.xml` |
-| `--coverage-output-format cobertura` | Coverage format (cobertura, json, etc.) | `dotnet run -c Release -- --coverage-output-format cobertura` |
-
-### Common TUnit Filter Patterns (treenode-filter)
-
-TUnit uses a tree path format: `/*/[project]/[class]/[test]` (4 segments). Use wildcards (`*`) to match any segment:
-
-```bash
-# All BackwardSpikes tests
-dotnet run -c Release -- --treenode-filter "/*/*/BackwardSpikes/*"
-
-# All tests in NativeVsManagedTests
-dotnet run -c Release -- --treenode-filter "/*/*/NativeVsManagedTests/*"
-
-# All parity tests (NumericalParityTests + NativeLibraryParityTests)
-dotnet run -c Release -- --treenode-filter "/*/*/*ParityTests/*"
-
-# Specific test
-dotnet run -c Release -- --treenode-filter "/*/*/BackwardSpikes_Uniform_Tiny"
-
-# All tests matching a pattern in the name
-dotnet run -c Release -- --treenode-filter "/*/*/*[Name~Poisson*]"
-```
-
-### Parsing TUnit Output (Common Patterns)
-
-TUnit output is verbose and multi-line. Use these grep patterns to extract meaningful information:
-
-```bash
-# Count total failures
-dotnet run -c Release -- 2>&1 | grep "failed " | wc -l
-
-# List only failed test names
-dotnet run -c Release -- 2>&1 | grep "failed BackwardSpikes"
-
-# Get failure reason for a specific test (3 lines after the name)
-dotnet run -c Release -- 2>&1 | grep "failed BackwardSpikes_Uniform_Tiny" -A3
-
-# Show only C vs Eigen comparison failures (NativeLibraryParityTests)
-dotnet run -c Release -- 2>&1 | grep "CompareNativeBackwardSpikes" -B3
-
-# Show only .NET vs Eigen comparison failures (NumericalParityTests)
-dotnet run -c Release -- 2>&1 | grep "CompareBackwardSpikes" -B3
-
-# Show only C vs .NET comparison failures (NativeVsManagedTests)
-dotnet run -c Release -- 2>&1 | grep "CompareNativeVsManaged" -B3
-
-# Check for Toms748 root-finder exceptions
-dotnet run -c Release -- 2>&1 | grep "f(a) and f(b)"
-
-# Check for spike count mismatches
-dotnet run -c Release -- 2>&1 | grep "SPIKE COUNT"
-
-# Get unique failure categories (test name only)
-dotnet run -c Release -- 2>&1 | grep "failed BackwardSpikes" | sort -u
-```
-
-### Quick Commands (Copy-Paste Ready)
-
-```bash
-# Run all tests — Release mode
-cd src/EventProp.Tests && dotnet run -c Release --
-
-# Run only backward pass tests
+# Filtered
 cd src/EventProp.Tests && dotnet run -c Release -- --treenode-filter "/*/*/BackwardSpikes/*"
-
-# Run only C vs Eigen parity tests
-cd src/EventProp.Tests && dotnet run -c Release -- --treenode-filter "/*/*/NativeLibraryParityTests/*"
-
-# Count failures
-cd src/EventProp.Tests && dotnet run -c Release -- 2>&1 | grep "failed " | wc -l
-
-# Show first failure reason
-cd src/EventProp.Tests && dotnet run -c Release -- --fail-fast 2>&1 | grep "failed" -A3
 ```
 
-### C/C++ Parity Test (Standalone Native Library)
+> **Note**: TUnit uses Microsoft Testing Platform (MTP), not VSTest. `dotnet test` does NOT work. The `-c` flag goes BEFORE `--`, TUnit flags go AFTER `--`. Use `--treenode-filter` instead of `--filter`.
 
-**Location**: `src/EventProp.Native.ParityTests/`
+### C/C++ Parity Tests (C vs Eigen)
 
-A standalone C++ test project that compares the pure C implementation (`libeventprop_c_api.dylib`) against the Eigen-based core (from EventProp.Cpp.Wrapper). Uses identical input data and asserts numerical equality. Built automatically by `./build.sh`.
-
-**Build & Run**:
 ```bash
 cd src/EventProp.Native.ParityTests && rm -rf build && mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
 ./parity_test /path/to/libeventprop_c_api.dylib
 ```
 
-**What it tests**: ComputeSums, ComputeSpikes, BackwardSpikes, ComputeMaxima, BackwardMaxima across uniform/poisson/burst patterns.
+### Native Benchmarks (C vs C++)
 
-**Current results**: 85/85 pass. All C outputs match Eigen within tolerance (absolute 1e-10, relative 1e-9).
-
-**Test suite expanded** to cover: ComputeSums, ComputeSpikes, BackwardSpikes, ComputeMaxima, BackwardMaxima across uniform/poisson/simultaneous/regular/exponential patterns at multiple scales. Zero-spike edge case (ComputeMaxima zero) returns NaN consistently in both backends.
-
-### C/C++ Benchmark Projects
-
-**Location**: `src/EventProp.Native.Benchmarks/`
-
-Compares C library vs Eigen core (C++ wrapper) performance across problem sizes and spike patterns. Built automatically by `./build.sh`.
-
-**Build & Run**:
 ```bash
 cd src/EventProp.Native.Benchmarks && rm -rf build && mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
@@ -297,81 +120,104 @@ cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
 
 ### Python Benchmarks (pytest-benchmark)
 
-**Location**: `src/EventProp.Python.Benchmarks/`
-
-Compares EventProp.Python (pybind11) vs EventProp.Native.Python (Cython → C library) at the Python level.
-
-**Run**:
 ```bash
 cd src/EventProp.Python.Benchmarks && pytest test_benchmarks.py -v
 ```
 
-### Python Bindings (Cython)
-
-**Location**: `src/EventProp.Native.Python/`
-
-The Python layer from EventProp.Python rewritten to use the C library via Cython bindings. The `eventprop_c/_native.pyx` module provides typed FFI to `libeventprop_c_api`, and the Python layer classes (`LIFLayer`, `LILayer`, etc.) delegate to these bindings.
-
-**Usage**: Install the package:
-```bash
-cd src/EventProp.Native.Python && pip install -e .
-```
-
-### Native Unit Tests
-
-Three independent native test suites validate correctness across implementations:
-
-| Suite | Location | Tests | Coverage |
-|-------|----------|-------|----------|
-| **C library** (`tests.c`) | `EventProp.C/` | 17 | All functions + edge cases (zero spikes, negative weights, large-scale) |
-| **Eigen direct** (`tests.cpp`) | `EventProp.Cpp.Wrapper/` | 23 | All Eigen methods + degenerate shapes, parameter variations, temporal extremes |
-| **C API wrapper** (`tests_capi.cpp`) | `EventProp.Cpp.Wrapper/` | 14 | Flat-array C interface mirroring pure C suite |
-| **Parity tests** (C vs Eigen) | `EventProp.Native.ParityTests/` | 85 | Numerical equivalence at ≤50×20 scale |
-| **.NET** (TUnit) | `EventProp.Tests/` | 408+ | Full managed API + three-way parity (C ≡ Eigen ≡ .NET) |
-
 ### Coverage Report Generation
 
 ```bash
-# Run with coverage (output → bin/Release/net10.0/TestResults/coverage.cobertura.xml)
-cd src/EventProp.Tests && dotnet run -c Release -- --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
+# Run with coverage
+cd src/EventProp.Tests && dotnet run -c Release -- --coverage --coverage-output-format=cobertura
 
-# Generate HTML coverage report (from test project directory)
+# Generate HTML report
 export PATH="$PATH:$HOME/.dotnet/tools"
 reportgenerator -reports:bin/Release/net10.0/TestResults/*.cobertura.xml \
   -targetdir:../../coverage-report -reporttypes:Html
-
-# Open report
-open coverage-report/index.html
 ```
 
-**Important**: `dotnet test` outputs "Testing with VSTest target is no longer supported" on .NET 10. Always use `dotnet run --`.
+## C Library API Design
 
-### Test Project Structure (EventProp.Tests)
+### Batch-First Architecture
 
-- **NativeVsManagedTests.cs** — C# (EventPropMath) vs NativeApi (C library). Tests: ComputeSums, ComputeSpikes, ComputeMaxima, Backward. Uses uniform patterns only.
-- **NumericalParityTests.cs** — Three-way: NativeApi (C) ≡ NativeCppApi (Eigen, source of truth) ≡ EventPropMath (.NET). All patterns/sizes. **This is the main parity test suite.**
-- **NativeLibraryParityTests.cs** — C vs Eigen ONLY (no .NET). Tests: BackwardSpikes, BackwardMaxima. All patterns/sizes.
-- **ComputeSpikesTests.cs** — Unit tests for ComputeSpikes forward pass.
-- **ComputeSumsTests.cs** — Unit tests for ComputeSums.
-- **BackwardSpikesTests.cs** — Numerical gradient verification for backward pass.
+The C library (`eventprop_batch.h`) provides batch operations as the primary interface. All batch functions accept per-sample input arrays and return typed result structs. Callers free via corresponding `_free_` functions.
 
-## Architecture Notes
+**Core batch types:**
+
+| Type | Role | Free Function |
+|------|------|---------------|
+| `SpikesBatch` | Forward spike output (borrowed inputs) | `eventprop_free_spikes_batch` |
+| `SpikesBatchWithInputs` | Forward spike output (owned inputs, flat-FFI variant) | `eventprop_free_spikes_with_inputs_batch` |
+| `MaximaBatch` / `MaximaBatchWithInputs` | Maxima output | `eventprop_free_maxima_batch` / `_with_inputs` |
+| `BackwardsBatch` | Per-sample backward results | `eventprop_free_backwards_batch` |
+| `AccumulatedBackwardResult` | Combined backward + summed gradient | `eventprop_free_accumulated_backward_result` |
+| `DropoutBatch` | Dropout output (per-sample surviving spikes) | `eventprop_free_dropout_batch` |
+
+### Flat-Array FFI Variants
+
+Functions suffixed `_flat` accept flat numpy-compatible arrays and per-sample offset counts. They are designed for Cython/P/Invoke callers that have contiguous buffers:
+
+```c
+SpikesBatchWithInputs eventprop_compute_spikes_batch_flat(
+    const double* w, int n_pre, int n_post,
+    const double* times, const int* sources, const int* n_per_sample,
+    int batch_size, double tau_mem, double tau_syn, double v_th);
+
+MaximaBatchWithInputs eventprop_compute_maxima_batch_flat(...);
+DropoutBatch eventprop_dropout_spikes_batch(
+    const double* times, const int* sources, const int* n_per_sample,
+    int batch_size, double p_drop, int seed);
+```
+
+### Combined Backward + Accumulate
+
+The primary FFI entry point for backward pass is the combined function — one call, zero intermediate allocations in Python:
+
+```c
+AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
+    const EventPropInput* inputs, const SpikesBatch spikes_batch);
+
+AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
+    const EventPropInput* inputs, const SpikesBatch spikes_batch);
+```
+
+Returns `GradientOutput summed_grads` (ready for weight update) + per-sample `.spike_errors` preserved. Per-sample `.grad` buffers are freed after summation.
+
+### Memory Ownership Rules
+
+- Batch free functions take pointers (`Type*`) to safely null out internal fields after freeing
+- Individual output free functions exist for all types: `eventprop_free_spike_output`, `eventprop_free_maxima_output`, `eventprop_free_backward_output`, `eventprop_free_dropout_output`
+- Dimension fields are removed from output structs — dimensions are inferred from input parameters
+
+## Python Bindings (`_native.pyx`)
+
+### Architecture
+
+Thin Cython wrappers with managed heap-backed wrapper classes that own C memory:
+
+| Wrapper Class | Owns | Provides |
+|---------------|------|----------|
+| `_SpikesBatchOutput` | `SpikesBatchWithInputs*` | Zero-copy views via `.get_spike_times(i)`, `.get_sources(i)` |
+| `_MaximaBatchOutput` | `MaximaBatchWithInputs*` | Zero-copy views for maxima times/values |
+| `_AccumulatedBackwardResult` | `AccumulatedBackwardResult*` | `.grad` (flat), `.rows`, `.cols`, `.get_spike_errors(i)` |
+| `_DropoutBatchOutput` | `DropoutBatch*` | Zero-copy views via `[i]` → `(times, sources)` tuple |
+
+All wrappers use `__dealloc__` to call the appropriate C free function. Numpy views are created via `PyArray_SimpleNewFromData` (zero-copy).
+
+### Layer Chain Flow
+
+1. Python constructs input once via flat variant (`compute_spikes_batch_flat`)
+2. All subsequent batch calls receive direct pointers to C-owned memory from previous returns
+3. No concatenation, no array rebuilding in Python after initial input
+4. Backward pass uses combined accumulate function — one FFI call per layer
+
+## Architecture Notes (.NET)
 
 ### Zero-Allocation Hot Paths
-
-The core algorithm (`EventPropMath`) is designed for allocation-free execution in training loops. Key patterns:
 
 - **`MatrixView`** — `ref struct` providing zero-copy row-major matrix views over flat `double[]` arrays
 - **`StridedSpan`** — column access without allocation (strided read-only span)
 - **`ScratchBuffers`** — pre-allocated reusable buffers; callers allocate once and pass in
-- **`Span<double>` / `ReadOnlySpan<double>`** — used throughout instead of arrays for zero-copy operations
-
-### Data Flow
-
-1. **Input**: `SpikesData` (times + source neuron indices per sample)
-2. **Forward**: `EventPropMath.ComputeSpikes()` — predicts post-synaptic spike times
-3. **Loss**: `MaximaData` (membrane potential maxima per neuron) or first-spike times
-4. **Backward**: `EventPropMath.Backward()` — adjoint method sweep computing weight gradients
 
 ### Biophysical Parameters
 
@@ -384,13 +230,6 @@ All functions share these parameters:
 
 Row-major: `w[row * cols + col]` where rows = pre-synaptic neurons, cols = post-synaptic neurons.
 
-## TDD Workflow
-
-Tests are written before implementation. Each new function should have:
-1. Failing test(s) defining the expected behavior
-2. Minimal implementation to pass those tests
-3. Coverage verification
-
 ## Key Algorithms
 
 - **`ComputeSums`**: Pre-computes cumulative exponential-weighted sums for fast membrane potential evaluation
@@ -398,87 +237,8 @@ Tests are written before implementation. Each new function should have:
 - **`Backward`**: Adjoint method — time-reversed sweep propagating λ_v (membrane) and λ_i (synaptic) adjoints
 - **`ComputeMaxima`**: Finds membrane potential maxima per neuron (for voltage-based loss)
 
----
+## Platform Support
 
-## Historical Notes
-
-### Parity Test Limitation — Large-Scale In-Process Testing
-
-The C library and Eigen core **both use OpenMP** (`#pragma omp parallel for` in `compute_spikes`). When loaded in the same process (parity test binary links Eigen statically + loads C via `dlopen`), large-scale tests (200×80, 500 spikes) cause an **intermittent bus error** due to memory allocator contention between the two OpenMP thread pools.
-
-- Both libraries link against the same `/opt/homebrew/opt/libomp/lib/libomp.dylib`
-- `OMP_NUM_THREADS=1` reduces but doesn't eliminate the issue (still ~10% failure rate)
-- Each library passes large-scale tests **in isolation** (C: 17/17, Eigen direct: 23/23, C API wrapper: 14/14)
-- **Does NOT affect native benchmarks** (`bench_c` and `bench_cpp` are separate processes, each using only one library)
-
-**Workaround**: Keep parity tests at ≤50×20 scale. Validate large-scale correctness via isolated unit test suites.
-
-### C Library Optimization Campaign (2026-06-01)
-
-The C library was optimised to match or exceed the C++ Eigen core. Key changes:
-
-| Optimization | Impact |
-|-------------|--------|
-| Larger initial buffer capacity + triple growth (#2) | 2.4–2.9x improvement on ComputeSpikes at Large scale |
-| Fix diff[256] stack buffer overflow risk (#5) | 2.4–3.1x improvement on BackwardSpikes at Large scale |
-| Factor exp() in compute_v (#6) | Closes remaining ComputeSpikes gap entirely — C ≈ C++ at all scales |
-
-### OOB Buffer Overflow Fix (2026-06-01)
-
-Fixed buffer overflow in `eventprop_compute_spikes` where burst patterns caused more output spikes than the fixed-size buffer could hold. Replaced with per-neuron dynamic buffers that grow via `realloc`.
-
-### C Library Batch Operations (2026-06-05)
-
-Added `eventprop_compute_spikes_batch_alloc()` to C library for batch processing. EventProp.Native.Python uses a dedicated set of batch functions designed for the Cython interface.
-
-### Benchmark Gaps Implemented (2026-06-09)
-
-- **FullTrainingStep** composite benchmark (Sums → Spikes → Backward chain)
-- **BatchTrainingStep** multi-sample benchmark (batch sizes 4–32)
-- **BackwardSpikes XL** size variant
-
-### SIMD Audit (2026-06-09)
-
-Existing SIMD helpers: `fma_row_simd`, `scale_inplace_simd`, `vadd_scaled_simd`, `dot_product_simd`. Added `vsub_simd` (<2% impact). Remaining scalar loops are inherently sequential (root-finding) or lack cross-platform SIMD transcendental support.
-
----
-
-## Temporary: Cython Forward Pass Overhead (2026-06-18)
-
-### Problem
-
-Python benchmarks (`EventProp.Python.Benchmarks`) show Cython (`eventprop_c`) forward pass is **10–100x slower** than pybind11 (`EventProp.Python`), while backward pass is comparable or faster.
-
-**Small uniform forward (Mean μs):**
-| Backend | LIF | LI | TTFS | VMax |
-|---------|-----|----|----|
-| pybind11 | 99 | 94 | 123 | 102 |
-| Cython | 1083 | 1084 | 1102 | 1023 |
-
-**Small uniform backward (Mean μs):**
-| Backend | LIF | LI | TTFS | VMax |
-|---------|-----|----|------|
-| pybind11 | 4.27 | 24.5 | 32.6 | 75.7 |
-| Cython | 4.63 | 17.3 | 22.2 | 26.0 |
-
-Cython backward is actually **1.4–3x faster** than pybind11.
-
-### Investigation
-
-- `ctypes` is imported in `_native.pyx` but used **only** for DLL loading (`cdll.LoadLibrary`) at module init. C function calls use proper `cdef extern from` declarations in `_native.pxd` (zero-overhead Cython FFI).
-- The C library itself is fast — native benchmarks (`bench_c.exe`) confirm this.
-- Forward pass timing is suspiciously flat (~1ms) across all operations and patterns in Cython, suggesting fixed overhead rather than computation cost.
-- Backward pass has similar C API structure but is fast, ruling out general ctypes/FFI overhead.
-
-### Suspected Causes (unconfirmed)
-
-1. **Output wrapping**: Forward creates `BatchSpikeOutput` with per-sample numpy views (`_double_view`, `_int_view`) via `PyArray_SimpleNewFromData` + `np.asarray()`. The `np.asarray()` call may trigger an eager copy instead of a zero-copy view.
-2. **Error buffer allocation**: Forward allocates `calloc(tot_spikes)` + `malloc(bs+1)` error buffers in Python-space after C call. Backward reads from pre-allocated buffers.
-3. **Python list handling**: Forward extracts `times_list = [inp.times for inp in input_batch]` before C call. pybind11 passes `SpikesVector` directly and iterates in C++.
-
-### Next Steps
-
-1. Profile Cython forward path to pinpoint exact overhead location
-2. Check if `_double_view`/`_int_view` are copying data (they shouldn't be)
-3. Compare with pybind11's `compute_spikes_batch_cpp` data flow
-4. Consider moving output wrapping to lazy evaluation (only create numpy views when accessed)
+- **macOS** — developed and tested
+- **Linux** — intended support
+- **Windows** — supported via MSVC + CMake (VS Code workspace configs provided)

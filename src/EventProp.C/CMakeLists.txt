@@ -4,6 +4,8 @@ project(eventprop_c LANGUAGES C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+
+
 # Detect SIMD support at compile time (priority: AVX-512 > AVX2 > NEON)
 # Use runtime CPU feature detection, not just compiler flag acceptance
 set(_HAS_AVX512 -1)
@@ -45,6 +47,7 @@ add_library(eventprop_c_api SHARED
     eventprop_diag.c
     eventprop_batch.c
 )
+target_compile_definitions(eventprop_c_api PUBLIC EVENTPROP_VALIDATE_INPUTS)
 # CPU-specific optimization and aggressive FP math optimizations
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     # GCC/Clang flags
@@ -89,11 +92,4 @@ target_include_directories(eventprop_c_api PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 install(TARGETS eventprop_c_api LIBRARY DESTINATION lib)
 install(FILES eventprop.h eventprop_diag.h eventprop_batch.h DESTINATION include)
 
-# Unit tests
-add_executable(test_runner tests.c)
-if(NOT WIN32)
-    target_link_libraries(test_runner PRIVATE eventprop_c_api m)
-else()
-    target_link_libraries(test_runner PRIVATE eventprop_c_api)
-endif()
-add_test(NAME EventPropCTests COMMAND test_runner)
+# Unit tests (see EventProp.C.Tests for Google Test suite)

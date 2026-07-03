@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools>=64", "numpy", "cython>=3.0"]
+requires = ["setuptools>=64", "numpy"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "eventprop_c"
 version = "0.1"
-description = "EventProp C-library bindings via Cython"
+description = "EventProp C-library bindings via Python C-API"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"

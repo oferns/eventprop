@@ -141,13 +141,13 @@ class SpikesVector:
 
     def __len__(self) -> int:
         if self._batch_output is not None:
-            return len(self._batch_output)
+            return self._batch_output.__len__()
         return len(self._spikes)
 
     def __getitem__(self, idx: int):
         if self._batch_output is not None:
             if idx not in self._cached_views:
-                result = self._batch_output[idx]
+                result = self._batch_output.__getitem__(idx)
                 # DropoutBatchOutput returns (times, sources) — no error buffer
                 # BatchSpikeOutput returns (times, sources, errors)
                 if len(result) == 2:
@@ -295,7 +295,7 @@ class _CythonSpikesView:
     def errors(self) -> np.ndarray:
         # Return view into native error buffer — zero-copy, writes go to C memory
         if self._batch_output is not None and self._currents is not None:
-            return self._batch_output.get_error_view(self._sample_idx)
+            return self._batch_output.get_errors(self._sample_idx)
         # Check for fallback buffer (set via _errors setter on dropout output)
         errors_buf = getattr(self, '_errors_buf', None)
         if errors_buf is not None:
@@ -316,8 +316,8 @@ class _CythonSpikesView:
         For dropout views (no error buffer), allocate a Python array.
         """
         if self._batch_output is not None and self._currents is not None:
-            # Write into native error buffer via get_error_view
-            self._batch_output.get_error_view(self._sample_idx)[:] = value
+            # Write into native error buffer via get_errors
+            self._batch_output.get_errors(self._sample_idx)[:] = value
         else:
             # Dropout output or standalone view — allocate Python array
             object.__setattr__(self, '_errors_buf', np.asarray(value, dtype=np.float64))
@@ -386,11 +386,11 @@ class _CythonMaximaView:
 
     @property
     def errors(self) -> np.ndarray:
-        # Return view into native error buffer — zero-copy, writes go to C memory
-        if self._batch_output is not None:
-            return self._batch_output.get_error_view(self._sample_idx)
-        # Fallback: allocate Python array (shouldn't happen in normal flow)
-        return np.zeros(len(self._times), dtype=np.float64)
+        # MaximaOutput has no embedded errors — managed by Python layer
+        # Return a fresh zeros array; set_error() writes to it
+        if not hasattr(self, '_errors_buf') or self._errors_buf is None:
+            object.__setattr__(self, '_errors_buf', np.zeros(len(self._times), dtype=np.float64))
+        return self._errors_buf
 
     def set_error(self, nrn_idx: int, error: float):
         self.errors[nrn_idx] = error
@@ -458,13 +458,13 @@ class MaximaVector:
 
     def __len__(self) -> int:
         if self._batch_output is not None:
-            return len(self._batch_output)
+            return self._batch_output.__len__()
         return len(self._maxima)
 
     def __getitem__(self, idx: int):
         if self._batch_output is not None:
             if idx not in self._cached_views:
-                times, values = self._batch_output[idx]
+                times, values = self._batch_output.__getitem__(idx)
                 self._cached_views[idx] = _CythonMaximaView(
                     times, values,
                     batch_output=self._batch_output,

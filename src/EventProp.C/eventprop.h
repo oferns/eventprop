@@ -17,51 +17,23 @@
 extern "C" {
 #endif
 
+/** Error codes returned by EventProp functions.
+ *  Set via the `error_no` field on output structs when validation is enabled.
+ *  Validation is gated behind `EVENTPROP_VALIDATE_INPUTS` at compile time. */
+typedef enum EventPropError {
+    EVENTPROP_OK                  = 0,
+    EVENTPROP_INVALID_DIMENSION   = 1,   /* n_pre <= 0 or n_post <= 0 */
+    EVENTPROP_NEGATIVE_SPIKES     = 2,   /* n_spikes < 0 */
+    EVENTPROP_NULL_POINTER        = 3,   /* w/times/sources is NULL when required */
+    EVENTPROP_INVALID_SOURCE      = 4,   /* sources[i] out of [0, n_pre) range */
+    EVENTPROP_INVALID_TAU         = 5,   /* tau_mem <= 0, tau_syn <= 0, or tau_mem == tau_syn */
+    EVENTPROP_ALLOCATION_FAILED   = 6,   /* calloc/malloc returned NULL */
+    EVENTPROP_INVALID_CURRENT     = 7,   /* spike.currents[i] == v_th (division by zero) */
+} EventPropError;
+
 /** Non-owning view into a flat row-major double array.
  *  Mimics Eigen::Ref<RowMatrixXd const>: attached dimensions,
  *  .row(i) access, and element-wise indexing without allocation. */
-typedef struct MatrixView {
-    const double* data;
-    int rows;
-    int cols;   /* row stride (always == n_cols for dense matrices) */
-} MatrixView;
-
-static inline MatrixView mv(const double* data, int rows, int cols)
-{
-    MatrixView v;
-    v.data = data; v.rows = rows; v.cols = cols;
-    return v;
-}
-
-/** Pointer to row i (row-major: base + i * cols). */
-static inline const double* mv_row(const MatrixView m, int i)
-{ return m.data + i * m.cols; }
-
-/** Element access: &m[row][col]. */
-static inline const double* mv_at(const MatrixView m, int row, int col)
-{ return &m.data[row * m.cols + col]; }
-
-/** Mutable view (like Eigen::Ref<RowMatrixXd>). */
-typedef struct MutableMatrixView {
-    double* data;
-    int rows;
-    int cols;
-} MutableMatrixView;
-
-static inline MutableMatrixView mv_mut(double* data, int rows, int cols)
-{
-    MutableMatrixView v;
-    v.data = data; v.rows = rows; v.cols = cols;
-    return v;
-}
-
-static inline double* mv_row_mut(MutableMatrixView m, int i)
-{ return m.data + i * m.cols; }
-
-/** Mutable element access: &m[row][col]. */
-static inline double* mv_at_mut(MutableMatrixView m, int row, int col)
-{ return &m.data[row * m.cols + col]; }
-
 typedef struct EventPropInput {
     const double* w;           /* Weight matrix (row-major) */
     int n_pre;                 /* Pre-synaptic neurons */
@@ -75,6 +47,7 @@ typedef struct EventPropInput {
 } EventPropInput;
 
 typedef struct SpikeOutput {
+    EventPropError error_no;  /* Error code (EVENTPROP_OK on success) */
     int n_spikes;            /* Number of output spikes */
     double* times;           /* Output spike times (malloc'd) */
     int* sources;        /* Output source neurons (malloc'd) */
@@ -83,75 +56,68 @@ typedef struct SpikeOutput {
 } SpikeOutput;
 
 typedef struct SumsOutput {
-    int n_rows;              /* n_spikes + 1 */
-    int n_post;              /* Number of post-synaptic neurons */
-    double* sum0;            /* Cumulative sums (malloc'd, n_rows * n_post) */
-    double* sum1;            /* Cumulative sums (malloc'd, n_rows * n_post) */
+    EventPropError error_no;  /* Error code (EVENTPROP_OK on success) */
+    double* sum0;             /* Cumulative sums (malloc'd, n_rows * n_post) */
+    double* sum1;             /* Cumulative sums (malloc'd, n_rows * n_post) */
 } SumsOutput;
 
 typedef struct MaximaOutput {
-    int n_post;              /* Number of post-synaptic neurons */
+    EventPropError error_no;  /* Error code (EVENTPROP_OK on success) */
     double* times;           /* Maxima times (malloc'd, n_post) */
     double* values;          /* Maxima values (malloc'd, n_post) */
+    double* errors;          /* Maxima errors per post-neuron (malloc'd, n_post) — written by caller before backward pass */
 } MaximaOutput;
 
-typedef struct BackwardSpikesInput {
-    const EventPropInput* input;      /* Shared layer params + input spike data (borrowed) */
-    const double* fwd_times;           /* Forward spike times (borrowed) */
-    const int* fwd_sources;        /* Forward spike sources (borrowed) */
-    const double* fwd_currents;         /* Forward spike currents (borrowed) */
-    const double* errors;             /* Post-synaptic errors (borrowed, from SpikeOutput.errors) */
-    int n_post_spikes;                  /* Number of post-synaptic spikes */
-} BackwardSpikesInput;
 
-typedef struct BackwardMaximaInput {
-    const EventPropInput* input;      /* Shared layer params + input spike data (borrowed) */
-    const double* maxima_times;        /* Maxima times (borrowed) */
-    const double* maxima_values;         /* Maxima values (borrowed) */
-    const double* maxima_errors;          /* Maxima errors (borrowed) */
-    int n_maxima;                       /* Number of maxima */
-} BackwardMaximaInput;
 
 typedef struct BackwardOutput {
-    int n_pre;               /* Number of pre-synaptic neurons */
-    int n_post;              /* Number of post-synaptic neurons */
+    EventPropError error_no;  /* Error code (EVENTPROP_OK on success) */
     double* grad;            /* Weight gradient (malloc'd, n_pre * n_post) */
     double* spike_errors;   /* Input spike errors (malloc'd, n_spikes) */
 } BackwardOutput;
+
 
 void eventprop_free_spike_output(SpikeOutput* output);
 void eventprop_free_sums_output(SumsOutput* output);
 void eventprop_free_maxima_output(MaximaOutput* output);
 void eventprop_free_backward_output(BackwardOutput* output);
+
 /**
  * Forward pass
  * Returns a SpikeOutput struct — caller must free via eventprop_free_spike_output().
  */
-SpikeOutput* eventprop_compute_spikes(const EventPropInput* input);
+SpikeOutput eventprop_compute_spikes(const EventPropInput input);
 
 /**
  * Compute cumulative sums
  * Returns a SumsOutput struct — caller must free via eventprop_free_sums_output().
  */
-SumsOutput* eventprop_compute_sums(const EventPropInput* input);
+SumsOutput eventprop_compute_sums(const EventPropInput input);
 
 /**
  * Compute membrane potential maxima
  * Returns a MaximaOutput struct — caller must free via eventprop_free_maxima_output().
  */
-MaximaOutput* eventprop_compute_maxima(const EventPropInput* input);
+MaximaOutput eventprop_compute_maxima(const EventPropInput input);
 
 /**
  * Backward pass (spikes).
  * Returns a BackwardOutput struct — caller must free via eventprop_free_backward_output().
  */
-BackwardOutput* eventprop_backward_spikes(const BackwardSpikesInput* input);
+BackwardOutput eventprop_backward_spikes(const EventPropInput input, const SpikeOutput spike);
 
 /**
- * Backward pass (maxima).
+ * Backward pass (maxima loss).
+ * `maxima_times` and `maxima_errors` are borrowed arrays of length n_post.
  * Returns a BackwardOutput struct — caller must free via eventprop_free_backward_output().
  */
-BackwardOutput* eventprop_backward_maxima(const BackwardMaximaInput* input);
+BackwardOutput eventprop_backward_maxima(const EventPropInput input,
+                                         const double* maxima_times,
+                                         const double* maxima_errors);
+
+/** Validate an EventPropInput and return the first error found (or OK).
+ *  When `EVENTPROP_VALIDATE_INPUTS` is not defined this compiles to a no-op. */
+EventPropError eventprop_validate_input(const EventPropInput input);
 
 #ifdef __cplusplus
 }

@@ -5,7 +5,7 @@ from typing import NamedTuple, Tuple
 
 from .layer import GaussianDistribution, Layer, WeightDistribution
 from ._native import (
-    compute_spikes_batch, backward_spikes_batch_accumulate,
+    compute_spikes_batch_flat, backward_spikes_batch_accumulate,
 )
 from .spikes import Spikes, SpikesVector
 
@@ -48,7 +48,7 @@ class LIFLayer(Layer):
         # and _n_spikes_per_sample pre-built at construction.
         times, sources, n_per_sample = SpikesVector._extract_flat_buffers(input_batch)
 
-        c_output = compute_spikes_batch(
+        c_output = compute_spikes_batch_flat(
             times, sources, n_per_sample,
             self.w_in_flat, self.parameters.n_in, self.parameters.n,
             self.parameters.tau_mem, self.parameters.tau_syn, self.parameters.v_th,
@@ -69,29 +69,18 @@ class LIFLayer(Layer):
         self.w_in_flat = np.ascontiguousarray(value).ravel().reshape(self.parameters.n_in, self.parameters.n)
 
     def backward(self):
-        batch_size = len(self.input_batch)
-
-        times, sources, n_per_sample = SpikesVector._extract_flat_buffers(self.input_batch)
-        errors = self.post_batch._batch_output.get_flat_errors()
-
+        # C owns inputs internally — no Python-side buffer extraction needed
         result = backward_spikes_batch_accumulate(
-            times, sources, n_per_sample,
-            self.post_batch._batch_output, errors,
-            self.w_in_flat, self.parameters.n_in, self.parameters.n,
-            self.parameters.tau_mem, self.parameters.tau_syn, self.parameters.v_th,
+            self.post_batch._batch_output,
         )
 
         self.gradient[:] = result.grad.reshape(self.w_in.shape)
 
-        # Propagate spike errors back to input spikes (for layer chains)
-        if result.spike_errors is not None:
-            offset = 0
-            for i in range(batch_size):
-                inp = self.input_batch[i]
-                n_spikes_i = len(inp.times) if hasattr(inp, 'times') else 0
-                if n_spikes_i > 0 and offset + n_spikes_i <= len(result.spike_errors):
-                    inp._errors = np.array(result.spike_errors[offset:offset + n_spikes_i])
-                offset += n_spikes_i
+        # Propagate spike errors back to input spikes (per-sample, zero-copy)
+        for i in range(result.batch_size):
+            inp = self.input_batch[i]
+            if len(inp.times) > 0:
+                inp._errors = result.get_spike_errors(i)
 
         self._ran_backward = True
         super().backward()

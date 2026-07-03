@@ -15,8 +15,10 @@ Example:
 """
 
 from ._native import (
-    compute_spikes_batch, backward_spikes_batch,
-    compute_maxima_batch, backward_maxima_batch,
+    compute_spikes_batch_flat as compute_spikes_batch,
+    backward_spikes_batch_accumulate as backward_spikes_batch,
+    compute_maxima_batch_flat as compute_maxima_batch,
+    backward_maxima_batch_accumulate as backward_maxima_batch,
     dropout_spikes_batch,
 )
 from .spikes import Spikes, SpikesVector, Maxima, MaximaVector
@@ -67,11 +69,11 @@ from .vmax_training import (
 )
 
 __all__ = [
-    # Cython batch functions
+    # Native batch functions
     'compute_spikes_batch',
-    'backward_spikes_batch',
+    'backward_spikes_batch',  # alias for backward_spikes_batch_accumulate
     'compute_maxima_batch',
-    'backward_maxima_batch',
+    'backward_maxima_batch',  # alias for backward_maxima_batch_accumulate
     'dropout_spikes_batch',
     # Python data classes (matching pybind11 interface)
     'Spikes',
