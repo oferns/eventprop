@@ -31,6 +31,7 @@ typedef struct VoltageTraceOutput {
     int n_t;                           /* Number of time points (= t_max / dt) */
     double* v_trace;                   /* Voltage values (malloc'd, length n_t) */
     double* ts;                        /* Time array (malloc'd, length n_t) */
+    EventPropError error_no;           /* Error code (EVENTPROP_OK on success) */
 } VoltageTraceOutput;
 
 typedef struct LambdaITraceInput {
@@ -49,6 +50,7 @@ typedef struct LambdaITraceOutput {
     int n_t;                           /* Number of time points (= t_max / dt) */
     double* lambda_trace;              /* Lambda-I values (malloc'd, length n_t) */
     double* ts;                        /* Time array (malloc'd, length n_t) */
+    EventPropError error_no;           /* Error code (EVENTPROP_OK on success) */
 } LambdaITraceOutput;
 
 void eventprop_free_voltage_trace_output(VoltageTraceOutput* output);

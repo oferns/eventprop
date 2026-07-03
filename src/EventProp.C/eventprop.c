@@ -606,11 +606,8 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
         result.sources  = NULL;
         result.currents = NULL;
         result.errors   = NULL;
-#ifdef EVENTPROP_VALIDATE_INPUTS
         result.error_no = sums.error_no;
-#else
-        result.error_no = EVENTPROP_ALLOCATION_FAILED;
-#endif
+
         return result;
     }
 

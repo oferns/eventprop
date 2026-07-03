@@ -21,14 +21,16 @@ extern "C" {
  */
 typedef struct SpikesBatch {
     int batch_size;                    /* Number of samples in the batch */
+    int has_errors;                    /* 1 if any sample returned an error, 0 otherwise — safe to set from parallel loop */
     SpikeOutput* spikes;               /* Per-sample outputs (malloc'd, length = batch_size) */
 } SpikesBatch;
 
 void eventprop_free_spikes_batch(SpikesBatch* batch);
 
 typedef struct SpikesBatchWithInputs {
-    EventPropInput* inputs;             
+    EventPropInput* inputs;
     int batch_size;                    /* Number of samples in the batch */
+    int has_errors;                    /* 1 if any sample returned an error, 0 otherwise — safe to set from parallel loop */
     SpikeOutput* spikes;               /* Per-sample outputs (malloc'd, length = batch_size) */
 } SpikesBatchWithInputs;
 
@@ -39,6 +41,7 @@ void eventprop_free_spikes_with_inputs_batch(SpikesBatchWithInputs* batch);
  */
 typedef struct BackwardsBatch {
     int batch_size;                    /* Number of samples in the batch */
+    int has_errors;                    /* 1 if any sample returned an error, 0 otherwise — safe to set from parallel loop */
     BackwardOutput* outputs;           /* Per-sample outputs (malloc'd, length = batch_size) */
 } BackwardsBatch;
 
@@ -49,6 +52,7 @@ void eventprop_free_backwards_batch(BackwardsBatch* batch);
  */
 typedef struct MaximaBatch {
     int batch_size;                    /* Number of samples in the batch */
+    int has_errors;                    /* 1 if any sample returned an error, 0 otherwise — safe to set from parallel loop */
     MaximaOutput* outputs;             /* Per-sample outputs (malloc'd, length = batch_size) */
 } MaximaBatch;
 
@@ -57,6 +61,7 @@ void eventprop_free_maxima_batch(MaximaBatch* batch);
 typedef struct MaximaBatchWithInputs {
     EventPropInput* inputs;            /* Owned copy of per-sample inputs (calloc'd) */
     int batch_size;                    /* Number of samples in the batch */
+    int has_errors;                    /* 1 if any sample returned an error, 0 otherwise — safe to set from parallel loop */
     MaximaOutput* outputs;             /* Per-sample outputs (malloc'd, length = batch_size) */
 } MaximaBatchWithInputs;
 
@@ -89,6 +94,7 @@ void eventprop_free_dropout_output(DropoutOutput* output);
  */
 typedef struct DropoutBatch {
     int batch_size;
+    int has_errors;            /* 1 if any sample returned an error, 0 otherwise — safe to set from parallel loop */
     DropoutOutput* outputs;    /* Per-sample surviving spikes (malloc'd, length = batch_size) */
 } DropoutBatch;
 
@@ -105,6 +111,7 @@ void eventprop_free_dropout_batch(DropoutBatch* batch);
  */
 typedef struct AccumulatedBackwardResult {
     GradientOutput summed_grads;
+    int has_errors;            /* 1 if any sample returned an error, 0 otherwise — safe to set from parallel loop */
     BackwardOutput* outputs;   /* Per-sample outputs (.grad freed, .spike_errors kept) */
     int batch_size;
 } AccumulatedBackwardResult;

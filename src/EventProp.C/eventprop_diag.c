@@ -25,13 +25,61 @@ void eventprop_free_voltage_trace_output(VoltageTraceOutput* output)
 
 VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput input)
 {
+    VoltageTraceOutput result;
+    result.n_t       = 0;
+    result.v_trace   = NULL;
+    result.ts        = NULL;
+    result.error_no  = EVENTPROP_OK;
+
+    /* Validate pointers */
+    if (!input.input) {
+        result.error_no = EVENTPROP_NULL_POINTER;
+        return result;
+    }
     const EventPropInput* fwd = input.input;
+
+    /* Validate dt and t_max */
+    if (input.dt <= 0 || input.t_max <= 0) {
+        result.error_no = EVENTPROP_INVALID_DIMENSION;
+        return result;
+    }
+
     int n_t = (int)(input.t_max / input.dt);
 
-    VoltageTraceOutput result;
+    /* Validate tau values (division by zero in k_prefactor) */
+    if (fwd->tau_mem <= 0 || fwd->tau_syn <= 0 || fwd->tau_mem == fwd->tau_syn) {
+        result.error_no = EVENTPROP_INVALID_TAU;
+        return result;
+    }
+
+    /* Validate target neuron index */
+    if (input.target_nrn_idx < 0 || input.target_nrn_idx >= fwd->n_post) {
+        result.error_no = EVENTPROP_INVALID_SOURCE;
+        return result;
+    }
+
+    /* Validate forward spike pointers */
+    if (fwd->n_spikes > 0 && (!fwd->times || !fwd->sources)) {
+        result.error_no = EVENTPROP_NULL_POINTER;
+        return result;
+    }
+    if (input.n_post_spikes > 0 && (!input.fwd_times || !input.fwd_sources)) {
+        result.error_no = EVENTPROP_NULL_POINTER;
+        return result;
+    }
+
     result.n_t = n_t;
     result.v_trace = calloc(n_t, sizeof(double));
     result.ts      = calloc(n_t, sizeof(double));
+
+    if (!result.v_trace || !result.ts) {
+        free(result.v_trace);
+        free(result.ts);
+        result.v_trace = NULL;
+        result.ts      = NULL;
+        result.error_no = EVENTPROP_ALLOCATION_FAILED;
+        return result;
+    }
 
     double k_prefactor = fwd->tau_syn / (fwd->tau_mem - fwd->tau_syn);
     MatrixView w = mv(fwd->w, fwd->n_pre, fwd->n_post);
@@ -64,12 +112,50 @@ VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput input
 
 LambdaITraceOutput eventprop_compute_lambda_i_trace(const LambdaITraceInput input)
 {
+    LambdaITraceOutput result;
+    result.n_t          = 0;
+    result.lambda_trace = NULL;
+    result.ts           = NULL;
+    result.error_no     = EVENTPROP_OK;
+
+    /* Validate dt and t_max */
+    if (input.dt <= 0 || input.t_max <= 0) {
+        result.error_no = EVENTPROP_INVALID_DIMENSION;
+        return result;
+    }
+
     int n_t = (int)(input.t_max / input.dt);
 
-    LambdaITraceOutput result;
+    /* Validate tau values (division by zero in k_bwd_prefactor) */
+    if (input.tau_mem <= 0 || input.tau_syn <= 0 || input.tau_mem == input.tau_syn) {
+        result.error_no = EVENTPROP_INVALID_TAU;
+        return result;
+    }
+
+    /* Validate v_th (division in jump computation) */
+    if (input.v_th <= 0) {
+        result.error_no = EVENTPROP_INVALID_DIMENSION;
+        return result;
+    }
+
+    /* Validate forward spike pointers */
+    if (input.n_post_spikes > 0 && !input.fwd_times) {
+        result.error_no = EVENTPROP_NULL_POINTER;
+        return result;
+    }
+
     result.n_t = n_t;
     result.lambda_trace = calloc(n_t, sizeof(double));
     result.ts           = calloc(n_t, sizeof(double));
+
+    if (!result.lambda_trace || !result.ts) {
+        free(result.lambda_trace);
+        free(result.ts);
+        result.lambda_trace = NULL;
+        result.ts           = NULL;
+        result.error_no     = EVENTPROP_ALLOCATION_FAILED;
+        return result;
+    }
 
     for (int ti = 0; ti < n_t; ti++) {
         double t = input.dt * ti;

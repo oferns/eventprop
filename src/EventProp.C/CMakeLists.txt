@@ -47,7 +47,7 @@ add_library(eventprop_c_api SHARED
     eventprop_diag.c
     eventprop_batch.c
 )
-target_compile_definitions(eventprop_c_api PUBLIC EVENTPROP_VALIDATE_INPUTS)
+
 # CPU-specific optimization and aggressive FP math optimizations
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     # GCC/Clang flags

@@ -1,13 +1,9 @@
 /**
  * @file test_main.cpp
- * @brief Google Test scaffold for EventProp C library.
+ * @brief Google Test entry point for EventProp C library.
  */
 
 #include <gtest/gtest.h>
-
-TEST(ScaffoldTest, GTestIsWorking) {
-    EXPECT_TRUE(true);
-}
 
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);

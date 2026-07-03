@@ -65,6 +65,7 @@ SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, int bat
 {
     SpikesBatch result;
     result.batch_size = batch_size;
+    result.has_errors = 0;
 
     /* Allocate result array */
     result.spikes = (SpikeOutput*)calloc(batch_size, sizeof(SpikeOutput));
@@ -76,6 +77,8 @@ SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, int bat
 #endif
     for (b = 0; b < batch_size; b++) {
         result.spikes[b] = eventprop_compute_spikes(inputs[b]);
+        if (result.spikes[b].error_no != EVENTPROP_OK)
+            result.has_errors = 1;
     }
     return result;
 }
@@ -91,6 +94,7 @@ SpikesBatchWithInputs eventprop_compute_spikes_batch_flat(
 {
     SpikesBatchWithInputs result;
     result.batch_size = batch_size;
+    result.has_errors = 0;
 
     /* Allocate result array */
     result.spikes = (SpikeOutput*)calloc(batch_size, sizeof(SpikeOutput));
@@ -121,6 +125,8 @@ SpikesBatchWithInputs eventprop_compute_spikes_batch_flat(
         input.v_th      = v_th;
 
         result.spikes[b] = eventprop_compute_spikes(input);
+        if (result.spikes[b].error_no != EVENTPROP_OK)
+            result.has_errors = 1;
         result.inputs[b] = input;
     }
     return result;
@@ -131,6 +137,7 @@ BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs, con
     int batch_size = spikes_batch.batch_size;
     BackwardsBatch batch;
     batch.batch_size = batch_size;
+    batch.has_errors = 0;
 
     /* Parallel per-sample backward */
     batch.outputs = (BackwardOutput*)calloc(batch_size, sizeof(BackwardOutput));
@@ -141,6 +148,8 @@ BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs, con
 #endif
     for (b = 0; b < batch_size; b++) {
         batch.outputs[b] = eventprop_backward_spikes(inputs[b], spikes_batch.spikes[b]);
+        if (batch.outputs[b].error_no != EVENTPROP_OK)
+            batch.has_errors = 1;
     }
 
     return batch;
@@ -151,6 +160,7 @@ MaximaBatch eventprop_compute_maxima_batch(const EventPropInput* inputs, const S
     int batch_size = spikes_batch.batch_size;
     MaximaBatch batch;
     batch.batch_size = batch_size;
+    batch.has_errors = 0;
 
     /* Parallel per-sample maxima */
     batch.outputs = (MaximaOutput*)calloc(batch_size, sizeof(MaximaOutput));
@@ -161,6 +171,8 @@ MaximaBatch eventprop_compute_maxima_batch(const EventPropInput* inputs, const S
 #endif
     for (b = 0; b < batch_size; b++) {
         batch.outputs[b] = eventprop_compute_maxima(inputs[b]);
+        if (batch.outputs[b].error_no != EVENTPROP_OK)
+            batch.has_errors = 1;
     }
 
     return batch;
@@ -177,6 +189,7 @@ MaximaBatchWithInputs eventprop_compute_maxima_batch_flat(
 {
     MaximaBatchWithInputs result;
     result.batch_size = batch_size;
+    result.has_errors = 0;
 
     /* Allocate arrays */
     result.outputs = (MaximaOutput*)calloc(batch_size, sizeof(MaximaOutput));
@@ -207,6 +220,8 @@ MaximaBatchWithInputs eventprop_compute_maxima_batch_flat(
         input.v_th      = v_th;
 
         result.outputs[b] = eventprop_compute_maxima(input);
+        if (result.outputs[b].error_no != EVENTPROP_OK)
+            result.has_errors = 1;
         result.inputs[b]  = input;
     }
     return result;
@@ -217,6 +232,7 @@ BackwardsBatch eventprop_backward_maxima_batch(const MaximaBatchWithInputs maxim
     int batch_size = maxima_batch.batch_size;
     BackwardsBatch batch;
     batch.batch_size = batch_size;
+    batch.has_errors = 0;
 
     /* Parallel per-sample backward */
     batch.outputs = (BackwardOutput*)calloc(batch_size, sizeof(BackwardOutput));
@@ -230,6 +246,8 @@ BackwardsBatch eventprop_backward_maxima_batch(const MaximaBatchWithInputs maxim
             maxima_batch.inputs[b],
             maxima_batch.outputs[b].times,
             maxima_batch.outputs[b].errors);
+        if (batch.outputs[b].error_no != EVENTPROP_OK)
+            batch.has_errors = 1;
     }
 
     return batch;
@@ -252,6 +270,7 @@ GradientOutput eventprop_accumulate_gradients(BackwardsBatch batch, int n_pre, i
     result.data = (double*)calloc(n_pre * n_post, sizeof(double));
 
     for (int b = 0; b < batch.batch_size; b++) {
+        if (batch.outputs[b].error_no != EVENTPROP_OK) continue;
         for (int i = 0; i < n_pre * n_post; i++)
             result.data[i] += batch.outputs[b].grad[i];
     }
@@ -279,6 +298,7 @@ AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
     int batch_size = spikes_batch.batch_size;
     AccumulatedBackwardResult result;
     result.batch_size = batch_size;
+    result.has_errors = 0;
 
     /* Parallel per-sample backward */
     BackwardOutput* outputs = (BackwardOutput*)calloc(batch_size, sizeof(BackwardOutput));
@@ -289,10 +309,13 @@ AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
 #endif
     for (b = 0; b < batch_size; b++) {
         outputs[b] = eventprop_backward_spikes(inputs[b], spikes_batch.spikes[b]);
+        if (outputs[b].error_no != EVENTPROP_OK)
+            result.has_errors = 1;
     }
 
     BackwardsBatch batch = {
         .batch_size = batch_size,
+        .has_errors = 0,   /* not used here */
         .outputs = outputs
     };
     
@@ -307,6 +330,7 @@ AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
     int batch_size = maxima_batch.batch_size;
     AccumulatedBackwardResult result;
     result.batch_size = batch_size;
+    result.has_errors = 0;
 
     /* Parallel per-sample backward */
     BackwardOutput* outputs = (BackwardOutput*)calloc(batch_size, sizeof(BackwardOutput));
@@ -320,10 +344,13 @@ AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
             maxima_batch.inputs[b],
             maxima_batch.outputs[b].times,
             maxima_batch.outputs[b].errors);
+        if (outputs[b].error_no != EVENTPROP_OK)
+            result.has_errors = 1;
     }
 
     BackwardsBatch batch = {
         .batch_size = batch_size,
+        .has_errors = 0,   /* not used here */
         .outputs = outputs
     };
 
@@ -382,6 +409,7 @@ DropoutBatch eventprop_dropout_spikes_batch(
 {
     DropoutBatch result;
     result.batch_size = batch_size;
+    result.has_errors = 0;   /* dropout has no per-sample errors */
     result.outputs = (DropoutOutput*)calloc(batch_size, sizeof(DropoutOutput));
 
     /* Compute sample offsets */

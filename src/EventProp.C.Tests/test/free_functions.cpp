@@ -110,6 +110,20 @@ TEST(FreeLambdaITraceOutput, NullPointerIsSafe) {
     eventprop_free_lambda_i_trace_output(nullptr);
 }
 
+TEST(FreeLambdaITraceOutput, DoubleFreeIsSafe) {
+    LambdaITraceOutput output;
+    std::memset(&output, 0, sizeof(output));
+    eventprop_free_lambda_i_trace_output(&output);
+    eventprop_free_lambda_i_trace_output(&output);
+}
+
 TEST(FreeVoltageTraceOutput, NullPointerIsSafe) {
     eventprop_free_voltage_trace_output(nullptr);
+}
+
+TEST(FreeVoltageTraceOutput, DoubleFreeIsSafe) {
+    VoltageTraceOutput output;
+    std::memset(&output, 0, sizeof(output));
+    eventprop_free_voltage_trace_output(&output);
+    eventprop_free_voltage_trace_output(&output);
 }

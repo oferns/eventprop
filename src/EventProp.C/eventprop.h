@@ -2,12 +2,7 @@
  * @file eventprop.h
  * @brief EventProp: Event-based backpropagation for SNN training.
  *
- * Pure C implementation with optional SIMD (AVX2/NEON). 
- *
- * Parameters (SI units):
- *   tau_mem  — membrane time constant (seconds, typically 0.02)
- *   tau_syn  — synaptic time constant (seconds, typically 0.005)
- *   v_th     — spike threshold voltage (typically 1.0)
+ * Pure C implementation with optional SIMD (AVX2/NEON) and threading OpenMP
  */
 
 #ifndef EVENTPROP_H
@@ -18,8 +13,7 @@ extern "C" {
 #endif
 
 /** Error codes returned by EventProp functions.
- *  Set via the `error_no` field on output structs when validation is enabled.
- *  Validation is gated behind `EVENTPROP_VALIDATE_INPUTS` at compile time. */
+ *  Set via the `error_no` field on output structs when validation is enabled */
 typedef enum EventPropError {
     EVENTPROP_OK                  = 0,
     EVENTPROP_INVALID_DIMENSION   = 1,   /* n_pre <= 0 or n_post <= 0 */
@@ -115,8 +109,7 @@ BackwardOutput eventprop_backward_maxima(const EventPropInput input,
                                          const double* maxima_times,
                                          const double* maxima_errors);
 
-/** Validate an EventPropInput and return the first error found (or OK).
- *  When `EVENTPROP_VALIDATE_INPUTS` is not defined this compiles to a no-op. */
+/** Validate an EventPropInput and return the first error found (or OK). */
 EventPropError eventprop_validate_input(const EventPropInput input);
 
 #ifdef __cplusplus

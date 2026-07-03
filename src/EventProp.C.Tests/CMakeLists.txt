@@ -50,8 +50,11 @@ add_executable(eventprop_tests
     test/compute_maxima.cpp
     test/backward_spikes.cpp
     test/backward_maxima.cpp
+    test/batch_functions.cpp
     test/validate_input.cpp
     test/free_functions.cpp
+    test/diag_functions.cpp
+    test/matrix_view.cpp
 )
 target_compile_definitions(eventprop_tests PRIVATE EVENTPROP_VALIDATE_INPUTS)
 target_link_libraries(eventprop_tests PRIVATE eventprop_c_api GTest::gtest_main)
