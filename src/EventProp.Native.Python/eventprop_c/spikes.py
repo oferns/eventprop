@@ -363,7 +363,7 @@ class _CythonMaximaView:
     in the BatchMaximaOutput native buffer — writing here goes directly to C memory.
     """
 
-    __slots__ = ('_times', '_values', '_batch_output', '_sample_idx')
+    __slots__ = ('_times', '_values', '_batch_output', '_sample_idx', '_errors_buf')
 
     def __init__(self, times: np.ndarray, values: np.ndarray,
                  batch_output=None, sample_idx: int = 0):
