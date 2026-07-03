@@ -64,6 +64,17 @@ _load_lib()
 
 cdef extern from "eventprop.h":
 
+    # Error codes (enum maps to int in Cython)
+    ctypedef enum EventPropError:
+        EVENTPROP_OK                  = 0
+        EVENTPROP_INVALID_DIMENSION   = 1
+        EVENTPROP_NEGATIVE_SPIKES     = 2
+        EVENTPROP_NULL_POINTER        = 3
+        EVENTPROP_INVALID_SOURCE      = 4
+        EVENTPROP_INVALID_TAU         = 5
+        EVENTPROP_ALLOCATION_FAILED   = 6
+        EVENTPROP_INVALID_CURRENT     = 7
+
     ctypedef struct MatrixView:
         const double* data
         int rows
@@ -86,6 +97,7 @@ cdef extern from "eventprop.h":
         double v_th
 
     ctypedef struct SpikeOutput:
+        EventPropError error_no
         int n_spikes
         double* times
         int* sources
@@ -93,14 +105,18 @@ cdef extern from "eventprop.h":
         double* errors
 
     ctypedef struct SumsOutput:
+        EventPropError error_no
         double* sum0
         double* sum1
 
     ctypedef struct MaximaOutput:
+        EventPropError error_no
         double* times
         double* values
+        double* errors
 
     ctypedef struct BackwardOutput:
+        EventPropError error_no
         double* grad
         double* spike_errors
 
@@ -115,7 +131,14 @@ cdef extern from "eventprop.h":
     SumsOutput      eventprop_compute_sums(const EventPropInput input)
     MaximaOutput    eventprop_compute_maxima(const EventPropInput input)
     BackwardOutput  eventprop_backward_spikes(const EventPropInput input, const SpikeOutput spike)
-    BackwardOutput  eventprop_backward_maxima(const EventPropInput input, const SpikeOutput spike)
+    # backward_maxima takes direct maxima_times + maxima_errors arrays (length n_post)
+    BackwardOutput  eventprop_backward_maxima(
+        const EventPropInput input,
+        const double* maxima_times,
+        const double* maxima_errors)
+
+    # Input validation helper
+    EventPropError eventprop_validate_input(const EventPropInput input)
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +149,7 @@ cdef extern from "eventprop_batch.h":
 
     ctypedef struct SpikesBatch:
         int batch_size
+        int has_errors
         SpikeOutput* spikes
 
     void eventprop_free_spikes_batch(SpikesBatch* batch)
@@ -133,12 +157,22 @@ cdef extern from "eventprop_batch.h":
     ctypedef struct SpikesBatchWithInputs:
         EventPropInput* inputs
         int batch_size
+        int has_errors
         SpikeOutput* spikes
 
     void eventprop_free_spikes_with_inputs_batch(SpikesBatchWithInputs* batch)
 
+    # Batch backward output — per-sample results
+    ctypedef struct BackwardsBatch:
+        int batch_size
+        int has_errors
+        BackwardOutput* outputs
+
+    void eventprop_free_backwards_batch(BackwardsBatch* batch)
+
     ctypedef struct MaximaBatch:
         int batch_size
+        int has_errors
         MaximaOutput* outputs
 
     void eventprop_free_maxima_batch(MaximaBatch* batch)
@@ -146,6 +180,7 @@ cdef extern from "eventprop_batch.h":
     ctypedef struct MaximaBatchWithInputs:
         EventPropInput* inputs
         int batch_size
+        int has_errors
         MaximaOutput* outputs
 
     void eventprop_free_maxima_with_inputs_batch(MaximaBatchWithInputs* batch)
@@ -160,6 +195,7 @@ cdef extern from "eventprop_batch.h":
 
     ctypedef struct DropoutBatch:
         int batch_size
+        int has_errors
         DropoutOutput* outputs
 
     void eventprop_free_dropout_batch(DropoutBatch* batch)
@@ -182,7 +218,8 @@ cdef extern from "eventprop_batch.h":
     # Combined backward + accumulate result (primary FFI entry point)
     ctypedef struct AccumulatedBackwardResult:
         GradientOutput summed_grads   # accumulated gradient with dimensions
-        BackwardOutput* outputs       # per-sample (.grad + .spike_errors kept)
+        int has_errors                # 1 if any sample returned an error
+        BackwardOutput* outputs       # per-sample (.grad freed, .spike_errors kept)
         int batch_size
 
     void eventprop_free_accumulated_backward_result(AccumulatedBackwardResult* result)
@@ -206,11 +243,74 @@ cdef extern from "eventprop_batch.h":
         int batch_size,
         double tau_mem, double tau_syn, double v_th)
 
+    # Standalone batch functions (non-accumulate variants)
+    SpikesBatch  eventprop_compute_spikes_batch(const EventPropInput* inputs, int batch_size)
+
+    BackwardsBatch eventprop_backward_spikes_batch(
+        const EventPropInput* inputs, const SpikesBatch spikes_batch)
+
+    MaximaBatch eventprop_compute_maxima_batch(
+        const EventPropInput* inputs, const SpikesBatch spikes_batch)
+
+    # backward_maxima_batch uses MaximaOutput.errors written by caller
+    BackwardsBatch eventprop_backward_maxima_batch(const MaximaBatchWithInputs maxima_batch)
+
+    # Gradient accumulation helper (skips samples with errors)
+    GradientOutput eventprop_accumulate_gradients(BackwardsBatch batch, int n_pre, int n_post)
+
+    # Combined backward + accumulate result (primary FFI entry point)
     AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
         const EventPropInput* inputs, const SpikesBatch spikes_batch)
 
+    # backward_maxima_batch_accumulate takes the full MaximaBatchWithInputs directly
     AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
-        const EventPropInput* inputs, const SpikesBatch spikes_batch)
+        const MaximaBatchWithInputs maxima_batch)
+
+
+# ---------------------------------------------------------------------------
+# 3b. C declarations — eventprop_diag.h (diagnostic helpers)
+# ---------------------------------------------------------------------------
+
+cdef extern from "eventprop_diag.h":
+
+    ctypedef struct VoltageTraceInput:
+        const EventPropInput* input
+        int target_nrn_idx
+        const double* fwd_times
+        const int* fwd_sources
+        int n_post_spikes
+        double t_max
+        double dt
+
+    ctypedef struct VoltageTraceOutput:
+        int n_t
+        double* v_trace
+        double* ts
+        EventPropError error_no
+
+    void eventprop_free_voltage_trace_output(VoltageTraceOutput* output)
+
+    VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput input)
+
+    ctypedef struct LambdaITraceInput:
+        const double* fwd_times
+        int n_post_spikes
+        int target_nrn_idx
+        double v_th
+        double tau_mem
+        double tau_syn
+        double t_max
+        double dt
+
+    ctypedef struct LambdaITraceOutput:
+        int n_t
+        double* lambda_trace
+        double* ts
+        EventPropError error_no
+
+    void eventprop_free_lambda_i_trace_output(LambdaITraceOutput* output)
+
+    LambdaITraceOutput eventprop_compute_lambda_i_trace(const LambdaITraceInput input)
 
 
 # ---------------------------------------------------------------------------
@@ -292,9 +392,19 @@ cdef class _SpikesBatchOutput:
         cdef SpikeOutput* out = &self._ptr.spikes[idx]
         return _double_view(out.errors, out.n_spikes)
 
+    def get_error_no(self, int idx):
+        """Return the error code for sample idx (EVENTPROP_OK == 0 on success)."""
+        cdef SpikeOutput* out = &self._ptr.spikes[idx]
+        return out.error_no
+
     @property
     def batch_size(self):
         return self._ptr.batch_size
+
+    @property
+    def has_errors(self):
+        """True if any sample in the batch returned an error."""
+        return bool(self._ptr.has_errors)
 
     @property
     def n_pre(self):
@@ -353,6 +463,11 @@ cdef class _MaximaBatchOutput:
         return self._ptr.batch_size
 
     @property
+    def has_errors(self):
+        """True if any sample in the batch returned an error."""
+        return bool(self._ptr.has_errors)
+
+    @property
     def n_post(self):
         if self._ptr.inputs == NULL:
             return 0
@@ -367,6 +482,20 @@ cdef class _MaximaBatchOutput:
         """Zero-copy view into sample idx's maxima values."""
         cdef MaximaOutput* out = &self._ptr.outputs[idx]
         return _double_view(out.values, self.n_post)
+
+    def get_maxima_errors(self, int idx):
+        """Return zero-copy writable view into sample idx's maxima error buffer.
+
+        Python writes target errors here before calling backward_maxima().
+        C reads them directly — no copying needed.
+        """
+        cdef MaximaOutput* out = &self._ptr.outputs[idx]
+        return _double_view(out.errors, self.n_post)
+
+    def get_error_no(self, int idx):
+        """Return the error code for sample idx (EVENTPROP_OK == 0 on success)."""
+        cdef MaximaOutput* out = &self._ptr.outputs[idx]
+        return out.error_no
 
     def __dealloc__(self):
         if self._owned and self._ptr != NULL:
@@ -427,6 +556,13 @@ cdef class _AccumulatedBackwardResult:
         if self._ptr == NULL:
             return 0
         return self._ptr.batch_size
+
+    @property
+    def has_errors(self):
+        """True if any sample in the batch returned an error."""
+        if self._ptr == NULL:
+            return False
+        return bool(self._ptr.has_errors)
 
     def get_spike_errors(self, int idx):
         """Get spike errors for sample idx (for layer chain propagation)."""
@@ -496,6 +632,13 @@ cdef class _DropoutBatchOutput:
             return 0
         return self._ptr.batch_size
 
+    @property
+    def has_errors(self):
+        """True if any sample in the batch returned an error."""
+        if self._ptr == NULL:
+            return False
+        return bool(self._ptr.has_errors)
+
     def __dealloc__(self):
         if self._owned and self._ptr != NULL:
             eventprop_free_dropout_batch(self._ptr)
@@ -554,6 +697,7 @@ def backward_spikes_batch_accumulate(_SpikesBatchOutput batch_output):
     # Build a plain SpikesBatch view for the C API (spikes pointer is shared)
     cdef SpikesBatch spikes_view
     spikes_view.batch_size = ptr.batch_size
+    spikes_view.has_errors = ptr.has_errors
     spikes_view.spikes = ptr.spikes
 
     cdef AccumulatedBackwardResult result = eventprop_backward_spikes_batch_accumulate(
@@ -572,20 +716,16 @@ def backward_spikes_batch_accumulate(_SpikesBatchOutput batch_output):
 def backward_maxima_batch_accumulate(_MaximaBatchOutput batch_output):
     """Backward pass (maxima loss) + gradient accumulation.
 
-    Uses batch_output's internal .inputs directly — no Python-side work.
+    Uses batch_output's internal MaximaBatchWithInputs directly — no Python-side work.
     Returns _AccumulatedBackwardResult with summed gradients and per-sample spike errors.
     """
     cdef MaximaBatchWithInputs* ptr = batch_output._ptr
     if ptr == NULL:
         raise RuntimeError("MaximaBatchOutput has been freed")
 
-    # Build a plain SpikesBatch view for the C API (spikes pointer is shared)
-    cdef SpikesBatch spikes_view
-    spikes_view.batch_size = ptr.batch_size
-    spikes_view.spikes = NULL  # backward_maxima doesn't read .spikes, only inputs
-
+    # Pass the full MaximaBatchWithInputs directly (C reads .inputs + .outputs.errors)
     cdef AccumulatedBackwardResult result = eventprop_backward_maxima_batch_accumulate(
-        ptr.inputs, spikes_view)
+        ptr[0])  # copy struct by value onto C stack
 
     # Build n_spikes_per_sample from inputs (needed for spike error sizing)
     cdef int batch_size = ptr.batch_size
