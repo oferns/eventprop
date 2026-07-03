@@ -473,6 +473,17 @@ cdef class _MaximaBatchOutput:
             return 0
         return self._ptr.inputs[0].n_post
 
+    def __getitem__(self, int idx):
+        """Return (times, values) as zero-copy numpy views for sample idx.
+
+        Used by spikes.py MaximaVector._batch_output.__getitem__.
+        """
+        cdef MaximaOutput* out = &self._ptr.outputs[idx]
+        return (
+            _double_view(out.times, self.n_post),
+            _double_view(out.values, self.n_post),
+        )
+
     def get_times(self, int idx):
         """Zero-copy view into sample idx's maxima times."""
         cdef MaximaOutput* out = &self._ptr.outputs[idx]
