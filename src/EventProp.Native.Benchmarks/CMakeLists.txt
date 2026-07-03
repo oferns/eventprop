@@ -87,9 +87,10 @@ endif()
 if(WIN32)
     # MSVC OpenMP is built into the compiler, no separate library needed
     target_compile_options(bench_c PRIVATE /openmp)
+    # Copy the actual DLL (not just the .lib import library) for runtime
     add_custom_command(TARGET bench_c POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${LIB_EVENTPROP_C}
+            ${EVENTPROP_C_BUILD}/Release/eventprop_c_api.dll
             $<TARGET_FILE_DIR:bench_c>
     )
 endif()

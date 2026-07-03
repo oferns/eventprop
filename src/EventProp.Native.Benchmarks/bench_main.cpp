@@ -136,9 +136,9 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
         EventPropInput fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                     .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
                     .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
-        SpikeOutput* warmup = eventprop_compute_spikes(&fi);
-        benchmark::DoNotOptimize(warmup->times);
-        eventprop_free_spike_output(warmup);
+        SpikeOutput warmup = eventprop_compute_spikes(fi);
+        benchmark::DoNotOptimize(warmup.times);
+        eventprop_free_spike_output(&warmup);
 #endif
     }
 
@@ -151,10 +151,10 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
         EventPropInput fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                     .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
                     .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
-        SpikeOutput* output = eventprop_compute_spikes(&fi);
-        benchmark::DoNotOptimize(output->times);
-        benchmark::DoNotOptimize(output->currents);
-        eventprop_free_spike_output(output);
+        SpikeOutput output = eventprop_compute_spikes(fi);
+        benchmark::DoNotOptimize(output.times);
+        benchmark::DoNotOptimize(output.currents);
+        eventprop_free_spike_output(&output);
 #endif
     }
 
@@ -164,12 +164,12 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
     EventPropInput fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                 .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
                 .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
-    SpikeOutput* last = eventprop_compute_spikes(&fi);
+    SpikeOutput last = eventprop_compute_spikes(fi);
 #endif
 #ifdef USE_CPP_WRAPPER
     state.counters["output_spikes"] = benchmark::Counter(last.n_spikes);
 #else
-    state.counters["output_spikes"] = benchmark::Counter(last->n_spikes);
+    state.counters["output_spikes"] = benchmark::Counter(last.n_spikes);
 #endif
 
     state.SetItemsProcessed(state.iterations() * sz.n_spikes);
@@ -250,30 +250,26 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
     EventPropInput fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                 .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
                 .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
-    SpikeOutput* fwd_result = eventprop_compute_spikes(&fi);
+    SpikeOutput fwd_result = eventprop_compute_spikes(fi);
 
-    int n_post_spikes = fwd_result->n_spikes;
+    int n_post_spikes = fwd_result.n_spikes;
 
-    // Write errors into fwd_result->errors (allocated by forward pass)
-    for (int i = 0; i < n_post_spikes; i++) fwd_result->errors[i] = 1.0;
+    // Write errors into fwd_result.errors (allocated by forward pass)
+    for (int i = 0; i < n_post_spikes; i++) fwd_result.errors[i] = 1.0;
+
+    EventPropInput base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+                              .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
+                              .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0 };
 
     for (auto _ : state) {
-        EventPropInput base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
-                                  .tau_mem=0.02, .tau_syn=0.005 };
-        BackwardSpikesInput backward_input = {
-            .input = &base,
-            .fwd_times=fwd_result->times, .fwd_sources=fwd_result->sources,
-            .fwd_currents=fwd_result->currents, .errors=fwd_result->errors,
-            .n_post_spikes=n_post_spikes
-        };
-        BackwardOutput* result = eventprop_backward_spikes(&backward_input);
+        BackwardOutput result = eventprop_backward_spikes(base, fwd_result);
 
-        benchmark::DoNotOptimize(result->grad);
-        eventprop_free_backward_output(result);
+        benchmark::DoNotOptimize(result.grad);
+        eventprop_free_backward_output(&result);
     }
 
     state.counters["output_spikes"] = benchmark::Counter(n_post_spikes);
-    eventprop_free_spike_output(fwd_result);
+    eventprop_free_spike_output(&fwd_result);
 #endif
 
     state.SetItemsProcessed(state.iterations() * sz.n_spikes);
@@ -356,47 +352,37 @@ static void BM_FullTrainingStep(benchmark::State& state, const ProblemSize& sz, 
     }
 #else
     // C library: warmup forward pass to get post-spike data
-    EventPropInput fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+    EventPropInput fi_warmup = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                 .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
                 .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
-    SpikeOutput* fwd_warmup = eventprop_compute_spikes(&fi);
-    benchmark::DoNotOptimize(fwd_warmup->times);
-    eventprop_free_spike_output(fwd_warmup);
+    SpikeOutput fwd_warmup = eventprop_compute_spikes(fi_warmup);
+    benchmark::DoNotOptimize(fwd_warmup.times);
+    eventprop_free_spike_output(&fwd_warmup);
+
+    EventPropInput base_input = {
+        .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+        .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
+        .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0
+    };
 
     for (auto _ : state) {
         // Forward: sums + spikes
-        EventPropInput base_input = {
-            .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
-            .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-            .tau_mem=0.02, .tau_syn=0.005
-        };
-        SumsOutput* sums = eventprop_compute_sums(&base_input);
+        SumsOutput sums = eventprop_compute_sums(base_input);
 
-        EventPropInput fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
-                    .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-                    .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
-        SpikeOutput* fwd = eventprop_compute_spikes(&fi);
+        SpikeOutput fwd = eventprop_compute_spikes(base_input);
 
-        // Write errors into fwd->errors (allocated by forward pass)
-        for (int i = 0; i < fwd->n_spikes; i++) fwd->errors[i] = -1.0;
+        // Write errors into fwd.errors (allocated by forward pass)
+        for (int i = 0; i < fwd.n_spikes; i++) fwd.errors[i] = -1.0;
 
         // Backward: gradient computation
-        EventPropInput base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
-                                  .tau_mem=0.02, .tau_syn=0.005 };
-        BackwardSpikesInput backward_input = {
-            .input = &base,
-            .fwd_times=fwd->times, .fwd_sources=fwd->sources,
-            .fwd_currents=fwd->currents, .errors=fwd->errors,
-            .n_post_spikes=fwd->n_spikes
-        };
-        BackwardOutput* result = eventprop_backward_spikes(&backward_input);
+        BackwardOutput result = eventprop_backward_spikes(base_input, fwd);
 
-        benchmark::DoNotOptimize(result->grad);
-        benchmark::DoNotOptimize(sums->sum0);
+        benchmark::DoNotOptimize(result.grad);
+        benchmark::DoNotOptimize(sums.sum0);
 
-        eventprop_free_backward_output(result);
-        eventprop_free_spike_output(fwd);
-        eventprop_free_sums_output(sums);
+        eventprop_free_backward_output(&result);
+        eventprop_free_spike_output(&fwd);
+        eventprop_free_sums_output(&sums);
     }
 #endif
 
@@ -497,7 +483,7 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
     std::vector<double> times(batch_size * sz.n_spikes);
     std::vector<int> sources(batch_size * sz.n_spikes);
     std::vector<int> n_spikes_per_sample(batch_size, sz.n_spikes);
-    
+
     for (int b = 0; b < batch_size; b++) {
         std::mt19937 rng(42 + b);
         for (int i = 0; i < sz.n_spikes; i++) {
@@ -508,36 +494,34 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
 
     // Collect results inside the loop and free after — avoids malloc/free
     // overhead per iteration while keeping the C library's allocation philosophy.
-    std::vector<SpikeOutput*> fwd_results;
-    std::vector<BackwardOutput*> bwd_results;
+    std::vector<SpikesBatchWithInputs> fwd_results;
+    std::vector<BackwardsBatch> bwd_results;
     fwd_results.reserve(state.iterations());
     bwd_results.reserve(state.iterations());
 
-    EventPropInput input_data = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
-                .times=times.data(), .sources=sources.data(),
-                .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
-    BatchEventPropInput batch = { .input = &input_data, .n_spikes_per_sample = n_spikes_per_sample.data(), .batch_size = batch_size };
-
     for (auto _ : state) {
-        SpikeOutput* fwd_batch = eventprop_compute_spikes_batch(&batch);
+        SpikesBatchWithInputs fwd_batch = eventprop_compute_spikes_batch_flat(
+            w.data(), sz.n_pre, sz.n_post,
+            times.data(), sources.data(), n_spikes_per_sample.data(),
+            batch_size, 0.02, 0.005, 1.0);
 
-        // Write errors into fwd_batch[b].errors (allocated by forward pass)
+        // Write errors into fwd_batch.spikes[b].errors (allocated by forward pass)
         for (int b = 0; b < batch_size; b++)
-            for (int i = 0; i < fwd_batch[b].n_spikes; i++)
-                fwd_batch[b].errors[i] = -1.0;
+            for (int i = 0; i < fwd_batch.spikes[b].n_spikes; i++)
+                fwd_batch.spikes[b].errors[i] = -1.0;
 
-        BackwardOutput* result_batch = eventprop_backward_spikes_batch(
-            &batch, fwd_batch);
+        SpikesBatch spikes_view = {fwd_batch.batch_size, fwd_batch.has_errors, fwd_batch.spikes};
+        BackwardsBatch result_batch = eventprop_backward_spikes_batch(fwd_batch.inputs, spikes_view);
 
-        benchmark::DoNotOptimize(result_batch[0].grad);
+        benchmark::DoNotOptimize(result_batch.outputs[0].grad);
 
-        fwd_results.push_back(fwd_batch);
-        bwd_results.push_back(result_batch);
+        fwd_results.push_back(std::move(fwd_batch));
+        bwd_results.push_back(std::move(result_batch));
     }
 
     // Free all results after the benchmark loop
-    for (auto* r : bwd_results) eventprop_free_backward_batch_output(r, batch_size);
-    for (auto* r : fwd_results) eventprop_free_batch_spike_output(r, batch_size);
+    for (auto& r : bwd_results) eventprop_free_backwards_batch(&r);
+    for (auto& r : fwd_results) eventprop_free_spikes_with_inputs_batch(&r);
 #endif
 
     state.SetItemsProcessed(state.iterations() * batch_size * sz.n_spikes);
@@ -583,10 +567,10 @@ static void BM_ComputeSpikesVth(benchmark::State& state)
         EventPropInput fi = {.w=w.data(), .n_pre=n_pre, .n_post=n_post,
                     .times=times.data(), .sources=sources.data(), .n_spikes=n_spikes,
                     .tau_mem=0.02, .tau_syn=0.005, .v_th=v_th};
-        SpikeOutput* output = eventprop_compute_spikes(&fi);
-        benchmark::DoNotOptimize(output->times);
-        benchmark::DoNotOptimize(output->currents);
-        eventprop_free_spike_output(output);
+        SpikeOutput output = eventprop_compute_spikes(fi);
+        benchmark::DoNotOptimize(output.times);
+        benchmark::DoNotOptimize(output.currents);
+        eventprop_free_spike_output(&output);
 #endif
     }
 
@@ -627,10 +611,10 @@ static void BM_BackwardSpikesVth(benchmark::State& state)
     EventPropInput fi = {.w=w.data(), .n_pre=n_pre, .n_post=n_post,
                 .times=times.data(), .sources=sources.data(), .n_spikes=n_spikes,
                 .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
-    SpikeOutput* fwd = eventprop_compute_spikes(&fi);
+    SpikeOutput fwd = eventprop_compute_spikes(fi);
 
-    // Write errors into fwd->errors (allocated by forward pass)
-    for (int i = 0; i < fwd->n_spikes; i++) fwd->errors[i] = -1.0;
+    // Write errors into fwd.errors (allocated by forward pass)
+    for (int i = 0; i < fwd.n_spikes; i++) fwd.errors[i] = -1.0;
 #endif
 
     for (auto _ : state) {
@@ -638,24 +622,19 @@ static void BM_BackwardSpikesVth(benchmark::State& state)
         gradient = backward(input, post, w_map, v_th, 0.02, 0.005);
         benchmark::DoNotOptimize(gradient.first.data());
 #else
-        EventPropInput base = { .w=w.data(), .n_pre=n_pre, .n_post=n_post,
-                                  .tau_mem=0.02, .tau_syn=0.005 };
-        BackwardSpikesInput backward_input = {
-            .input = &base,
-            .fwd_times=fwd->times, .fwd_sources=fwd->sources,
-            .fwd_currents=fwd->currents, .errors=fwd->errors,
-            .n_post_spikes=fwd->n_spikes
-        };
-        BackwardOutput* result = eventprop_backward_spikes(&backward_input);
-        benchmark::DoNotOptimize(result->grad);
-        eventprop_free_backward_output(result);
+        EventPropInput base_input = {.w=w.data(), .n_pre=n_pre, .n_post=n_post,
+            .times=times.data(), .sources=sources.data(), .n_spikes=n_spikes,
+            .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
+        BackwardOutput result = eventprop_backward_spikes(base_input, fwd);
+        benchmark::DoNotOptimize(result.grad);
+        eventprop_free_backward_output(&result);
 #endif
     }
 
 #ifdef USE_CPP_WRAPPER
     // Nothing to free for Eigen
 #else
-    eventprop_free_spike_output(fwd);
+    eventprop_free_spike_output(&fwd);
 #endif
 
     state.SetItemsProcessed(state.iterations() * n_spikes);
@@ -693,11 +672,11 @@ static void BM_ComputeSums(benchmark::State& state, const ProblemSize& sz, DataG
         EventPropInput base_input = {
             .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
             .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-            .tau_mem=0.02, .tau_syn=0.005
+            .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0
         };
-        SumsOutput* warmup = eventprop_compute_sums(&base_input);
-        benchmark::DoNotOptimize(warmup->sum0);
-        eventprop_free_sums_output(warmup);
+        SumsOutput warmup = eventprop_compute_sums(base_input);
+        benchmark::DoNotOptimize(warmup.sum0);
+        eventprop_free_sums_output(&warmup);
 #endif
     }
 
@@ -710,12 +689,12 @@ static void BM_ComputeSums(benchmark::State& state, const ProblemSize& sz, DataG
         EventPropInput base_input = {
             .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
             .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-            .tau_mem=0.02, .tau_syn=0.005
+            .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0
         };
-        SumsOutput* output = eventprop_compute_sums(&base_input);
-        benchmark::DoNotOptimize(output->sum0);
-        benchmark::DoNotOptimize(output->sum1);
-        eventprop_free_sums_output(output);
+        SumsOutput output = eventprop_compute_sums(base_input);
+        benchmark::DoNotOptimize(output.sum0);
+        benchmark::DoNotOptimize(output.sum1);
+        eventprop_free_sums_output(&output);
 #endif
     }
 
@@ -785,11 +764,11 @@ static void BM_ComputeMaxima(benchmark::State& state, const ProblemSize& sz, Dat
         EventPropInput base_input = {
             .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
             .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-            .tau_mem=0.02, .tau_syn=0.005
+            .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0
         };
-        MaximaOutput* warmup = eventprop_compute_maxima(&base_input);
-        benchmark::DoNotOptimize(warmup->times);
-        eventprop_free_maxima_output(warmup);
+        MaximaOutput warmup = eventprop_compute_maxima(base_input);
+        benchmark::DoNotOptimize(warmup.times);
+        eventprop_free_maxima_output(&warmup);
 #endif
     }
 
@@ -802,12 +781,12 @@ static void BM_ComputeMaxima(benchmark::State& state, const ProblemSize& sz, Dat
         EventPropInput base_input = {
             .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
             .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-            .tau_mem=0.02, .tau_syn=0.005
+            .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0
         };
-        MaximaOutput* output = eventprop_compute_maxima(&base_input);
-        benchmark::DoNotOptimize(output->times);
-        benchmark::DoNotOptimize(output->values);
-        eventprop_free_maxima_output(output);
+        MaximaOutput output = eventprop_compute_maxima(base_input);
+        benchmark::DoNotOptimize(output.times);
+        benchmark::DoNotOptimize(output.values);
+        eventprop_free_maxima_output(&output);
 #endif
     }
 
@@ -877,9 +856,9 @@ static void BM_BackwardMaxima(benchmark::State& state, const ProblemSize& sz, Da
     EventPropInput base_input = {
         .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
         .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-        .tau_mem=0.02, .tau_syn=0.005
+        .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0
     };
-    MaximaOutput* maxima = eventprop_compute_maxima(&base_input);
+    MaximaOutput maxima = eventprop_compute_maxima(base_input);
 
     std::vector<double> maxima_errors(sz.n_post, -1.0);
 #endif
@@ -889,23 +868,16 @@ static void BM_BackwardMaxima(benchmark::State& state, const ProblemSize& sz, Da
         gradient = backward(input, maxima, w_map, 0.02, 0.005);
         benchmark::DoNotOptimize(gradient.first.data());
 #else
-        EventPropInput base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
-                                  .tau_mem=0.02, .tau_syn=0.005 };
-        BackwardMaximaInput backward_input = {
-            .input = &base,
-            .maxima_times=maxima->times, .maxima_values=maxima->values,
-            .maxima_errors=maxima_errors.data(), .n_maxima=sz.n_post
-        };
-        BackwardOutput* result = eventprop_backward_maxima(&backward_input);
-        benchmark::DoNotOptimize(result->grad[0]);
-        eventprop_free_backward_output(result);
+        BackwardOutput result = eventprop_backward_maxima(base_input, maxima.times, maxima_errors.data());
+        benchmark::DoNotOptimize(result.grad[0]);
+        eventprop_free_backward_output(&result);
 #endif
     }
 
 #ifdef USE_CPP_WRAPPER
     // Nothing to free for Eigen
 #else
-    eventprop_free_maxima_output(maxima);
+    eventprop_free_maxima_output(&maxima);
 #endif
 
     state.SetItemsProcessed(state.iterations() * sz.n_spikes);
@@ -983,18 +955,8 @@ static void BM_Dropout(benchmark::State& state, const ProblemSize& sz, DataGener
 #endif
 
 #ifndef USE_CPP_WRAPPER
-    // Setup C batch input
-    int* n_per_sample = (int*)malloc(batch_size * sizeof(int));
-    for (int b = 0; b < batch_size; b++) n_per_sample[b] = sz.n_spikes;
-
-    EventPropInput input = {
-        .w=NULL, .n_pre=sz.n_pre, .n_post=0,
-        .times=times.data(), .sources=sources.data(), .n_spikes=total_spikes,
-        .tau_mem=0.0, .tau_syn=0.0, .v_th=0.0
-    };
-    BatchEventPropInput batch = {
-        .input=&input, .n_spikes_per_sample=n_per_sample, .batch_size=batch_size
-    };
+    // Setup C flat-array input
+    std::vector<int> n_per_sample(batch_size, sz.n_spikes);
 #endif
 
     for (auto _ : state) {
@@ -1002,17 +964,14 @@ static void BM_Dropout(benchmark::State& state, const ProblemSize& sz, DataGener
         auto dropped = dropout_spikes(cpp_spikes, 0.3, 42);
         benchmark::DoNotOptimize(dropped);
 #else
-        DropoutOutput* dropped = eventprop_dropout_spikes_batch(&batch, 0.3, 42);
+        DropoutBatch dropped = eventprop_dropout_spikes_batch(
+            times.data(), sources.data(), n_per_sample.data(), batch_size, 0.3, 42);
         int total = 0;
-        for (int b = 0; b < batch_size; b++) total += dropped[b].n_spikes;
+        for (int b = 0; b < batch_size; b++) total += dropped.outputs[b].n_spikes;
         benchmark::DoNotOptimize(total);
-        eventprop_free_dropout_output(dropped, batch_size);
+        eventprop_free_dropout_batch(&dropped);
 #endif
     }
-
-#ifndef USE_CPP_WRAPPER
-    free(n_per_sample);
-#endif
 
     state.SetItemsProcessed(state.iterations() * total_spikes);
 }
