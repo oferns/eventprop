@@ -58,6 +58,8 @@ else
     PATCH_FILE="$SCRIPT_DIR/submodule-macos.patch"
   elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
     PATCH_FILE="$SCRIPT_DIR/submodule-linux.patch"
+  elif [[ "$OSTYPE" == "msys"* || "$OSTYPE" == "cygwin"* ]]; then
+    PATCH_FILE="$SCRIPT_DIR/submodule-windows.patch"
   else
     echo "WARNING: Unknown platform ($OSTYPE) — skipping submodule patch"
     PATCH_FILE=""
