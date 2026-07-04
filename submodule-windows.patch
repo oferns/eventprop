@@ -12,10 +12,10 @@ index 9209c56..a7217c7 100644
          for batch_idx, spikes in enumerate(self.post_batch):
              self.first_spike_times[batch_idx, :] = self.post_batch[
 diff --git a/setup.py b/setup.py
-index a53268b..d4e7f1a 100644
+index a53268b..6bf4320 100644
 --- a/setup.py
 +++ b/setup.py
-@@ -9,13 +9,13 @@ cpp_ext = setuptools.Extension(
+@@ -7,13 +7,9 @@ cpp_ext = setuptools.Extension(
      language="c++",
      # extra_compile_args=["-std=c++17", "-O0", "-g"]
      extra_compile_args=[
@@ -31,3 +31,4 @@ index a53268b..d4e7f1a 100644
 +        "/openmp",
      ],
  )
+ 

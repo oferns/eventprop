@@ -1,5 +1,6 @@
 #include "eventprop_eigen_stripped.h"
 #include <algorithm>
+#include <execution>
 // #include <boost/format.hpp>  // unused
 #include <boost/math/tools/roots.hpp>
 #include <cmath>
@@ -255,7 +256,7 @@ compute_spikes(Eigen::Ref<RowMatrixXd const> w, Spikes const &spikes,
               return a.first.first < b.first.first;
             });
   #else
-  std::sort(all_post_spikes.begin(), all_post_spikes.end(),
+  std::sort(std::execution::par_unseq, all_post_spikes.begin(), all_post_spikes.end(),
             [](std::pair<std::pair<double, double>, int> a, std::pair<std::pair<double, double>, int> b) {
               return a.first.first < b.first.first;
             });
@@ -270,7 +271,7 @@ compute_spikes(Eigen::Ref<RowMatrixXd const> w, Spikes const &spikes,
       #ifdef __APPLE__
       auto find_result = std::distance(all_post_spikes.begin(), std::find_if(all_post_spikes.begin(), all_post_spikes.end(), [&](std::pair<std::pair<double, double>, int> spike) -> bool { return spike.second == nrn_idx; }));
       #else
-      auto find_result = std::distance(all_post_spikes.begin(), std::find_if(all_post_spikes.begin(), all_post_spikes.end(), [&](std::pair<std::pair<double, double>, int> spike) -> bool { return spike.second == nrn_idx; }));
+      auto find_result = std::distance(all_post_spikes.begin(), std::find_if(std::execution::par_unseq, all_post_spikes.begin(), all_post_spikes.end(), [&](std::pair<std::pair<double, double>, int> spike) -> bool { return spike.second == nrn_idx; }));
       #endif
 
       first_spike_idxs.at(nrn_idx) = find_result;
