@@ -5,7 +5,7 @@ from typing import NamedTuple, Tuple
 
 from .layer import GaussianDistribution, Layer, WeightDistribution
 from ._native import (
-    compute_maxima_batch_flat, backward_maxima_batch_accumulate,
+    compute_maxima_batch, backward_maxima_batch_accumulate,
 )
 from .spikes import MaximaVector, SpikesVector
 
@@ -46,7 +46,7 @@ class LILayer(Layer):
 
         times, sources, n_per_sample = SpikesVector._extract_flat_buffers(input_batch)
 
-        c_output = compute_maxima_batch_flat(
+        c_output = compute_maxima_batch(
             times, sources, n_per_sample,
             self.w_in_flat, self.parameters.n_in, self.parameters.n,
             self.parameters.tau_mem, self.parameters.tau_syn, float('inf'),  # LI: no threshold

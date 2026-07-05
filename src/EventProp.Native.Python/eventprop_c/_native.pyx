@@ -5,8 +5,8 @@ Zero-copy interface: numpy arrays → flat buffers → C structs → back to num
 No data copies across the FFI boundary.
 
 Philosophy:
-    - compute_spikes_batch_flat() returns SpikesBatchWithInputs (owns inputs + spikes)
-    - All subsequent batch functions take that object directly — no Python-side reconstruction
+    - compute_spikes_batch() constructs EventPropInput[] in Cython, calls non-flat C API
+    - Wrapper classes own both input pointers (C-allocated) and output pointers (C-returned)
     - backward_*_batch_accumulate() combines parallel backward + sequential gradient sum in C
     - Managed wrapper classes keep C memory alive via __dealloc__
 """
@@ -154,14 +154,6 @@ cdef extern from "eventprop_batch.h":
 
     void eventprop_free_spikes_batch(SpikesBatch* batch)
 
-    ctypedef struct SpikesBatchWithInputs:
-        EventPropInput* inputs
-        int batch_size
-        int has_errors
-        SpikeOutput* spikes
-
-    void eventprop_free_spikes_with_inputs_batch(SpikesBatchWithInputs* batch)
-
     # Batch backward output — per-sample results
     ctypedef struct BackwardsBatch:
         int batch_size
@@ -176,14 +168,6 @@ cdef extern from "eventprop_batch.h":
         MaximaOutput* outputs
 
     void eventprop_free_maxima_batch(MaximaBatch* batch)
-
-    ctypedef struct MaximaBatchWithInputs:
-        EventPropInput* inputs
-        int batch_size
-        int has_errors
-        MaximaOutput* outputs
-
-    void eventprop_free_maxima_with_inputs_batch(MaximaBatchWithInputs* batch)
 
     # Dropout output — per-sample surviving spikes
     ctypedef struct DropoutOutput:
@@ -225,25 +209,6 @@ cdef extern from "eventprop_batch.h":
     void eventprop_free_accumulated_backward_result(AccumulatedBackwardResult* result)
 
     # Batch functions (return by value, heap-allocated internals)
-    SpikesBatchWithInputs  eventprop_compute_spikes_batch_flat(
-        const double* w,
-        int n_pre, int n_post,
-        const double* times,
-        const int* sources,
-        const int* n_per_sample,
-        int batch_size,
-        double tau_mem, double tau_syn, double v_th)
-
-    MaximaBatchWithInputs  eventprop_compute_maxima_batch_flat(
-        const double* w,
-        int n_pre, int n_post,
-        const double* times,
-        const int* sources,
-        const int* n_per_sample,
-        int batch_size,
-        double tau_mem, double tau_syn, double v_th)
-
-    # Standalone batch functions (non-accumulate variants)
     SpikesBatch  eventprop_compute_spikes_batch(const EventPropInput* inputs, int batch_size)
 
     BackwardsBatch eventprop_backward_spikes_batch(
@@ -253,7 +218,8 @@ cdef extern from "eventprop_batch.h":
         const EventPropInput* inputs, const SpikesBatch spikes_batch)
 
     # backward_maxima_batch uses MaximaOutput.errors written by caller
-    BackwardsBatch eventprop_backward_maxima_batch(const MaximaBatchWithInputs maxima_batch)
+    BackwardsBatch eventprop_backward_maxima_batch(
+        const EventPropInput* inputs, const MaximaBatch maxima_batch)
 
     # Gradient accumulation helper (skips samples with errors)
     GradientOutput eventprop_accumulate_gradients(BackwardsBatch batch, int n_pre, int n_post)
@@ -262,9 +228,9 @@ cdef extern from "eventprop_batch.h":
     AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
         const EventPropInput* inputs, const SpikesBatch spikes_batch)
 
-    # backward_maxima_batch_accumulate takes the full MaximaBatchWithInputs directly
+    # backward_maxima_batch_accumulate takes inputs separately
     AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
-        const MaximaBatchWithInputs maxima_batch)
+        const EventPropInput* inputs, const MaximaBatch maxima_batch)
 
 
 # ---------------------------------------------------------------------------
@@ -340,46 +306,49 @@ cdef inline object _int_view(int* ptr, ssize_t size):
 # ---------------------------------------------------------------------------
 
 cdef class _SpikesBatchOutput:
-    """Managed wrapper around SpikesBatchWithInputs (C-owned memory).
+    """Managed wrapper around SpikesBatch + EventPropInput[] (C-owned memory).
 
-    Returned by compute_spikes_batch_flat(). Keeps the C heap allocation alive
-    for the lifetime of this Python object. Provides zero-copy access to per-sample
+    Returned by compute_spikes_batch(). Keeps both the input array and spike outputs
+    alive for the lifetime of this Python object. Provides zero-copy access to per-sample
     spike data and error buffers.
 
     The .inputs array is stored in C and reused directly by backward/maxima calls —
     no Python-side reconstruction needed.
     """
-    cdef SpikesBatchWithInputs* _ptr   # pointer to heap-allocated struct
-    cdef bint _owned                   # True if we own the memory (should free)
+    cdef EventPropInput* _inputs      # pointer to heap-allocated input array (owned)
+    cdef SpikesBatch* _spikes         # pointer to heap-allocated spikes batch (owned)
+    cdef bint _owned                  # True if we own the memory (should free)
     # Keep flat arrays alive when inputs are constructed in Cython (not C-owned)
-    cdef object _times_ref             # reference to original times array
-    cdef object _sources_ref           # reference to original sources array
+    cdef object _times_ref            # reference to original times array
+    cdef object _sources_ref          # reference to original sources array
 
     def __cinit__(self):
-        self._ptr = NULL
+        self._inputs = NULL
+        self._spikes = NULL
         self._owned = False
         self._times_ref = None
         self._sources_ref = None
 
     @staticmethod
-    cdef _SpikesBatchOutput from_c_result(SpikesBatchWithInputs result, int n_pre, int n_post):
-        """Wrap a C return value by copying it to heap and managing lifetime."""
+    cdef _SpikesBatchOutput from_c_result(EventPropInput* inputs, SpikesBatch result):
+        """Wrap C return values by copying spikes to heap and managing lifetime."""
         cdef _SpikesBatchOutput obj = _SpikesBatchOutput.__new__(_SpikesBatchOutput)
-        obj._ptr = <SpikesBatchWithInputs*>malloc(sizeof(SpikesBatchWithInputs))
-        if obj._ptr == NULL:
-            raise MemoryError("Failed to allocate SpikesBatchWithInputs wrapper")
-        obj._ptr[0] = result  # copy struct by value onto heap
+        obj._inputs = inputs  # caller transfers ownership
+        obj._spikes = <SpikesBatch*>malloc(sizeof(SpikesBatch))
+        if obj._spikes == NULL:
+            raise MemoryError("Failed to allocate SpikesBatch wrapper")
+        obj._spikes[0] = result  # copy struct by value onto heap
         obj._owned = True
         return obj
 
     def __len__(self):
-        if self._ptr == NULL:
+        if self._spikes == NULL:
             raise RuntimeError("SpikesBatchOutput has been freed")
-        return self._ptr.batch_size
+        return self._spikes.batch_size
 
     def __getitem__(self, int idx):
         """Return (times, sources, currents) as zero-copy numpy views for sample idx."""
-        cdef SpikeOutput* out = &self._ptr.spikes[idx]
+        cdef SpikeOutput* out = &self._spikes.spikes[idx]
         if out.n_spikes <= 0:
             return np.array([], dtype=np.float64), np.array([], dtype=np.int32), np.array([], dtype=np.float64)
         return (
@@ -394,96 +363,115 @@ cdef class _SpikesBatchOutput:
         Python writes target errors here before calling backward().
         C reads them directly — no copying needed.
         """
-        cdef SpikeOutput* out = &self._ptr.spikes[idx]
+        cdef SpikeOutput* out = &self._spikes.spikes[idx]
         return _double_view(out.errors, out.n_spikes)
 
     def get_error_no(self, int idx):
         """Return the error code for sample idx (EVENTPROP_OK == 0 on success)."""
-        cdef SpikeOutput* out = &self._ptr.spikes[idx]
+        cdef SpikeOutput* out = &self._spikes.spikes[idx]
         return out.error_no
 
     @property
     def batch_size(self):
-        return self._ptr.batch_size
+        if self._spikes == NULL:
+            return 0
+        return self._spikes.batch_size
 
     @property
     def has_errors(self):
         """True if any sample in the batch returned an error."""
-        return bool(self._ptr.has_errors)
+        if self._spikes == NULL:
+            return False
+        return bool(self._spikes.has_errors)
 
     @property
     def n_pre(self):
-        if self._ptr.inputs == NULL:
+        if self._inputs == NULL:
             return 0
-        return self._ptr.inputs[0].n_pre
+        return self._inputs[0].n_pre
 
     @property
     def n_post(self):
-        if self._ptr.inputs == NULL:
+        if self._inputs == NULL:
             return 0
-        return self._ptr.inputs[0].n_post
+        return self._inputs[0].n_post
 
     def __dealloc__(self):
-        if self._owned and self._ptr != NULL:
-            eventprop_free_spikes_with_inputs_batch(self._ptr)
-            free(self._ptr)
-            self._ptr = NULL
+        if self._owned and self._spikes != NULL:
+            eventprop_free_spikes_batch(self._spikes)
+            free(self._spikes)
+            self._spikes = NULL
+        if self._owned and self._inputs != NULL:
+            free(self._inputs)
+            self._inputs = NULL
 
 
 cdef class _MaximaBatchOutput:
-    """Managed wrapper around MaximaBatchWithInputs (C-owned memory).
+    """Managed wrapper around MaximaBatch + EventPropInput[] (C-owned memory).
 
-    Returned by compute_maxima_batch_flat(). Keeps the C heap allocation alive
-    for the lifetime of this Python object. Provides zero-copy access to per-sample
+    Returned by compute_maxima_batch(). Keeps both the input array and maxima outputs
+    alive for the lifetime of this Python object. Provides zero-copy access to per-sample
     maxima data.
 
     The .inputs array is stored in C and reused directly by backward calls —
     no Python-side reconstruction needed.
     """
-    cdef MaximaBatchWithInputs* _ptr   # pointer to heap-allocated struct
-    cdef bint _owned                   # True if we own the memory (should free)
+    cdef EventPropInput* _inputs      # pointer to heap-allocated input array (owned)
+    cdef MaximaBatch* _maxima         # pointer to heap-allocated maxima batch (owned)
+    cdef bint _owned                  # True if we own the memory (should free)
+    # Keep flat arrays alive when inputs are constructed in Cython (not C-owned)
+    cdef object _times_ref            # reference to original times array
+    cdef object _sources_ref          # reference to original sources array
 
     def __cinit__(self):
-        self._ptr = NULL
+        self._inputs = NULL
+        self._maxima = NULL
         self._owned = False
+        self._times_ref = None
+        self._sources_ref = None
 
     @staticmethod
-    cdef _MaximaBatchOutput from_c_result(MaximaBatchWithInputs result, int n_post):
-        """Wrap a C return value by copying it to heap and managing lifetime."""
+    cdef _MaximaBatchOutput from_c_result(EventPropInput* inputs, MaximaBatch result):
+        """Wrap C return values by copying maxima to heap and managing lifetime."""
         cdef _MaximaBatchOutput obj = _MaximaBatchOutput.__new__(_MaximaBatchOutput)
-        obj._ptr = <MaximaBatchWithInputs*>malloc(sizeof(MaximaBatchWithInputs))
-        if obj._ptr == NULL:
-            raise MemoryError("Failed to allocate MaximaBatchWithInputs wrapper")
-        obj._ptr[0] = result  # copy struct by value onto heap
+        obj._inputs = inputs  # caller transfers ownership
+        obj._maxima = <MaximaBatch*>malloc(sizeof(MaximaBatch))
+        if obj._maxima == NULL:
+            raise MemoryError("Failed to allocate MaximaBatch wrapper")
+        obj._maxima[0] = result  # copy struct by value onto heap
         obj._owned = True
         return obj
 
     def __len__(self):
-        if self._ptr == NULL:
+        if self._maxima == NULL:
             raise RuntimeError("MaximaBatchOutput has been freed")
-        return self._ptr.batch_size
+        return self._maxima.batch_size
 
     @property
     def batch_size(self):
-        return self._ptr.batch_size
+        if self._maxima == NULL:
+            return 0
+        return self._maxima.batch_size
 
     @property
     def has_errors(self):
         """True if any sample in the batch returned an error."""
-        return bool(self._ptr.has_errors)
+        if self._maxima == NULL:
+            return False
+        return bool(self._maxima.has_errors)
 
     @property
     def n_post(self):
-        if self._ptr.inputs == NULL:
+        if self._inputs == NULL:
             return 0
-        return self._ptr.inputs[0].n_post
+        return self._inputs[0].n_post
 
     def __getitem__(self, int idx):
         """Return (times, values) as zero-copy numpy views for sample idx.
 
         Used by spikes.py MaximaVector._batch_output.__getitem__.
         """
-        cdef MaximaOutput* out = &self._ptr.outputs[idx]
+        cdef MaximaOutput* out = &self._maxima.outputs[idx]
         return (
             _double_view(out.times, self.n_post),
             _double_view(out.values, self.n_post),
@@ -491,12 +479,12 @@ cdef class _MaximaBatchOutput:
 
     def get_times(self, int idx):
         """Zero-copy view into sample idx's maxima times."""
-        cdef MaximaOutput* out = &self._ptr.outputs[idx]
+        cdef MaximaOutput* out = &self._maxima.outputs[idx]
         return _double_view(out.times, self.n_post)
 
     def get_values(self, int idx):
         """Zero-copy view into sample idx's maxima values."""
-        cdef MaximaOutput* out = &self._ptr.outputs[idx]
+        cdef MaximaOutput* out = &self._maxima.outputs[idx]
         return _double_view(out.values, self.n_post)
 
     def get_maxima_errors(self, int idx):
@@ -505,19 +493,22 @@ cdef class _MaximaBatchOutput:
         Python writes target errors here before calling backward_maxima().
         C reads them directly — no copying needed.
         """
-        cdef MaximaOutput* out = &self._ptr.outputs[idx]
+        cdef MaximaOutput* out = &self._maxima.outputs[idx]
         return _double_view(out.errors, self.n_post)
 
     def get_error_no(self, int idx):
         """Return the error code for sample idx (EVENTPROP_OK == 0 on success)."""
-        cdef MaximaOutput* out = &self._ptr.outputs[idx]
+        cdef MaximaOutput* out = &self._maxima.outputs[idx]
         return out.error_no
 
     def __dealloc__(self):
-        if self._owned and self._ptr != NULL:
-            eventprop_free_maxima_with_inputs_batch(self._ptr)
-            free(self._ptr)
-            self._ptr = NULL
+        if self._owned and self._maxima != NULL:
+            eventprop_free_maxima_batch(self._maxima)
+            free(self._maxima)
+            self._maxima = NULL
+        if self._owned and self._inputs != NULL:
+            free(self._inputs)
+            self._inputs = NULL
 
 
 cdef class _AccumulatedBackwardResult:
@@ -663,17 +654,17 @@ cdef class _DropoutBatchOutput:
 
 
 # ---------------------------------------------------------------------------
-# 6. Public API — Python-callable functions
+# 6. Internal helper — construct EventPropInput[] from flat numpy arrays
 # ---------------------------------------------------------------------------
 
-def compute_spikes_batch(
+cdef EventPropInput* _build_inputs(
         double[:] times, int[:] sources, int[:] n_per_sample,
         double[:, ::1] w, int n_pre, int n_post,
         double tau_mem, double tau_syn, double v_th):
-    """Batch forward pass — construct EventPropInput[] in Cython, call non-flat C API.
+    """Construct a heap-allocated EventPropInput[] from flat numpy arrays.
 
-    Returns _SpikesBatchOutput that owns the C memory (inputs + spikes).
-    Keeps references to original flat arrays so input pointers stay valid for backward passes.
+    Returns pointer to caller-owned memory (caller must free via libc.free).
+    Pointers into times/sources are valid as long as the original numpy arrays live.
     """
     cdef int batch_size = n_per_sample.shape[0]
     cdef EventPropInput* inputs = <EventPropInput*>malloc(batch_size * sizeof(EventPropInput))
@@ -702,57 +693,64 @@ def compute_spikes_batch(
         inputs[b].sources = s_ptr
         inputs[b].n_spikes = n_per_sample[b]
 
+    return inputs
+
+
+# ---------------------------------------------------------------------------
+# 7. Public API — Python-callable functions
+# ---------------------------------------------------------------------------
+
+def compute_spikes_batch(
+        double[:] times, int[:] sources, int[:] n_per_sample,
+        double[:, ::1] w, int n_pre, int n_post,
+        double tau_mem, double tau_syn, double v_th):
+    """Batch forward pass — construct EventPropInput[] in Cython, call non-flat C API.
+
+    Returns _SpikesBatchOutput that owns both the input array and spike outputs.
+    Keeps references to original flat arrays so input pointers stay valid for backward passes.
+    """
+    cdef int batch_size = n_per_sample.shape[0]
+    cdef EventPropInput* inputs = _build_inputs(
+        times, sources, n_per_sample, w, n_pre, n_post, tau_mem, tau_syn, v_th)
+
     cdef SpikesBatch result = eventprop_compute_spikes_batch(inputs, batch_size)
 
-    # Wrap: store inputs on heap alongside spikes, keep flat arrays alive via Python refs
-    cdef _SpikesBatchOutput obj = _SpikesBatchOutput.__new__(_SpikesBatchOutput)
-    obj._ptr = <SpikesBatchWithInputs*>malloc(sizeof(SpikesBatchWithInputs))
-    if obj._ptr == NULL:
-        free(inputs)
-        raise MemoryError("Failed to allocate SpikesBatchWithInputs wrapper")
-    obj._ptr.inputs = inputs
-    obj._ptr.batch_size = result.batch_size
-    obj._ptr.has_errors = result.has_errors
-    obj._ptr.spikes = result.spikes
-    obj._owned = True
+    # Wrap: transfer input ownership to wrapper, copy spikes onto heap
+    cdef _SpikesBatchOutput obj = _SpikesBatchOutput.from_c_result(inputs, result)
     # Keep flat arrays alive so input pointers stay valid
     obj._times_ref = times
     obj._sources_ref = sources
     return obj
 
 
-def compute_spikes_batch_flat(
+def compute_maxima_batch(
         double[:] times, int[:] sources, int[:] n_per_sample,
         double[:, ::1] w, int n_pre, int n_post,
         double tau_mem, double tau_syn, double v_th):
-    """Batch forward pass — flat numpy arrays → C-owned SpikesBatchWithInputs.
+    """Batch maxima pass — construct inputs in Cython, compute spikes then maxima.
 
-    Returns _SpikesBatchOutput that owns the C memory (inputs + spikes).
-    Subsequent backward/maxima calls use this object directly — no Python reconstruction.
+    Returns _MaximaBatchOutput that owns both the input array and maxima outputs.
+    Keeps references to original flat arrays so input pointers stay valid for backward passes.
     """
     cdef int batch_size = n_per_sample.shape[0]
-    cdef SpikesBatchWithInputs result = eventprop_compute_spikes_batch_flat(
-        &w[0, 0], n_pre, n_post,
-        &times[0], &sources[0], &n_per_sample[0],
-        batch_size, tau_mem, tau_syn, v_th)
-    return _SpikesBatchOutput.from_c_result(result, n_pre, n_post)
+    cdef EventPropInput* inputs = _build_inputs(
+        times, sources, n_per_sample, w, n_pre, n_post, tau_mem, tau_syn, v_th)
 
+    # Compute spikes first (needed for maxima)
+    cdef SpikesBatch spikes_result = eventprop_compute_spikes_batch(inputs, batch_size)
 
-def compute_maxima_batch_flat(
-        double[:] times, int[:] sources, int[:] n_per_sample,
-        double[:, ::1] w, int n_pre, int n_post,
-        double tau_mem, double tau_syn, double v_th):
-    """Batch maxima pass — flat numpy arrays → C-owned MaximaBatchWithInputs.
+    # Compute maxima using the same inputs and spike results
+    cdef MaximaBatch maxima_result = eventprop_compute_maxima_batch(inputs, spikes_result)
 
-    Returns _MaximaBatchOutput that owns the C memory (inputs + maxima).
-    Subsequent backward calls use this object directly — no Python reconstruction.
-    """
-    cdef int batch_size = n_per_sample.shape[0]
-    cdef MaximaBatchWithInputs result = eventprop_compute_maxima_batch_flat(
-        &w[0, 0], n_pre, n_post,
-        &times[0], &sources[0], &n_per_sample[0],
-        batch_size, tau_mem, tau_syn, v_th)
-    return _MaximaBatchOutput.from_c_result(result, n_post)
+    # Free intermediate spikes batch (maxima doesn't need it after computation)
+    eventprop_free_spikes_batch(&spikes_result)
+
+    # Wrap: transfer input ownership to wrapper, copy maxima onto heap
+    cdef _MaximaBatchOutput obj = _MaximaBatchOutput.from_c_result(inputs, maxima_result)
+    # Keep flat arrays alive so input pointers stay valid
+    obj._times_ref = times
+    obj._sources_ref = sources
+    return obj
 
 
 def backward_spikes_batch_accumulate(_SpikesBatchOutput batch_output):
@@ -761,25 +759,21 @@ def backward_spikes_batch_accumulate(_SpikesBatchOutput batch_output):
     Uses batch_output's internal .inputs and .spikes directly — no Python-side work.
     Returns _AccumulatedBackwardResult with summed gradients and per-sample spike errors.
     """
-    cdef SpikesBatchWithInputs* ptr = batch_output._ptr
-    if ptr == NULL:
+    cdef EventPropInput* inputs = batch_output._inputs
+    cdef SpikesBatch* spikes_ptr = batch_output._spikes
+    if inputs == NULL or spikes_ptr == NULL:
         raise RuntimeError("SpikesBatchOutput has been freed")
 
-    # Build a plain SpikesBatch view for the C API (spikes pointer is shared)
-    cdef SpikesBatch spikes_view
-    spikes_view.batch_size = ptr.batch_size
-    spikes_view.has_errors = ptr.has_errors
-    spikes_view.spikes = ptr.spikes
-
+    # Build a plain SpikesBatch view for the C API (shared with wrapper)
     cdef AccumulatedBackwardResult result = eventprop_backward_spikes_batch_accumulate(
-        ptr.inputs, spikes_view)
+        inputs, spikes_ptr[0])  # copy struct by value onto C stack
 
     # Build n_spikes_per_sample from inputs (needed for spike error sizing)
-    cdef int batch_size = ptr.batch_size
+    cdef int batch_size = spikes_ptr.batch_size
     cdef cnp.ndarray[cnp.int32_t, ndim=1] n_spikes_arr = np.empty(batch_size, dtype=np.int32)
     cdef int b
     for b in range(batch_size):
-        n_spikes_arr[b] = ptr.inputs[b].n_spikes
+        n_spikes_arr[b] = inputs[b].n_spikes
 
     return _AccumulatedBackwardResult.from_c_result(result, n_spikes_arr)
 
@@ -787,23 +781,24 @@ def backward_spikes_batch_accumulate(_SpikesBatchOutput batch_output):
 def backward_maxima_batch_accumulate(_MaximaBatchOutput batch_output):
     """Backward pass (maxima loss) + gradient accumulation.
 
-    Uses batch_output's internal MaximaBatchWithInputs directly — no Python-side work.
+    Uses batch_output's internal .inputs and .maxima directly — no Python-side work.
     Returns _AccumulatedBackwardResult with summed gradients and per-sample spike errors.
     """
-    cdef MaximaBatchWithInputs* ptr = batch_output._ptr
-    if ptr == NULL:
+    cdef EventPropInput* inputs = batch_output._inputs
+    cdef MaximaBatch* maxima_ptr = batch_output._maxima
+    if inputs == NULL or maxima_ptr == NULL:
         raise RuntimeError("MaximaBatchOutput has been freed")
 
-    # Pass the full MaximaBatchWithInputs directly (C reads .inputs + .outputs.errors)
+    # Pass inputs and maxima separately (new API)
     cdef AccumulatedBackwardResult result = eventprop_backward_maxima_batch_accumulate(
-        ptr[0])  # copy struct by value onto C stack
+        inputs, maxima_ptr[0])  # copy struct by value onto C stack
 
     # Build n_spikes_per_sample from inputs (needed for spike error sizing)
-    cdef int batch_size = ptr.batch_size
+    cdef int batch_size = maxima_ptr.batch_size
     cdef cnp.ndarray[cnp.int32_t, ndim=1] n_spikes_arr = np.empty(batch_size, dtype=np.int32)
     cdef int b
     for b in range(batch_size):
-        n_spikes_arr[b] = ptr.inputs[b].n_spikes
+        n_spikes_arr[b] = inputs[b].n_spikes
 
     return _AccumulatedBackwardResult.from_c_result(result, n_spikes_arr)
 

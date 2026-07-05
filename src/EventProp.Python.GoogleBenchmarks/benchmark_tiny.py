@@ -79,7 +79,7 @@ def bm_pybind11_10sp(state):
 
 # ── Cython benchmarks ──────────────────────────────────────────────────
 
-from eventprop_c._native import compute_spikes_batch_flat as cy_compute_spikes_batch
+from eventprop_c._native import compute_spikes_batch as cy_compute_spikes_batch
 
 
 @benchmark.register

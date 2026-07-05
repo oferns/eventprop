@@ -5,7 +5,7 @@ from typing import NamedTuple, Tuple
 
 from .layer import GaussianDistribution, Layer, WeightDistribution
 from ._native import (
-    compute_spikes_batch_flat, backward_spikes_batch_accumulate,
+    compute_spikes_batch, backward_spikes_batch_accumulate,
 )
 from .spikes import Spikes, SpikesVector
 
@@ -48,7 +48,7 @@ class LIFLayer(Layer):
         # and _n_spikes_per_sample pre-built at construction.
         times, sources, n_per_sample = SpikesVector._extract_flat_buffers(input_batch)
 
-        c_output = compute_spikes_batch_flat(
+        c_output = compute_spikes_batch(
             times, sources, n_per_sample,
             self.w_in_flat, self.parameters.n_in, self.parameters.n,
             self.parameters.tau_mem, self.parameters.tau_syn, self.parameters.v_th,

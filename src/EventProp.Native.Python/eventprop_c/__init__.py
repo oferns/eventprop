@@ -15,9 +15,9 @@ Example:
 """
 
 from ._native import (
-    compute_spikes_batch_flat as compute_spikes_batch,
+    compute_spikes_batch,
     backward_spikes_batch_accumulate as backward_spikes_batch,
-    compute_maxima_batch_flat as compute_maxima_batch,
+    compute_maxima_batch,
     backward_maxima_batch_accumulate as backward_maxima_batch,
     dropout_spikes_batch,
 )

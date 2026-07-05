@@ -77,7 +77,7 @@ def bm_forward_pybind11(state):
 
 # ── Cython (EventProp.Native.Python — C library via ctypes) ─────────────
 
-from eventprop_c._native import compute_spikes_batch_flat as cy_compute_spikes_batch
+from eventprop_c._native import compute_spikes_batch as cy_compute_spikes_batch
 
 
 @benchmark.register
