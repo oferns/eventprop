@@ -351,10 +351,15 @@ cdef class _SpikesBatchOutput:
     """
     cdef SpikesBatchWithInputs* _ptr   # pointer to heap-allocated struct
     cdef bint _owned                   # True if we own the memory (should free)
+    # Keep flat arrays alive when inputs are constructed in Cython (not C-owned)
+    cdef object _times_ref             # reference to original times array
+    cdef object _sources_ref           # reference to original sources array
 
     def __cinit__(self):
         self._ptr = NULL
         self._owned = False
+        self._times_ref = None
+        self._sources_ref = None
 
     @staticmethod
     cdef _SpikesBatchOutput from_c_result(SpikesBatchWithInputs result, int n_pre, int n_post):
@@ -660,6 +665,61 @@ cdef class _DropoutBatchOutput:
 # ---------------------------------------------------------------------------
 # 6. Public API — Python-callable functions
 # ---------------------------------------------------------------------------
+
+def compute_spikes_batch(
+        double[:] times, int[:] sources, int[:] n_per_sample,
+        double[:, ::1] w, int n_pre, int n_post,
+        double tau_mem, double tau_syn, double v_th):
+    """Batch forward pass — construct EventPropInput[] in Cython, call non-flat C API.
+
+    Returns _SpikesBatchOutput that owns the C memory (inputs + spikes).
+    Keeps references to original flat arrays so input pointers stay valid for backward passes.
+    """
+    cdef int batch_size = n_per_sample.shape[0]
+    cdef EventPropInput* inputs = <EventPropInput*>malloc(batch_size * sizeof(EventPropInput))
+    if inputs == NULL:
+        raise MemoryError("Failed to allocate EventPropInput array")
+
+    cdef const double* w_ptr = &w[0, 0]
+    cdef const double* t_ptr
+    cdef const int* s_ptr
+    cdef int b, k
+    for b in range(batch_size):
+        inputs[b].w = w_ptr
+        inputs[b].n_pre = n_pre
+        inputs[b].n_post = n_post
+        inputs[b].tau_mem = tau_mem
+        inputs[b].tau_syn = tau_syn
+        inputs[b].v_th = v_th
+
+        # Walk flat arrays to find this sample's slice
+        t_ptr = &times[0]
+        s_ptr = &sources[0]
+        for k in range(b):
+            t_ptr += n_per_sample[k]
+            s_ptr += n_per_sample[k]
+        inputs[b].times = t_ptr
+        inputs[b].sources = s_ptr
+        inputs[b].n_spikes = n_per_sample[b]
+
+    cdef SpikesBatch result = eventprop_compute_spikes_batch(inputs, batch_size)
+
+    # Wrap: store inputs on heap alongside spikes, keep flat arrays alive via Python refs
+    cdef _SpikesBatchOutput obj = _SpikesBatchOutput.__new__(_SpikesBatchOutput)
+    obj._ptr = <SpikesBatchWithInputs*>malloc(sizeof(SpikesBatchWithInputs))
+    if obj._ptr == NULL:
+        free(inputs)
+        raise MemoryError("Failed to allocate SpikesBatchWithInputs wrapper")
+    obj._ptr.inputs = inputs
+    obj._ptr.batch_size = result.batch_size
+    obj._ptr.has_errors = result.has_errors
+    obj._ptr.spikes = result.spikes
+    obj._owned = True
+    # Keep flat arrays alive so input pointers stay valid
+    obj._times_ref = times
+    obj._sources_ref = sources
+    return obj
+
 
 def compute_spikes_batch_flat(
         double[:] times, int[:] sources, int[:] n_per_sample,

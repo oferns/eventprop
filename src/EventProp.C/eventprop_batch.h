@@ -27,15 +27,6 @@ typedef struct SpikesBatch {
 
 void eventprop_free_spikes_batch(SpikesBatch* batch);
 
-typedef struct SpikesBatchWithInputs {
-    EventPropInput* inputs;
-    int batch_size;                    /* Number of samples in the batch */
-    int has_errors;                    /* 1 if any sample returned an error, 0 otherwise — safe to set from parallel loop */
-    SpikeOutput* spikes;               /* Per-sample outputs (malloc'd, length = batch_size) */
-} SpikesBatchWithInputs;
-
-void eventprop_free_spikes_with_inputs_batch(SpikesBatchWithInputs* batch);
-
 /**
  * Batch backward output — per-sample results.
  */
@@ -57,15 +48,6 @@ typedef struct MaximaBatch {
 } MaximaBatch;
 
 void eventprop_free_maxima_batch(MaximaBatch* batch);
-
-typedef struct MaximaBatchWithInputs {
-    EventPropInput* inputs;            /* Owned copy of per-sample inputs (calloc'd) */
-    int batch_size;                    /* Number of samples in the batch */
-    int has_errors;                    /* 1 if any sample returned an error, 0 otherwise — safe to set from parallel loop */
-    MaximaOutput* outputs;             /* Per-sample outputs (malloc'd, length = batch_size) */
-} MaximaBatchWithInputs;
-
-void eventprop_free_maxima_with_inputs_batch(MaximaBatchWithInputs* batch);
 
 /**
  * Accumulated gradient output with dimensions.
@@ -138,22 +120,6 @@ DropoutBatch eventprop_dropout_spikes_batch(
 SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, int batch_size);
 
 /**
- * Flat-array variant of compute_spikes_batch.
- *
- * Accepts flat concatenated spike arrays and per-sample offset counts.
- * Internally constructs EventPropInput structs and dispatches in parallel.
- * Designed for FFI callers (Cython, P/Invoke) that have flat numpy buffers.
- */
-SpikesBatchWithInputs eventprop_compute_spikes_batch_flat(
-    const double* w,
-    int n_pre, int n_post,
-    const double* times,
-    const int* sources,
-    const int* n_per_sample,
-    int batch_size,
-    double tau_mem, double tau_syn, double v_th);
-
-/**
  * Batch backward pass (spike loss) — returns per-sample gradients.
  */
 BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs, const SpikesBatch spikes_batch);
@@ -164,29 +130,11 @@ BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs, con
 MaximaBatch eventprop_compute_maxima_batch(const EventPropInput* inputs, const SpikesBatch spikes_batch);
 
 /**
- * Flat-array variant of compute_maxima_batch.
- *
- * Accepts flat concatenated spike arrays and per-sample offset counts.
- * Internally constructs EventPropInput structs and dispatches in parallel.
- * Designed for FFI callers (Cython, P/Invoke) that have flat numpy buffers.
- */
-MaximaBatchWithInputs eventprop_compute_maxima_batch_flat(
-    const double* w,
-    int n_pre, int n_post,
-    const double* times,
-    const int* sources,
-    const int* n_per_sample,
-    int batch_size,
-    double tau_mem, double tau_syn, double v_th);
-
-/**
  * Batch backward pass (maxima loss) — returns per-sample gradients.
  *
  * Uses `MaximaOutput.errors` written by caller before this call.
  */
-BackwardsBatch eventprop_backward_maxima_batch(const MaximaBatchWithInputs maxima_batch);
-
-
+BackwardsBatch eventprop_backward_maxima_batch(const EventPropInput* inputs, const MaximaBatch maxima_batch);
 
 /**
  * Sum per-sample gradients into a single tensor.
@@ -202,8 +150,7 @@ GradientOutput eventprop_accumulate_gradients(BackwardsBatch batch, int n_pre, i
  * Parallel backward pass → sequential gradient sum → free per-sample .grad buffers.
  * Returns combined result with summed gradient and preserved spike errors.
  */
-AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
-    const EventPropInput* inputs, const SpikesBatch spikes_batch);
+AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(const EventPropInput* inputs, const SpikesBatch spikes_batch);
 
 /**
  * Batch backward (maxima loss) + accumulate gradients in one call.
@@ -213,8 +160,7 @@ AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
  *
  * Uses `MaximaOutput.errors` written by caller before this call.
  */
-AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
-    const MaximaBatchWithInputs maxima_batch);
+AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(const EventPropInput* inputs, const MaximaBatch maxima_batch);
 
 
 #ifdef __cplusplus

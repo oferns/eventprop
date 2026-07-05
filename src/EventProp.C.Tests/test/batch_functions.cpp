@@ -129,51 +129,51 @@ TEST(BatchSpikes, AllBadSamplesSetsHasErrors) {
 }
 
 // ──────────────────────────────────────────────────────────────
-// compute_spikes_batch_flat
+// compute_spikes_batch (struct-based API)
 // ──────────────────────────────────────────────────────────────
 
-TEST(BatchSpikesFlat, ValidBatchHasNoErrors) {
+TEST(BatchSpikesStruct, ValidBatchHasNoErrors) {
     std::vector<double> w = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0}; // 2x3
-    std::vector<double> times = {0.01, 0.02, 0.01, 0.02};
-    std::vector<int> sources = {0, 1, 0, 1};
-    std::vector<int> n_per_sample = {2, 2};
+    std::vector<double> times0 = {0.01, 0.02}, times1 = {0.01, 0.02};
+    std::vector<int> sources0 = {0, 1}, sources1 = {0, 1};
 
-    SpikesBatchWithInputs batch = eventprop_compute_spikes_batch_flat(
-        w.data(), 2, 3, times.data(), sources.data(), n_per_sample.data(),
-        2, kTauMem, kTauSyn, kVTh);
+    EventPropInput inputs[2];
+    inputs[0] = make_input(w, 2, 3, times0, sources0);
+    inputs[1] = make_input(w, 2, 3, times1, sources1);
+
+    SpikesBatch batch = eventprop_compute_spikes_batch(inputs, 2);
 
     EXPECT_EQ(batch.has_errors, 0);
     for (int i = 0; i < 2; ++i) {
         EXPECT_EQ(batch.spikes[i].error_no, EVENTPROP_OK);
     }
 
-    eventprop_free_spikes_with_inputs_batch(&batch);
+    eventprop_free_spikes_batch(&batch);
 }
 
-TEST(BatchSpikesFlat, ZeroBatchSizeReturnsEmpty) {
-    SpikesBatchWithInputs batch = eventprop_compute_spikes_batch_flat(
-        nullptr, 0, 0, nullptr, nullptr, nullptr, 0, kTauMem, kTauSyn, kVTh);
+TEST(BatchSpikesStruct, ZeroBatchSizeReturnsEmpty) {
+    SpikesBatch batch = eventprop_compute_spikes_batch(nullptr, 0);
     EXPECT_EQ(batch.batch_size, 0);
     EXPECT_EQ(batch.has_errors, 0);
-    eventprop_free_spikes_with_inputs_batch(&batch);
+    eventprop_free_spikes_batch(&batch);
 }
 
-TEST(BatchSpikesFlat, OneBadSampleSetsHasErrors) {
+TEST(BatchSpikesStruct, OneBadSampleSetsHasErrors) {
     std::vector<double> w = {1.0, 2.0, 3.0}; // 1x3
-    // Sample 0: valid (1 spike), sample 1: invalid source index (source=5 >= n_pre=1)
-    std::vector<double> times = {0.01, 0.02};
-    std::vector<int> sources = {0, 5};       // second source out of bounds
-    std::vector<int> n_per_sample = {1, 1};
+    std::vector<double> times0 = {0.01}, times1 = {0.02};
+    std::vector<int> sources0 = {0}, sources1 = {5};       // second source out of bounds (>= n_pre=1)
 
-    SpikesBatchWithInputs batch = eventprop_compute_spikes_batch_flat(
-        w.data(), 1, 3, times.data(), sources.data(), n_per_sample.data(),
-        2, kTauMem, kTauSyn, kVTh);
+    EventPropInput inputs[2];
+    inputs[0] = make_input(w, 1, 3, times0, sources0);
+    inputs[1] = make_input(w, 1, 3, times1, sources1);
+
+    SpikesBatch batch = eventprop_compute_spikes_batch(inputs, 2);
 
     EXPECT_EQ(batch.has_errors, 1);
     EXPECT_EQ(batch.spikes[0].error_no, EVENTPROP_OK);
     EXPECT_NE(batch.spikes[1].error_no, EVENTPROP_OK);
 
-    eventprop_free_spikes_with_inputs_batch(&batch);
+    eventprop_free_spikes_batch(&batch);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -261,42 +261,48 @@ TEST(BatchMaxima, OneBadSampleSetsHasErrors) {
 }
 
 // ──────────────────────────────────────────────────────────────
-// compute_maxima_batch_flat
+// compute_maxima_batch (struct-based API)
 // ──────────────────────────────────────────────────────────────
 
-TEST(BatchMaximaFlat, ValidBatchHasNoErrors) {
+TEST(BatchMaximaStruct, ValidBatchHasNoErrors) {
     std::vector<double> w = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0}; // 2x3
-    std::vector<double> times = {0.01, 0.02, 0.01, 0.02};
-    std::vector<int> sources = {0, 1, 0, 1};
-    std::vector<int> n_per_sample = {2, 2};
+    std::vector<double> times0 = {0.01, 0.02}, times1 = {0.01, 0.02};
+    std::vector<int> sources0 = {0, 1}, sources1 = {0, 1};
 
-    MaximaBatchWithInputs batch = eventprop_compute_maxima_batch_flat(
-        w.data(), 2, 3, times.data(), sources.data(), n_per_sample.data(),
-        2, kTauMem, kTauSyn, kVTh);
+    EventPropInput inputs[2];
+    inputs[0] = make_input(w, 2, 3, times0, sources0);
+    inputs[1] = make_input(w, 2, 3, times1, sources1);
+
+    SpikesBatch spikes = eventprop_compute_spikes_batch(inputs, 2);
+    MaximaBatch batch = eventprop_compute_maxima_batch(inputs, spikes);
 
     EXPECT_EQ(batch.has_errors, 0);
     for (int i = 0; i < 2; ++i) {
         EXPECT_EQ(batch.outputs[i].error_no, EVENTPROP_OK);
     }
 
-    eventprop_free_maxima_with_inputs_batch(&batch);
+    eventprop_free_spikes_batch(&spikes);
+    eventprop_free_maxima_batch(&batch);
 }
 
-TEST(BatchMaximaFlat, OneBadSampleSetsHasErrors) {
+TEST(BatchMaximaStruct, OneBadSampleSetsHasErrors) {
     std::vector<double> w = {1.0, 2.0, 3.0}; // 1x3
-    std::vector<double> times = {0.01, 0.02};
-    std::vector<int> sources = {0, 5};       // second source out of bounds
-    std::vector<int> n_per_sample = {1, 1};
+    std::vector<double> times0 = {0.01}, times1 = {0.02};
+    std::vector<int> sources0 = {0}, sources1 = {5};       // second source out of bounds (>= n_pre=1)
 
-    MaximaBatchWithInputs batch = eventprop_compute_maxima_batch_flat(
-        w.data(), 1, 3, times.data(), sources.data(), n_per_sample.data(),
-        2, kTauMem, kTauSyn, kVTh);
+    EventPropInput inputs[2];
+    inputs[0] = make_input(w, 1, 3, times0, sources0);
+    inputs[1] = make_input(w, 1, 3, times1, sources1);
+
+    SpikesBatch spikes = eventprop_compute_spikes_batch(inputs, 2);
+    MaximaBatch batch = eventprop_compute_maxima_batch(inputs, spikes);
 
     EXPECT_EQ(batch.has_errors, 1);
     EXPECT_EQ(batch.outputs[0].error_no, EVENTPROP_OK);
     EXPECT_NE(batch.outputs[1].error_no, EVENTPROP_OK);
 
-    eventprop_free_maxima_with_inputs_batch(&batch);
+    eventprop_free_spikes_batch(&spikes);
+    eventprop_free_maxima_batch(&batch);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -305,39 +311,44 @@ TEST(BatchMaximaFlat, OneBadSampleSetsHasErrors) {
 
 TEST(BatchBackwardMaxima, ValidBatchHasNoErrors) {
     std::vector<double> w = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0}; // 2x3
-    std::vector<double> times = {0.01, 0.02, 0.01, 0.02};
-    std::vector<int> sources = {0, 1, 0, 1};
-    std::vector<int> n_per_sample = {2, 2};
+    std::vector<double> times0 = {0.01, 0.02}, times1 = {0.01, 0.02};
+    std::vector<int> sources0 = {0, 1}, sources1 = {0, 1};
 
-    MaximaBatchWithInputs maxima = eventprop_compute_maxima_batch_flat(
-        w.data(), 2, 3, times.data(), sources.data(), n_per_sample.data(),
-        2, kTauMem, kTauSyn, kVTh);
+    EventPropInput inputs[2];
+    inputs[0] = make_input(w, 2, 3, times0, sources0);
+    inputs[1] = make_input(w, 2, 3, times1, sources1);
+
+    SpikesBatch spikes = eventprop_compute_spikes_batch(inputs, 2);
+    MaximaBatch maxima = eventprop_compute_maxima_batch(inputs, spikes);
 
     // Set errors before backward pass
     for (int i = 0; i < 2; ++i) {
         maxima.outputs[i].errors[0] = 1.0;
     }
 
-    BackwardsBatch batch = eventprop_backward_maxima_batch(maxima);
+    BackwardsBatch batch = eventprop_backward_maxima_batch(inputs, maxima);
 
     EXPECT_EQ(batch.has_errors, 0);
     for (int i = 0; i < 2; ++i) {
         EXPECT_EQ(batch.outputs[i].error_no, EVENTPROP_OK);
     }
 
-    eventprop_free_maxima_with_inputs_batch(&maxima);
+    eventprop_free_spikes_batch(&spikes);
+    eventprop_free_maxima_batch(&maxima);
     eventprop_free_backwards_batch(&batch);
 }
 
 TEST(BatchBackwardMaxima, OneBadSampleSetsHasErrors) {
     std::vector<double> w = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0}; // 2x3
-    std::vector<double> times = {0.01, 0.02, 0.01, 0.02};
-    std::vector<int> sources = {0, 1, 0, 1};
-    std::vector<int> n_per_sample = {2, 2};
+    std::vector<double> times0 = {0.01, 0.02}, times1 = {0.01, 0.02};
+    std::vector<int> sources0 = {0, 1}, sources1 = {0, 1};
 
-    MaximaBatchWithInputs maxima = eventprop_compute_maxima_batch_flat(
-        w.data(), 2, 3, times.data(), sources.data(), n_per_sample.data(),
-        2, kTauMem, kTauSyn, kVTh);
+    EventPropInput inputs[2];
+    inputs[0] = make_input(w, 2, 3, times0, sources0);
+    inputs[1] = make_input(w, 2, 3, times1, sources1);
+
+    SpikesBatch spikes = eventprop_compute_spikes_batch(inputs, 2);
+    MaximaBatch maxima = eventprop_compute_maxima_batch(inputs, spikes);
 
     // Set errors before backward pass
     for (int i = 0; i < 2; ++i) {
@@ -345,15 +356,16 @@ TEST(BatchBackwardMaxima, OneBadSampleSetsHasErrors) {
     }
 
     // Corrupt one input after computing maxima but before backward
-    maxima.inputs[1].n_pre = -1;
+    inputs[1].n_pre = -1;
 
-    BackwardsBatch batch = eventprop_backward_maxima_batch(maxima);
+    BackwardsBatch batch = eventprop_backward_maxima_batch(inputs, maxima);
 
     EXPECT_EQ(batch.has_errors, 1);
     EXPECT_EQ(batch.outputs[0].error_no, EVENTPROP_OK);       // valid sample still works
     EXPECT_NE(batch.outputs[1].error_no, EVENTPROP_OK);      // bad sample fails
 
-    eventprop_free_maxima_with_inputs_batch(&maxima);
+    eventprop_free_spikes_batch(&spikes);
+    eventprop_free_maxima_batch(&maxima);
     eventprop_free_backwards_batch(&batch);
 }
 
@@ -444,38 +456,43 @@ TEST(BatchAccumulateBackwardSpikes, OneBadSampleSetsHasErrors) {
 
 TEST(BatchAccumulateBackwardMaxima, ValidBatchHasNoErrors) {
     std::vector<double> w = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0}; // 2x3
-    std::vector<double> times = {0.01, 0.02, 0.01, 0.02};
-    std::vector<int> sources = {0, 1, 0, 1};
-    std::vector<int> n_per_sample = {2, 2};
+    std::vector<double> times0 = {0.01, 0.02}, times1 = {0.01, 0.02};
+    std::vector<int> sources0 = {0, 1}, sources1 = {0, 1};
 
-    MaximaBatchWithInputs maxima = eventprop_compute_maxima_batch_flat(
-        w.data(), 2, 3, times.data(), sources.data(), n_per_sample.data(),
-        2, kTauMem, kTauSyn, kVTh);
+    EventPropInput inputs[2];
+    inputs[0] = make_input(w, 2, 3, times0, sources0);
+    inputs[1] = make_input(w, 2, 3, times1, sources1);
+
+    SpikesBatch spikes = eventprop_compute_spikes_batch(inputs, 2);
+    MaximaBatch maxima = eventprop_compute_maxima_batch(inputs, spikes);
 
     // Set errors before backward pass
     for (int i = 0; i < 2; ++i) {
         maxima.outputs[i].errors[0] = 1.0;
     }
 
-    AccumulatedBackwardResult result = eventprop_backward_maxima_batch_accumulate(maxima);
+    AccumulatedBackwardResult result = eventprop_backward_maxima_batch_accumulate(inputs, maxima);
 
     EXPECT_EQ(result.has_errors, 0);
     EXPECT_NE(result.summed_grads.data, nullptr);
     EXPECT_EQ(result.batch_size, 2);
 
-    eventprop_free_maxima_with_inputs_batch(&maxima);
+    eventprop_free_spikes_batch(&spikes);
+    eventprop_free_maxima_batch(&maxima);
     eventprop_free_accumulated_backward_result(&result);
 }
 
 TEST(BatchAccumulateBackwardMaxima, OneBadSampleSetsHasErrors) {
     std::vector<double> w = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0}; // 2x3
-    std::vector<double> times = {0.01, 0.02, 0.01, 0.02};
-    std::vector<int> sources = {0, 1, 0, 1};
-    std::vector<int> n_per_sample = {2, 2};
+    std::vector<double> times0 = {0.01, 0.02}, times1 = {0.01, 0.02};
+    std::vector<int> sources0 = {0, 1}, sources1 = {0, 1};
 
-    MaximaBatchWithInputs maxima = eventprop_compute_maxima_batch_flat(
-        w.data(), 2, 3, times.data(), sources.data(), n_per_sample.data(),
-        2, kTauMem, kTauSyn, kVTh);
+    EventPropInput inputs[2];
+    inputs[0] = make_input(w, 2, 3, times0, sources0);
+    inputs[1] = make_input(w, 2, 3, times1, sources1);
+
+    SpikesBatch spikes = eventprop_compute_spikes_batch(inputs, 2);
+    MaximaBatch maxima = eventprop_compute_maxima_batch(inputs, spikes);
 
     // Set errors before backward pass
     for (int i = 0; i < 2; ++i) {
@@ -483,14 +500,15 @@ TEST(BatchAccumulateBackwardMaxima, OneBadSampleSetsHasErrors) {
     }
 
     // Corrupt one input after computing maxima but before backward
-    maxima.inputs[1].n_pre = -1;
+    inputs[1].n_pre = -1;
 
-    AccumulatedBackwardResult result = eventprop_backward_maxima_batch_accumulate(maxima);
+    AccumulatedBackwardResult result = eventprop_backward_maxima_batch_accumulate(inputs, maxima);
 
     EXPECT_EQ(result.has_errors, 1);
     EXPECT_NE(result.summed_grads.data, nullptr); // still produces a gradient (partial)
 
-    eventprop_free_maxima_with_inputs_batch(&maxima);
+    eventprop_free_spikes_batch(&spikes);
+    eventprop_free_maxima_batch(&maxima);
     eventprop_free_accumulated_backward_result(&result);
 }
 
@@ -564,9 +582,7 @@ TEST(BatchDropout, PartialDropoutReducesCount) {
 
 TEST(BatchFree, NullPointerSafety) {
     eventprop_free_spikes_batch(nullptr);
-    eventprop_free_spikes_with_inputs_batch(nullptr);
     eventprop_free_maxima_batch(nullptr);
-    eventprop_free_maxima_with_inputs_batch(nullptr);
     eventprop_free_backwards_batch(nullptr);
     eventprop_free_gradient_output(nullptr);
     eventprop_free_dropout_batch(nullptr);

@@ -70,16 +70,8 @@ TEST(FreeSpikesBatch, NullPointerIsSafe) {
     eventprop_free_spikes_batch(nullptr);
 }
 
-TEST(FreeSpikesWithInputsBatch, NullPointerIsSafe) {
-    eventprop_free_spikes_with_inputs_batch(nullptr);
-}
-
 TEST(FreeMaximaBatch, NullPointerIsSafe) {
     eventprop_free_maxima_batch(nullptr);
-}
-
-TEST(FreeMaximaWithInputsBatch, NullPointerIsSafe) {
-    eventprop_free_maxima_with_inputs_batch(nullptr);
 }
 
 TEST(FreeBackwardsBatch, NullPointerIsSafe) {
