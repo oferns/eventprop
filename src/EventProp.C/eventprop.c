@@ -40,30 +40,76 @@
 #define TOMS748_TOL 1e-14
 
 
-/* ── Input validation ──────────────────────────────────────────────── */
+/* ── Input validation ──────────────────────────────────────── */
 
 EventPropError eventprop_validate_input(const EventPropInput input)
 {
+    /* ── Dimension checks ─────────────────────────────────────── */
     if (input.n_pre <= 0 || input.n_post <= 0)
         return EVENTPROP_INVALID_DIMENSION;
+    if (input.n_pre > EVENTPROP_MAX_DIM || input.n_post > EVENTPROP_MAX_DIM)
+        return EVENTPROP_DIMENSION_TOO_LARGE;
+
+    /* ── Spike count ──────────────────────────────────────────── */
     if (input.n_spikes < 0)
         return EVENTPROP_NEGATIVE_SPIKES;
+
+    /* ── Tau bounds and proximity ─────────────────────────────── */
     if (input.tau_mem <= 0.0 || input.tau_syn <= 0.0)
         return EVENTPROP_INVALID_TAU;
+    if (input.tau_mem < EVENTPROP_MIN_TAU || input.tau_syn < EVENTPROP_MIN_TAU)
+        return EVENTPROP_TAU_TOO_SMALL;
+    if (input.tau_mem > EVENTPROP_MAX_TAU || input.tau_syn > EVENTPROP_MAX_TAU)
+        return EVENTPROP_TAU_TOO_LARGE;
     if (input.tau_mem == input.tau_syn)
         return EVENTPROP_INVALID_TAU;
+
+    /* Relative difference: |tau_mem - tau_syn| / min(tau) < 1e-6 → k_prefactor blows up */
+    {
+        double min_tau = fmin(input.tau_mem, input.tau_syn);
+        double rel_diff = fabs(input.tau_mem - input.tau_syn) / min_tau;
+        if (rel_diff < EVENTPROP_TAU_REL_DIFF_MIN)
+            return EVENTPROP_TAU_TOO_CLOSE;
+    }
+
+    /* ── Threshold voltage ────────────────────────────────────── */
+    if (input.v_th <= 0.0)
+        return EVENTPROP_INVALID_VTH;
+
+    /* ── Pointer checks ───────────────────────────────────────── */
+    if (input.w == NULL)
+        return EVENTPROP_NULL_POINTER;
     if (input.n_spikes > 0) {
-        if (input.w == NULL)
-            return EVENTPROP_NULL_POINTER;
         if (input.times == NULL || input.sources == NULL)
             return EVENTPROP_NULL_POINTER;
-        for (int i = 0; i < input.n_spikes; i++) {
-            if (input.sources[i] < 0 || input.sources[i] >= input.n_pre)
-                return EVENTPROP_INVALID_SOURCE;
-        }
-    } else if (input.w == NULL) {
-        return EVENTPROP_NULL_POINTER;
+    } else {
+        /* n_spikes == 0: times/sources may be NULL, nothing to iterate */
+        return EVENTPROP_OK;
     }
+
+    /* ── Per-spike checks (single pass) ──────────────────────── */
+    double max_time = -1.0;   /* sentinel: will become >= 0 on first spike */
+    for (int i = 0; i < input.n_spikes; i++) {
+        if (input.sources[i] < 0 || input.sources[i] >= input.n_pre)
+            return EVENTPROP_INVALID_SOURCE;
+
+        double t = input.times[i];
+        if (t < 0.0)
+            return EVENTPROP_NEGATIVE_SPIKE_TIME;
+        if (t > EVENTPROP_MAX_SPIKE_TIME)
+            return EVENTPROP_EXCESSIVE_SPIKE_TIME;
+        if (max_time < 0.0 || t > max_time)
+            max_time = t;
+    }
+
+    /* ── Cross-field: times vs tau overflow check ─────────────── */
+    /* exp(max_time / min_tau) must stay finite (< INF at ~709.78). */
+    {
+        double min_tau = fmin(input.tau_mem, input.tau_syn);
+        if (max_time > 0.0 && max_time / min_tau >= EVENTPROP_EXP_OVERFLOW_THRESHOLD)
+            return EVENTPROP_TIMES_TAU_MISMATCH;
+    }
+
     return EVENTPROP_OK;
 }
 

@@ -15,15 +15,39 @@ extern "C" {
 /** Error codes returned by EventProp functions.
  *  Set via the `error_no` field on output structs when validation is enabled */
 typedef enum EventPropError {
-    EVENTPROP_OK                  = 0,
-    EVENTPROP_INVALID_DIMENSION   = 1,   /* n_pre <= 0 or n_post <= 0 */
-    EVENTPROP_NEGATIVE_SPIKES     = 2,   /* n_spikes < 0 */
-    EVENTPROP_NULL_POINTER        = 3,   /* w/times/sources is NULL when required */
-    EVENTPROP_INVALID_SOURCE      = 4,   /* sources[i] out of [0, n_pre) range */
-    EVENTPROP_INVALID_TAU         = 5,   /* tau_mem <= 0, tau_syn <= 0, or tau_mem == tau_syn */
-    EVENTPROP_ALLOCATION_FAILED   = 6,   /* calloc/malloc returned NULL */
-    EVENTPROP_INVALID_CURRENT     = 7,   /* spike.currents[i] == v_th (division by zero) */
+    EVENTPROP_OK                      = 0,
+    EVENTPROP_INVALID_DIMENSION       = 1,   /* n_pre <= 0 or n_post <= 0 */
+    EVENTPROP_NEGATIVE_SPIKES         = 2,   /* n_spikes < 0 */
+    EVENTPROP_NULL_POINTER            = 3,   /* w/times/sources is NULL when required */
+    EVENTPROP_INVALID_SOURCE          = 4,   /* sources[i] out of [0, n_pre) range */
+    EVENTPROP_INVALID_TAU             = 5,   /* tau_mem <= 0, tau_syn <= 0, or tau_mem == tau_syn */
+    EVENTPROP_ALLOCATION_FAILED       = 6,   /* calloc/malloc returned NULL */
+    EVENTPROP_INVALID_CURRENT         = 7,   /* spike.currents[i] == v_th (division by zero) */
+    EVENTPROP_NEGATIVE_SPIKE_TIME     = 8,   /* times[i] < 0 */
+    EVENTPROP_EXCESSIVE_SPIKE_TIME    = 9,   /* max(times) > MAX_SPIKE_TIME */
+    EVENTPROP_TAU_TOO_SMALL           = 10,  /* tau_mem or tau_syn < MIN_TAU */
+    EVENTPROP_TAU_TOO_LARGE           = 11,  /* tau_mem or tau_syn > MAX_TAU */
+    EVENTPROP_INVALID_VTH             = 12,  /* v_th <= 0 */
+    EVENTPROP_DIMENSION_TOO_LARGE     = 13,  /* n_pre or n_post > MAX_DIM */
+    EVENTPROP_TIMES_TAU_MISMATCH      = 14,  /* max(times)/min(tau) >= EXP_OVERFLOW_THRESHOLD */
+    EVENTPROP_TAU_TOO_CLOSE           = 15,  /* |tau_mem - tau_syn| / min(tau) < TAU_REL_DIFF_MIN */
 } EventPropError;
+
+/** ── Validation limits ──────────────────────────────────────────────── */
+
+/// Maximum allowed spike time (seconds). ~11.6 days.
+#define EVENTPROP_MAX_SPIKE_TIME        1e6
+/// Minimum allowed tau (seconds). Below this, exp(-t/tau) underflows instantly.
+#define EVENTPROP_MIN_TAU               1e-9
+/// Maximum allowed tau (seconds). ~17 minutes; impractical above for SNN timescales.
+#define EVENTPROP_MAX_TAU               1e3
+/// Maximum allowed dimension per axis. Prevents int overflow in indexing and impossible allocations.
+#define EVENTPROP_MAX_DIM               100000
+/// exp(x) overflows to INF at x ≈ 709.78. We use a safety margin of 700.
+#define EVENTPROP_EXP_OVERFLOW_THRESHOLD 700.0
+/// Minimum relative difference between tau_mem and tau_syn (tau_mem == tau_syn already caught).
+/// Below this, k_prefactor = tau_syn / (tau_mem - tau_syn) blows up.
+#define EVENTPROP_TAU_REL_DIFF_MIN      1e-6
 
 /** Non-owning view into a flat row-major double array.
  *  Mimics Eigen::Ref<RowMatrixXd const>: attached dimensions,
