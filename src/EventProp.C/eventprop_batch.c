@@ -1,6 +1,7 @@
 #include "eventprop_batch.h"
 #include <stdlib.h>
 #include <stdint.h>
+#include <limits.h>
 
 void eventprop_free_spikes_batch(SpikesBatch* batch)
 {
@@ -38,11 +39,21 @@ void eventprop_free_backwards_batch(BackwardsBatch* batch)
 SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, int batch_size)
 {
     SpikesBatch result;
-    result.batch_size = batch_size;
+    result.batch_size = 0;
     result.has_errors = 0;
+    result.spikes = NULL;
+
+    if (batch_size <= 0) return result;
+    if (inputs == NULL) return result;
+
+    result.batch_size = batch_size;
 
     /* Allocate result array */
     result.spikes = (SpikeOutput*)calloc(batch_size, sizeof(SpikeOutput));
+    if (!result.spikes) {
+        result.batch_size = 0;
+        return result;
+    }
 
     int b;
 #ifdef _OPENMP
@@ -69,11 +80,17 @@ BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs, con
 {
     int batch_size = spikes_batch.batch_size;
     BackwardsBatch batch;
-    batch.batch_size = batch_size;
+    batch.batch_size = 0;
     batch.has_errors = 0;
+    batch.outputs = NULL;
+
+    if (batch_size <= 0 || inputs == NULL) return batch;
+
+    batch.batch_size = batch_size;
 
     /* Parallel per-sample backward */
     batch.outputs = (BackwardOutput*)calloc(batch_size, sizeof(BackwardOutput));
+    if (!batch.outputs) return batch;
 
     int b;
 #ifdef _OPENMP
@@ -101,11 +118,17 @@ MaximaBatch eventprop_compute_maxima_batch(const EventPropInput* inputs, const S
 {
     int batch_size = spikes_batch.batch_size;
     MaximaBatch batch;
-    batch.batch_size = batch_size;
+    batch.batch_size = 0;
     batch.has_errors = 0;
+    batch.outputs = NULL;
+
+    if (batch_size <= 0 || inputs == NULL) return batch;
+
+    batch.batch_size = batch_size;
 
     /* Parallel per-sample maxima */
     batch.outputs = (MaximaOutput*)calloc(batch_size, sizeof(MaximaOutput));
+    if (!batch.outputs) return batch;
 
     int b;
 #ifdef _OPENMP
@@ -133,11 +156,17 @@ BackwardsBatch eventprop_backward_maxima_batch(const EventPropInput* inputs, Max
 {
     int batch_size = maxima_batch.batch_size;
     BackwardsBatch batch;
-    batch.batch_size = batch_size;
+    batch.batch_size = 0;
     batch.has_errors = 0;
+    batch.outputs = NULL;
+
+    if (batch_size <= 0 || inputs == NULL) return batch;
+
+    batch.batch_size = batch_size;
 
     /* Parallel per-sample backward */
     batch.outputs = (BackwardOutput*)calloc(batch_size, sizeof(BackwardOutput));
+    if (!batch.outputs) return batch;
 
     int b;
 #ifdef _OPENMP
@@ -179,9 +208,24 @@ void eventprop_free_gradient_output(GradientOutput* output)
 GradientOutput eventprop_accumulate_gradients(BackwardsBatch batch, int n_pre, int n_post)
 {
     GradientOutput result;
+    result.rows = 0;
+    result.cols = 0;
+    result.data = NULL;
+
+    if (n_pre <= 0 || n_post <= 0) return result;
+    if (batch.batch_size <= 0) return result;
+
+    /* Check for integer overflow */
+    if (n_pre > INT_MAX / n_post) return result;
+
     result.rows = n_pre;
     result.cols = n_post;
     result.data = (double*)calloc(n_pre * n_post, sizeof(double));
+    if (!result.data) {
+        result.rows = 0;
+        result.cols = 0;
+        return result;
+    }
 
     for (int b = 0; b < batch.batch_size; b++) {
         if (batch.outputs[b].error_no != EVENTPROP_OK) continue;
@@ -211,11 +255,16 @@ AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
 {
     int batch_size = spikes_batch.batch_size;
     AccumulatedBackwardResult result;
-    result.batch_size = batch_size;
+    result.batch_size = 0;
     result.has_errors = 0;
+    result.outputs = NULL;
+    result.summed_grads.data = NULL;
+
+    if (batch_size <= 0 || inputs == NULL) return result;
 
     /* Parallel per-sample backward */
     BackwardOutput* outputs = (BackwardOutput*)calloc(batch_size, sizeof(BackwardOutput));
+    if (!outputs) return result;
 
     int b;
 #ifdef _OPENMP
@@ -241,7 +290,8 @@ AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
         .has_errors = 0,   /* not used here */
         .outputs = outputs
     };
-    
+
+    result.batch_size = batch_size;
     result.summed_grads = eventprop_accumulate_gradients(batch, inputs[0].n_pre, inputs[0].n_post);
     result.outputs = outputs;
     return result;
@@ -252,11 +302,16 @@ AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
 {
     int batch_size = maxima_batch.batch_size;
     AccumulatedBackwardResult result;
-    result.batch_size = batch_size;
+    result.batch_size = 0;
     result.has_errors = 0;
+    result.outputs = NULL;
+    result.summed_grads.data = NULL;
+
+    if (batch_size <= 0 || inputs == NULL) return result;
 
     /* Parallel per-sample backward */
     BackwardOutput* outputs = (BackwardOutput*)calloc(batch_size, sizeof(BackwardOutput));
+    if (!outputs) return result;
 
     int b;
 #ifdef _OPENMP
@@ -291,6 +346,7 @@ AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
 
     result.summed_grads = eventprop_accumulate_gradients(batch, inputs[0].n_pre, inputs[0].n_post);
 
+    result.batch_size = batch_size;
     result.outputs = outputs;
     return result;
 }
@@ -344,12 +400,26 @@ DropoutBatch eventprop_dropout_spikes_batch(
 )
 {
     DropoutBatch result;
+    result.batch_size = 0;
+    result.has_errors = 0;
+    result.outputs = NULL;
+
+    if (batch_size <= 0) return result;
+    if (times == NULL || sources == NULL || n_per_sample == NULL) return result;
+
     result.batch_size = batch_size;
-    result.has_errors = 0;   /* dropout has no per-sample errors */
     result.outputs = (DropoutOutput*)calloc(batch_size, sizeof(DropoutOutput));
+    if (!result.outputs) {
+        result.batch_size = 0;
+        return result;
+    }
 
     /* Compute sample offsets */
     int* offsets = (int*)malloc((batch_size + 1) * sizeof(int));
+    if (!offsets) {
+        eventprop_free_dropout_batch(&result);
+        return result;
+    }
     offsets[0] = 0;
     for (int i = 0; i < batch_size; i++) {
         offsets[i+1] = offsets[i] + n_per_sample[i];

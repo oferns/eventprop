@@ -13,6 +13,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <errno.h>
+#include <limits.h>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -662,18 +663,28 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
 
     /* Per-neuron dynamic buffers - growable to handle burst patterns */
     double** post_times_arr   = malloc(input.n_post * sizeof(double*));
+    if (!post_times_arr) goto fwd_alloc_fail;
     double** post_currents_arr = malloc(input.n_post * sizeof(double*));
+    if (!post_currents_arr) { free(post_times_arr); goto fwd_alloc_fail; }
     int* spike_caps  = calloc(input.n_post, sizeof(int));
+    if (!spike_caps) { free(post_times_arr); free(post_currents_arr); goto fwd_alloc_fail; }
     int* spike_counts = calloc(input.n_post, sizeof(int));
+    if (!spike_counts) { free(post_times_arr); free(post_currents_arr); free(spike_caps); goto fwd_alloc_fail; }
 
     /* Start with 3× estimated spikes to reduce realloc overhead */
     int initial_cap = input.n_spikes * 3 + 1;
     for (int n = 0; n < input.n_post; n++) {
         post_times_arr[n]   = calloc(initial_cap, sizeof(double));
+        if (!post_times_arr[n]) goto fwd_alloc_fail_partial_neuron;
         post_currents_arr[n] = calloc(initial_cap, sizeof(double));
+        if (!post_currents_arr[n]) { free(post_times_arr[n]); goto fwd_alloc_fail_partial_neuron; }
         spike_caps[n]       = initial_cap;
     }
 
+    /* Shared error flag for OpenMP region: threads bail out gracefully on OOM */
+#ifdef _OPENMP
+    volatile int fwd_alloc_error = 0;
+#endif
     int target_nrn;
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
@@ -709,6 +720,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                             double* post_exp_st = NULL;
                             if (count > 0) {
                                 post_exp_st = (double*)malloc(count * sizeof(double));
+                                if (!post_exp_st) { fwd_alloc_error = 1; finished = 1; break; }
                                 for (int s = 0; s < count; s++)
                                     post_exp_st[s] = exp(p_times[s] * tau_mem_inv);
                             }
@@ -723,8 +735,11 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                             if (t_post > t_lower && t_post < tmax) {
                                 if (count >= cap) {
                                     cap *= 3;
-                                    p_times    = realloc(p_times, cap * sizeof(double));
-                                    p_currents = realloc(p_currents, cap * sizeof(double));
+                                    double* new_times    = realloc(p_times, cap * sizeof(double));
+                                    double* new_currents = realloc(p_currents, cap * sizeof(double));
+                                    if (!new_times || !new_currents) { free(new_times); free(new_currents); fwd_alloc_error = 1; finished = 1; break; }
+                                    p_times    = new_times;
+                                    p_currents = new_currents;
                                 }
                                 p_times[count]   = t_post;
                                 p_currents[count] = compute_i(t_post, input.n_spikes, input.times, sum0,
@@ -756,6 +771,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                             double* post_exp_st = NULL;
                             if (count > 0) {
                                 post_exp_st = (double*)malloc(count * sizeof(double));
+                                if (!post_exp_st) { fwd_alloc_error = 1; finished = 1; break; }
                                 for (int s = 0; s < count; s++)
                                     post_exp_st[s] = exp(p_times[s] * tau_mem_inv);
                             }
@@ -770,8 +786,11 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                             if (t_post > t_before && t_post < tmax) {
                                 if (count >= cap) {
                                     cap *= 3;
-                                    p_times    = realloc(p_times, cap * sizeof(double));
-                                    p_currents = realloc(p_currents, cap * sizeof(double));
+                                    double* new_times    = realloc(p_times, cap * sizeof(double));
+                                    double* new_currents = realloc(p_currents, cap * sizeof(double));
+                                    if (!new_times || !new_currents) { free(new_times); free(new_currents); fwd_alloc_error = 1; finished = 1; break; }
+                                    p_times    = new_times;
+                                    p_currents = new_currents;
                                 }
                                 p_times[count]   = t_post;
                                 p_currents[count] = compute_i(t_post, input.n_spikes, input.times, sum0,
@@ -798,6 +817,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                         double* post_exp_st = NULL;
                         if (count > 0) {
                             post_exp_st = (double*)malloc(count * sizeof(double));
+                            if (!post_exp_st) { fwd_alloc_error = 1; finished = 1; break; }
                             for (int s = 0; s < count; s++)
                                 post_exp_st[s] = exp(p_times[s] * tau_mem_inv);
                         }
@@ -812,8 +832,11 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                         if (t_post > t_before && t_post < t_input) {
                             if (count >= cap) {
                                 cap *= 3;
-                                p_times    = realloc(p_times, cap * sizeof(double));
-                                p_currents = realloc(p_currents, cap * sizeof(double));
+                                double* new_times    = realloc(p_times, cap * sizeof(double));
+                                double* new_currents = realloc(p_currents, cap * sizeof(double));
+                                if (!new_times || !new_currents) { free(new_times); free(new_currents); fwd_alloc_error = 1; finished = 1; break; }
+                                p_times    = new_times;
+                                p_currents = new_currents;
                             }
                             p_times[count]   = t_post;
                             p_currents[count] = compute_i(t_post, input.n_spikes, input.times, sum0,
@@ -840,6 +863,9 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
     for (int n = 0; n < input.n_post; n++)
         result.n_spikes += spike_counts[n];
 
+#ifdef _OPENMP
+    if (fwd_alloc_error) goto fwd_alloc_fail;
+#endif
 
     if (result.n_spikes == 0) {
         result.times = NULL;
@@ -859,6 +885,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
 
     /* Collect all spikes into sortable array */
     SpikeEntry* entries = malloc(result.n_spikes * sizeof(SpikeEntry));
+    if (!entries) goto fwd_alloc_fail;
     int idx = 0;
     for (int n = 0; n < input.n_post; n++) {
         int cnt = spike_counts[n];
@@ -877,9 +904,13 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
 
     /* Allocate and copy to output */
     result.times = malloc(result.n_spikes * sizeof(double));
+    if (!result.times) goto fwd_alloc_fail_entries;
     result.sources = malloc(result.n_spikes * sizeof(int));
+    if (!result.sources) { free(result.times); goto fwd_alloc_fail_entries; }
     result.currents = malloc(result.n_spikes * sizeof(double));
+    if (!result.currents) { free(result.times); free(result.sources); goto fwd_alloc_fail_entries; }
     result.errors = calloc(result.n_spikes, sizeof(double));
+    if (!result.errors) { free(result.times); free(result.sources); free(result.currents); goto fwd_alloc_fail_entries; }
 
     for (int i = 0; i < result.n_spikes; i++) {
         result.times[i]     = entries[i].time;
@@ -898,6 +929,26 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
     free(entries);
 
     return result;
+
+fwd_alloc_fail_entries:
+    free(entries);
+fwd_alloc_fail_partial_neuron:
+    /* Free any neuron buffers that were allocated before failure */
+    for (int n = 0; n < input.n_post && post_times_arr != NULL; n++) {
+        if (post_currents_arr) { free(post_times_arr[n]); free(post_currents_arr[n]); }
+    }
+fwd_alloc_fail:
+    /* Cleanup on allocation failure */
+    eventprop_free_sums_output(&sums);
+    free(post_times_arr); free(post_currents_arr);
+    free(spike_caps); free(spike_counts);
+    result.n_spikes = 0;
+    result.times    = NULL;
+    result.sources  = NULL;
+    result.currents = NULL;
+    result.errors   = NULL;
+    result.error_no = EVENTPROP_ALLOCATION_FAILED;
+    return result;
 }
 
 SumsOutput eventprop_compute_sums(const EventPropInput input)
@@ -914,7 +965,15 @@ SumsOutput eventprop_compute_sums(const EventPropInput input)
     }
 
     int n_rows = input.n_spikes + 1;
- 
+
+    /* Check for integer overflow in allocation size */
+    if (n_rows > 0 && input.n_post > INT_MAX / n_rows) {
+        result.sum0 = NULL;
+        result.sum1 = NULL;
+        result.error_no = EVENTPROP_ALLOCATION_FAILED;
+        return result;
+    }
+
     /* Allocate output - exact size known upfront */
     result.sum0 = calloc(n_rows * input.n_post, sizeof(double));
     result.sum1 = calloc(n_rows * input.n_post, sizeof(double));
@@ -1100,6 +1159,14 @@ BackwardOutput eventprop_backward_maxima(const EventPropInput input,
         return result;
     }
 
+    /* Check for integer overflow in allocation size */
+    if (input.n_pre > 0 && input.n_post > INT_MAX / input.n_pre) {
+        result.grad         = NULL;
+        result.spike_errors = NULL;
+        result.error_no     = EVENTPROP_ALLOCATION_FAILED;
+        return result;
+    }
+
     /* Allocate output */
     result.grad         = calloc(input.n_pre * input.n_post, sizeof(double));
     result.spike_errors = calloc(input.n_spikes, sizeof(double));
@@ -1168,6 +1235,22 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
         return result;
     }
 
+    /* Validate output spike count */
+    if (spike.n_spikes < 0) {
+        result.grad         = NULL;
+        result.spike_errors = NULL;
+        result.error_no     = EVENTPROP_NEGATIVE_SPIKES;
+        return result;
+    }
+
+    /* Check for integer overflow in allocation sizes */
+    if (input.n_pre > 0 && input.n_post > INT_MAX / input.n_pre) {
+        result.grad         = NULL;
+        result.spike_errors = NULL;
+        result.error_no     = EVENTPROP_ALLOCATION_FAILED;
+        return result;
+    }
+
     /* Validate output spike source bounds: post-sources index post-neurons */
     for (int i = 0; i < spike.n_spikes; ++i) {
         if (spike.sources[i] < 0 || spike.sources[i] >= input.n_post) {
@@ -1208,18 +1291,36 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
 
     int total = input.n_spikes + spike.n_spikes;
 
-    MergedSpike* merged = malloc(total * sizeof(MergedSpike));
-
-    for (int i = 0; i < input.n_spikes; i++) { 
-        merged[i].time=input.times[i]; 
-        merged[i].idx=i; 
-        merged[i].is_input=1; 
+    /* Check for integer overflow in merged array size */
+    if (input.n_spikes > INT_MAX - spike.n_spikes) {
+        free(result.grad);
+        free(result.spike_errors);
+        result.grad         = NULL;
+        result.spike_errors = NULL;
+        result.error_no     = EVENTPROP_ALLOCATION_FAILED;
+        return result;
     }
 
-    for (int i = 0; i < spike.n_spikes; i++) { 
+    MergedSpike* merged = malloc(total * sizeof(MergedSpike));
+    if (!merged) {
+        free(result.grad);
+        free(result.spike_errors);
+        result.grad         = NULL;
+        result.spike_errors = NULL;
+        result.error_no     = EVENTPROP_ALLOCATION_FAILED;
+        return result;
+    }
+
+    for (int i = 0; i < input.n_spikes; i++) {
+        merged[i].time=input.times[i];
+        merged[i].idx=i;
+        merged[i].is_input=1;
+    }
+
+    for (int i = 0; i < spike.n_spikes; i++) {
         merged[input.n_spikes+i].time = spike.times[i];
-        merged[input.n_spikes+i].idx = i; 
-        merged[input.n_spikes+i].is_input=0; 
+        merged[input.n_spikes+i].idx = i;
+        merged[input.n_spikes+i].is_input=0;
     }
 
       /* Sort descending by time: O(n log n) via qsort */
@@ -1230,19 +1331,29 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
         all_errors[input.n_spikes + i] = spike.errors[i];
     }
 
+    /* ── Allocate intermediate buffers (with NULL checks) ─────────────── */
 
     double* lambda_v = calloc(input.n_post, sizeof(double));
+    if (!lambda_v) goto bwd_alloc_fail;
     double* lambda_i = malloc(input.n_post * sizeof(double));
+    if (!lambda_i) { free(lambda_v); goto bwd_alloc_fail; }
 
     /* Per-neuron jump storage (matching Eigen's vector<vector<pair<double,double>>> structure) */
     double** jump_time = calloc(input.n_post, sizeof(double*));
+    if (!jump_time) { free(lambda_v); free(lambda_i); goto bwd_alloc_fail; }
     double** jump_mag  = calloc(input.n_post, sizeof(double*));
+    if (!jump_mag)  { free(lambda_v); free(lambda_i); free(jump_time); goto bwd_alloc_fail; }
     int*   jump_count  = calloc(input.n_post, sizeof(int));
+    if (!jump_count) { free(lambda_v); free(lambda_i); free(jump_time); free(jump_mag); goto bwd_alloc_fail; }
     int*   jump_cap    = calloc(input.n_post, sizeof(int));
+    if (!jump_cap)     { free(lambda_v); free(lambda_i); free(jump_time); free(jump_mag); free(jump_count); goto bwd_alloc_fail; }
+
     for (int i = 0; i < input.n_post; i++) {
         jump_cap[i] = 8;  /* initial capacity */
         jump_time[i] = malloc(jump_cap[i] * sizeof(double));
+        if (!jump_time[i]) goto bwd_alloc_fail_partial;
         jump_mag[i]  = malloc(jump_cap[i] * sizeof(double));
+        if (!jump_mag[i]) { free(jump_time[i]); goto bwd_alloc_fail_partial; }
     }
 
     MutableMatrixView grad = mv_mut(result.grad, input.n_pre, input.n_post);
@@ -1296,8 +1407,12 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
             /* Record jump for this neuron (with capacity management) */
             if (jump_count[nrn] >= jump_cap[nrn]) {
                 jump_cap[nrn] *= 2;
-                jump_time[nrn] = realloc(jump_time[nrn], jump_cap[nrn] * sizeof(double));
-                jump_mag[nrn]  = realloc(jump_mag[nrn],  jump_cap[nrn] * sizeof(double));
+                double* new_time = realloc(jump_time[nrn], jump_cap[nrn] * sizeof(double));
+                if (!new_time) goto bwd_alloc_fail_partial;
+                jump_time[nrn] = new_time;
+                double* new_mag = realloc(jump_mag[nrn],  jump_cap[nrn] * sizeof(double));
+                if (!new_mag) { free(new_time); goto bwd_alloc_fail_partial; }
+                jump_mag[nrn] = new_mag;
             }
             jump_time[nrn][jump_count[nrn]] = t_bwd;
             jump_mag[nrn][jump_count[nrn]]  = inv_ic * (input.v_th * lambda_v[nrn] + post_err);
@@ -1314,5 +1429,21 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
     free(merged); free(all_errors); free(lambda_v); free(lambda_i);
     free(jump_time); free(jump_mag); free(jump_count); free(jump_cap);
 
+    return result;
+
+/* ── Allocation failure cleanup paths ─────────────────────────────── */
+bwd_alloc_fail_partial:
+    for (int j = 0; j < input.n_post; j++) {
+        if (jump_time) free(jump_time[j]);
+        if (jump_mag)  free(jump_mag[j]);
+    }
+bwd_alloc_fail:
+    free(lambda_v);   free(lambda_i);
+    free(jump_time);  free(jump_mag);
+    free(jump_count); free(jump_cap);
+    free(all_errors); free(merged);
+    free(result.grad);     result.grad = NULL;
+    free(result.spike_errors); result.spike_errors = NULL;
+    result.error_no = EVENTPROP_ALLOCATION_FAILED;
     return result;
 }

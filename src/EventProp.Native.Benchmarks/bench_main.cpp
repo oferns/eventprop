@@ -479,39 +479,35 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
         fwd_results.push_back(std::move(post_batch));
     }
 #else
-    // C library: flat arrays + per-sample spike counts
-    std::vector<double> times(batch_size * sz.n_spikes);
-    std::vector<int> sources(batch_size * sz.n_spikes);
-    std::vector<int> n_spikes_per_sample(batch_size, sz.n_spikes);
-
+    // C library: construct EventPropInput[] from flat arrays
+    std::vector<EventPropInput> inputs(batch_size);
     for (int b = 0; b < batch_size; b++) {
+        double* times = new double[sz.n_spikes];
+        int* sources = new int[sz.n_spikes];
         std::mt19937 rng(42 + b);
         for (int i = 0; i < sz.n_spikes; i++) {
-            times[b * sz.n_spikes + i] = (i + 1) / static_cast<double>(sz.n_spikes + 1);
-            sources[b * sz.n_spikes + i] = std::uniform_int_distribution<int>(0, sz.n_pre - 1)(rng);
+            times[i] = (i + 1) / static_cast<double>(sz.n_spikes + 1);
+            sources[i] = std::uniform_int_distribution<int>(0, sz.n_pre - 1)(rng);
         }
+        inputs[b] = {w.data(), sz.n_pre, sz.n_post, times, sources, sz.n_spikes, 0.02, 0.005, 1.0};
     }
 
     // Collect results inside the loop and free after — avoids malloc/free
     // overhead per iteration while keeping the C library's allocation philosophy.
-    std::vector<SpikesBatchWithInputs> fwd_results;
+    std::vector<SpikesBatch> fwd_results;
     std::vector<BackwardsBatch> bwd_results;
     fwd_results.reserve(state.iterations());
     bwd_results.reserve(state.iterations());
 
     for (auto _ : state) {
-        SpikesBatchWithInputs fwd_batch = eventprop_compute_spikes_batch_flat(
-            w.data(), sz.n_pre, sz.n_post,
-            times.data(), sources.data(), n_spikes_per_sample.data(),
-            batch_size, 0.02, 0.005, 1.0);
+        SpikesBatch fwd_batch = eventprop_compute_spikes_batch(inputs.data(), batch_size);
 
         // Write errors into fwd_batch.spikes[b].errors (allocated by forward pass)
         for (int b = 0; b < batch_size; b++)
             for (int i = 0; i < fwd_batch.spikes[b].n_spikes; i++)
                 fwd_batch.spikes[b].errors[i] = -1.0;
 
-        SpikesBatch spikes_view = {fwd_batch.batch_size, fwd_batch.has_errors, fwd_batch.spikes};
-        BackwardsBatch result_batch = eventprop_backward_spikes_batch(fwd_batch.inputs, spikes_view);
+        BackwardsBatch result_batch = eventprop_backward_spikes_batch(inputs.data(), fwd_batch);
 
         benchmark::DoNotOptimize(result_batch.outputs[0].grad);
 
@@ -521,7 +517,11 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
 
     // Free all results after the benchmark loop
     for (auto& r : bwd_results) eventprop_free_backwards_batch(&r);
-    for (auto& r : fwd_results) eventprop_free_spikes_with_inputs_batch(&r);
+    for (auto& r : fwd_results) eventprop_free_spikes_batch(&r);
+    for (int b = 0; b < batch_size; b++) {
+        delete[] inputs[b].times;
+        delete[] inputs[b].sources;
+    }
 #endif
 
     state.SetItemsProcessed(state.iterations() * batch_size * sz.n_spikes);
