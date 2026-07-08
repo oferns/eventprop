@@ -3,17 +3,27 @@
 # Usage: bench_compare.sh [num_runs] [min_time_s]
 set -euo pipefail
 
+# Detect platform for correct binary paths and extensions
+if [[ "$(uname -s)" == MINGW* ]] || [[ "$(uname -s)" == CYGWIN* ]] || [[ "$(uname -s)" == MSYS* ]]; then
+    BENCH_SUBDIR="Release"
+    BENCH_EXT=".exe"
+else
+    # Linux/macOS — single-config CMake puts binaries directly in build/
+    BENCH_SUBDIR=""
+    BENCH_EXT=""
+fi
+
 NUM_RUNS="${1:-3}"
 MIN_TIME="${2:-0.1}"
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$REPO_ROOT/src/EventProp.Native.Benchmarks/build"
 OUT_DIR="$BUILD_DIR/bench_runs"
-BENCH_C="$BUILD_DIR/Release/bench_c.exe"
-BENCH_CPP="$BUILD_DIR/Release/bench_cpp.exe"
+BENCH_C="$BUILD_DIR/${BENCH_SUBDIR:+$BENCH_SUBDIR/}bench_c${BENCH_EXT}"
+BENCH_CPP="$BUILD_DIR/${BENCH_SUBDIR:+$BENCH_SUBDIR/}bench_cpp${BENCH_EXT}"
 
 # Copy C library DLL next to executable (Windows needs it in same dir or PATH)
 if [ -f "$REPO_ROOT/src/EventProp.C/build/Release/eventprop_c_api.dll" ]; then
-    cp "$REPO_ROOT/src/EventProp.C/build/Release/eventprop_c_api.dll" "$BUILD_DIR/Release/" 2>/dev/null || true
+    cp "$REPO_ROOT/src/EventProp.C/build/Release/eventprop_c_api.dll" "$BUILD_DIR/${BENCH_SUBDIR:+$BENCH_SUBDIR}/" 2>/dev/null || true
 fi
 
 mkdir -p "$OUT_DIR"
@@ -29,17 +39,17 @@ for i in $(seq 1 "$NUM_RUNS"); do
     echo "[C]   Run $i/$NUM_RUNS..."
     cd "$BUILD_DIR"
     if [ -n "$FILTER" ]; then
-        ./Release/bench_c.exe --benchmark_min_time="${MIN_TIME}s" --benchmark_filter="$FILTER" --benchmark_format=json > "$OUT_DIR/c_run_${i}.json" 2>/dev/null || true
+        ./${BENCH_SUBDIR:+$BENCH_SUBDIR/}bench_c${BENCH_EXT} --benchmark_min_time="${MIN_TIME}s" --benchmark_filter="$FILTER" --benchmark_format=json > "$OUT_DIR/c_run_${i}.json" 2>/dev/null || true
     else
-        ./Release/bench_c.exe --benchmark_min_time="${MIN_TIME}s" --benchmark_format=json > "$OUT_DIR/c_run_${i}.json" 2>/dev/null || true
+        ./${BENCH_SUBDIR:+$BENCH_SUBDIR/}bench_c${BENCH_EXT} --benchmark_min_time="${MIN_TIME}s" --benchmark_format=json > "$OUT_DIR/c_run_${i}.json" 2>/dev/null || true
     fi
 
     echo "[CPP] Run $i/$NUM_RUNS..."
     cd "$BUILD_DIR"
     if [ -n "$FILTER" ]; then
-        ./Release/bench_cpp.exe --benchmark_min_time="${MIN_TIME}s" --benchmark_filter="$FILTER" --benchmark_format=json > "$OUT_DIR/cpp_run_${i}.json" 2>/dev/null || true
+        ./${BENCH_SUBDIR:+$BENCH_SUBDIR/}bench_cpp${BENCH_EXT} --benchmark_min_time="${MIN_TIME}s" --benchmark_filter="$FILTER" --benchmark_format=json > "$OUT_DIR/cpp_run_${i}.json" 2>/dev/null || true
     else
-        ./Release/bench_cpp.exe --benchmark_min_time="${MIN_TIME}s" --benchmark_format=json > "$OUT_DIR/cpp_run_${i}.json" 2>/dev/null || true
+        ./${BENCH_SUBDIR:+$BENCH_SUBDIR/}bench_cpp${BENCH_EXT} --benchmark_min_time="${MIN_TIME}s" --benchmark_format=json > "$OUT_DIR/cpp_run_${i}.json" 2>/dev/null || true
     fi
 done
 

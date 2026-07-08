@@ -17,7 +17,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="$SCRIPT_DIR/build/Release"
+
+# Detect platform for correct binary paths
+# Windows (MSVC/Ninja Multi-Config): build/Release or build/Debug
+# Linux/macOS (Unix Makefiles/Ninja single-config): build/
+if [[ "$(uname -s)" == MINGW* ]] || [[ "$(uname -s)" == CYGWIN* ]] || [[ "$(uname -s)" == MSYS* ]]; then
+    BUILD_DIR="$SCRIPT_DIR/build/Release"
+else
+    BUILD_DIR="$SCRIPT_DIR/build"
+fi
 BASELINES_DIR="$SCRIPT_DIR/baselines"
 TOOLS_DIR="$SCRIPT_DIR/build/_deps/benchmark-src/tools"
 
@@ -66,8 +74,9 @@ if $RUN_C; then
     echo "Running C benchmark..."
     echo "========================================"
 
-    # Ensure library is findable (LD_LIBRARY_PATH or rpath)
-    export LD_LIBRARY_PATH="$BUILD_DIR:${LD_LIBRARY_PATH:-}"
+    # On Linux the RUNPATH is baked into bench_c by CMake.
+    # On Windows the DLL is copied next to the exe at build time.
+    # No runtime path manipulation needed.
 
     C_OUTPUT="$BASELINES_DIR/bench_c_${DATE_STAMP}.json"
     echo "Output: $C_OUTPUT"
@@ -107,43 +116,48 @@ if $DO_COMPARE; then
     CONTENDER=""
 
     if [[ $# -lt 2 ]]; then
-        # Auto-find latest files
-        BASELINE=$(ls -1t "$BASELINES_DIR"/bench_c_*.json 2>/dev/null | head -1) || true
-        CONTENDER=$(ls -1t "$BASELINES_DIR"/bench_cpp_*.json 2>/dev/null | head -1) || true
+        # Auto-find latest files (returns full paths from ls)
+        FULL_BASELINE=$(ls -1t "$BASELINES_DIR"/bench_c_*.json 2>/dev/null | head -1) || true
+        FULL_CONTENDER=$(ls -1t "$BASELINES_DIR"/bench_cpp_*.json 2>/dev/null | head -1) || true
 
-        if [[ -z "$BASELINE" ]]; then
+        if [[ -z "$FULL_BASELINE" ]]; then
             echo "ERROR: No C benchmark results found in $BASELINES_DIR"
             exit 1
         fi
-        if [[ -z "$CONTENDER" ]]; then
+        if [[ -z "$FULL_CONTENDER" ]]; then
             echo "ERROR: No C++ benchmark results found in $BASELINES_DIR"
             exit 1
         fi
     elif [[ $# -eq 2 ]]; then
+        # User gave one explicit file; auto-find the other
         BASELINE="$2"
-        CONTENDER=$(ls -1t "$BASELINES_DIR"/bench_cpp_*.json 2>/dev/null | head -1) || true
+        FULL_CONTENDER=$(ls -1t "$BASELINES_DIR"/bench_cpp_*.json 2>/dev/null | head -1) || true
+        if [[ -f "$BASELINE" ]]; then
+            FULL_BASELINE="$BASELINE"
+        elif [[ -f "$BASELINES_DIR/$BASELINE" ]]; then
+            FULL_BASELINE="$BASELINES_DIR/$BASELINE"
+        else
+            echo "ERROR: Cannot find $BASELINE"
+            exit 1
+        fi
     else
-        BASELINE="$2"
-        CONTENDER="$3"
-    fi
-
-    # Resolve paths (try baselines/ first, then SCRIPT_DIR)
-    if [[ -f "$BASELINES_DIR/$BASELINE" ]]; then
-        FULL_BASELINE="$BASELINES_DIR/$BASELINE"
-    elif [[ -f "$SCRIPT_DIR/$BASELINE" ]]; then
-        FULL_BASELINE="$SCRIPT_DIR/$BASELINE"
-    else
-        echo "ERROR: Cannot find $BASELINE"
-        exit 1
-    fi
-
-    if [[ -f "$BASELINES_DIR/$CONTENDER" ]]; then
-        FULL_CONTENDER="$BASELINES_DIR/$CONTENDER"
-    elif [[ -f "$SCRIPT_DIR/$CONTENDER" ]]; then
-        FULL_CONTENDER="$SCRIPT_DIR/$CONTENDER"
-    else
-        echo "ERROR: Cannot find $CONTENDER"
-        exit 1
+        # User gave two explicit files
+        if [[ -f "$2" ]]; then
+            FULL_BASELINE="$2"
+        elif [[ -f "$BASELINES_DIR/$2" ]]; then
+            FULL_BASELINE="$BASELINES_DIR/$2"
+        else
+            echo "ERROR: Cannot find $2"
+            exit 1
+        fi
+        if [[ -f "$3" ]]; then
+            FULL_CONTENDER="$3"
+        elif [[ -f "$BASELINES_DIR/$3" ]]; then
+            FULL_CONTENDER="$BASELINES_DIR/$3"
+        else
+            echo "ERROR: Cannot find $3"
+            exit 1
+        fi
     fi
 
     echo ""
