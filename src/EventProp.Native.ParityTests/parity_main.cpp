@@ -120,7 +120,7 @@ static void test_compute_sums(const TestCase& tc) {
     ASSERT_ARRAY_NEAR(sums_c.sum1, sum1_e, sum_count, ABS_TOLERANCE, REL_TOLERANCE, "sum1");
 
     free(w); free(times); free(sources);
-    eventprop_free_sums_output(&sums_c);
+    eventprop_free_sums_output(sums_c);
     free(sum0_e); free(sum1_e);
     TEST_END;
 }
@@ -149,7 +149,7 @@ static void test_compute_spikes(const TestCase& tc) {
     }
 
     free(w); free(times); free(sources);
-    eventprop_free_spike_output(&spikes_c);
+    eventprop_free_spike_output(spikes_c);
     TEST_END;
 }
 
@@ -163,7 +163,7 @@ static void test_backward_spikes(const TestCase& tc) {
 
     EventPropInput fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
     SpikeOutput fwd_c = eventprop_compute_spikes(fi_spikes);
-    if (fwd_c.n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(&fwd_c); return; }
+    if (fwd_c.n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
 
     // Write errors into fwd_c.errors (allocated by forward pass)
     for (int i = 0; i < fwd_c.n_spikes; i++) fwd_c.errors[i] = 1.0;
@@ -187,8 +187,8 @@ static void test_backward_spikes(const TestCase& tc) {
     ASSERT_ARRAY_NEAR(backward_c.grad, grad_eig, tc.n_pre * tc.n_post, ABS_TOLERANCE, REL_TOLERANCE, "gradient");
 
     free(w); free(times); free(sources);
-    eventprop_free_spike_output(&fwd_c);
-    eventprop_free_backward_output(&backward_c);
+    eventprop_free_spike_output(fwd_c);
+    eventprop_free_backward_output(backward_c);
     free(grad_eig);
     TEST_END;
 }
@@ -207,11 +207,11 @@ static void test_compute_maxima(const TestCase& tc) {
         bool c_nan = std::isnan(maxima_c.times[i]);
         bool e_nan = std::isnan(max_times_e[i]);
         if (c_nan && e_nan) continue;
-        if (c_nan != e_nan) { printf("FAIL [maxima[%d]: C NaN=%d, Eigen NaN=%d]\n", i, c_nan, e_nan); tests_failed++; free(w); free(times); free(sources); eventprop_free_maxima_output(&maxima_c); free(max_times_e); free(max_values_e); return; }
+        if (c_nan != e_nan) { printf("FAIL [maxima[%d]: C NaN=%d, Eigen NaN=%d]\n", i, c_nan, e_nan); tests_failed++; free(w); free(times); free(sources); eventprop_free_maxima_output(maxima_c); free(max_times_e); free(max_values_e); return; }
         ASSERT_NEAR_SCALED(maxima_c.times[i], max_times_e[i], ABS_TOLERANCE, REL_TOLERANCE, "max_times");
         ASSERT_NEAR_SCALED(maxima_c.values[i], max_values_e[i], ABS_TOLERANCE, REL_TOLERANCE, "max_values");
     }
-    free(w); free(times); free(sources); eventprop_free_maxima_output(&maxima_c); free(max_times_e); free(max_values_e); TEST_END;
+    free(w); free(times); free(sources); eventprop_free_maxima_output(maxima_c); free(max_times_e); free(max_values_e); TEST_END;
 }
 
 static void test_backward_maxima(const TestCase& tc) {
@@ -245,9 +245,9 @@ static void test_backward_maxima(const TestCase& tc) {
 
     free(w);
     free(times); free(sources);
-    eventprop_free_maxima_output(&maxima_c);
+    eventprop_free_maxima_output(maxima_c);
     free(max_errors_c);
-    eventprop_free_backward_output(&backward_c);
+    eventprop_free_backward_output(backward_c);
     free(grad_eig); TEST_END;
 }
 
@@ -261,7 +261,7 @@ static void test_voltage_trace(const TestCase& tc) {
 
     EventPropInput fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
     SpikeOutput fwd_c = eventprop_compute_spikes(fi_spikes);
-    if (fwd_c.n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(&fwd_c); return; }
+    if (fwd_c.n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
 
     int target_nrn = 0;
     double t_max = 1.0, dt = 0.005;
@@ -279,8 +279,8 @@ static void test_voltage_trace(const TestCase& tc) {
     ASSERT_ARRAY_NEAR(trace_c.v_trace, v_eig.data(), trace_c.n_t, 1e-8, 1e-6, "voltage values");
 
     free(w); free(times); free(sources);
-    eventprop_free_spike_output(&fwd_c);
-    eventprop_free_voltage_trace_output(&trace_c);
+    eventprop_free_spike_output(fwd_c);
+    eventprop_free_voltage_trace_output(trace_c);
     TEST_END;
 }
 
@@ -293,7 +293,7 @@ static void test_lambda_i_trace(const TestCase& tc) {
 
     EventPropInput fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
     SpikeOutput fwd_c = eventprop_compute_spikes(fi_spikes);
-    if (fwd_c.n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(&fwd_c); return; }
+    if (fwd_c.n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
 
     int target_nrn = 0;
     double t_max = 1.0, dt = 0.005;
@@ -309,15 +309,15 @@ static void test_lambda_i_trace(const TestCase& tc) {
             printf("FAIL [ts[%d]: %.6f vs %.6f]\n", i, trace_c.ts[i], expected_t);
             tests_failed++;
             free(w); free(times); free(sources);
-            eventprop_free_spike_output(&fwd_c);
-            eventprop_free_lambda_i_trace_output(&trace_c);
+            eventprop_free_spike_output(fwd_c);
+            eventprop_free_lambda_i_trace_output(trace_c);
             return;
         }
     }
 
     free(w); free(times); free(sources);
-    eventprop_free_spike_output(&fwd_c);
-    eventprop_free_lambda_i_trace_output(&trace_c);
+    eventprop_free_spike_output(fwd_c);
+    eventprop_free_lambda_i_trace_output(trace_c);
     TEST_END;
 }
 
@@ -382,7 +382,7 @@ int main(int argc, char* argv[]) {
         printf("C=%d Eigen=%d ", n_c, n_e);
         if (n_c != n_e) { printf("FAIL [spike count: %d vs %d]\n", n_c, n_e); tests_failed++; }
         else { printf("PASS\n"); tests_passed++; }
-        eventprop_free_spike_output(&spikes_c);
+        eventprop_free_spike_output(spikes_c);
     }
 
     // NearZeroThreshold: 1x1, w=[5], times=[0.01], sources=[0], vTh=0.001
@@ -399,7 +399,7 @@ int main(int argc, char* argv[]) {
         printf("C=%d Eigen=%d ", n_c, n_e);
         if (n_c != n_e) { printf("FAIL [spike count: %d vs %d]\n", n_c, n_e); tests_failed++; }
         else { printf("PASS\n"); tests_passed++; }
-        eventprop_free_spike_output(&spikes_c);
+        eventprop_free_spike_output(spikes_c);
     }
 
     printf("\n=================================\n");

@@ -138,7 +138,7 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
                     .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
         SpikeOutput warmup = eventprop_compute_spikes(fi);
         benchmark::DoNotOptimize(warmup.times);
-        eventprop_free_spike_output(&warmup);
+        eventprop_free_spike_output(warmup);
 #endif
     }
 
@@ -154,7 +154,7 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
         SpikeOutput output = eventprop_compute_spikes(fi);
         benchmark::DoNotOptimize(output.times);
         benchmark::DoNotOptimize(output.currents);
-        eventprop_free_spike_output(&output);
+        eventprop_free_spike_output(output);
 #endif
     }
 
@@ -265,11 +265,11 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
         BackwardOutput result = eventprop_backward_spikes(base, fwd_result);
 
         benchmark::DoNotOptimize(result.grad);
-        eventprop_free_backward_output(&result);
+        eventprop_free_backward_output(result);
     }
 
     state.counters["output_spikes"] = benchmark::Counter(n_post_spikes);
-    eventprop_free_spike_output(&fwd_result);
+    eventprop_free_spike_output(fwd_result);
 #endif
 
     state.SetItemsProcessed(state.iterations() * sz.n_spikes);
@@ -357,7 +357,7 @@ static void BM_FullTrainingStep(benchmark::State& state, const ProblemSize& sz, 
                 .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
     SpikeOutput fwd_warmup = eventprop_compute_spikes(fi_warmup);
     benchmark::DoNotOptimize(fwd_warmup.times);
-    eventprop_free_spike_output(&fwd_warmup);
+    eventprop_free_spike_output(fwd_warmup);
 
     EventPropInput base_input = {
         .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
@@ -380,9 +380,9 @@ static void BM_FullTrainingStep(benchmark::State& state, const ProblemSize& sz, 
         benchmark::DoNotOptimize(result.grad);
         benchmark::DoNotOptimize(sums.sum0);
 
-        eventprop_free_backward_output(&result);
-        eventprop_free_spike_output(&fwd);
-        eventprop_free_sums_output(&sums);
+        eventprop_free_backward_output(result);
+        eventprop_free_spike_output(fwd);
+        eventprop_free_sums_output(sums);
     }
 #endif
 
@@ -516,8 +516,8 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
     }
 
     // Free all results after the benchmark loop
-    for (auto& r : bwd_results) eventprop_free_backwards_batch(&r);
-    for (auto& r : fwd_results) eventprop_free_spikes_batch(&r);
+    for (auto& r : bwd_results) eventprop_free_backwards_batch(r);
+    for (auto& r : fwd_results) eventprop_free_spikes_batch(r);
     for (int b = 0; b < batch_size; b++) {
         delete[] inputs[b].times;
         delete[] inputs[b].sources;
@@ -570,7 +570,7 @@ static void BM_ComputeSpikesVth(benchmark::State& state)
         SpikeOutput output = eventprop_compute_spikes(fi);
         benchmark::DoNotOptimize(output.times);
         benchmark::DoNotOptimize(output.currents);
-        eventprop_free_spike_output(&output);
+        eventprop_free_spike_output(output);
 #endif
     }
 
@@ -627,14 +627,14 @@ static void BM_BackwardSpikesVth(benchmark::State& state)
             .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
         BackwardOutput result = eventprop_backward_spikes(base_input, fwd);
         benchmark::DoNotOptimize(result.grad);
-        eventprop_free_backward_output(&result);
+        eventprop_free_backward_output(result);
 #endif
     }
 
 #ifdef USE_CPP_WRAPPER
     // Nothing to free for Eigen
 #else
-    eventprop_free_spike_output(&fwd);
+    eventprop_free_spike_output(fwd);
 #endif
 
     state.SetItemsProcessed(state.iterations() * n_spikes);
@@ -676,7 +676,7 @@ static void BM_ComputeSums(benchmark::State& state, const ProblemSize& sz, DataG
         };
         SumsOutput warmup = eventprop_compute_sums(base_input);
         benchmark::DoNotOptimize(warmup.sum0);
-        eventprop_free_sums_output(&warmup);
+        eventprop_free_sums_output(warmup);
 #endif
     }
 
@@ -694,7 +694,7 @@ static void BM_ComputeSums(benchmark::State& state, const ProblemSize& sz, DataG
         SumsOutput output = eventprop_compute_sums(base_input);
         benchmark::DoNotOptimize(output.sum0);
         benchmark::DoNotOptimize(output.sum1);
-        eventprop_free_sums_output(&output);
+        eventprop_free_sums_output(output);
 #endif
     }
 
@@ -768,7 +768,7 @@ static void BM_ComputeMaxima(benchmark::State& state, const ProblemSize& sz, Dat
         };
         MaximaOutput warmup = eventprop_compute_maxima(base_input);
         benchmark::DoNotOptimize(warmup.times);
-        eventprop_free_maxima_output(&warmup);
+        eventprop_free_maxima_output(warmup);
 #endif
     }
 
@@ -786,7 +786,7 @@ static void BM_ComputeMaxima(benchmark::State& state, const ProblemSize& sz, Dat
         MaximaOutput output = eventprop_compute_maxima(base_input);
         benchmark::DoNotOptimize(output.times);
         benchmark::DoNotOptimize(output.values);
-        eventprop_free_maxima_output(&output);
+        eventprop_free_maxima_output(output);
 #endif
     }
 
@@ -870,14 +870,14 @@ static void BM_BackwardMaxima(benchmark::State& state, const ProblemSize& sz, Da
 #else
         BackwardOutput result = eventprop_backward_maxima(base_input, maxima.times, maxima_errors.data());
         benchmark::DoNotOptimize(result.grad[0]);
-        eventprop_free_backward_output(&result);
+        eventprop_free_backward_output(result);
 #endif
     }
 
 #ifdef USE_CPP_WRAPPER
     // Nothing to free for Eigen
 #else
-    eventprop_free_maxima_output(&maxima);
+    eventprop_free_maxima_output(maxima);
 #endif
 
     state.SetItemsProcessed(state.iterations() * sz.n_spikes);
@@ -969,7 +969,7 @@ static void BM_Dropout(benchmark::State& state, const ProblemSize& sz, DataGener
         int total = 0;
         for (int b = 0; b < batch_size; b++) total += dropped.outputs[b].n_spikes;
         benchmark::DoNotOptimize(total);
-        eventprop_free_dropout_batch(&dropped);
+        eventprop_free_dropout_batch(dropped);
 #endif
     }
 

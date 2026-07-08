@@ -75,12 +75,15 @@ typedef struct SpikeOutput {
 
 typedef struct SumsOutput {
     EventPropError error_no;  /* Error code (EVENTPROP_OK on success) */
+    int n_rows;               /* Pre-synaptic neurons */
+    int n_post;               /* Post-synaptic neurons */
     double* sum0;             /* Cumulative sums (malloc'd, n_rows * n_post) */
     double* sum1;             /* Cumulative sums (malloc'd, n_rows * n_post) */
 } SumsOutput;
 
 typedef struct MaximaOutput {
     EventPropError error_no;  /* Error code (EVENTPROP_OK on success) */
+    int n_post;               /* Post-synaptic neurons */
     double* times;           /* Maxima times (malloc'd, n_post) */
     double* values;          /* Maxima values (malloc'd, n_post) */
     double* errors;          /* Maxima errors per post-neuron (malloc'd, n_post) — written by caller before backward pass */
@@ -90,15 +93,18 @@ typedef struct MaximaOutput {
 
 typedef struct BackwardOutput {
     EventPropError error_no;  /* Error code (EVENTPROP_OK on success) */
+    int n_pre;                /* Pre-synaptic neurons */
+    int n_post;               /* Post-synaptic neurons */
+    int n_spikes;             /* Number of input spikes */
     double* grad;            /* Weight gradient (malloc'd, n_pre * n_post) */
     double* spike_errors;   /* Input spike errors (malloc'd, n_spikes) */
 } BackwardOutput;
 
 
-void eventprop_free_spike_output(SpikeOutput* output);
-void eventprop_free_sums_output(SumsOutput* output);
-void eventprop_free_maxima_output(MaximaOutput* output);
-void eventprop_free_backward_output(BackwardOutput* output);
+void eventprop_free_spike_output(SpikeOutput output);
+void eventprop_free_sums_output(SumsOutput output);
+void eventprop_free_maxima_output(MaximaOutput output);
+void eventprop_free_backward_output(BackwardOutput output);
 
 /**
  * Forward pass

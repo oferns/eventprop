@@ -187,43 +187,27 @@ typedef struct MergedSpike {
 } MergedSpike;
 
 
-void eventprop_free_spike_output(SpikeOutput* output)
+void eventprop_free_spike_output(SpikeOutput output)
 {
-    if (!output) return;
-    free(output->times);
-    free(output->sources);
-    free(output->currents);
-    free(output->errors);
-    output->times = NULL;
-    output->sources = NULL;
-    output->currents = NULL;
-    output->errors = NULL;
-    output->n_spikes = 0;
+    free(output.times);
+    free(output.sources);
+    free(output.currents);
+    free(output.errors);
 }
-void eventprop_free_sums_output(SumsOutput* output)
+void eventprop_free_sums_output(SumsOutput output)
 {
-    if (!output) return;
-    free(output->sum0);
-    free(output->sum1);
-    output->sum0 = NULL;
-    output->sum1 = NULL;
+    free(output.sum0);
+    free(output.sum1);
 }
-void eventprop_free_maxima_output(MaximaOutput* output)
+void eventprop_free_maxima_output(MaximaOutput output)
 {
-    if (!output) return;
-    free(output->times);
-    free(output->values);
-    free(output->errors);
-    output->times = NULL;
-    output->values = NULL;
-    output->errors = NULL;
+    free(output.times);
+    free(output.values);
+    free(output.errors);
 }
-void eventprop_free_backward_output(BackwardOutput* output){
-    if (!output) return;
-    free(output->grad);
-    free(output->spike_errors);
-    output->grad = NULL;
-    output->spike_errors = NULL;
+void eventprop_free_backward_output(BackwardOutput output){
+    free(output.grad);
+    free(output.spike_errors);
 }
 /* ── SIMD helper functions ───────────────────────────────────── */
 
@@ -877,7 +861,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
             free(post_times_arr[n]);
             free(post_currents_arr[n]);
         }
-        eventprop_free_sums_output(&sums);
+        eventprop_free_sums_output(sums);
         free(post_times_arr); free(post_currents_arr);
         free(spike_caps); free(spike_counts);
         return result;
@@ -923,7 +907,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
         free(post_times_arr[n]);
         free(post_currents_arr[n]);
     }
-    eventprop_free_sums_output(&sums);
+    eventprop_free_sums_output(sums);
     free(post_times_arr); free(post_currents_arr);
     free(spike_caps); free(spike_counts);
     free(entries);
@@ -939,7 +923,7 @@ fwd_alloc_fail_partial_neuron:
     }
 fwd_alloc_fail:
     /* Cleanup on allocation failure */
-    eventprop_free_sums_output(&sums);
+    eventprop_free_sums_output(sums);
     free(post_times_arr); free(post_currents_arr);
     free(spike_caps); free(spike_counts);
     result.n_spikes = 0;
@@ -987,6 +971,9 @@ SumsOutput eventprop_compute_sums(const EventPropInput input)
         return result;
     }
 
+    result.n_rows = n_rows;
+    result.n_post = input.n_post;
+
     if (input.n_spikes == 0) return result;
 
     /* Pre-compute exponential lookup tables */
@@ -1012,6 +999,8 @@ SumsOutput eventprop_compute_sums(const EventPropInput input)
     free(exp_mem);
     free(exp_syn);
 
+    result.n_rows = n_rows;
+    result.n_post = input.n_post;
     return result;
 }
 
@@ -1044,6 +1033,8 @@ MaximaOutput eventprop_compute_maxima(const EventPropInput input)
         result.error_no = EVENTPROP_ALLOCATION_FAILED;
         return result;
     }
+
+    result.n_post = input.n_post;
 
     /* Initialize maxima to "not found" */
     for (int i = 0; i < input.n_post; i++) {
@@ -1087,7 +1078,8 @@ MaximaOutput eventprop_compute_maxima(const EventPropInput input)
 
     /* No spikes → nothing to compute, return NaN/-INF (matches Eigen) */
     if (input.n_spikes == 0) {
-        eventprop_free_sums_output(&sums);
+        result.n_post = input.n_post;
+        eventprop_free_sums_output(sums);
         return result;
     }
 
@@ -1131,7 +1123,8 @@ MaximaOutput eventprop_compute_maxima(const EventPropInput input)
         }
     }
 
-    eventprop_free_sums_output(&sums);
+    eventprop_free_sums_output(sums);
+    result.n_post = input.n_post;
     return result;
 }
 
@@ -1180,6 +1173,10 @@ BackwardOutput eventprop_backward_maxima(const EventPropInput input,
         return result;
     }
 
+    result.n_pre = input.n_pre;
+    result.n_post = input.n_post;
+    result.n_spikes = input.n_spikes;
+
     if (input.n_spikes == 0 || input.n_post == 0) {
         return result;
     }
@@ -1218,6 +1215,9 @@ BackwardOutput eventprop_backward_maxima(const EventPropInput input,
         }
     }
 
+    result.n_pre = input.n_pre;
+    result.n_post = input.n_post;
+    result.n_spikes = input.n_spikes;
     return result;
 }
 
@@ -1284,8 +1284,15 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
         return result;
     }
 
+    result.n_pre = input.n_pre;
+    result.n_post = input.n_post;
+    result.n_spikes = input.n_spikes;
+
     // No output spikes to process
     if(spike.n_spikes == 0) {
+        result.n_pre = input.n_pre;
+        result.n_post = input.n_post;
+        result.n_spikes = input.n_spikes;
         return result;
     }
 
@@ -1429,6 +1436,9 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
     free(merged); free(all_errors); free(lambda_v); free(lambda_i);
     free(jump_time); free(jump_mag); free(jump_count); free(jump_cap);
 
+    result.n_pre = input.n_pre;
+    result.n_post = input.n_post;
+    result.n_spikes = input.n_spikes;
     return result;
 
 /* ── Allocation failure cleanup paths ─────────────────────────────── */

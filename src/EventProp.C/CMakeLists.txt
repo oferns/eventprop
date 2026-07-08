@@ -62,9 +62,12 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     )
 elseif(CMAKE_C_COMPILER_ID MATCHES "MSVC")
     # MSVC equivalent optimizations:
-    # /Ox = Optimize for maximum speed (/O2 + /Ob2 /Oi /Ot /Op /Gy /GF)
+    # /O2 = Optimize for speed
+    # /Ob2 = Inline functions
+    # /Oi = Enable intrinsic functions
+    # /Ot = Favor fast code
     # /fp:fast = Fast floating-point math (equivalent to -ffp-contract=fast, -freciprocal-math, -fno-signed-zeros)
-    target_compile_options(eventprop_c_api PRIVATE /Ox /fp:fast)
+    target_compile_options(eventprop_c_api PRIVATE /O2 /Ob2 /Oi /Ot /fp:fast)
 endif()
 # libm is separate on Unix, built-in on Windows
 if(NOT WIN32)

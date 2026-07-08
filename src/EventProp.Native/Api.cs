@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace CW.EventProp.Native;
@@ -8,8 +7,31 @@ public static unsafe partial class Api
 {
     private const string Lib = "eventprop_c_api";
 
-    // ── Native structs (match C layout exactly) ────────────────
+    // ── Error codes (match C enum exactly) ────────────────────────
 
+    public enum EventPropError : int
+    {
+        Ok                       = 0,
+        InvalidDimension         = 1,
+        NegativeSpikes           = 2,
+        NullPointer              = 3,
+        InvalidSource            = 4,
+        InvalidTau               = 5,
+        AllocationFailed         = 6,
+        InvalidCurrent           = 7,
+        NegativeSpikeTime        = 8,
+        ExcessiveSpikeTime       = 9,
+        TauTooSmall              = 10,
+        TauTooLarge              = 11,
+        InvalidVTh               = 12,
+        DimensionTooLarge        = 13,
+        TimesTauMismatch         = 14,
+        TauTooClose              = 15,
+    }
+
+    // ── Native structs (match C layout exactly) ───────────────────
+
+    /// <summary>Non-owning view into weight matrix + spike input.</summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct EventPropInput
     {
@@ -22,379 +44,161 @@ public static unsafe partial class Api
         public double TauMem;
         public double TauSyn;
         public double VTh;
+
+        /// <summary>Build from raw pointers.</summary>
+        public static EventPropInput Create(double* w, int nPre, int nPost,
+            double* times, int* sources, int nSpikes,
+            double vTh, double tauMem, double tauSyn)
+        {
+            return new EventPropInput
+            {
+                W = (IntPtr)w,
+                NPre = nPre,
+                NPost = nPost,
+                Times = (IntPtr)times,
+                Sources = (IntPtr)sources,
+                NSpikes = nSpikes,
+                TauMem = tauMem,
+                TauSyn = tauSyn,
+                VTh = vTh,
+            };
+        }
+
+        /// <summary>Build from managed arrays (pins via fixed).</summary>
+        public static EventPropInput Create(ReadOnlySpan<double> w, int nPre, int nPost,
+            ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
+            double vTh, double tauMem, double tauSyn)
+        {
+            fixed (double* pw = w)
+            fixed (double* pt = times)
+            fixed (int* ps = sources)
+                return Create(pw, nPre, nPost, pt, ps, times.Length, vTh, tauMem, tauSyn);
+        }
     }
 
+    /// <summary>Owned spike output — freed via Dispose (<c>using</c>). Zero boxing: compiler calls Dispose directly.</summary>
     [StructLayout(LayoutKind.Sequential)]
-    public struct SpikeOutput
+    public readonly ref struct SpikeOutput : IDisposable
     {
-        public int NSpikes;
-        public IntPtr Times;       // double* (malloc'd)
-        public IntPtr Sources;     // int* (malloc'd)
-        public IntPtr Currents;    // double* (malloc'd)
+        internal readonly EventPropError errorNo;
+        internal readonly int nSpikes;
+        internal readonly IntPtr times;       // double* (malloc'd)
+        internal readonly IntPtr sources;     // int* (malloc'd)
+        internal readonly IntPtr currents;    // double* (malloc'd)
+        internal readonly IntPtr errors;      // double* (malloc'd, written by caller before backward)
+
+        public EventPropError ErrorNo => errorNo;
+        public int NSpikes => nSpikes;
+
+        /// <summary>Zero-copy span over spike times.</summary>
+        public Span<double> Times => NS<double>(times, nSpikes);
+        /// <summary>Zero-copy span over spike sources.</summary>
+        public Span<int> Sources => NS<int>(sources, nSpikes);
+        /// <summary>Zero-copy span over synaptic currents at spike times.</summary>
+        public Span<double> Currents => NS<double>(currents, nSpikes);
+        /// <summary>Zero-copy mutable span for writing error signals before backward pass.</summary>
+        public Span<double> Errors => NS<double>(errors, nSpikes);
+
+        public void Dispose() => eventprop_free_spike_output(this);
     }
 
+    /// <summary>Owned sums output — freed via Dispose (<c>using</c>). Zero boxing: compiler calls Dispose directly.</summary>
     [StructLayout(LayoutKind.Sequential)]
-    public struct SumsOutput
+    public readonly ref struct SumsOutput : IDisposable
     {
-        public int NRows;          // n_spikes + 1
-        public int NPost;
-        public IntPtr Sum0;        // double* (malloc'd, n_rows * n_post)
-        public IntPtr Sum1;        // double* (malloc'd, n_rows * n_post)
+        internal readonly EventPropError errorNo;
+        internal readonly int nRows;
+        internal readonly int nPost;
+        internal readonly IntPtr sum0;        // double* (malloc'd, nRows * nPost)
+        internal readonly IntPtr sum1;        // double* (malloc'd, nRows * nPost);
+
+        public EventPropError ErrorNo => errorNo;
+        /// <summary>Zero-copy span over sum0.</summary>
+        public Span<double> Sum0 => NS<double>(sum0, nRows * nPost);
+        /// <summary>Zero-copy span over sum1.</summary>
+        public Span<double> Sum1 => NS<double>(sum1, nRows * nPost);
+
+        public void Dispose() => eventprop_free_sums_output(this);
     }
 
+    /// <summary>Owned maxima output — freed via Dispose (<c>using</c>). Zero boxing: compiler calls Dispose directly.</summary>
     [StructLayout(LayoutKind.Sequential)]
-    public struct MaximaOutput
+    public readonly ref struct MaximaOutput : IDisposable
     {
-        public int NPost;
-        public IntPtr Times;       // double* (malloc'd, n_post)
-        public IntPtr Values;      // double* (malloc'd, n_post)
+        internal readonly EventPropError errorNo;
+        internal readonly int nPost;
+        internal readonly IntPtr times;       // double* (malloc'd, nPost)
+        internal readonly IntPtr values;      // double* (malloc'd, nPost)
+        internal readonly IntPtr errors;      // double* (malloc'd, nPost, written by caller before backward);
+
+        public EventPropError ErrorNo => errorNo;
+        /// <summary>Zero-copy span over maxima times.</summary>
+        public Span<double> Times => NS<double>(times, nPost);
+        /// <summary>Zero-copy span over maxima values.</summary>
+        public Span<double> Values => NS<double>(values, nPost);
+
+        public void Dispose() => eventprop_free_maxima_output(this);
     }
 
+    /// <summary>Owned backward output — freed via Dispose (<c>using</c>). Zero boxing: compiler calls Dispose directly.</summary>
     [StructLayout(LayoutKind.Sequential)]
-    public struct BackwardSpikesInput
+    public readonly ref struct BackwardOutput : IDisposable
     {
-        public IntPtr Input;       // const EventPropInput*
-        public IntPtr FwdTimes;    // const double*
-        public IntPtr FwdSources;  // const int*
-        public IntPtr FwdCurrents;// const double*
-        public IntPtr PostErrors;  // const double*
-        public int NPostSpikes;
+        internal readonly EventPropError errorNo;
+        internal readonly int nPre;
+        internal readonly int nPost;
+        internal readonly int nSpikes;
+        internal readonly IntPtr grad;        // double* (malloc'd, nPre * nPost)
+        internal readonly IntPtr spikeErrors; // double* (malloc'd, nSpikes)
+
+        public EventPropError ErrorNo => errorNo;
+        /// <summary>Zero-copy span over weight gradient.</summary>
+        public Span<double> Gradient => NS<double>(grad, nPre * nPost);
+        /// <summary>Zero-copy span over input spike errors.</summary>
+        public Span<double> SpikeErrors => NS<double>(spikeErrors, nSpikes);
+
+        public void Dispose() => eventprop_free_backward_output(this);
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    public struct BackwardMaximaInput
-    {
-        public IntPtr Input;       // const EventPropInput*
-        public IntPtr MaximaTimes;// const double*
-        public IntPtr MaximaValues;// const double*
-        public IntPtr MaximaErrors;// const double*
-        public int NMaxima;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct BackwardOutput
-    {
-        public int NPre;
-        public int NPost;
-        public IntPtr Grad;        // double* (malloc'd, n_pre * n_post)
-        public IntPtr SpikeErrors;// double* (malloc'd, n_spikes)
-    }
-
-    // ── Native function declarations ───────────────────────────
+    // ── Native function declarations ───────────────────────────────
 
     [LibraryImport(Lib)]
-    private static partial IntPtr eventprop_compute_spikes(IntPtr input);
+    public static partial SpikeOutput eventprop_compute_spikes(EventPropInput input);
 
     [LibraryImport(Lib)]
-    private static partial IntPtr eventprop_compute_sums(IntPtr input);
+    public static partial SumsOutput eventprop_compute_sums(EventPropInput input);
 
     [LibraryImport(Lib)]
-    private static partial IntPtr eventprop_compute_maxima(IntPtr input);
+    public static partial MaximaOutput eventprop_compute_maxima(EventPropInput input);
 
     [LibraryImport(Lib)]
-    private static partial IntPtr eventprop_backward_spikes(IntPtr input);
+    public static partial BackwardOutput eventprop_backward_spikes(EventPropInput input, SpikeOutput spike);
 
     [LibraryImport(Lib)]
-    private static partial IntPtr eventprop_backward_maxima(IntPtr input);
+    public static partial BackwardOutput eventprop_backward_maxima(EventPropInput input, IntPtr maximaTimes, IntPtr maximaErrors);
+
+    // ── Free functions (public for manual lifetime management) ─────
 
     [LibraryImport(Lib)]
-    private static partial void eventprop_free_spike_output(IntPtr output);
+    public static partial void eventprop_free_spike_output(SpikeOutput output);
 
     [LibraryImport(Lib)]
-    private static partial void eventprop_free_sums_output(IntPtr output);
+    public static partial void eventprop_free_sums_output(SumsOutput output);
 
     [LibraryImport(Lib)]
-    private static partial void eventprop_free_maxima_output(IntPtr output);
+    public static partial void eventprop_free_maxima_output(MaximaOutput output);
 
     [LibraryImport(Lib)]
-    private static partial void eventprop_free_backward_output(IntPtr output);
+    public static partial void eventprop_free_backward_output(BackwardOutput output);
 
-  // ── Managed wrappers (single-sample) ────────────────────────
+    [LibraryImport(Lib)]
+    public static partial EventPropError eventprop_validate_input(EventPropInput input);
 
-    /// <summary>Forward pass — compute post-synaptic spikes.</summary>
-    public static OwnedSpikeOutput ComputeSpikes(
-        ReadOnlySpan<double> w, int nPre, int nPost,
-        ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
-        double vTh, double tauMem, double tauSyn)
-    {
-        fixed (double* pw = w)
-        fixed (double* pt = times)
-        fixed (int* ps = sources)
-        {
-            EventPropInput* input = stackalloc EventPropInput[1];
-            input->W = (IntPtr)pw;
-            input->NPre = nPre;
-            input->NPost = nPost;
-            input->Times = (IntPtr)pt;
-            input->Sources = (IntPtr)ps;
-            input->NSpikes = times.Length;
-            input->TauMem = tauMem;
-            input->TauSyn = tauSyn;
-            input->VTh = vTh;
-
-            return new OwnedSpikeOutput(eventprop_compute_spikes((IntPtr)input));
-        }
-    }
-
-    /// <summary>Compute cumulative exponential-weighted sums.</summary>
-    public static OwnedSumsOutput ComputeSums(
-        ReadOnlySpan<double> w, int nPre, int nPost,
-        ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
-        double tauMem, double tauSyn)
-    {
-        fixed (double* pw = w)
-        fixed (double* pt = times)
-        fixed (int* ps = sources)
-        {
-            EventPropInput* input = stackalloc EventPropInput[1];
-            input->W = (IntPtr)pw;
-            input->NPre = nPre;
-            input->NPost = nPost;
-            input->Times = (IntPtr)pt;
-            input->Sources = (IntPtr)ps;
-            input->NSpikes = times.Length;
-            input->TauMem = tauMem;
-            input->TauSyn = tauSyn;
-            input->VTh = 0;
-
-            return new OwnedSumsOutput(eventprop_compute_sums((IntPtr)input));
-        }
-    }
-
-    /// <summary>Compute membrane potential maxima per neuron.</summary>
-    public static OwnedMaximaOutput ComputeMaxima(
-        ReadOnlySpan<double> w, int nPre, int nPost,
-        ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
-        double tauMem, double tauSyn)
-    {
-        fixed (double* pw = w)
-        fixed (double* pt = times)
-        fixed (int* ps = sources)
-        {
-            EventPropInput* input = stackalloc EventPropInput[1];
-            input->W = (IntPtr)pw;
-            input->NPre = nPre;
-            input->NPost = nPost;
-            input->Times = (IntPtr)pt;
-            input->Sources = (IntPtr)ps;
-            input->NSpikes = times.Length;
-            input->TauMem = tauMem;
-            input->TauSyn = tauSyn;
-            input->VTh = 0;
-
-            return new OwnedMaximaOutput(eventprop_compute_maxima((IntPtr)input));
-        }
-    }
-
-    /// <summary>Backward pass — compute weight gradients from spike errors.</summary>
-    public static OwnedBackwardOutput BackwardSpikes(
-        ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
-        ReadOnlySpan<double> fwdTimes, ReadOnlySpan<int> fwdSources,
-        ReadOnlySpan<double> fwdCurrents,
-        ReadOnlySpan<double> postErrors, int nPostSpikes,
-        ReadOnlySpan<double> w, int nPre, int nPost,
-        double vTh, double tauMem, double tauSyn)
-    {
-        fixed (double* pw = w)
-        fixed (double* pt = times)
-        fixed (int* ps = sources)
-        fixed (double* pft = fwdTimes)
-        fixed (int* pfs = fwdSources)
-        fixed (double* pfc = fwdCurrents)
-        fixed (double* pe = postErrors)
-        {
-            EventPropInput* epInput = stackalloc EventPropInput[1];
-            epInput->W = (IntPtr)pw;
-            epInput->NPre = nPre;
-            epInput->NPost = nPost;
-            epInput->Times = (IntPtr)pt;
-            epInput->Sources = (IntPtr)ps;
-            epInput->NSpikes = times.Length;
-            epInput->TauMem = tauMem;
-            epInput->TauSyn = tauSyn;
-            epInput->VTh = vTh;
-
-            BackwardSpikesInput* input = stackalloc BackwardSpikesInput[1];
-            input->Input = (IntPtr)epInput;
-            input->FwdTimes = (IntPtr)pft;
-            input->FwdSources = (IntPtr)pfs;
-            input->FwdCurrents = (IntPtr)pfc;
-            input->PostErrors = (IntPtr)pe;
-            input->NPostSpikes = nPostSpikes;
-
-            return new OwnedBackwardOutput(
-                eventprop_backward_spikes((IntPtr)input), times.Length);
-        }
-    }
-
-    /// <summary>Backward pass — compute weight gradients from maxima errors.</summary>
-    public static OwnedBackwardOutput BackwardMaxima(
-        ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
-        ReadOnlySpan<double> maximaTimes, ReadOnlySpan<double> maximaValues,
-        ReadOnlySpan<double> maximaErrors, int nMaxima,
-        ReadOnlySpan<double> w, int nPre, int nPost,
-        double tauMem, double tauSyn)
-    {
-        fixed (double* pw = w)
-        fixed (double* pt = times)
-        fixed (int* ps = sources)
-        fixed (double* mt = maximaTimes)
-        fixed (double* mv = maximaValues)
-        fixed (double* me = maximaErrors)
-        {
-            EventPropInput* epInput = stackalloc EventPropInput[1];
-            epInput->W = (IntPtr)pw;
-            epInput->NPre = nPre;
-            epInput->NPost = nPost;
-            epInput->Times = (IntPtr)pt;
-            epInput->Sources = (IntPtr)ps;
-            epInput->NSpikes = times.Length;
-            epInput->TauMem = tauMem;
-            epInput->TauSyn = tauSyn;
-            epInput->VTh = 0;
-
-            BackwardMaximaInput* input = stackalloc BackwardMaximaInput[1];
-            input->Input = (IntPtr)epInput;
-            input->MaximaTimes = (IntPtr)mt;
-            input->MaximaValues = (IntPtr)mv;
-            input->MaximaErrors = (IntPtr)me;
-            input->NMaxima = nMaxima;
-
-            return new OwnedBackwardOutput(
-                eventprop_backward_maxima((IntPtr)input), times.Length);
-        }
-    }
-
-  // ── IDisposable wrappers ────────────────────────────────────
-
-    /// <summary>Owned spike output — Dispose() frees native memory.</summary>
-    public readonly struct OwnedSpikeOutput : IDisposable
-    {
-        private readonly IntPtr _ptr;
-
-        public int NSpikes => Unsafe.Read<int>(_ptr.ToPointer());
-        public Span<double> Times
-        {
-            get
-            {
-                IntPtr ptr = *(IntPtr*)((byte*)_ptr.ToPointer() + 8);
-                return NS<double>(ptr, NSpikes);
-            }
-        }
-        public Span<int> Sources
-        {
-            get
-            {
-                IntPtr ptr = *(IntPtr*)((byte*)_ptr.ToPointer() + 16);
-                return NS<int>(ptr, NSpikes);
-            }
-        }
-        public Span<double> Currents
-        {
-            get
-            {
-                IntPtr ptr = *(IntPtr*)((byte*)_ptr.ToPointer() + 24);
-                return NS<double>(ptr, NSpikes);
-            }
-        }
-
-        internal OwnedSpikeOutput(IntPtr ptr) => _ptr = ptr;
-        public void Dispose() => eventprop_free_spike_output(_ptr);
-    }
-
-    /// <summary>Owned sums output — Dispose() frees native memory.</summary>
-    public readonly struct OwnedSumsOutput : IDisposable
-    {
-        private readonly IntPtr _ptr;
-
-        public int NRows => Unsafe.Read<int>(_ptr.ToPointer());
-        public int NPost => Unsafe.Read<int>((void*)((byte*)_ptr.ToPointer() + 4));
-        public Span<double> Sum0
-        {
-            get
-            {
-                IntPtr ptr = *(IntPtr*)((byte*)_ptr.ToPointer() + 8);
-                return NS<double>(ptr, NRows * NPost);
-            }
-        }
-        public Span<double> Sum1
-        {
-            get
-            {
-                IntPtr ptr = *(IntPtr*)((byte*)_ptr.ToPointer() + 16);
-                return NS<double>(ptr, NRows * NPost);
-            }
-        }
-
-        internal OwnedSumsOutput(IntPtr ptr) => _ptr = ptr;
-        public void Dispose() => eventprop_free_sums_output(_ptr);
-    }
-
-    /// <summary>Owned maxima output — Dispose() frees native memory.</summary>
-    public readonly struct OwnedMaximaOutput : IDisposable
-    {
-        private readonly IntPtr _ptr;
-
-        public int NPost => Unsafe.Read<int>(_ptr.ToPointer());
-        public Span<double> Times
-        {
-            get
-            {
-                IntPtr ptr = *(IntPtr*)((byte*)_ptr.ToPointer() + 8);
-                return NS<double>(ptr, NPost);
-            }
-        }
-        public Span<double> Values
-        {
-            get
-            {
-                IntPtr ptr = *(IntPtr*)((byte*)_ptr.ToPointer() + 16);
-                return NS<double>(ptr, NPost);
-            }
-        }
-
-        internal OwnedMaximaOutput(IntPtr ptr) => _ptr = ptr;
-        public void Dispose() => eventprop_free_maxima_output(_ptr);
-    }
-
-    /// <summary>Owned backward output — Dispose() frees native memory.</summary>
-    public readonly struct OwnedBackwardOutput : IDisposable
-    {
-        private readonly IntPtr _ptr;
-        private readonly int _nSpikes;
-
-        public int NPre => Unsafe.Read<int>(_ptr.ToPointer());
-        public int NPost => Unsafe.Read<int>((void*)((byte*)_ptr.ToPointer() + 4));
-        public Span<double> Gradient
-        {
-            get
-            {
-                IntPtr ptr = *(IntPtr*)((byte*)_ptr.ToPointer() + 8);
-                return NS<double>(ptr, NPre * NPost);
-            }
-        }
-        public Span<double> SpikeErrors
-        {
-            get
-            {
-                IntPtr ptr = *(IntPtr*)((byte*)_ptr.ToPointer() + 16);
-                return NS<double>(ptr, _nSpikes);
-            }
-        }
-
-        internal OwnedBackwardOutput(IntPtr ptr, int nSpikes)
-        {
-            _ptr = ptr;
-            _nSpikes = nSpikes;
-        }
-        public void Dispose() => eventprop_free_backward_output(_ptr);
-    }
-
-  // ── Helpers ─────────────────────────────────────────────────
+    // ── Helpers ───────────────────────────────────────────────────
 
     private static Span<T> NS<T>(IntPtr ptr, int len) where T : unmanaged
     {
-        if (ptr == IntPtr.Zero || len == 0) return Span<T>.Empty;
+        if (ptr == IntPtr.Zero || len <= 0) return Span<T>.Empty;
         return new Span<T>((T*)ptr.ToPointer(), len);
     }
 }

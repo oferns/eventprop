@@ -9,18 +9,16 @@
 #include <stdlib.h>
 #include <math.h>
 
-void eventprop_free_lambda_i_trace_output(LambdaITraceOutput* output)
+void eventprop_free_lambda_i_trace_output(LambdaITraceOutput output)
 {
-    if (!output) return;
-    free(output->lambda_trace);
-    free(output->ts);
+    free(output.lambda_trace);
+    free(output.ts);
 }
 
-void eventprop_free_voltage_trace_output(VoltageTraceOutput* output)
+void eventprop_free_voltage_trace_output(VoltageTraceOutput output)
 {
-    if (!output) return;
-    free(output->v_trace);
-    free(output->ts);
+    free(output.v_trace);
+    free(output.ts);
 }
 
 VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput input)

@@ -25,7 +25,7 @@ typedef struct SpikesBatch {
     SpikeOutput* spikes;               /* Per-sample outputs (malloc'd, length = batch_size) */
 } SpikesBatch;
 
-void eventprop_free_spikes_batch(SpikesBatch* batch);
+void eventprop_free_spikes_batch(SpikesBatch batch);
 
 /**
  * Batch backward output — per-sample results.
@@ -36,7 +36,7 @@ typedef struct BackwardsBatch {
     BackwardOutput* outputs;           /* Per-sample outputs (malloc'd, length = batch_size) */
 } BackwardsBatch;
 
-void eventprop_free_backwards_batch(BackwardsBatch* batch);
+void eventprop_free_backwards_batch(BackwardsBatch batch);
 
 /**
  * Batch maxima output — per-sample membrane potential maxima.
@@ -47,7 +47,7 @@ typedef struct MaximaBatch {
     MaximaOutput* outputs;             /* Per-sample outputs (malloc'd, length = batch_size) */
 } MaximaBatch;
 
-void eventprop_free_maxima_batch(MaximaBatch* batch);
+void eventprop_free_maxima_batch(MaximaBatch batch);
 
 /**
  * Accumulated gradient output with dimensions.
@@ -58,7 +58,7 @@ typedef struct GradientOutput {
     int cols;         /* n_post */
 } GradientOutput;
 
-void eventprop_free_gradient_output(GradientOutput* output);
+void eventprop_free_gradient_output(GradientOutput output);
 
 /**
  * Dropout output — per-sample surviving spikes.
@@ -69,7 +69,7 @@ typedef struct DropoutOutput {
     int* sources;              /* Surviving source neurons (malloc'd) */
 } DropoutOutput;
 
-void eventprop_free_dropout_output(DropoutOutput* output);
+void eventprop_free_dropout_output(DropoutOutput output);
 
 /**
  * Batch dropout result — per-sample outputs.
@@ -80,7 +80,7 @@ typedef struct DropoutBatch {
     DropoutOutput* outputs;    /* Per-sample surviving spikes (malloc'd, length = batch_size) */
 } DropoutBatch;
 
-void eventprop_free_dropout_batch(DropoutBatch* batch);
+void eventprop_free_dropout_batch(DropoutBatch batch);
 
 /**
  * Combined backward + accumulate result.
@@ -92,13 +92,13 @@ void eventprop_free_dropout_batch(DropoutBatch* batch);
  * This is the primary FFI entry point — one call, zero intermediate allocations in Python.
  */
 typedef struct AccumulatedBackwardResult {
-    GradientOutput summed_grads;
-    int has_errors;            /* 1 if any sample returned an error, 0 otherwise — safe to set from parallel loop */
-    BackwardOutput* outputs;   /* Per-sample outputs (.grad freed, .spike_errors kept) */
+    GradientOutput* summed_grads;  /* malloc'd — freed by caller via eventprop_free_accumulated_backward_result */
+    int has_errors;                /* 1 if any sample returned an error, 0 otherwise — safe to set from parallel loop */
+    BackwardOutput* outputs;       /* Per-sample outputs (.grad freed, .spike_errors kept) */
     int batch_size;
 } AccumulatedBackwardResult;
 
-void eventprop_free_accumulated_backward_result(AccumulatedBackwardResult* result);
+void eventprop_free_accumulated_backward_result(AccumulatedBackwardResult result);
 
 /**
  * Flat-array dropout — randomly drop spikes from each sample.
@@ -167,4 +167,4 @@ AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(const Event
 }
 #endif
 
-#endif /* EVENTPROP_BATCH_H */
+#endif

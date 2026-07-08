@@ -3,37 +3,28 @@
 #include <stdint.h>
 #include <limits.h>
 
-void eventprop_free_spikes_batch(SpikesBatch* batch)
+void eventprop_free_spikes_batch(SpikesBatch batch)
 {
-    if (batch == NULL) return;
-    for (int b = 0; b < batch->batch_size; b++) {
-        eventprop_free_spike_output(&batch->spikes[b]);
+    for (int b = 0; b < batch.batch_size; b++) {
+        eventprop_free_spike_output(batch.spikes[b]);
     }
-    free(batch->spikes);
-    batch->spikes = NULL;
-    batch->batch_size = 0;
+    free(batch.spikes);
 }
 
-void eventprop_free_maxima_batch(MaximaBatch* batch)
+void eventprop_free_maxima_batch(MaximaBatch batch)
 {
-    if (batch == NULL) return;
-    for (int b = 0; b < batch->batch_size; b++) {
-        eventprop_free_maxima_output(&batch->outputs[b]);
+    for (int b = 0; b < batch.batch_size; b++) {
+        eventprop_free_maxima_output(batch.outputs[b]);
     }
-    free(batch->outputs);
-    batch->outputs = NULL;
-    batch->batch_size = 0;
+    free(batch.outputs);
 }
 
-void eventprop_free_backwards_batch(BackwardsBatch* batch)
+void eventprop_free_backwards_batch(BackwardsBatch batch)
 {
-    if (batch == NULL) return;
-    for (int b = 0; b < batch->batch_size; b++) {
-        eventprop_free_backward_output(&batch->outputs[b]);
+    for (int b = 0; b < batch.batch_size; b++) {
+        eventprop_free_backward_output(batch.outputs[b]);
     }
-    free(batch->outputs);
-    batch->outputs = NULL;
-    batch->batch_size = 0;
+    free(batch.outputs);
 }
 
 SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, int batch_size)
@@ -196,13 +187,9 @@ BackwardsBatch eventprop_backward_maxima_batch(const EventPropInput* inputs, Max
     return batch;
 }
 
-void eventprop_free_gradient_output(GradientOutput* output)
+void eventprop_free_gradient_output(GradientOutput output)
 {
-    if (output == NULL) return;
-    free(output->data);
-    output->data = NULL;
-    output->rows = 0;
-    output->cols = 0;
+    free(output.data);
 }
 
 GradientOutput eventprop_accumulate_gradients(BackwardsBatch batch, int n_pre, int n_post)
@@ -236,18 +223,17 @@ GradientOutput eventprop_accumulate_gradients(BackwardsBatch batch, int n_pre, i
     return result;
 }
 
-void eventprop_free_accumulated_backward_result(AccumulatedBackwardResult* result)
+void eventprop_free_accumulated_backward_result(AccumulatedBackwardResult result)
 {
-    if (result == NULL) return;
-        
-    eventprop_free_gradient_output(&result->summed_grads);
-
-    for (int b = 0; b < result->batch_size; b++) {
-        eventprop_free_backward_output(&result->outputs[b]);
+    if (result.summed_grads) {
+        eventprop_free_gradient_output(*result.summed_grads);
+        free(result.summed_grads);
     }
-    free(result->outputs);
-    result->outputs = NULL;
-    result->batch_size = 0;
+
+    for (int b = 0; b < result.batch_size; b++) {
+        eventprop_free_backward_output(result.outputs[b]);
+    }
+    free(result.outputs);
 }
 
 AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
@@ -258,7 +244,7 @@ AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
     result.batch_size = 0;
     result.has_errors = 0;
     result.outputs = NULL;
-    result.summed_grads.data = NULL;
+    result.summed_grads = NULL;
 
     if (batch_size <= 0 || inputs == NULL) return result;
 
@@ -291,8 +277,15 @@ AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
         .outputs = outputs
     };
 
+    GradientOutput* grad = (GradientOutput*)malloc(sizeof(GradientOutput));
+    if (!grad) {
+        free(outputs);
+        return result;
+    }
+    *grad = eventprop_accumulate_gradients(batch, inputs[0].n_pre, inputs[0].n_post);
+
     result.batch_size = batch_size;
-    result.summed_grads = eventprop_accumulate_gradients(batch, inputs[0].n_pre, inputs[0].n_post);
+    result.summed_grads = grad;
     result.outputs = outputs;
     return result;
 }
@@ -305,7 +298,7 @@ AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
     result.batch_size = 0;
     result.has_errors = 0;
     result.outputs = NULL;
-    result.summed_grads.data = NULL;
+    result.summed_grads = NULL;
 
     if (batch_size <= 0 || inputs == NULL) return result;
 
@@ -344,9 +337,15 @@ AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
         .outputs = outputs
     };
 
-    result.summed_grads = eventprop_accumulate_gradients(batch, inputs[0].n_pre, inputs[0].n_post);
+    GradientOutput* grad = (GradientOutput*)malloc(sizeof(GradientOutput));
+    if (!grad) {
+        free(outputs);
+        return result;
+    }
+    *grad = eventprop_accumulate_gradients(batch, inputs[0].n_pre, inputs[0].n_post);
 
     result.batch_size = batch_size;
+    result.summed_grads = grad;
     result.outputs = outputs;
     return result;
 }
@@ -361,27 +360,21 @@ static inline double lcg_rand(uint64_t* state)
 /**
  * Free a single dropout output.
  */
-void eventprop_free_dropout_output(DropoutOutput* output)
+void eventprop_free_dropout_output(DropoutOutput output)
 {
-    if (output == NULL) return;
-    free(output->times);
-    free(output->sources);
-    output->times = NULL;
-    output->sources = NULL;
+    free(output.times);
+    free(output.sources);
 }
 
 /**
  * Free a dropout batch result.
  */
-void eventprop_free_dropout_batch(DropoutBatch* batch)
+void eventprop_free_dropout_batch(DropoutBatch batch)
 {
-    if (batch == NULL) return;
-    for (int b = 0; b < batch->batch_size; b++) {
-        eventprop_free_dropout_output(&batch->outputs[b]);
+    for (int b = 0; b < batch.batch_size; b++) {
+        eventprop_free_dropout_output(batch.outputs[b]);
     }
-    free(batch->outputs);
-    batch->outputs = NULL;
-    batch->batch_size = 0;
+    free(batch.outputs);
 }
 
 /**
@@ -417,7 +410,7 @@ DropoutBatch eventprop_dropout_spikes_batch(
     /* Compute sample offsets */
     int* offsets = (int*)malloc((batch_size + 1) * sizeof(int));
     if (!offsets) {
-        eventprop_free_dropout_batch(&result);
+        eventprop_free_dropout_batch(result);
         return result;
     }
     offsets[0] = 0;

@@ -7,26 +7,84 @@ public static unsafe partial class Diag
 {
     private const string Lib = "eventprop_c_api";
 
+    // ── Native structs (match C layout exactly) ───────────────────
+
+    /// <summary>Voltage trace input — plain data, no ownership.</summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct VoltageTraceInput
     {
-        public IntPtr Input;       // const EventPropInput*
+        public IntPtr Input;       // const Api.EventPropInput*
         public int TargetNrnIdx;
         public IntPtr FwdTimes;    // const double*
         public IntPtr FwdSources;  // const int*
         public int NPostSpikes;
         public double TMax;
         public double Dt;
+
+        /// <summary>Build from raw pointers.</summary>
+        public static VoltageTraceInput Create(Api.EventPropInput* input,
+            int targetNrnIdx, double* fwdTimes, int* fwdSources, int nPostSpikes,
+            double tMax, double dt)
+        {
+            return new VoltageTraceInput
+            {
+                Input = (IntPtr)input,
+                TargetNrnIdx = targetNrnIdx,
+                FwdTimes = (IntPtr)fwdTimes,
+                FwdSources = (IntPtr)fwdSources,
+                NPostSpikes = nPostSpikes,
+                TMax = tMax,
+                Dt = dt,
+            };
+        }
+
+        /// <summary>Build from managed arrays (pins via fixed).</summary>
+        public static VoltageTraceInput Create(ReadOnlySpan<double> w, int nPre, int nPost,
+            ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
+            ReadOnlySpan<double> fwdTimes, ReadOnlySpan<int> fwdSources,
+            int targetNrnIdx, double tMax, double dt,
+            double vTh, double tauMem, double tauSyn)
+        {
+            fixed (double* pw = w)
+            fixed (double* pt = times)
+            fixed (int* ps = sources)
+            fixed (double* pft = fwdTimes)
+            fixed (int* pfs = fwdSources)
+            {
+                var epInput = Api.EventPropInput.Create(pw, nPre, nPost, pt, ps, times.Length, vTh, tauMem, tauSyn);
+
+                return new VoltageTraceInput
+                {
+                    Input = (IntPtr)(void*)&epInput,
+                    TargetNrnIdx = targetNrnIdx,
+                    FwdTimes = (IntPtr)pft,
+                    FwdSources = (IntPtr)pfs,
+                    NPostSpikes = fwdTimes.Length,
+                    TMax = tMax,
+                    Dt = dt,
+                };
+            }
+        }
     }
 
+    /// <summary>Owned voltage trace output — freed via Dispose (<c>using</c>). Zero boxing: compiler calls Dispose directly.</summary>
     [StructLayout(LayoutKind.Sequential)]
-    public struct VoltageTraceOutput
+    public readonly ref struct VoltageTraceOutput : IDisposable
     {
-        public int NT;
-        public IntPtr VTrace;      // double* (malloc'd)
-        public IntPtr Ts;          // double* (malloc'd)
+        internal readonly int nT;
+        internal readonly IntPtr vTrace;      // double* (malloc'd)
+        internal readonly IntPtr ts;          // double* (malloc'd)
+        internal readonly Api.EventPropError errorNo;
+
+        public int NT => nT;
+        public IntPtr VTrace => vTrace;
+        public IntPtr Ts => ts;
+        public Api.EventPropError ErrorNo => errorNo;
+
+        public void Dispose() => eventprop_free_voltage_trace_output(this);
     }
 
+    /// <summary>lambda-I trace input — plain data, no ownership.</summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct LambdaITraceInput
     {
@@ -38,133 +96,63 @@ public static unsafe partial class Diag
         public double TauSyn;
         public double TMax;
         public double Dt;
+
+        /// <summary>Build from raw pointers.</summary>
+        public static LambdaITraceInput Create(double* fwdTimes, int nPostSpikes, int targetNrnIdx,
+            double vTh, double tauMem, double tauSyn, double tMax, double dt)
+        {
+            return new LambdaITraceInput
+            {
+                FwdTimes = (IntPtr)fwdTimes,
+                NPostSpikes = nPostSpikes,
+                TargetNrnIdx = targetNrnIdx,
+                VTh = vTh,
+                TauMem = tauMem,
+                TauSyn = tauSyn,
+                TMax = tMax,
+                Dt = dt,
+            };
+        }
+
+        /// <summary>Build from managed arrays (pins via fixed).</summary>
+        public static LambdaITraceInput Create(ReadOnlySpan<double> fwdTimes, int targetNrnIdx,
+            double vTh, double tauMem, double tauSyn, double tMax, double dt)
+        {
+            fixed (double* pft = fwdTimes)
+                return Create(pft, fwdTimes.Length, targetNrnIdx, vTh, tauMem, tauSyn, tMax, dt);
+        }
     }
 
+    /// <summary>Owned lambda-I trace output — freed via Dispose (<c>using</c>). Zero boxing: compiler calls Dispose directly.</summary>
     [StructLayout(LayoutKind.Sequential)]
-    public struct LambdaITraceOutput
+    public readonly ref struct LambdaITraceOutput : IDisposable
     {
-        public int NT;
-        public IntPtr LambdaTrace;// double* (malloc'd)
-        public IntPtr Ts;          // double* (malloc'd)
+        internal readonly int nT;
+        internal readonly IntPtr lambdaTrace;// double* (malloc'd)
+        internal readonly IntPtr ts;          // double* (malloc'd)
+        internal readonly Api.EventPropError errorNo;
+
+        public int NT => nT;
+        public IntPtr LambdaTrace => lambdaTrace;
+        public IntPtr Ts => ts;
+        public Api.EventPropError ErrorNo => errorNo;
+
+        public void Dispose() => eventprop_free_lambda_i_trace_output(this);
     }
+
+    // ── Native function declarations ───────────────────────────────
 
     [LibraryImport(Lib)]
-    private static partial IntPtr eventprop_compute_voltage_trace(IntPtr input);
+    public static partial VoltageTraceOutput eventprop_compute_voltage_trace(VoltageTraceInput input);
 
     [LibraryImport(Lib)]
-    private static partial IntPtr eventprop_compute_lambda_i_trace(IntPtr input);
+    public static partial LambdaITraceOutput eventprop_compute_lambda_i_trace(LambdaITraceInput input);
+
+    // ── Free functions (public for manual lifetime management) ─────
 
     [LibraryImport(Lib)]
-    private static partial void eventprop_free_voltage_trace_output(IntPtr output);
+    public static partial void eventprop_free_voltage_trace_output(VoltageTraceOutput output);
 
     [LibraryImport(Lib)]
-    private static partial void eventprop_free_lambda_i_trace_output(IntPtr output);
-
-    /// <summary>Compute membrane potential trace for a single post-synaptic neuron.</summary>
-    public static OwnedVoltageTraceOutput ComputeVoltageTrace(
-        ReadOnlySpan<double> w, int nPre, int nPost,
-        ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
-        ReadOnlySpan<double> fwdTimes, ReadOnlySpan<int> fwdSources,
-        int targetNrnIdx, double tMax, double dt,
-        double vTh, double tauMem, double tauSyn)
-    {
-        fixed (double* pw = w)
-        fixed (double* pt = times)
-        fixed (int* ps = sources)
-        fixed (double* pft = fwdTimes)
-        fixed (int* pfs = fwdSources)
-        {
-            Api.EventPropInput* epInput = stackalloc Api.EventPropInput[1];
-            epInput->W = (IntPtr)pw;
-            epInput->NPre = nPre;
-            epInput->NPost = nPost;
-            epInput->Times = (IntPtr)pt;
-            epInput->Sources = (IntPtr)ps;
-            epInput->NSpikes = times.Length;
-            epInput->TauMem = tauMem;
-            epInput->TauSyn = tauSyn;
-            epInput->VTh = vTh;
-
-            VoltageTraceInput* input = stackalloc VoltageTraceInput[1];
-            input->Input = (IntPtr)epInput;
-            input->TargetNrnIdx = targetNrnIdx;
-            input->FwdTimes = (IntPtr)pft;
-            input->FwdSources = (IntPtr)pfs;
-            input->NPostSpikes = fwdTimes.Length;
-            input->TMax = tMax;
-            input->Dt = dt;
-
-            return new OwnedVoltageTraceOutput(eventprop_compute_voltage_trace((IntPtr)input));
-        }
-    }
-
-    /// <summary>Compute synaptic adjoint (lambda_i) trace for a single neuron.</summary>
-    public static OwnedLambdaITraceOutput ComputeLambdaITrace(
-        ReadOnlySpan<double> fwdTimes, int targetNrnIdx,
-        double vTh, double tauMem, double tauSyn,
-        double tMax, double dt)
-    {
-        fixed (double* pft = fwdTimes)
-        {
-            LambdaITraceInput* input = stackalloc LambdaITraceInput[1];
-            input->FwdTimes = (IntPtr)pft;
-            input->NPostSpikes = fwdTimes.Length;
-            input->TargetNrnIdx = targetNrnIdx;
-            input->VTh = vTh;
-            input->TauMem = tauMem;
-            input->TauSyn = tauSyn;
-            input->TMax = tMax;
-            input->Dt = dt;
-
-            return new OwnedLambdaITraceOutput(eventprop_compute_lambda_i_trace((IntPtr)input));
-        }
-    }
-
-  // ── IDisposable wrappers ────────────────────────────────────
-
-    public readonly ref struct OwnedVoltageTraceOutput : IDisposable
-    {
-        private readonly IntPtr _ptr;
-
-        public int NT => Read().NT;
-        public Span<double> VTrace
-        {
-            get { var o = Read(); return NS<double>(o.VTrace, o.NT); }
-        }
-        public Span<double> Ts
-        {
-            get { var o = Read(); return NS<double>(o.Ts, o.NT); }
-        }
-
-        internal OwnedVoltageTraceOutput(IntPtr ptr) => _ptr = ptr;
-        public void Dispose() => eventprop_free_voltage_trace_output(_ptr);
-        private VoltageTraceOutput Read() => Marshal.PtrToStructure<VoltageTraceOutput>(_ptr)!;
-    }
-
-    public readonly ref struct OwnedLambdaITraceOutput : IDisposable
-    {
-        private readonly IntPtr _ptr;
-
-        public int NT => Read().NT;
-        public Span<double> LambdaTrace
-        {
-            get { var o = Read(); return NS<double>(o.LambdaTrace, o.NT); }
-        }
-        public Span<double> Ts
-        {
-            get { var o = Read(); return NS<double>(o.Ts, o.NT); }
-        }
-
-        internal OwnedLambdaITraceOutput(IntPtr ptr) => _ptr = ptr;
-        public void Dispose() => eventprop_free_lambda_i_trace_output(_ptr);
-        private LambdaITraceOutput Read() => Marshal.PtrToStructure<LambdaITraceOutput>(_ptr)!;
-    }
-
-  // ── Helpers ─────────────────────────────────────────────────
-
-    private static Span<T> NS<T>(IntPtr ptr, int len) where T : unmanaged
-    {
-        if (ptr == IntPtr.Zero || len == 0) return Span<T>.Empty;
-        return new Span<T>((T*)ptr.ToPointer(), len);
-    }
+    public static partial void eventprop_free_lambda_i_trace_output(LambdaITraceOutput output);
 }

@@ -109,14 +109,56 @@ cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
 ./parity_test /path/to/libeventprop_c_api.dylib
 ```
 
-### Native Benchmarks (C vs C++)
+### Native Benchmarks (C vs C++) — Standard Workflow
+
+**Use the benchmark scripts** (`run_benchmarks.bat` on Windows, `run_benchmarks.sh` on Linux/macOS). These handle building, running both benchmarks, saving JSON to `baselines/`, and invoking Google Benchmark's `compare.py` for human-readable comparison reports.
 
 ```bash
+# Build first (if not already built)
 cd src/EventProp.Native.Benchmarks && rm -rf build && mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
-./bench_c --benchmark_min_time=0.1s
-./bench_cpp --benchmark_min_time=0.1s
+
+# Run full suite and compare (Windows)
+cd src/EventProp.Native.Benchmarks
+cmd /c "run_benchmarks.bat"
+
+# Run full suite and compare (Linux/macOS)
+cd src/EventProp.Native.Benchmarks
+./run_benchmarks.sh
 ```
+
+**Script modes:**
+
+| Command | Action |
+|---------|--------|
+| `run_benchmarks` (no args) | Run C + C++, save JSON, auto-compare latest results |
+| `run_benchmarks c` | Run only C benchmark |
+| `run_benchmarks cpp` | Run only C++ benchmark |
+| `run_benchmarks compare` | Compare last saved results (no re-run) |
+| `run_benchmarks compare A.json B.json` | Compare two specific JSON files |
+
+**Environment variables** (set before calling):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MIN_TIME` | `0.1s` | Minimum benchmark time per test (`--benchmark_min_time`) |
+| `FILTER` | *(none)* | Regex filter for benchmarks (`--benchmark_filter`) |
+
+**Example — quick run of a single benchmark family:**
+```bash
+# Windows
+cmd /c "set MIN_TIME=0.05s & set FILTER=ComputeSpikes/Tiny & run_benchmarks.bat"
+
+# Linux/macOS
+MIN_TIME=0.05s FILTER=ComputeSpikes/Tiny ./run_benchmarks.sh
+```
+
+**Output:**
+- JSON results saved to `src/EventProp.Native.Benchmarks/baselines/bench_c_<id>.json` and `bench_cpp_<id>.json`
+- Comparison report printed to stdout via Google Benchmark's `compare.py`
+- Results are gitignored (`baselines/*.json`) but scripts are tracked
+
+> **Note**: Full suite runs can take several minutes. Use `FILTER` for quick validation of specific benchmark families.
 
 ### Python Benchmarks (pytest-benchmark)
 

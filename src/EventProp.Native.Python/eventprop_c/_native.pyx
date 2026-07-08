@@ -106,25 +106,31 @@ cdef extern from "eventprop.h":
 
     ctypedef struct SumsOutput:
         EventPropError error_no
+        int n_rows
+        int n_post
         double* sum0
         double* sum1
 
     ctypedef struct MaximaOutput:
         EventPropError error_no
+        int n_post
         double* times
         double* values
         double* errors
 
     ctypedef struct BackwardOutput:
         EventPropError error_no
+        int n_pre
+        int n_post
+        int n_spikes
         double* grad
         double* spike_errors
 
-    # Free functions (take pointer to null out fields after free)
-    void eventprop_free_spike_output(SpikeOutput* output)
-    void eventprop_free_sums_output(SumsOutput* output)
-    void eventprop_free_maxima_output(MaximaOutput* output)
-    void eventprop_free_backward_output(BackwardOutput* output)
+    # Free functions (take struct by value — no pointer needed)
+    void eventprop_free_spike_output(SpikeOutput output)
+    void eventprop_free_sums_output(SumsOutput output)
+    void eventprop_free_maxima_output(MaximaOutput output)
+    void eventprop_free_backward_output(BackwardOutput output)
 
     # Core functions (return by value, heap-allocated internals)
     SpikeOutput     eventprop_compute_spikes(const EventPropInput input)
@@ -152,7 +158,7 @@ cdef extern from "eventprop_batch.h":
         int has_errors
         SpikeOutput* spikes
 
-    void eventprop_free_spikes_batch(SpikesBatch* batch)
+    void eventprop_free_spikes_batch(SpikesBatch batch)
 
     # Batch backward output — per-sample results
     ctypedef struct BackwardsBatch:
@@ -160,14 +166,14 @@ cdef extern from "eventprop_batch.h":
         int has_errors
         BackwardOutput* outputs
 
-    void eventprop_free_backwards_batch(BackwardsBatch* batch)
+    void eventprop_free_backwards_batch(BackwardsBatch batch)
 
     ctypedef struct MaximaBatch:
         int batch_size
         int has_errors
         MaximaOutput* outputs
 
-    void eventprop_free_maxima_batch(MaximaBatch* batch)
+    void eventprop_free_maxima_batch(MaximaBatch batch)
 
     # Dropout output — per-sample surviving spikes
     ctypedef struct DropoutOutput:
@@ -175,14 +181,14 @@ cdef extern from "eventprop_batch.h":
         double* times
         int* sources
 
-    void eventprop_free_dropout_output(DropoutOutput* output)
+    void eventprop_free_dropout_output(DropoutOutput output)
 
     ctypedef struct DropoutBatch:
         int batch_size
         int has_errors
         DropoutOutput* outputs
 
-    void eventprop_free_dropout_batch(DropoutBatch* batch)
+    void eventprop_free_dropout_batch(DropoutBatch batch)
 
     DropoutBatch eventprop_dropout_spikes_batch(
         const double* times,
@@ -197,16 +203,16 @@ cdef extern from "eventprop_batch.h":
         int rows
         int cols
 
-    void eventprop_free_gradient_output(GradientOutput* output)
+    void eventprop_free_gradient_output(GradientOutput output)
 
     # Combined backward + accumulate result (primary FFI entry point)
     ctypedef struct AccumulatedBackwardResult:
-        GradientOutput summed_grads   # accumulated gradient with dimensions
+        GradientOutput* summed_grads  # heap-allocated gradient with dimensions
         int has_errors                # 1 if any sample returned an error
         BackwardOutput* outputs       # per-sample (.grad freed, .spike_errors kept)
         int batch_size
 
-    void eventprop_free_accumulated_backward_result(AccumulatedBackwardResult* result)
+    void eventprop_free_accumulated_backward_result(AccumulatedBackwardResult result)
 
     # Batch functions (return by value, heap-allocated internals)
     SpikesBatch  eventprop_compute_spikes_batch(const EventPropInput* inputs, int batch_size)
@@ -254,7 +260,7 @@ cdef extern from "eventprop_diag.h":
         double* ts
         EventPropError error_no
 
-    void eventprop_free_voltage_trace_output(VoltageTraceOutput* output)
+    void eventprop_free_voltage_trace_output(VoltageTraceOutput output)
 
     VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput input)
 
@@ -274,7 +280,7 @@ cdef extern from "eventprop_diag.h":
         double* ts
         EventPropError error_no
 
-    void eventprop_free_lambda_i_trace_output(LambdaITraceOutput* output)
+    void eventprop_free_lambda_i_trace_output(LambdaITraceOutput output)
 
     LambdaITraceOutput eventprop_compute_lambda_i_trace(const LambdaITraceInput input)
 
@@ -398,7 +404,7 @@ cdef class _SpikesBatchOutput:
 
     def __dealloc__(self):
         if self._owned and self._spikes != NULL:
-            eventprop_free_spikes_batch(self._spikes)
+            eventprop_free_spikes_batch(self._spikes[0])
             free(self._spikes)
             self._spikes = NULL
         if self._owned and self._inputs != NULL:
@@ -473,19 +479,19 @@ cdef class _MaximaBatchOutput:
         """
         cdef MaximaOutput* out = &self._maxima.outputs[idx]
         return (
-            _double_view(out.times, self.n_post),
-            _double_view(out.values, self.n_post),
+            _double_view(out.times, out.n_post),
+            _double_view(out.values, out.n_post),
         )
 
     def get_times(self, int idx):
         """Zero-copy view into sample idx's maxima times."""
         cdef MaximaOutput* out = &self._maxima.outputs[idx]
-        return _double_view(out.times, self.n_post)
+        return _double_view(out.times, out.n_post)
 
     def get_values(self, int idx):
         """Zero-copy view into sample idx's maxima values."""
         cdef MaximaOutput* out = &self._maxima.outputs[idx]
-        return _double_view(out.values, self.n_post)
+        return _double_view(out.values, out.n_post)
 
     def get_maxima_errors(self, int idx):
         """Return zero-copy writable view into sample idx's maxima error buffer.
@@ -494,7 +500,7 @@ cdef class _MaximaBatchOutput:
         C reads them directly — no copying needed.
         """
         cdef MaximaOutput* out = &self._maxima.outputs[idx]
-        return _double_view(out.errors, self.n_post)
+        return _double_view(out.errors, out.n_post)
 
     def get_error_no(self, int idx):
         """Return the error code for sample idx (EVENTPROP_OK == 0 on success)."""
@@ -503,7 +509,7 @@ cdef class _MaximaBatchOutput:
 
     def __dealloc__(self):
         if self._owned and self._maxima != NULL:
-            eventprop_free_maxima_batch(self._maxima)
+            eventprop_free_maxima_batch(self._maxima[0])
             free(self._maxima)
             self._maxima = NULL
         if self._owned and self._inputs != NULL:
@@ -541,22 +547,22 @@ cdef class _AccumulatedBackwardResult:
     @property
     def grad(self):
         """Zero-copy flat gradient array. Use .reshape(rows, cols) for weight update."""
-        if self._ptr == NULL:
+        if self._ptr == NULL or self._ptr.summed_grads == NULL:
             raise RuntimeError("AccumulatedBackwardResult has been freed")
-        return _double_view(self._ptr.summed_grads.data,
-                            self._ptr.summed_grads.rows * self._ptr.summed_grads.cols)
+        return _double_view(self._ptr.summed_grads[0].data,
+                            self._ptr.summed_grads[0].rows * self._ptr.summed_grads[0].cols)
 
     @property
     def rows(self):
-        if self._ptr == NULL:
+        if self._ptr == NULL or self._ptr.summed_grads == NULL:
             return 0
-        return self._ptr.summed_grads.rows
+        return self._ptr.summed_grads[0].rows
 
     @property
     def cols(self):
-        if self._ptr == NULL:
+        if self._ptr == NULL or self._ptr.summed_grads == NULL:
             return 0
-        return self._ptr.summed_grads.cols
+        return self._ptr.summed_grads[0].cols
 
     @property
     def batch_size(self):
@@ -584,11 +590,11 @@ cdef class _AccumulatedBackwardResult:
         if out.grad == NULL:
             return None
         return _double_view(out.grad,
-                            self._ptr.summed_grads.rows * self._ptr.summed_grads.cols)
+                            self._ptr.summed_grads[0].rows * self._ptr.summed_grads[0].cols)
 
     def __dealloc__(self):
         if self._owned and self._ptr != NULL:
-            eventprop_free_accumulated_backward_result(self._ptr)
+            eventprop_free_accumulated_backward_result(self._ptr[0])
             free(self._ptr)
             self._ptr = NULL
 
@@ -648,7 +654,7 @@ cdef class _DropoutBatchOutput:
 
     def __dealloc__(self):
         if self._owned and self._ptr != NULL:
-            eventprop_free_dropout_batch(self._ptr)
+            eventprop_free_dropout_batch(self._ptr[0])
             free(self._ptr)
             self._ptr = NULL
 
@@ -743,7 +749,7 @@ def compute_maxima_batch(
     cdef MaximaBatch maxima_result = eventprop_compute_maxima_batch(inputs, spikes_result)
 
     # Free intermediate spikes batch (maxima doesn't need it after computation)
-    eventprop_free_spikes_batch(&spikes_result)
+    eventprop_free_spikes_batch(spikes_result)
 
     # Wrap: transfer input ownership to wrapper, copy maxima onto heap
     cdef _MaximaBatchOutput obj = _MaximaBatchOutput.from_c_result(inputs, maxima_result)

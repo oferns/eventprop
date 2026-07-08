@@ -53,8 +53,8 @@ typedef struct LambdaITraceOutput {
     EventPropError error_no;           /* Error code (EVENTPROP_OK on success) */
 } LambdaITraceOutput;
 
-void eventprop_free_voltage_trace_output(VoltageTraceOutput* output);
-void eventprop_free_lambda_i_trace_output(LambdaITraceOutput* output);
+void eventprop_free_voltage_trace_output(VoltageTraceOutput output);
+void eventprop_free_lambda_i_trace_output(LambdaITraceOutput output);
 
 /**
  * Compute the membrane potential trace for a single post-synaptic neuron.
