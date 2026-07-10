@@ -65,6 +65,19 @@ target_link_libraries(bench_c PRIVATE
     benchmark::benchmark_main
 )
 
+# CPU-specific optimization and aggressive FP math optimizations for bench_c
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(bench_c PRIVATE -march=native)
+    target_compile_options(bench_c PRIVATE -ffp-contract=fast)
+    target_compile_options(bench_c PRIVATE
+        -freciprocal-math
+        -fno-signed-zeros
+        -funroll-loops
+    )
+elseif(CMAKE_C_COMPILER_ID MATCHES "MSVC")
+    target_compile_options(bench_c PRIVATE /O2 /Ob2 /Oi /Ot /fp:fast)
+endif()
+
 # Link OpenMP runtime (needed by the C library)
 if(APPLE AND _BREW_FAIL EQUAL 0)
     target_link_libraries(bench_c PRIVATE ${_OPENMP_PREFIX}/lib/libomp.dylib)
@@ -107,9 +120,24 @@ target_include_directories(bench_cpp PRIVATE
     ${EIGEN_DIR}
     ${BOOST_INCLUDE_DIR})
 
+# CPU-specific optimization and aggressive FP math optimizations for bench_cpp
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(bench_cpp PRIVATE -march=native)
+    target_compile_options(bench_cpp PRIVATE -ffp-contract=fast)
+    target_compile_options(bench_cpp PRIVATE
+        -freciprocal-math
+        -fno-signed-zeros
+        -funroll-loops
+    )
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+    target_compile_options(bench_cpp PRIVATE /O2 /Ob2 /Oi /Ot /fp:fast)
+endif()
+
 # OpenMP headers for the Eigen library (it uses #pragma omp)
 if(APPLE AND _BREW_FAIL EQUAL 0)
     target_include_directories(bench_cpp PRIVATE ${_OPENMP_PREFIX}/include)
+    # AppleClang requires -Xpreprocessor -fopenmp to enable OpenMP pragmas
+    target_compile_options(bench_cpp PRIVATE "-Xpreprocessor" "-fopenmp")
 endif()
 
 target_link_libraries(bench_cpp PRIVATE
@@ -139,9 +167,24 @@ target_include_directories(bench_rootfind PRIVATE
     ${EIGEN_DIR}
     ${BOOST_INCLUDE_DIR})
 
+# CPU-specific optimization and aggressive FP math optimizations for bench_rootfind
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(bench_rootfind PRIVATE -march=native)
+    target_compile_options(bench_rootfind PRIVATE -ffp-contract=fast)
+    target_compile_options(bench_rootfind PRIVATE
+        -freciprocal-math
+        -fno-signed-zeros
+        -funroll-loops
+    )
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+    target_compile_options(bench_rootfind PRIVATE /O2 /Ob2 /Oi /Ot /fp:fast)
+endif()
+
 # OpenMP headers for the Eigen library (it uses #pragma omp)
 if(APPLE AND _BREW_FAIL EQUAL 0)
     target_include_directories(bench_rootfind PRIVATE ${_OPENMP_PREFIX}/include)
+    # AppleClang requires -Xpreprocessor -fopenmp to enable OpenMP pragmas
+    target_compile_options(bench_rootfind PRIVATE "-Xpreprocessor" "-fopenmp")
 endif()
 
 target_link_libraries(bench_rootfind PRIVATE

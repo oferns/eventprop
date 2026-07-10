@@ -38,6 +38,28 @@ endif()
 # ── Eigen core (stripped copy without pybind11) — build as static lib
 add_library(eventprop_eigen_core STATIC eventprop_eigen_core_stripped.cpp)
 set_target_properties(eventprop_eigen_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# CPU-specific optimization and aggressive FP math optimizations
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    # GCC/Clang flags
+    target_compile_options(eventprop_eigen_core PRIVATE -march=native)
+    target_compile_options(eventprop_eigen_core PRIVATE -ffp-contract=fast)
+    # Aggressive FP math optimizations — matches EventProp.Python's C++ flags.
+    # Subset of -ffast-math but without -ffinite-math-only (avoids NaN/infinity UB).
+    target_compile_options(eventprop_eigen_core PRIVATE
+        -freciprocal-math   # x / y → x * (1/y) — many exp-decay divisions benefit
+        -fno-signed-zeros   # treat ±0 as identical, enables more FP simplifications
+        -funroll-loops      # unroll small per-neuron/per-spike loops
+    )
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+    # MSVC equivalent optimizations:
+    # /O2 = Optimize for speed
+    # /Ob2 = Inline functions
+    # /Oi = Enable intrinsic functions
+    # /Ot = Favor fast code
+    # /fp:fast = Fast floating-point math (equivalent to -ffp-contract=fast, -freciprocal-math, -fno-signed-zeros)
+    target_compile_options(eventprop_eigen_core PRIVATE /O2 /Ob2 /Oi /Ot /fp:fast)
+endif()
 target_include_directories(eventprop_eigen_core PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
     ${EIGEN_DIR}
@@ -47,6 +69,8 @@ target_include_directories(eventprop_eigen_core PRIVATE
 # OpenMP for parallelization (no CPU-specific flags — let compiler auto-detect)
 if(APPLE AND _BREW_FAIL EQUAL 0)
     target_include_directories(eventprop_eigen_core PRIVATE ${OpenMP_CXX_INCLUDE_DIRS})
+    # AppleClang requires -Xpreprocessor -fopenmp to enable OpenMP pragmas
+    target_compile_options(eventprop_eigen_core PRIVATE "-Xpreprocessor" "-fopenmp")
     # PUBLIC so consumers (tests, wrapper DLL) get the OpenMP runtime linked
     target_link_libraries(eventprop_eigen_core PUBLIC ${OpenMP_CXX_LIBRARIES})
 elseif(OpenMP_CXX_FOUND)
