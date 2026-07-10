@@ -72,6 +72,9 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(bench_c PRIVATE
         -freciprocal-math
         -fno-signed-zeros
+        -fassociative-math
+        -fno-trapping-math
+        -fno-math-errno
         -funroll-loops
     )
 elseif(CMAKE_C_COMPILER_ID MATCHES "MSVC")
@@ -127,6 +130,9 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(bench_cpp PRIVATE
         -freciprocal-math
         -fno-signed-zeros
+        -fassociative-math
+        -fno-trapping-math
+        -fno-math-errno
         -funroll-loops
     )
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
@@ -174,6 +180,9 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(bench_rootfind PRIVATE
         -freciprocal-math
         -fno-signed-zeros
+        -fassociative-math
+        -fno-trapping-math
+        -fno-math-errno
         -funroll-loops
     )
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")

@@ -58,6 +58,9 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(eventprop_c_api PRIVATE
         -freciprocal-math   # x / y → x * (1/y) — many exp-decay divisions benefit
         -fno-signed-zeros   # treat ±0 as identical, enables more FP simplifications
+        -fassociative-math  # allow reassociation of FP operations (e.g., (a+b)+c → a+(b+c))
+        -fno-trapping-math  # assume FP operations will not generate traps
+        -fno-math-errno     # do not set errno on FP errors
         -funroll-loops      # unroll small per-neuron/per-spike loops
     )
 elseif(CMAKE_C_COMPILER_ID MATCHES "MSVC")
