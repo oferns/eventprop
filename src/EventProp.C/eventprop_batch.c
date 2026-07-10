@@ -27,7 +27,7 @@ void eventprop_free_backwards_batch(BackwardsBatch batch)
     free(batch.outputs);
 }
 
-SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, int batch_size)
+SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, const int batch_size)
 {
     SpikesBatch result;
     result.batch_size = 0;
@@ -143,7 +143,7 @@ MaximaBatch eventprop_compute_maxima_batch(const EventPropInput* inputs, const S
     return batch;
 }
 
-BackwardsBatch eventprop_backward_maxima_batch(const EventPropInput* inputs, MaximaBatch maxima_batch)
+BackwardsBatch eventprop_backward_maxima_batch(const EventPropInput* inputs, const MaximaBatch maxima_batch)
 {
     int batch_size = maxima_batch.batch_size;
     BackwardsBatch batch;
@@ -192,7 +192,7 @@ void eventprop_free_gradient_output(GradientOutput output)
     free(output.data);
 }
 
-GradientOutput eventprop_accumulate_gradients(BackwardsBatch batch, int n_pre, int n_post)
+GradientOutput eventprop_accumulate_gradients(const BackwardsBatch batch, const int n_pre, const int n_post)
 {
     GradientOutput result;
     result.rows = 0;

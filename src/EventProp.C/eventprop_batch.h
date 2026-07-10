@@ -117,7 +117,7 @@ DropoutBatch eventprop_dropout_spikes_batch(
 /**
  * Batch forward pass — compute post-synaptic spikes for each sample.
  */
-SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, int batch_size);
+SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, const int batch_size);
 
 /**
  * Batch backward pass (spike loss) — returns per-sample gradients.
@@ -142,7 +142,7 @@ BackwardsBatch eventprop_backward_maxima_batch(const EventPropInput* inputs, con
  *
  * NOTE: This does NOT free the BackwardsBatch. Call eventprop_free_backwards_batch() separately.
  */
-GradientOutput eventprop_accumulate_gradients(BackwardsBatch batch, int n_pre, int n_post);
+GradientOutput eventprop_accumulate_gradients(BackwardsBatch batch, const int n_pre, const int n_post);
 
 /**
  * Batch backward (spike loss) + accumulate gradients in one call.
