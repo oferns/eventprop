@@ -681,28 +681,33 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
 
     /* Start with 3× estimated spikes to reduce realloc overhead */
     size_t initial_cap = (size_t)(input.n_spikes * 3 + 1);
-    int failed = -1;
+    int failed = 0;
     for (int n = 0; n < input.n_post; n++) {
         ctx.post_times_arr[n]   = calloc(initial_cap, sizeof(double));
         if (!ctx.post_times_arr[n]){
-            failed = n;
+            failed = n + 1;
             break;
         }
         ctx.post_currents_arr[n] = calloc(initial_cap, sizeof(double));
         if (!ctx.post_currents_arr[n]) {
             free(ctx.post_times_arr[n]);
-            failed = n;
+            failed = n + 1;
             break;
         }
         ctx.spike_caps[n]       = initial_cap;
     }
 
-    if (failed >= 0) {
+    // Something failed
+    if (failed > 0) {
+        // It wasnt the first loop so we need to clean up to that.
+        if(failed > 1){            
         /* Free any successfully allocated per-neuron buffers before the failure point */
-        for (int n = 0; n < failed; n++) {
+        /*  The failing allocation cleans its array index so we only need to free up to that index. Hence failed - 1  */
+        for (int n = 0; n < failed - 1; n++) {
             free(ctx.post_times_arr[n]);
             free(ctx.post_currents_arr[n]);
         }
+    }
         result.error_no = EVENTPROP_ALLOC_NEURON_BUF;
         goto cleanup_and_return;
     }
