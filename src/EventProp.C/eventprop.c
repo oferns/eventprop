@@ -629,16 +629,14 @@ static void free_compute_spikes_ctx(ComputeSpikesCtx* ctx) {
 
 SpikeOutput eventprop_compute_spikes(const EventPropInput input)
 {
+    /* Context tracks all heap allocations for unified cleanup */
+    ComputeSpikesCtx ctx = { .n_post = input.n_post };
     SpikeOutput result = (SpikeOutput){ .error_no = eventprop_validate_input(input) };
 
     if (result.error_no != EVENTPROP_OK){
-        return result;
+        goto cleanup_and_return;
     }
-
-    /* Context tracks all heap allocations for unified cleanup */
-    ComputeSpikesCtx ctx = {0};
-    ctx.n_post = input.n_post;
-
+    
     double k_prefactor = input.tau_syn / (input.tau_mem - input.tau_syn);
     double tmax_prefactor = 1.0 / (1.0 / input.tau_mem - 1.0 / input.tau_syn);
     double tmax_summand = log(input.tau_syn / input.tau_mem);
