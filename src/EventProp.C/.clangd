@@ -1,0 +1,6 @@
+# clangd configuration for EventProp.C
+CompileFlags:
+  Add:
+    - Werror=return-type
+    - Werror=implicit-function-declaration
+    - Werror=incompatible-pointer-types
