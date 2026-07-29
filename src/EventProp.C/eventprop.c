@@ -1043,7 +1043,7 @@ SumsOutput eventprop_compute_sums(const EventPropInput input)
     }
 
     if((result.n_rows > 0 && input.n_post > INT_MAX / result.n_rows)) {
-        result.error_no = EVENTPROP_ALLOC_SUM0; /* overflow guard */
+        result.error_no = EVENTPROP_DIMENSION_TOO_LARGE; /* n_rows*n_post overflows int */
         goto cleanup_and_return;
     }
 
@@ -1214,28 +1214,31 @@ BackwardOutput eventprop_backward_maxima(const EventPropInput input,
     BackwardOutput result = (BackwardOutput) { .error_no = eventprop_validate_input(input) };
 
     if (result.error_no != EVENTPROP_OK) {
-        return result;
+        goto cleanup_and_return;
     }
 
     /* Validate maxima pointers */
     if (!maxima_times || !maxima_errors) {
         result.error_no     = EVENTPROP_NULL_POINTER;
-        return result;
+        goto cleanup_and_return;
     }
 
     /* Check for integer overflow in allocation size */
     if (input.n_pre > 0 && input.n_post > INT_MAX / input.n_pre) {
-        result.error_no     = EVENTPROP_ALLOCATION_FAILED;
-        return result;
+        result.error_no     = EVENTPROP_DIMENSION_TOO_LARGE; /* n_pre*n_post overflows int */
+        goto cleanup_and_return;
     }
 
     /* Allocate output */
-    result.grad         = calloc(input.n_pre * input.n_post, sizeof(double));
-    result.spike_errors = calloc(input.n_spikes, sizeof(double));
-
-    if (!result.grad || !result.spike_errors) {
-        result.error_no     = EVENTPROP_ALLOCATION_FAILED;
-        return result;
+    result.grad         = calloc((size_t)(input.n_pre * input.n_post), sizeof(double));
+    if (!result.grad) {
+        result.error_no     = EVENTPROP_ALLOC_BWD_GRAD;
+        goto cleanup_and_return;
+    }
+    result.spike_errors = calloc((size_t)input.n_spikes, sizeof(double));
+    if (!result.spike_errors) {
+        result.error_no     = EVENTPROP_ALLOC_BWD_SPIKE_ERRORS;
+        goto cleanup_and_return;
     }
 
     result.n_pre = input.n_pre;
@@ -1243,7 +1246,7 @@ BackwardOutput eventprop_backward_maxima(const EventPropInput input,
     result.n_spikes = input.n_spikes;
 
     if (input.n_spikes == 0 || input.n_post == 0) {
-        return result;
+        goto cleanup_and_return;
     }
 
     double largest_time = input.times[input.n_spikes - 1];
@@ -1280,9 +1283,10 @@ BackwardOutput eventprop_backward_maxima(const EventPropInput input,
         }
     }
 
-    result.n_pre = input.n_pre;
-    result.n_post = input.n_post;
-    result.n_spikes = input.n_spikes;
+cleanup_and_return:
+    if (result.error_no != EVENTPROP_OK) {
+        eventprop_free_backward_output(result);
+    }
     return result;
 }
 
