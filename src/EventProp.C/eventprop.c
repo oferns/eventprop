@@ -1105,25 +1105,27 @@ cleanup_and_return:
 MaximaOutput eventprop_compute_maxima(const EventPropInput input)
 {
     MaximaOutput result = (MaximaOutput){ .error_no = eventprop_validate_input(input) } ;
+
     if (result.error_no != EVENTPROP_OK) {
-        return result;
+        goto cleanup_and_return;
     }
 
     size_t sz = (size_t)input.n_post;
     /* Allocate output - always exactly n_post elements */
     result.times   = calloc(sz, sizeof(double));
+    if (!result.times) {
+        result.error_no = EVENTPROP_ALLOC_MAXIMA_TIMES;
+        goto cleanup_and_return;
+    }
     result.values  = calloc(sz, sizeof(double));
+    if (!result.values) {
+        result.error_no = EVENTPROP_ALLOC_MAXIMA_VALUES;
+        goto cleanup_and_return;
+    }
     result.errors  = calloc(sz, sizeof(double));
-
-    if (!result.times || !result.values || !result.errors) {
-        free(result.times);
-        free(result.values);
-        free(result.errors);
-        result.times   = NULL;
-        result.values  = NULL;
-        result.errors  = NULL;
-        result.error_no = EVENTPROP_ALLOCATION_FAILED;
-        return result;
+    if (!result.errors) {
+        result.error_no = EVENTPROP_ALLOC_MAXIMA_ERRORS;
+        goto cleanup_and_return;
     }
 
     result.n_post = input.n_post;
@@ -1134,29 +1136,11 @@ MaximaOutput eventprop_compute_maxima(const EventPropInput input)
         result.values[i]  = 0.0;
     }
 
-    /* Use our own alloc function */
+    /* Compute sums */
     SumsOutput sums = eventprop_compute_sums(input);
-
     if (sums.error_no != EVENTPROP_OK) {
-        free(result.times);
-        free(result.values);
-        free(result.errors);
-        result.times   = NULL;
-        result.values  = NULL;
-        result.errors  = NULL;
         result.error_no = sums.error_no;   /* propagate from compute_sums */
-        return result;
-    }
-
-    if (!sums.sum0 || !sums.sum1) {
-        free(result.times);
-        free(result.values);
-        free(result.errors);
-        result.times   = NULL;
-        result.values  = NULL;
-        result.errors  = NULL;
-        result.error_no = EVENTPROP_ALLOCATION_FAILED;
-        return result;
+        goto cleanup_and_return;
     }
 
     int n_rows = input.n_spikes + 1;
@@ -1168,11 +1152,10 @@ MaximaOutput eventprop_compute_maxima(const EventPropInput input)
     double tmax_pref = 1.0 / (1.0/input.tau_mem - 1.0/input.tau_syn);
     double tmax_sum = log(input.tau_syn / input.tau_mem);
 
-    /* No spikes → nothing to compute, return NaN/-INF (matches Eigen) */
+    /* No spikes → nothing to compute, return NaN/0 (matches Eigen) */
     if (input.n_spikes == 0) {
-        result.n_post = input.n_post;
         eventprop_free_sums_output(sums);
-        return result;
+        goto cleanup_and_return;
     }
 
     MatrixView s0 = mv(sum0, n_rows, input.n_post);
@@ -1217,7 +1200,10 @@ MaximaOutput eventprop_compute_maxima(const EventPropInput input)
     }
 
     eventprop_free_sums_output(sums);
-    result.n_post = input.n_post;
+cleanup_and_return:
+    if (result.error_no != EVENTPROP_OK) {
+        eventprop_free_maxima_output(result);
+    }
     return result;
 }
 

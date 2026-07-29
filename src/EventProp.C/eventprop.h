@@ -46,7 +46,10 @@ typedef enum EventPropError {
     EVENTPROP_ALLOC_RESULT_SOURCES    = 28,  /* result.sources */
     EVENTPROP_ALLOC_RESULT_CURRENTS   = 29,  /* result.currents */
     EVENTPROP_ALLOC_RESULT_ERRORS     = 30,  /* result.errors */
-    EVENTPROP_BATCH_EMPTY             = 31   /* batch input was null*/
+    EVENTPROP_ALLOC_MAXIMA_TIMES      = 31,  /* maxima result.times */
+    EVENTPROP_ALLOC_MAXIMA_VALUES     = 32,  /* maxima result.values */
+    EVENTPROP_ALLOC_MAXIMA_ERRORS     = 33,  /* maxima result.errors */
+    EVENTPROP_BATCH_EMPTY             = 34   /* batch input was null*/
 } EventPropError;
 
 /** ── Validation limits ──────────────────────────────────────────────── */
