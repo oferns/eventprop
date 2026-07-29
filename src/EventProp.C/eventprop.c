@@ -46,6 +46,13 @@
 #define TOMS748_MAX_ITER 1024
 #define TOMS748_TOL 1e-14
 
+/* Evaluate v(t) - v_th for root-finding */
+#define VOLTAGE(c, t) \
+    (compute_v_factored(t, (c)->i, (c)->spike_count, (c)->post_spike_times, (c)->neuron_offset, \
+                 (c)->sum0, (c)->sum1, (c)->target_nrn, (c)->n_post, \
+                 (c)->k_prefactor, (c)->tau_mem_inv, (c)->tau_syn_inv, (c)->v_th, \
+                 (c)->post_spike_exp_st) - (c)->v_th)
+
 
 /* ── Input validation ──────────────────────────────────────── */
 
@@ -531,13 +538,6 @@ static int cmp_spike_asc(const void* a, const void* b) {
     const double tb = ((const SpikeEntry*)b)->time;
     return (ta > tb) - (ta < tb);
 }
-
-/* Inline voltage computation — eliminates callback indirection */
-#define VOLTAGE(c, t) \
-    (compute_v_factored(t, (c)->i, (c)->spike_count, (c)->post_spike_times, (c)->neuron_offset, \
-                 (c)->sum0, (c)->sum1, (c)->target_nrn, (c)->n_post, \
-                 (c)->k_prefactor, (c)->tau_mem_inv, (c)->tau_syn_inv, (c)->v_th, \
-                 (c)->post_spike_exp_st) - (c)->v_th)
 
 static double toms748_solve(const RootContext* ctx, double a, double b) {
 
