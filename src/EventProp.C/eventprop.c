@@ -1105,6 +1105,7 @@ cleanup_and_return:
 MaximaOutput eventprop_compute_maxima(const EventPropInput input)
 {
     MaximaOutput result = (MaximaOutput){ .error_no = eventprop_validate_input(input) } ;
+    SumsOutput sums     = {0};
 
     if (result.error_no != EVENTPROP_OK) {
         goto cleanup_and_return;
@@ -1137,7 +1138,7 @@ MaximaOutput eventprop_compute_maxima(const EventPropInput input)
     }
 
     /* Compute sums */
-    SumsOutput sums = eventprop_compute_sums(input);
+    sums = eventprop_compute_sums(input);
     if (sums.error_no != EVENTPROP_OK) {
         result.error_no = sums.error_no;   /* propagate from compute_sums */
         goto cleanup_and_return;
@@ -1154,7 +1155,6 @@ MaximaOutput eventprop_compute_maxima(const EventPropInput input)
 
     /* No spikes → nothing to compute, return NaN/0 (matches Eigen) */
     if (input.n_spikes == 0) {
-        eventprop_free_sums_output(sums);
         goto cleanup_and_return;
     }
 
@@ -1199,8 +1199,8 @@ MaximaOutput eventprop_compute_maxima(const EventPropInput input)
         }
     }
 
-    eventprop_free_sums_output(sums);
 cleanup_and_return:
+    eventprop_free_sums_output(sums);
     if (result.error_no != EVENTPROP_OK) {
         eventprop_free_maxima_output(result);
     }
