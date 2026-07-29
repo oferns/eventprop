@@ -600,15 +600,45 @@ static double toms748_solve(const RootContext* ctx, double a, double b) {
     return b;
 }
 
+// ── Internal context for compute_spikes memory management ─────────────────────
+typedef struct {
+    int n_post;  // needed for per-neuron cleanup loop
+
+    SumsOutput sums;              // eventprop_free_sums_output
+    double** post_times_arr;      // array + each [n]
+    double** post_currents_arr;   // array + each [n]
+    int* spike_caps;
+    int* spike_counts;
+    SpikeEntry* entries;          // sorted collection buffer
+} ComputeSpikesCtx;
+
+static void free_compute_spikes_ctx(ComputeSpikesCtx* ctx) {
+    eventprop_free_sums_output(ctx->sums);
+    if (ctx->post_times_arr) {
+        for (int n = 0; n < ctx->n_post; n++) {
+            free(ctx->post_times_arr[n]);
+            free(ctx->post_currents_arr[n]);
+        }
+        free(ctx->post_times_arr);
+        free(ctx->post_currents_arr);
+    }
+    free(ctx->spike_caps);
+    free(ctx->spike_counts);
+    free(ctx->entries);
+}
+
 SpikeOutput eventprop_compute_spikes(const EventPropInput input)
 {
     SpikeOutput result = (SpikeOutput){ .error_no = eventprop_validate_input(input) };
-    
+
     if (result.error_no != EVENTPROP_OK){
         return result;
     }
 
-    /* Use dynamic arrays internally, then copy to exact-size output */
+    /* Context tracks all heap allocations for unified cleanup */
+    ComputeSpikesCtx ctx = {0};
+    ctx.n_post = input.n_post;
+
     double k_prefactor = input.tau_syn / (input.tau_mem - input.tau_syn);
     double tmax_prefactor = 1.0 / (1.0 / input.tau_mem - 1.0 / input.tau_syn);
     double tmax_summand = log(input.tau_syn / input.tau_mem);
@@ -616,85 +646,67 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
     double tau_syn_inv = 1.0 / input.tau_syn;
 
     /* Compute sums */
-    SumsOutput sums = eventprop_compute_sums(input);
-
-    if (sums.error_no != EVENTPROP_OK) {
-        result.error_no = sums.error_no;   /* propagate from compute_sums */
-        eventprop_free_sums_output(sums);
-        return result;
+    ctx.sums = eventprop_compute_sums(input);
+    if (ctx.sums.error_no != EVENTPROP_OK) {
+        result.error_no = EVENTPROP_ALLOC_SUMS;   /* propagate from compute_sums */
+        goto cleanup_and_return;
     }
 
-    const double* sum0 = sums.sum0;
-    const double* sum1 = sums.sum1;
+    const double* sum0 = ctx.sums.sum0;
+    const double* sum1 = ctx.sums.sum1;
     const size_t sz = (size_t)input.n_post;
+
     /* Per-neuron dynamic buffers - growable to handle burst patterns */
-    double** post_times_arr =  malloc(sz * sizeof(double*));
-
-    if (!post_times_arr) {
-        eventprop_free_sums_output(sums);
-        result.error_no = EVENTPROP_ALLOCATION_FAILED;
-        return result;   
+    ctx.post_times_arr = malloc(sz * sizeof(double*));
+    if (!ctx.post_times_arr) {
+        result.error_no = EVENTPROP_ALLOC_TIMES_ARR;
+        goto cleanup_and_return;
     }
 
-    double** post_currents_arr = malloc (sz * sizeof(double*));
-    
-    if (!post_currents_arr) { 
-        eventprop_free_sums_output(sums);
-        free(post_times_arr); 
-        result.error_no = EVENTPROP_ALLOCATION_FAILED;
-        return result;   
+    ctx.post_currents_arr = malloc(sz * sizeof(double*));
+    if (!ctx.post_currents_arr) {
+        result.error_no = EVENTPROP_ALLOC_CURRENTS_ARR;
+        goto cleanup_and_return;
     }
 
-    int* spike_caps  = calloc(sz, sizeof(int));
-    if (!spike_caps) { 
-        eventprop_free_sums_output(sums);
-        free(post_times_arr); 
-        free(post_currents_arr); 
-        result.error_no = EVENTPROP_ALLOCATION_FAILED;
-        return result;   
+    ctx.spike_caps = calloc(sz, sizeof(int));
+    if (!ctx.spike_caps) {
+        result.error_no = EVENTPROP_ALLOC_SPIKE_CAPS;
+        goto cleanup_and_return;
     }
-    
-    int* spike_counts = calloc(sz, sizeof(int));
-    if (!spike_counts) { 
-        eventprop_free_sums_output(sums);
-        free(post_times_arr); 
-        free(post_currents_arr); 
-        free(spike_caps); 
-        result.error_no = EVENTPROP_ALLOCATION_FAILED;
-        return result;
+
+    ctx.spike_counts = calloc(sz, sizeof(int));
+    if (!ctx.spike_counts) {
+        result.error_no = EVENTPROP_ALLOC_SPIKE_COUNTS;
+        goto cleanup_and_return;
     }
 
     /* Start with 3× estimated spikes to reduce realloc overhead */
     size_t initial_cap = (size_t)(input.n_spikes * 3 + 1);
-    int failed = 0;
+    int failed = -1;
     for (int n = 0; n < input.n_post; n++) {
-        post_times_arr[n]   = calloc(initial_cap, sizeof(double));
-        if (!post_times_arr[n]){
-            failed = n;
-            break;
-        } 
-        post_currents_arr[n] = calloc(initial_cap, sizeof(double));
-        if (!post_currents_arr[n]) { 
-            free(post_times_arr[n]);
+        ctx.post_times_arr[n]   = calloc(initial_cap, sizeof(double));
+        if (!ctx.post_times_arr[n]){
             failed = n;
             break;
         }
-        spike_caps[n]       = initial_cap;
+        ctx.post_currents_arr[n] = calloc(initial_cap, sizeof(double));
+        if (!ctx.post_currents_arr[n]) {
+            free(ctx.post_times_arr[n]);
+            failed = n;
+            break;
+        }
+        ctx.spike_caps[n]       = initial_cap;
     }
 
-    if(failed > 0){
-        if(failed > 1){
-            for(int n = 0; n < failed -1; n++){
-                free(post_times_arr[n]);
-                free(post_currents_arr[n]);
-            }
+    if (failed >= 0) {
+        /* Free any successfully allocated per-neuron buffers before the failure point */
+        for (int n = 0; n < failed; n++) {
+            free(ctx.post_times_arr[n]);
+            free(ctx.post_currents_arr[n]);
         }
-        eventprop_free_sums_output(sums);
-        free(post_times_arr); 
-        free(post_currents_arr); 
-        free(spike_caps); 
-        result.error_no = EVENTPROP_ALLOCATION_FAILED;
-        return result;
+        result.error_no = EVENTPROP_ALLOC_NEURON_BUF;
+        goto cleanup_and_return;
     }
 
     /* Shared error flag for OpenMP region: threads bail out gracefully on OOM */
@@ -707,9 +719,9 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
 #endif
     for (target_nrn = 0; target_nrn < input.n_post; target_nrn++) {
 
-        double* p_times   = post_times_arr[target_nrn];
-        double* p_currents = post_currents_arr[target_nrn];
-        int cap = spike_caps[target_nrn];
+        double* p_times   = ctx.post_times_arr[target_nrn];
+        double* p_currents = ctx.post_currents_arr[target_nrn];
+        int cap = ctx.spike_caps[target_nrn];
         int count = 0;
         int finished = 0, processed = 0;
 
@@ -932,168 +944,89 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
         }
 
         /* Write back updated pointers */
-        post_times_arr[target_nrn]   = p_times;
-        post_currents_arr[target_nrn] = p_currents;
-        spike_caps[target_nrn]       = cap;
-        spike_counts[target_nrn]     = count;
+        ctx.post_times_arr[target_nrn]   = p_times;
+        ctx.post_currents_arr[target_nrn] = p_currents;
+        ctx.spike_caps[target_nrn]       = cap;
+        ctx.spike_counts[target_nrn]     = count;
     }
-
-    // No longer needed
-    eventprop_free_sums_output(sums);
-    
-    /* Count total spikes and allocate exact-size output */
-    result.n_spikes = 0;
-    for (int n = 0; n < input.n_post; n++)
-        result.n_spikes += spike_counts[n];
 
 #ifdef _OPENMP
     if (fwd_alloc_error) {
-        free(post_times_arr);
-        free(post_currents_arr);
-        free(spike_caps);
-        free(spike_counts);
         result.n_spikes = 0;
-        result.error_no = EVENTPROP_ALLOCATION_FAILED;
-        return result;
+        result.error_no = EVENTPROP_ALLOC_NEURON_BUF;
+        goto cleanup_and_return;
     }
 #endif
+
+    /* Count total spikes and allocate exact-size output */
+    result.n_spikes = 0;
+    for (int n = 0; n < input.n_post; n++)
+        result.n_spikes += ctx.spike_counts[n];
+
     // No error, just no spikes to process
     if (result.n_spikes == 0) {
-        for (int n = 0; n < input.n_post; n++) {
-            free(post_times_arr[n]);
-            free(post_currents_arr[n]);
-        }
-        free(post_times_arr);
-        free(post_currents_arr);
-        free(spike_caps);
-        free(spike_counts);
-        return result;
+        goto cleanup_and_return;
     }
 
     /* Collect all spikes into sortable array */
-    SpikeEntry* entries = malloc(result.n_spikes * sizeof(SpikeEntry));
-    if (!entries) {    
-        for (int n = 0; n < input.n_post; n++) {
-            free(post_times_arr[n]);
-            free(post_currents_arr[n]);
-        }
-        free(post_times_arr);
-        free(post_currents_arr);
-        free(spike_caps);
-        free(spike_counts);
-        result.error_no = EVENTPROP_ALLOCATION_FAILED;
-        return result;
+    ctx.entries = malloc(result.n_spikes * sizeof(SpikeEntry));
+    if (!ctx.entries) {
+        result.error_no = EVENTPROP_ALLOC_ENTRIES;
+        goto cleanup_and_return;
     }
 
     int idx = 0;
     for (int n = 0; n < input.n_post; n++) {
-        int cnt = spike_counts[n];
-        double* pt   = post_times_arr[n];
-        double* pc   = post_currents_arr[n];
+        int cnt = ctx.spike_counts[n];
+        double* pt   = ctx.post_times_arr[n];
+        double* pc   = ctx.post_currents_arr[n];
         for (int k = 0; k < cnt; k++) {
-            entries[idx].time    = pt[k];
-            entries[idx].source  = n;
-            entries[idx].current = pc[k];
+            ctx.entries[idx].time    = pt[k];
+            ctx.entries[idx].source  = n;
+            ctx.entries[idx].current = pc[k];
             idx++;
         }
     }
 
     /* Sort by time ascending */
-    qsort(entries, result.n_spikes, sizeof(SpikeEntry), cmp_spike_asc);
+    qsort(ctx.entries, result.n_spikes, sizeof(SpikeEntry), cmp_spike_asc);
 
     /* Allocate and copy to output */
     result.times = malloc(result.n_spikes * sizeof(double));
     if (!result.times) {
-        
-        for (int n = 0; n < input.n_post; n++) {
-            free(post_times_arr[n]);
-            free(post_currents_arr[n]);
-        }
-        free(post_times_arr);
-        free(post_currents_arr);
-        free(spike_caps);
-        free(spike_counts);
-        free(entries);
-
-        eventprop_free_spike_output(result);
-        
-        result.error_no =  EVENTPROP_ALLOCATION_FAILED;
-        return result;    }
+        result.error_no = EVENTPROP_ALLOC_RESULT_TIMES;
+        goto cleanup_and_return;
+    }
 
     result.sources = malloc(result.n_spikes * sizeof(int));
-    if (!result.sources) { 
- 
-        for (int n = 0; n < input.n_post; n++) {
-            free(post_times_arr[n]);
-            free(post_currents_arr[n]);
-        }
-        free(post_times_arr);
-        free(post_currents_arr);
-        free(spike_caps);
-        free(spike_counts);
-        free(entries);
- 
-        eventprop_free_spike_output(result);
- 
-        result.error_no =  EVENTPROP_ALLOCATION_FAILED;
-        return result;
+    if (!result.sources) {
+        result.error_no = EVENTPROP_ALLOC_RESULT_SOURCES;
+        goto cleanup_and_return;
     }
-    
+
     result.currents = malloc(result.n_spikes * sizeof(double));
-    
-    if (!result.currents) { 
-        for (int n = 0; n < input.n_post; n++) {
-            free(post_times_arr[n]);
-            free(post_currents_arr[n]);
-        }
-        free(post_times_arr);
-        free(post_currents_arr);
-        free(spike_caps);
-        free(spike_counts);
-        free(entries);
+    if (!result.currents) {
+        result.error_no = EVENTPROP_ALLOC_RESULT_CURRENTS;
+        goto cleanup_and_return;
+    }
 
-
-        eventprop_free_spike_output(result);
-        result.error_no =  EVENTPROP_ALLOCATION_FAILED;
-        return result;
-     }
-    
     result.errors = calloc(result.n_spikes, sizeof(double));
-    if (!result.errors) { 
-
-        for (int n = 0; n < input.n_post; n++) {
-            free(post_times_arr[n]);
-            free(post_currents_arr[n]);
-        }
-        free(post_times_arr);
-        free(post_currents_arr);
-        free(spike_caps);
-        free(spike_counts);
-        free(entries);
-
-        eventprop_free_spike_output(result);
-        result.error_no =  EVENTPROP_ALLOCATION_FAILED;
-        return result;
+    if (!result.errors) {
+        result.error_no = EVENTPROP_ALLOC_RESULT_ERRORS;
+        goto cleanup_and_return;
     }
 
     for (int i = 0; i < result.n_spikes; i++) {
-        result.times[i]     = entries[i].time;
-        result.sources[i]   = entries[i].source;
-        result.currents[i]  = entries[i].current;
+        result.times[i]     = ctx.entries[i].time;
+        result.sources[i]   = ctx.entries[i].source;
+        result.currents[i]  = ctx.entries[i].current;
     }
 
-    /* Cleanup */
-    for (int n = 0; n < input.n_post; n++) {
-        free(post_times_arr[n]);
-        free(post_currents_arr[n]);
+cleanup_and_return:
+    if (result.error_no != EVENTPROP_OK) {
+        eventprop_free_spike_output(result);  // free partial output fields
     }
-    
-    free(post_times_arr);
-    free(post_currents_arr);
-    free(spike_caps); 
-    free(spike_counts);
-    free(entries);
-
+    free_compute_spikes_ctx(&ctx);
     return result;
 }
 
