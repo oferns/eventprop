@@ -31,6 +31,8 @@ typedef enum EventPropError {
     EVENTPROP_DIMENSION_TOO_LARGE     = 13,  /* n_pre or n_post > MAX_DIM */
     EVENTPROP_TIMES_TAU_MISMATCH      = 14,  /* max(times)/min(tau) >= EXP_OVERFLOW_THRESHOLD */
     EVENTPROP_TAU_TOO_CLOSE           = 15,  /* |tau_mem - tau_syn| / min(tau) < TAU_REL_DIFF_MIN */
+    EVENTPROP_BATCHSIZE_ZERO_OR_NEG   = 16,  /* Bad batch size*/
+    EVENTPROP_BATCH_EMPTY             = 17   /* batch input was null*/
 } EventPropError;
 
 /** ── Validation limits ──────────────────────────────────────────────── */
@@ -110,37 +112,37 @@ void eventprop_free_backward_output(BackwardOutput output);
  * Forward pass
  * Returns a SpikeOutput struct — caller must free via eventprop_free_spike_output().
  */
-SpikeOutput eventprop_compute_spikes(const EventPropInput input);
+SpikeOutput eventprop_compute_spikes(EventPropInput input);
 
 /**
  * Compute cumulative sums
  * Returns a SumsOutput struct — caller must free via eventprop_free_sums_output().
  */
-SumsOutput eventprop_compute_sums(const EventPropInput input);
+SumsOutput eventprop_compute_sums(EventPropInput input);
 
 /**
  * Compute membrane potential maxima
  * Returns a MaximaOutput struct — caller must free via eventprop_free_maxima_output().
  */
-MaximaOutput eventprop_compute_maxima(const EventPropInput input);
+MaximaOutput eventprop_compute_maxima(EventPropInput input);
 
 /**
  * Backward pass (spikes).
  * Returns a BackwardOutput struct — caller must free via eventprop_free_backward_output().
  */
-BackwardOutput eventprop_backward_spikes(const EventPropInput input, const SpikeOutput spike);
+BackwardOutput eventprop_backward_spikes(EventPropInput input, SpikeOutput spike);
 
 /**
  * Backward pass (maxima loss).
  * `maxima_times` and `maxima_errors` are borrowed arrays of length n_post.
  * Returns a BackwardOutput struct — caller must free via eventprop_free_backward_output().
  */
-BackwardOutput eventprop_backward_maxima(const EventPropInput input,
+BackwardOutput eventprop_backward_maxima(EventPropInput input,
                                          const double* maxima_times,
                                          const double* maxima_errors);
 
 /** Validate an EventPropInput and return the first error found (or OK). */
-EventPropError eventprop_validate_input(const EventPropInput input);
+EventPropError eventprop_validate_input(EventPropInput input);
 
 #ifdef __cplusplus
 }

@@ -20,6 +20,7 @@ extern "C" {
  * Batch forward output — per-sample spike results.
  */
 typedef struct SpikesBatch {
+    EventPropError error_no;           /* Batch Errors */
     int batch_size;                    /* Number of samples in the batch */
     int has_errors;                    /* 1 if any sample returned an error, 0 otherwise — safe to set from parallel loop */
     SpikeOutput* spikes;               /* Per-sample outputs (malloc'd, length = batch_size) */
@@ -31,6 +32,7 @@ void eventprop_free_spikes_batch(SpikesBatch batch);
  * Batch backward output — per-sample results.
  */
 typedef struct BackwardsBatch {
+    EventPropError error_no;           /* Batch Errors */
     int batch_size;                    /* Number of samples in the batch */
     int has_errors;                    /* 1 if any sample returned an error, 0 otherwise — safe to set from parallel loop */
     BackwardOutput* outputs;           /* Per-sample outputs (malloc'd, length = batch_size) */
@@ -42,6 +44,7 @@ void eventprop_free_backwards_batch(BackwardsBatch batch);
  * Batch maxima output — per-sample membrane potential maxima.
  */
 typedef struct MaximaBatch {
+    EventPropError error_no;           /* Batch Errors */    
     int batch_size;                    /* Number of samples in the batch */
     int has_errors;                    /* 1 if any sample returned an error, 0 otherwise — safe to set from parallel loop */
     MaximaOutput* outputs;             /* Per-sample outputs (malloc'd, length = batch_size) */
@@ -53,6 +56,7 @@ void eventprop_free_maxima_batch(MaximaBatch batch);
  * Accumulated gradient output with dimensions.
  */
 typedef struct GradientOutput {
+    EventPropError error_no;           /* Batch Errors */    
     double* data;     /* malloc'd, size = rows * cols (row-major) */
     int rows;         /* n_pre */
     int cols;         /* n_post */
@@ -92,6 +96,7 @@ void eventprop_free_dropout_batch(DropoutBatch batch);
  * This is the primary FFI entry point — one call, zero intermediate allocations in Python.
  */
 typedef struct AccumulatedBackwardResult {
+    EventPropError error_no;           /* Batch Errors */   
     GradientOutput* summed_grads;  /* malloc'd — freed by caller via eventprop_free_accumulated_backward_result */
     int has_errors;                /* 1 if any sample returned an error, 0 otherwise — safe to set from parallel loop */
     BackwardOutput* outputs;       /* Per-sample outputs (.grad freed, .spike_errors kept) */
@@ -117,24 +122,24 @@ DropoutBatch eventprop_dropout_spikes_batch(
 /**
  * Batch forward pass — compute post-synaptic spikes for each sample.
  */
-SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, const int batch_size);
+SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, int batch_size);
 
 /**
  * Batch backward pass (spike loss) — returns per-sample gradients.
  */
-BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs, const SpikesBatch spikes_batch);
+BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs, SpikesBatch spikes_batch);
 
 /**
  * Batch forward pass — compute membrane potential maxima for each sample.
  */
-MaximaBatch eventprop_compute_maxima_batch(const EventPropInput* inputs, const SpikesBatch spikes_batch);
+MaximaBatch eventprop_compute_maxima_batch(const EventPropInput* inputs, SpikesBatch spikes_batch);
 
 /**
  * Batch backward pass (maxima loss) — returns per-sample gradients.
  *
  * Uses `MaximaOutput.errors` written by caller before this call.
  */
-BackwardsBatch eventprop_backward_maxima_batch(const EventPropInput* inputs, const MaximaBatch maxima_batch);
+BackwardsBatch eventprop_backward_maxima_batch(const EventPropInput* inputs, MaximaBatch maxima_batch);
 
 /**
  * Sum per-sample gradients into a single tensor.
@@ -142,7 +147,7 @@ BackwardsBatch eventprop_backward_maxima_batch(const EventPropInput* inputs, con
  *
  * NOTE: This does NOT free the BackwardsBatch. Call eventprop_free_backwards_batch() separately.
  */
-GradientOutput eventprop_accumulate_gradients(BackwardsBatch batch, const int n_pre, const int n_post);
+GradientOutput eventprop_accumulate_gradients(BackwardsBatch batch, int n_pre, int n_post);
 
 /**
  * Batch backward (spike loss) + accumulate gradients in one call.
@@ -150,7 +155,7 @@ GradientOutput eventprop_accumulate_gradients(BackwardsBatch batch, const int n_
  * Parallel backward pass → sequential gradient sum → free per-sample .grad buffers.
  * Returns combined result with summed gradient and preserved spike errors.
  */
-AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(const EventPropInput* inputs, const SpikesBatch spikes_batch);
+AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(const EventPropInput* inputs, SpikesBatch spikes_batch);
 
 /**
  * Batch backward (maxima loss) + accumulate gradients in one call.
@@ -160,7 +165,7 @@ AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(const Event
  *
  * Uses `MaximaOutput.errors` written by caller before this call.
  */
-AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(const EventPropInput* inputs, const MaximaBatch maxima_batch);
+AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(const EventPropInput* inputs, MaximaBatch maxima_batch);
 
 
 #ifdef __cplusplus

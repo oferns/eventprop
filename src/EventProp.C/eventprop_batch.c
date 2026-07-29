@@ -1,48 +1,38 @@
 #include "eventprop_batch.h"
+#include "eventprop.h"
 #include <stdlib.h>
 #include <stdint.h>
 #include <limits.h>
 
-void eventprop_free_spikes_batch(SpikesBatch batch)
+static inline double lcg_rand(uint64_t* state)
 {
-    for (int b = 0; b < batch.batch_size; b++) {
-        eventprop_free_spike_output(batch.spikes[b]);
-    }
-    free(batch.spikes);
-}
-
-void eventprop_free_maxima_batch(MaximaBatch batch)
-{
-    for (int b = 0; b < batch.batch_size; b++) {
-        eventprop_free_maxima_output(batch.outputs[b]);
-    }
-    free(batch.outputs);
-}
-
-void eventprop_free_backwards_batch(BackwardsBatch batch)
-{
-    for (int b = 0; b < batch.batch_size; b++) {
-        eventprop_free_backward_output(batch.outputs[b]);
-    }
-    free(batch.outputs);
+    *state = (*state * 6364136223846793005ULL + 1442695040888963407ULL);
+    return ((double)(*state >> 11)) / 9007199254740992.0;  /* [0, 1), ~53 bits of precision */
 }
 
 SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, const int batch_size)
 {
-    SpikesBatch result;
-    result.batch_size = 0;
-    result.has_errors = 0;
-    result.spikes = NULL;
+    SpikesBatch result = (SpikesBatch){ .spikes = 0 };
+  
+    if (batch_size <= 0) {
+        result.has_errors = 1;
+        result.error_no = EVENTPROP_BATCHSIZE_ZERO_OR_NEG;
+        return result;
+    }
 
-    if (batch_size <= 0) return result;
-    if (inputs == NULL) return result;
+    if (inputs == NULL) {
+        result.has_errors = 1;
+        result.error_no = EVENTPROP_BATCH_EMPTY; 
+        return result;
+    }
 
     result.batch_size = batch_size;
 
-    /* Allocate result array */
     result.spikes = (SpikeOutput*)calloc(batch_size, sizeof(SpikeOutput));
+    
     if (!result.spikes) {
-        result.batch_size = 0;
+        result.has_errors = 1;
+        result.error_no = EVENTPROP_ALLOCATION_FAILED;
         return result;
     }
 
@@ -69,19 +59,29 @@ SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, const i
 
 BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs, const SpikesBatch spikes_batch)
 {
-    int batch_size = spikes_batch.batch_size;
-    BackwardsBatch batch;
-    batch.batch_size = 0;
-    batch.has_errors = 0;
-    batch.outputs = NULL;
+    BackwardsBatch batch = (BackwardsBatch){ .error_no = EVENTPROP_OK };
+ 
+    const int batch_size = spikes_batch.batch_size;
+ 
+    if (batch_size <= 0) {
+        batch.has_errors = 1;
+        batch.error_no = EVENTPROP_BATCHSIZE_ZERO_OR_NEG;
+        return batch;
+    }
 
-    if (batch_size <= 0 || inputs == NULL) return batch;
-
-    batch.batch_size = batch_size;
+    if (inputs == NULL) {
+        batch.has_errors = 1;
+        batch.error_no = EVENTPROP_BATCH_EMPTY; 
+        return batch;
+    }
 
     /* Parallel per-sample backward */
     batch.outputs = (BackwardOutput*)calloc(batch_size, sizeof(BackwardOutput));
-    if (!batch.outputs) return batch;
+    if (!batch.outputs) {   
+        batch.has_errors = 1;
+        batch.error_no = EVENTPROP_ALLOCATION_FAILED;
+        return batch;
+    }
 
     int b;
 #ifdef _OPENMP
@@ -102,24 +102,35 @@ BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs, con
         }
     }
 
+    batch.batch_size = batch_size;
     return batch;
 }
 
 MaximaBatch eventprop_compute_maxima_batch(const EventPropInput* inputs, const SpikesBatch spikes_batch)
 {
-    int batch_size = spikes_batch.batch_size;
-    MaximaBatch batch;
-    batch.batch_size = 0;
-    batch.has_errors = 0;
-    batch.outputs = NULL;
+    MaximaBatch batch = (MaximaBatch) { .error_no = EVENTPROP_OK };
 
-    if (batch_size <= 0 || inputs == NULL) return batch;
+    const int batch_size = spikes_batch.batch_size;
+ 
+    if (batch_size <= 0) {
+        batch.has_errors = 1;
+        batch.error_no = EVENTPROP_BATCHSIZE_ZERO_OR_NEG;
+        return batch;
+    }
 
-    batch.batch_size = batch_size;
+    if (inputs == NULL) {
+        batch.has_errors = 1;
+        batch.error_no = EVENTPROP_BATCH_EMPTY; 
+        return batch;
+    }
 
     /* Parallel per-sample maxima */
     batch.outputs = (MaximaOutput*)calloc(batch_size, sizeof(MaximaOutput));
-    if (!batch.outputs) return batch;
+    if (!batch.outputs) {   
+        batch.has_errors = 1;
+        batch.error_no = EVENTPROP_ALLOCATION_FAILED;
+        return batch;
+    }
 
     int b;
 #ifdef _OPENMP
@@ -140,24 +151,35 @@ MaximaBatch eventprop_compute_maxima_batch(const EventPropInput* inputs, const S
         }
     }
 
+    batch.batch_size = batch_size;
     return batch;
 }
 
 BackwardsBatch eventprop_backward_maxima_batch(const EventPropInput* inputs, const MaximaBatch maxima_batch)
 {
-    int batch_size = maxima_batch.batch_size;
-    BackwardsBatch batch;
-    batch.batch_size = 0;
-    batch.has_errors = 0;
-    batch.outputs = NULL;
+    BackwardsBatch batch = (BackwardsBatch){ .error_no = EVENTPROP_OK };
+ 
+    const int batch_size = maxima_batch.batch_size;
+ 
+    if (batch_size <= 0) {
+        batch.has_errors = 1;
+        batch.error_no = EVENTPROP_BATCHSIZE_ZERO_OR_NEG;
+        return batch;
+    }
 
-    if (batch_size <= 0 || inputs == NULL) return batch;
-
-    batch.batch_size = batch_size;
+    if (inputs == NULL) {
+        batch.has_errors = 1;
+        batch.error_no = EVENTPROP_BATCH_EMPTY; 
+        return batch;
+    }
 
     /* Parallel per-sample backward */
     batch.outputs = (BackwardOutput*)calloc(batch_size, sizeof(BackwardOutput));
-    if (!batch.outputs) return batch;
+    if (!batch.outputs) {   
+        batch.has_errors = 1;
+        batch.error_no = EVENTPROP_ALLOCATION_FAILED;
+        return batch;
+    }
 
     int b;
 #ifdef _OPENMP
@@ -184,33 +206,37 @@ BackwardsBatch eventprop_backward_maxima_batch(const EventPropInput* inputs, con
         }
     }
 
+    batch.batch_size = batch_size;
     return batch;
-}
-
-void eventprop_free_gradient_output(GradientOutput output)
-{
-    free(output.data);
 }
 
 GradientOutput eventprop_accumulate_gradients(const BackwardsBatch batch, const int n_pre, const int n_post)
 {
-    GradientOutput result;
-    result.rows = 0;
-    result.cols = 0;
-    result.data = NULL;
-
-    if (n_pre <= 0 || n_post <= 0) return result;
-    if (batch.batch_size <= 0) return result;
-
-    /* Check for integer overflow */
-    if (n_pre > INT_MAX / n_post) return result;
+    GradientOutput result = (GradientOutput) { .error_no = EVENTPROP_OK  };
+ 
+    if (n_pre <= 0 || n_post <= 0) {
+        result.error_no = EVENTPROP_INVALID_DIMENSION;
+        return result;
+    }
 
     result.rows = n_pre;
     result.cols = n_post;
+ 
+    if (batch.batch_size <= 0) {
+        result.error_no = EVENTPROP_BATCHSIZE_ZERO_OR_NEG;
+        return result;
+    }
+
+ 
+    /* Check for integer overflow */
+    if (n_pre > INT_MAX / n_post) {
+        result.error_no = EVENTPROP_DIMENSION_TOO_LARGE;
+        return result;
+    }
+
     result.data = (double*)calloc(n_pre * n_post, sizeof(double));
     if (!result.data) {
-        result.rows = 0;
-        result.cols = 0;
+        result.error_no = EVENTPROP_ALLOCATION_FAILED;
         return result;
     }
 
@@ -223,34 +249,33 @@ GradientOutput eventprop_accumulate_gradients(const BackwardsBatch batch, const 
     return result;
 }
 
-void eventprop_free_accumulated_backward_result(AccumulatedBackwardResult result)
-{
-    if (result.summed_grads) {
-        eventprop_free_gradient_output(*result.summed_grads);
-        free(result.summed_grads);
-    }
-
-    for (int b = 0; b < result.batch_size; b++) {
-        eventprop_free_backward_output(result.outputs[b]);
-    }
-    free(result.outputs);
-}
-
 AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
     const EventPropInput* inputs, const SpikesBatch spikes_batch)
 {
-    int batch_size = spikes_batch.batch_size;
-    AccumulatedBackwardResult result;
-    result.batch_size = 0;
-    result.has_errors = 0;
-    result.outputs = NULL;
-    result.summed_grads = NULL;
+    AccumulatedBackwardResult result = (AccumulatedBackwardResult)  { .error_no = EVENTPROP_OK };
 
-    if (batch_size <= 0 || inputs == NULL) return result;
+    int batch_size = spikes_batch.batch_size;
+
+     if (batch_size <= 0) {
+        result.has_errors = 1;
+        result.error_no = EVENTPROP_BATCHSIZE_ZERO_OR_NEG;
+        return result;
+    }
+
+    result.batch_size = batch_size;
+
+    if (inputs == NULL) {
+        result.has_errors = 1;
+        result.error_no = EVENTPROP_BATCH_EMPTY; 
+        return result;
+    }
 
     /* Parallel per-sample backward */
-    BackwardOutput* outputs = (BackwardOutput*)calloc(batch_size, sizeof(BackwardOutput));
-    if (!outputs) return result;
+    BackwardOutput* outputs = calloc((size_t)batch_size, sizeof(BackwardOutput));
+    if (!outputs) {
+        result.error_no = EVENTPROP_ALLOCATION_FAILED;
+        return result;
+    }
 
     int b;
 #ifdef _OPENMP
@@ -294,12 +319,8 @@ AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
     const EventPropInput* inputs, const MaximaBatch maxima_batch)
 {
     int batch_size = maxima_batch.batch_size;
-    AccumulatedBackwardResult result;
-    result.batch_size = 0;
-    result.has_errors = 0;
-    result.outputs = NULL;
-    result.summed_grads = NULL;
-
+    AccumulatedBackwardResult result  = (AccumulatedBackwardResult) { .error_no = EVENTPROP_OK };
+  
     if (batch_size <= 0 || inputs == NULL) return result;
 
     /* Parallel per-sample backward */
@@ -348,33 +369,6 @@ AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
     result.summed_grads = grad;
     result.outputs = outputs;
     return result;
-}
-
-
-static inline double lcg_rand(uint64_t* state)
-{
-    *state = (*state * 6364136223846793005ULL + 1442695040888963407ULL);
-    return ((double)(*state >> 11)) / 9007199254740992.0;  /* [0, 1), ~53 bits of precision */
-}
-
-/**
- * Free a single dropout output.
- */
-void eventprop_free_dropout_output(DropoutOutput output)
-{
-    free(output.times);
-    free(output.sources);
-}
-
-/**
- * Free a dropout batch result.
- */
-void eventprop_free_dropout_batch(DropoutBatch batch)
-{
-    for (int b = 0; b < batch.batch_size; b++) {
-        eventprop_free_dropout_output(batch.outputs[b]);
-    }
-    free(batch.outputs);
 }
 
 /**
@@ -458,3 +452,60 @@ DropoutBatch eventprop_dropout_spikes_batch(
     free(offsets);
     return result;
 }
+
+void eventprop_free_spikes_batch(SpikesBatch batch)
+{
+    for (int b = 0; b < batch.batch_size; b++) {
+        eventprop_free_spike_output(batch.spikes[b]);
+    }
+    free(batch.spikes);
+}
+
+void eventprop_free_maxima_batch(MaximaBatch batch)
+{
+    for (int b = 0; b < batch.batch_size; b++) {
+        eventprop_free_maxima_output(batch.outputs[b]);
+    }
+    free(batch.outputs);
+}
+
+void eventprop_free_backwards_batch(BackwardsBatch batch)
+{
+    for (int b = 0; b < batch.batch_size; b++) {
+        eventprop_free_backward_output(batch.outputs[b]);
+    }
+    free(batch.outputs);
+}
+
+void eventprop_free_gradient_output(GradientOutput output)
+{
+    free(output.data);
+}
+
+void eventprop_free_accumulated_backward_result(const AccumulatedBackwardResult result)
+{
+    if (result.summed_grads) {
+        eventprop_free_gradient_output(*result.summed_grads);
+        free(result.summed_grads);
+    }
+
+    for (int b = 0; b < result.batch_size; b++) {
+        eventprop_free_backward_output(result.outputs[b]);
+    }
+    free(result.outputs);
+}
+
+void eventprop_free_dropout_output(DropoutOutput output)
+{
+    free(output.times);
+    free(output.sources);
+}
+
+void eventprop_free_dropout_batch(DropoutBatch batch)
+{
+    for (int b = 0; b < batch.batch_size; b++) {
+        eventprop_free_dropout_output(batch.outputs[b]);
+    }
+    free(batch.outputs);
+}
+

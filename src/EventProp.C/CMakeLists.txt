@@ -4,6 +4,22 @@ project(eventprop_c LANGUAGES C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+# Generate compile_commands.json for clangd/IDE integration
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Strict warning flags — catch real issues without drowning numerical code in noise.
+# -Wall: unused vars, implicit decls, format mismatches, etc.
+# -Wextra: missing field initializers, type limits, unused params (with -Wunused)
+# -Wpedantic: strict C11 conformance diagnostics
+# -Wshadow: variable shadowing bugs
+# -Wimplicit-fallthrough: missing break/return in switch cases
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(-Wall -Wextra -Wpedantic -Wshadow -Wimplicit-fallthrough)
+elseif(CMAKE_C_COMPILER_ID MATCHES "MSVC")
+    # MSVC equivalents (enabled by default: /W3, /W4 for extra warnings)
+    add_compile_options(/W4)
+endif()
+
 
 
 # Detect SIMD support at compile time (priority: AVX-512 > AVX2 > NEON)

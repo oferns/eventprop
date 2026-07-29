@@ -1,4 +1,6 @@
 /* ── MatrixView helpers (included, not compiled standalone) ─────── */
+#ifndef MATRIXVIEW_INC
+#define MATRIXVIEW_INC
 
 typedef struct MatrixView {
     const double* data;
@@ -41,3 +43,4 @@ static inline double* mv_row_mut(MutableMatrixView m, int i)
 /** Mutable element access: &m[row][col]. */
 static inline double* mv_at_mut(MutableMatrixView m, int row, int col)
 { return &m.data[row * m.cols + col]; }
+#endif // MATRIXVIEW_INC

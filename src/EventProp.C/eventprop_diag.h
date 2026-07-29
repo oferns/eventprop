@@ -60,13 +60,13 @@ void eventprop_free_lambda_i_trace_output(LambdaITraceOutput output);
  * Compute the membrane potential trace for a single post-synaptic neuron.
  * Includes both pre-synaptic drive and post-synaptic spike-reset effects.
  */
-VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput input);
+VoltageTraceOutput eventprop_compute_voltage_trace(VoltageTraceInput input);
 
 /**
  * Compute the synaptic adjoint (lambda_i) trace for a single neuron.
  * Useful for debugging the backward pass.
  */
-LambdaITraceOutput eventprop_compute_lambda_i_trace(const LambdaITraceInput input);
+LambdaITraceOutput eventprop_compute_lambda_i_trace(LambdaITraceInput input);
 
 #ifdef __cplusplus
 }
