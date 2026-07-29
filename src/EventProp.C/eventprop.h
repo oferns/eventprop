@@ -32,18 +32,21 @@ typedef enum EventPropError {
     EVENTPROP_TIMES_TAU_MISMATCH      = 14,  /* max(times)/min(tau) >= EXP_OVERFLOW_THRESHOLD */
     EVENTPROP_TAU_TOO_CLOSE           = 15,  /* |tau_mem - tau_syn| / min(tau) < TAU_REL_DIFF_MIN */
     EVENTPROP_BATCHSIZE_ZERO_OR_NEG   = 16,  /* Bad batch size*/
-    EVENTPROP_ALLOC_SUMS              = 17,  /* compute_sums failed */
-    EVENTPROP_ALLOC_TIMES_ARR         = 18,  /* post_times_arr */
-    EVENTPROP_ALLOC_CURRENTS_ARR      = 19,  /* post_currents_arr */
-    EVENTPROP_ALLOC_SPIKE_CAPS        = 20,  /* spike_caps */
-    EVENTPROP_ALLOC_SPIKE_COUNTS      = 21,  /* spike_counts */
-    EVENTPROP_ALLOC_NEURON_BUF        = 22,  /* per-neuron times/currents buffer */
-    EVENTPROP_ALLOC_ENTRIES           = 23,  /* entries (sorted collection) */
-    EVENTPROP_ALLOC_RESULT_TIMES      = 24,  /* result.times */
-    EVENTPROP_ALLOC_RESULT_SOURCES    = 25,  /* result.sources */
-    EVENTPROP_ALLOC_RESULT_CURRENTS   = 26,  /* result.currents */
-    EVENTPROP_ALLOC_RESULT_ERRORS     = 27,  /* result.errors */
-    EVENTPROP_BATCH_EMPTY             = 17   /* batch input was null*/
+    EVENTPROP_ALLOC_SUM0              = 17,  /* result.sum0 */
+    EVENTPROP_ALLOC_SUM1              = 18,  /* result.sum1 */
+    EVENTPROP_ALLOC_EXP_MEM           = 19,  /* exp_mem lookup table */
+    EVENTPROP_ALLOC_EXP_SYN           = 20,  /* exp_syn lookup table */
+    EVENTPROP_ALLOC_TIMES_ARR         = 21,  /* post_times_arr */
+    EVENTPROP_ALLOC_CURRENTS_ARR      = 22,  /* post_currents_arr */
+    EVENTPROP_ALLOC_SPIKE_CAPS        = 23,  /* spike_caps */
+    EVENTPROP_ALLOC_SPIKE_COUNTS      = 24,  /* spike_counts */
+    EVENTPROP_ALLOC_NEURON_BUF        = 25,  /* per-neuron times/currents buffer */
+    EVENTPROP_ALLOC_ENTRIES           = 26,  /* entries (sorted collection) */
+    EVENTPROP_ALLOC_RESULT_TIMES      = 27,  /* result.times */
+    EVENTPROP_ALLOC_RESULT_SOURCES    = 28,  /* result.sources */
+    EVENTPROP_ALLOC_RESULT_CURRENTS   = 29,  /* result.currents */
+    EVENTPROP_ALLOC_RESULT_ERRORS     = 30,  /* result.errors */
+    EVENTPROP_BATCH_EMPTY             = 31   /* batch input was null*/
 } EventPropError;
 
 /** ── Validation limits ──────────────────────────────────────────────── */

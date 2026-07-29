@@ -646,7 +646,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
     /* Compute sums */
     ctx.sums = eventprop_compute_sums(input);
     if (ctx.sums.error_no != EVENTPROP_OK) {
-        result.error_no = EVENTPROP_ALLOC_SUMS;   /* propagate from compute_sums */
+        result.error_no = ctx.sums.error_no;      /* propagate specific error from compute_sums */
         goto cleanup_and_return;
     }
 
@@ -1032,43 +1032,50 @@ cleanup_and_return:
 
 SumsOutput eventprop_compute_sums(const EventPropInput input)
 {
-    
     SumsOutput result = (SumsOutput){ .error_no = eventprop_validate_input(input) };
+    double* exp_mem = NULL, *exp_syn = NULL;
 
     result.n_rows = input.n_spikes + 1;
     result.n_post = input.n_post;
 
     if (result.error_no != EVENTPROP_OK){
-        return result;
+        goto cleanup_and_return;
     }
 
     if((result.n_rows > 0 && input.n_post > INT_MAX / result.n_rows)) {
-        result.error_no = EVENTPROP_ALLOCATION_FAILED;
-        return result;
+        result.error_no = EVENTPROP_ALLOC_SUM0; /* overflow guard */
+        goto cleanup_and_return;
     }
 
     size_t count = result.n_rows * input.n_post;
     
     result.sum0 = calloc(count, sizeof(double));
     if(!result.sum0) {
-        result.error_no = EVENTPROP_ALLOCATION_FAILED;
-        return result;
+        result.error_no = EVENTPROP_ALLOC_SUM0;
+        goto cleanup_and_return;
     }
 
     result.sum1 = calloc(count, sizeof(double));
     if (!result.sum1) {
-        free(result.sum0);
-        result.error_no = EVENTPROP_ALLOCATION_FAILED;
-        return result;
+        result.error_no = EVENTPROP_ALLOC_SUM1;
+        goto cleanup_and_return;
     }
 
     if (input.n_spikes == 0) {
-        return result;
+        goto cleanup_and_return;
     }
 
     /* Pre-compute exponential lookup tables */
-    double* exp_mem = calloc((size_t)input.n_spikes, sizeof(double));
-    double* exp_syn = calloc((size_t)input.n_spikes, sizeof(double));
+    exp_mem = calloc((size_t)input.n_spikes, sizeof(double));
+    if (!exp_mem) {
+        result.error_no = EVENTPROP_ALLOC_EXP_MEM;
+        goto cleanup_and_return;
+    }
+    exp_syn = calloc((size_t)input.n_spikes, sizeof(double));
+    if (!exp_syn) {
+        result.error_no = EVENTPROP_ALLOC_EXP_SYN;
+        goto cleanup_and_return;
+    }
 
     for (int i = 0; i < input.n_spikes; i++) {
         exp_mem[i] = exp(input.times[i] / input.tau_mem);
@@ -1086,9 +1093,12 @@ SumsOutput eventprop_compute_sums(const EventPropInput input)
         fma_row_simd(mv_row_mut(s1, i + 1), mv_row_mut(s1, i), mv_row(w, src), exp_mem[i], input.n_post);
     }
 
+cleanup_and_return:
+    if (result.error_no != EVENTPROP_OK) {
+        eventprop_free_sums_output(result);
+    }
     free(exp_mem);
     free(exp_syn);
-
     return result;
 }
 
