@@ -9,6 +9,9 @@
 #include <stdlib.h>
 #include <math.h>
 
+/* Numerical stability epsilon for lambda-I backward current computation */
+#define LAMBDA_I_VTH_EPS 0.001
+
 void eventprop_free_lambda_i_trace_output(LambdaITraceOutput output)
 {
     free(output.lambda_trace);
@@ -178,7 +181,7 @@ LambdaITraceOutput eventprop_compute_lambda_i_trace(const LambdaITraceInput inpu
         for (int i = input.n_post_spikes - 1; i >= 0; i--) {
             if (input.fwd_times[i] < t) break;
             double dt_jump = t_bwd_from_t - (largest_time - input.fwd_times[i]);
-            lambda_i += (1.0 / (input.v_th + 0.001)) * k_bwd_prefactor *
+            lambda_i += (1.0 / (input.v_th + LAMBDA_I_VTH_EPS)) * k_bwd_prefactor *
                         (exp(-dt_jump / input.tau_mem) - exp(-dt_jump / input.tau_syn));
         }
 

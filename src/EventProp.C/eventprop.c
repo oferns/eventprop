@@ -45,6 +45,10 @@
 
 #define TOMS748_MAX_ITER 1024
 #define TOMS748_TOL 1e-14
+#define TOMS748_NEAR_ZERO 1e-300   /* near-zero guard to avoid div-by-zero in curvature checks */
+
+/* Voltage threshold crossing tolerance — "has v genuinely exceeded v_th?" */
+#define SPIKE_THRESHOLD_EPS 1e-14
 
 /* Evaluate v(t) - v_th for root-finding */
 #define VOLTAGE(c, t) \
@@ -569,9 +573,9 @@ static double toms748_solve(const RootContext* ctx, double a, double b) {
             const double qcb = (fc - fb) / (c - b);
             const double qcbba = (qcb - qba) / (c - a);
 
-            if (fabs(qcbba) > 1e-300) {
+            if (fabs(qcbba) > TOMS748_NEAR_ZERO) {
                 const double denom = qba + qcb;
-                if (fabs(denom) > 1e-300) {
+                if (fabs(denom) > TOMS748_NEAR_ZERO) {
                     s = b - fb / (qba + qcb * (b - a) * qcbba / denom);
                     const int inBracket = (s > a && s < b);
                     const double mVal = 0.5 * (b - a);
@@ -754,7 +758,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                     if (!isinf(tmax)) {
                         double v = compute_v_inline(tmax, i, count, p_times, 0, sum0, sum1,
                                              target_nrn, input, k_prefactor);
-                        if (v > input.v_th + 1e-14) {
+                        if (v > input.v_th + SPIKE_THRESHOLD_EPS) {
                             double t_lower = count > 0 ? p_times[count - 1] : 0.0;
                             /* Precompute exp(st * tau_mem_inv) for each post-spike → factorization */
                             double* post_exp_st = NULL;
@@ -819,7 +823,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                     if (!isinf(tmax)) {
                         double v = compute_v_inline(tmax, i, count, p_times, 0, sum0, sum1,
                                              target_nrn, input, k_prefactor);
-                        if (v > input.v_th + 1e-14) {
+                        if (v > input.v_th + SPIKE_THRESHOLD_EPS) {
                             double t_before = (i > 0) ? input.times[i-1] : 0.0;
                             for (int s = 0; s < count; s++) {
                                 double st = p_times[s];
@@ -883,7 +887,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                     double v_at_input = compute_v_inline(t_input, i, count, p_times, 0,
                                                           sum0, sum1, target_nrn, input,
                                                           k_prefactor);
-                    if (v_at_input > input.v_th + 1e-14) {
+                    if (v_at_input > input.v_th + SPIKE_THRESHOLD_EPS) {
                         double t_before = (i > 0) ? input.times[i-1] : 0.0;
                         for (int s = 0; s < count; s++) {
                             double st = p_times[s];
