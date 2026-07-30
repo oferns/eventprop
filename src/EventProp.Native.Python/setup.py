@@ -14,12 +14,18 @@ if sys.platform == 'win32':
     lib_candidates = glob.glob(os.path.join(c_build_base, '*', 'eventprop_c_api.lib'))
     c_lib_dir = os.path.dirname(lib_candidates[0]) if lib_candidates else c_build_base
     libraries = ['eventprop_c_api'] if os.path.exists(c_lib_dir) else []
+    extra_link_args = []
 elif sys.platform == 'darwin':
     c_lib_dir = c_build_base
     libraries = ['eventprop_c_api']
+    # Build native arch only (not universal2) to match C library
+    import platform
+    arch = platform.machine()
+    extra_link_args = ['-arch', arch, '-Wl,-rpath,' + c_lib_dir]
 else:
     c_lib_dir = c_build_base
     libraries = ['eventprop_c_api']
+    extra_link_args = []
 
 ext = Extension(
     "eventprop_c._native",
@@ -31,6 +37,8 @@ ext = Extension(
     library_dirs=[c_lib_dir] if libraries else [],
     libraries=libraries,
     define_macros=[("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION")],
+    extra_compile_args=['-arch', platform.machine()] if sys.platform == 'darwin' else [],
+    extra_link_args=extra_link_args,
 )
 
 setup(

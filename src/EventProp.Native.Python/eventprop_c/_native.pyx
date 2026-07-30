@@ -11,9 +11,6 @@ Philosophy:
     - Managed wrapper classes keep C memory alive via __dealloc__
 """
 
-import ctypes
-import os
-import sys
 import numpy as np
 cimport numpy as cnp
 from libc.stdlib cimport free, malloc
@@ -21,41 +18,8 @@ from libc.stdlib cimport free, malloc
 cnp.import_array()
 
 
-# ---------------------------------------------------------------------------
-# 1. Load the shared library (once at import time)
-# ---------------------------------------------------------------------------
-
-def _load_lib():
-    """Find and load libeventprop_c_api."""
-    base = os.path.dirname(__file__)
-    for suffix in ('.dll', '.so', '.dylib'):
-        path = os.path.join(base, f"libeventprop_c_api{suffix}")
-        try:
-            return ctypes.cdll.LoadLibrary(path)
-        except OSError:
-            pass
-    # Fallback search paths
-    if sys.platform == 'win32':
-        for suffix in ('.dll', '.lib'):
-            path = os.path.join(base, f"eventprop_c_api{suffix}")
-            try:
-                return ctypes.cdll.LoadLibrary(path)
-            except OSError:
-                pass
-    for libdir in ('.', '/usr/local/lib', '/opt/homebrew/lib'):
-        suffix = '.dylib' if sys.platform == 'darwin' else '.so'
-        path = os.path.join(libdir, f"libeventprop_c_api{suffix}")
-        try:
-            return ctypes.cdll.LoadLibrary(path)
-        except OSError:
-            pass
-    raise FileNotFoundError(
-        "Could not load libeventprop_c_api from:\n" +
-        "\n".join(f"  {os.path.join(base, f'libeventprop_c_api{s}')}" for s in ('.dll', '.so', '.dylib'))
-    )
-
-
-_load_lib()
+# The shared library is loaded via rpath embedded in the .so at build time.
+# No manual ctypes.LoadLibrary needed — dynamic linker handles it.
 
 
 # ---------------------------------------------------------------------------
@@ -64,16 +28,7 @@ _load_lib()
 
 cdef extern from "eventprop.h":
 
-    # Error codes (enum maps to int in Cython)
-    ctypedef enum EventPropError:
-        EVENTPROP_OK                  = 0
-        EVENTPROP_INVALID_DIMENSION   = 1
-        EVENTPROP_NEGATIVE_SPIKES     = 2
-        EVENTPROP_NULL_POINTER        = 3
-        EVENTPROP_INVALID_SOURCE      = 4
-        EVENTPROP_INVALID_TAU         = 5
-        EVENTPROP_ALLOCATION_FAILED   = 6
-        EVENTPROP_INVALID_CURRENT     = 7
+
 
     ctypedef struct MatrixView:
         const double* data
@@ -97,7 +52,7 @@ cdef extern from "eventprop.h":
         double v_th
 
     ctypedef struct SpikeOutput:
-        EventPropError error_no
+        int error_no
         int n_spikes
         double* times
         int* sources
@@ -105,21 +60,21 @@ cdef extern from "eventprop.h":
         double* errors
 
     ctypedef struct SumsOutput:
-        EventPropError error_no
+        int error_no
         int n_rows
         int n_post
         double* sum0
         double* sum1
 
     ctypedef struct MaximaOutput:
-        EventPropError error_no
+        int error_no
         int n_post
         double* times
         double* values
         double* errors
 
     ctypedef struct BackwardOutput:
-        EventPropError error_no
+        int error_no
         int n_pre
         int n_post
         int n_spikes
@@ -144,7 +99,7 @@ cdef extern from "eventprop.h":
         const double* maxima_errors)
 
     # Input validation helper
-    EventPropError eventprop_validate_input(const EventPropInput input)
+    int eventprop_validate_input(const EventPropInput input)
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +109,7 @@ cdef extern from "eventprop.h":
 cdef extern from "eventprop_batch.h":
 
     ctypedef struct SpikesBatch:
+        int error_no
         int batch_size
         int has_errors
         SpikeOutput* spikes
@@ -162,6 +118,7 @@ cdef extern from "eventprop_batch.h":
 
     # Batch backward output — per-sample results
     ctypedef struct BackwardsBatch:
+        int error_no
         int batch_size
         int has_errors
         BackwardOutput* outputs
@@ -169,6 +126,7 @@ cdef extern from "eventprop_batch.h":
     void eventprop_free_backwards_batch(BackwardsBatch batch)
 
     ctypedef struct MaximaBatch:
+        int error_no
         int batch_size
         int has_errors
         MaximaOutput* outputs
@@ -199,6 +157,7 @@ cdef extern from "eventprop_batch.h":
         int seed)
 
     ctypedef struct GradientOutput:
+        int error_no
         double* data
         int rows
         int cols
@@ -207,6 +166,7 @@ cdef extern from "eventprop_batch.h":
 
     # Combined backward + accumulate result (primary FFI entry point)
     ctypedef struct AccumulatedBackwardResult:
+        int error_no                  # Batch error code
         GradientOutput* summed_grads  # heap-allocated gradient with dimensions
         int has_errors                # 1 if any sample returned an error
         BackwardOutput* outputs       # per-sample (.grad freed, .spike_errors kept)
@@ -258,7 +218,7 @@ cdef extern from "eventprop_diag.h":
         int n_t
         double* v_trace
         double* ts
-        EventPropError error_no
+        int error_no
 
     void eventprop_free_voltage_trace_output(VoltageTraceOutput output)
 
@@ -278,7 +238,7 @@ cdef extern from "eventprop_diag.h":
         int n_t
         double* lambda_trace
         double* ts
-        EventPropError error_no
+        int error_no
 
     void eventprop_free_lambda_i_trace_output(LambdaITraceOutput output)
 
