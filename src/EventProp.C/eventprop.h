@@ -21,51 +21,51 @@ typedef enum EventPropError {
     EVENTPROP_NULL_POINTER            = 3,   /* w/times/sources is NULL when required */
     EVENTPROP_INVALID_SOURCE          = 4,   /* sources[i] out of [0, n_pre) range */
     EVENTPROP_INVALID_TAU             = 5,   /* tau_mem <= 0, tau_syn <= 0, or tau_mem == tau_syn */
-    EVENTPROP_INVALID_CURRENT         = 7,   /* spike.currents[i] == v_th (division by zero) */
-    EVENTPROP_NEGATIVE_SPIKE_TIME     = 8,   /* times[i] < 0 */
-    EVENTPROP_EXCESSIVE_SPIKE_TIME    = 9,   /* max(times) > MAX_SPIKE_TIME */
-    EVENTPROP_TAU_TOO_SMALL           = 10,  /* tau_mem or tau_syn < MIN_TAU */
-    EVENTPROP_TAU_TOO_LARGE           = 11,  /* tau_mem or tau_syn > MAX_TAU */
-    EVENTPROP_INVALID_VTH             = 12,  /* v_th <= 0 */
-    EVENTPROP_DIMENSION_TOO_LARGE     = 13,  /* n_pre or n_post > MAX_DIM */
-    EVENTPROP_TIMES_TAU_MISMATCH      = 14,  /* max(times)/min(tau) >= EXP_OVERFLOW_THRESHOLD */
-    EVENTPROP_TAU_TOO_CLOSE           = 15,  /* |tau_mem - tau_syn| / min(tau) < TAU_REL_DIFF_MIN */
-    EVENTPROP_BATCHSIZE_ZERO_OR_NEG   = 16,  /* Bad batch size*/
-    EVENTPROP_ALLOC_SUM0              = 17,  /* result.sum0 */
-    EVENTPROP_ALLOC_SUM1              = 18,  /* result.sum1 */
-    EVENTPROP_ALLOC_EXP_MEM           = 19,  /* exp_mem lookup table */
-    EVENTPROP_ALLOC_EXP_SYN           = 20,  /* exp_syn lookup table */
-    EVENTPROP_ALLOC_TIMES_ARR         = 21,  /* post_times_arr */
-    EVENTPROP_ALLOC_CURRENTS_ARR      = 22,  /* post_currents_arr */
-    EVENTPROP_ALLOC_SPIKE_CAPS        = 23,  /* spike_caps */
-    EVENTPROP_ALLOC_SPIKE_COUNTS      = 24,  /* spike_counts */
-    EVENTPROP_ALLOC_NEURON_BUF        = 25,  /* per-neuron times/currents buffer */
-    EVENTPROP_ALLOC_ENTRIES           = 26,  /* entries (sorted collection) */
-    EVENTPROP_ALLOC_RESULT_TIMES      = 27,  /* result.times */
-    EVENTPROP_ALLOC_RESULT_SOURCES    = 28,  /* result.sources */
-    EVENTPROP_ALLOC_RESULT_CURRENTS   = 29,  /* result.currents */
-    EVENTPROP_ALLOC_RESULT_ERRORS     = 30,  /* result.errors */
-    EVENTPROP_ALLOC_MAXIMA_TIMES      = 31,  /* maxima result.times */
-    EVENTPROP_ALLOC_MAXIMA_VALUES     = 32,  /* maxima result.values */
-    EVENTPROP_ALLOC_MAXIMA_ERRORS     = 33,  /* maxima result.errors */
-    EVENTPROP_ALLOC_BWD_GRAD          = 34,  /* backward result.grad */
-    EVENTPROP_ALLOC_BWD_SPIKE_ERRORS  = 35,  /* backward result.spike_errors */
-    EVENTPROP_ALLOC_BWD_MERGED        = 36,  /* backward merged spike array */
-    EVENTPROP_ALLOC_BWD_ALL_ERRORS    = 37,  /* backward all_errors buffer */
-    EVENTPROP_ALLOC_BWD_LAMBDA_V      = 38,  /* backward lambda_v */
-    EVENTPROP_ALLOC_BWD_LAMBDA_I      = 39,  /* backward lambda_i */
-    EVENTPROP_ALLOC_BWD_JUMP_TIME     = 40,  /* backward jump_time array */
-    EVENTPROP_ALLOC_BWD_JUMP_MAG      = 41,  /* backward jump_mag array */
-    EVENTPROP_ALLOC_BWD_JUMP_COUNT    = 42,  /* backward jump_count array */
-    EVENTPROP_ALLOC_BWD_JUMP_CAP      = 43,  /* backward jump_cap array */
-    EVENTPROP_ALLOC_BWD_PER_NEURON    = 44,  /* per-neuron jump_time/mag buffer */
-    EVENTPROP_ALLOC_BATCH_OUTPUTS     = 45,  /* batch outputs array */
-    EVENTPROP_ALLOC_BATCH_GRAD        = 46,  /* accumulate grad pointer */
-    EVENTPROP_ALLOC_DROPOUT_SAMPLE    = 47,  /* dropout per-sample buffer */
-    EVENTPROP_ALLOC_DIAG_V_TRACE      = 48,  /* voltage trace v_trace array */
-    EVENTPROP_ALLOC_DIAG_TS           = 49,  /* trace ts (time) array */
-    EVENTPROP_ALLOC_DIAG_LAMBDA       = 50,  /* lambda-I trace array */
-    EVENTPROP_BATCH_EMPTY             = 51   /* batch input was null*/
+    EVENTPROP_INVALID_CURRENT         = 6,   /* spike.currents[i] == v_th (division by zero) */
+    EVENTPROP_NEGATIVE_SPIKE_TIME     = 7,   /* times[i] < 0 */
+    EVENTPROP_EXCESSIVE_SPIKE_TIME    = 8,   /* max(times) > MAX_SPIKE_TIME */
+    EVENTPROP_TAU_TOO_SMALL           = 9,   /* tau_mem or tau_syn < MIN_TAU */
+    EVENTPROP_TAU_TOO_LARGE           = 10,  /* tau_mem or tau_syn > MAX_TAU */
+    EVENTPROP_INVALID_VTH             = 11,  /* v_th <= 0 */
+    EVENTPROP_DIMENSION_TOO_LARGE     = 12,  /* n_pre or n_post > MAX_DIM */
+    EVENTPROP_TIMES_TAU_MISMATCH      = 13,  /* max(times)/min(tau) >= EXP_OVERFLOW_THRESHOLD */
+    EVENTPROP_TAU_TOO_CLOSE           = 14,  /* |tau_mem - tau_syn| / min(tau) < TAU_REL_DIFF_MIN */
+    EVENTPROP_BATCHSIZE_ZERO_OR_NEG   = 15,  /* Bad batch size*/
+    EVENTPROP_ALLOC_SUM0              = 16,  /* result.sum0 */
+    EVENTPROP_ALLOC_SUM1              = 17,  /* result.sum1 */
+    EVENTPROP_ALLOC_EXP_MEM           = 18,  /* exp_mem lookup table */
+    EVENTPROP_ALLOC_EXP_SYN           = 19,  /* exp_syn lookup table */
+    EVENTPROP_ALLOC_TIMES_ARR         = 20,  /* post_times_arr */
+    EVENTPROP_ALLOC_CURRENTS_ARR      = 21,  /* post_currents_arr */
+    EVENTPROP_ALLOC_SPIKE_CAPS        = 22,  /* spike_caps */
+    EVENTPROP_ALLOC_SPIKE_COUNTS      = 23,  /* spike_counts */
+    EVENTPROP_ALLOC_NEURON_BUF        = 24,  /* per-neuron times/currents buffer */
+    EVENTPROP_ALLOC_ENTRIES           = 25,  /* entries (sorted collection) */
+    EVENTPROP_ALLOC_RESULT_TIMES      = 26,  /* result.times */
+    EVENTPROP_ALLOC_RESULT_SOURCES    = 27,  /* result.sources */
+    EVENTPROP_ALLOC_RESULT_CURRENTS   = 28,  /* result.currents */
+    EVENTPROP_ALLOC_RESULT_ERRORS     = 29,  /* result.errors */
+    EVENTPROP_ALLOC_MAXIMA_TIMES      = 30,  /* maxima result.times */
+    EVENTPROP_ALLOC_MAXIMA_VALUES     = 31,  /* maxima result.values */
+    EVENTPROP_ALLOC_MAXIMA_ERRORS     = 32,  /* maxima result.errors */
+    EVENTPROP_ALLOC_BWD_GRAD          = 33,  /* backward result.grad */
+    EVENTPROP_ALLOC_BWD_SPIKE_ERRORS  = 34,  /* backward result.spike_errors */
+    EVENTPROP_ALLOC_BWD_MERGED        = 35,  /* backward merged spike array */
+    EVENTPROP_ALLOC_BWD_ALL_ERRORS    = 36,  /* backward all_errors buffer */
+    EVENTPROP_ALLOC_BWD_LAMBDA_V      = 37,  /* backward lambda_v */
+    EVENTPROP_ALLOC_BWD_LAMBDA_I      = 38,  /* backward lambda_i */
+    EVENTPROP_ALLOC_BWD_JUMP_TIME     = 39,  /* backward jump_time array */
+    EVENTPROP_ALLOC_BWD_JUMP_MAG      = 40,  /* backward jump_mag array */
+    EVENTPROP_ALLOC_BWD_JUMP_COUNT    = 41,  /* backward jump_count array */
+    EVENTPROP_ALLOC_BWD_JUMP_CAP      = 42,  /* backward jump_cap array */
+    EVENTPROP_ALLOC_BWD_PER_NEURON    = 43,  /* per-neuron jump_time/mag buffer */
+    EVENTPROP_ALLOC_BATCH_OUTPUTS     = 44,  /* batch outputs array */
+    EVENTPROP_ALLOC_BATCH_GRAD        = 45,  /* accumulate grad pointer */
+    EVENTPROP_ALLOC_DROPOUT_SAMPLE    = 46,  /* dropout per-sample buffer */
+    EVENTPROP_ALLOC_DIAG_V_TRACE      = 47,  /* voltage trace v_trace array */
+    EVENTPROP_ALLOC_DIAG_TS           = 48,  /* trace ts (time) array */
+    EVENTPROP_ALLOC_DIAG_LAMBDA       = 49,  /* lambda-I trace array */
+    EVENTPROP_BATCH_EMPTY             = 50   /* batch input was null*/
 } EventPropError;
 
 /** ── Validation limits ──────────────────────────────────────────────── */
