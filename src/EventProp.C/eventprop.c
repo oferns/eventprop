@@ -58,91 +58,61 @@
                  (c)->k_prefactor, (c)->tau_mem_inv, (c)->tau_syn_inv, (c)->v_th, \
                  (c)->post_spike_exp_st) - (c)->v_th)
 
+typedef struct RootContext {
+    const double* sum0; const double* sum1;
+    int i, spike_count, target_nrn, n_post;
+    const double* post_spike_times; int neuron_offset;
+    double k_prefactor, tau_mem_inv, tau_syn_inv, v_th;
+    /* Precomputed: exp(post_spike_times[s] * tau_mem_inv) for each spike.
+     * Factorization: exp(-(t-st)*tau-1) = exp(-t*tau-1) × exp(st*tau-1)
+     * Eliminates N exp() calls per iteration → just 1 (for base terms). */
+    const double* post_spike_exp_st;   /* NULL if not precomputed */
+} RootContext;
 
-/* ── Input validation ──────────────────────────────────────── */
+typedef struct SpikeEntry {
+     double time; 
+     int source; 
+     double current; 
+} SpikeEntry;
 
-EventPropError eventprop_validate_input(const EventPropInput input)
-{
-    /* ── Dimension checks ─────────────────────────────────────── */
-    if (input.n_pre <= 0 || input.n_post <= 0)
-        return EVENTPROP_INVALID_DIMENSION;
-    if (input.n_pre > EVENTPROP_MAX_DIM || input.n_post > EVENTPROP_MAX_DIM)
-        return EVENTPROP_DIMENSION_TOO_LARGE;
-    /* n_pre * n_post can overflow int even when both pass MAX_DIM */
-    if ((size_t)input.n_pre * input.n_post > INT_MAX)
-        return EVENTPROP_DIMENSION_TOO_LARGE;
+/* Merge spike comparison for qsort (descending by time) */
+typedef struct MergedSpike {
+     double time; 
+     int idx; 
+     int is_input; 
+} MergedSpike;
 
-    /* ── Spike count ──────────────────────────────────────────── */
-    if (input.n_spikes < 0)
-        return EVENTPROP_NEGATIVE_SPIKES;
+/** Context for eventprop_backward_spikes — groups all heap allocations. */
+typedef struct BackwardSpikesCtx {
+    MergedSpike* merged;
+    double* all_errors;
+    double* lambda_v;
+    double* lambda_i;
+    double** jump_time;   // array of pointers
+    double** jump_mag;
+    int* jump_count;
+    int* jump_cap;
+    int n_post_alloc;     // how many per-neuron arrays were actually allocated
+} BackwardSpikesCtx;
 
-    /* ── Tau bounds and proximity ─────────────────────────────── */
-    if (input.tau_mem <= 0.0 || input.tau_syn <= 0.0)
-        return EVENTPROP_INVALID_TAU;
-    if (input.tau_mem < EVENTPROP_MIN_TAU || input.tau_syn < EVENTPROP_MIN_TAU)
-        return EVENTPROP_TAU_TOO_SMALL;
-    if (input.tau_mem > EVENTPROP_MAX_TAU || input.tau_syn > EVENTPROP_MAX_TAU)
-        return EVENTPROP_TAU_TOO_LARGE;
-    if (input.tau_mem == input.tau_syn)
-        return EVENTPROP_INVALID_TAU;
+// ── Internal context for compute_spikes memory management ─────────────────────
+typedef struct {
+    int n_post;  // needed for per-neuron clean-up loop
 
-    /* Relative difference: |tau_mem - tau_syn| / min(tau) < 1e-6 → k_prefactor blows up */
-    {
-        const double min_tau = fmin(input.tau_mem, input.tau_syn);
-        const double rel_diff = fabs(input.tau_mem - input.tau_syn) / min_tau;
-        if (rel_diff < EVENTPROP_TAU_REL_DIFF_MIN)
-            return EVENTPROP_TAU_TOO_CLOSE;
-    }
-
-    /* ── Threshold voltage ────────────────────────────────────── */
-    if (input.v_th <= 0.0)
-        return EVENTPROP_INVALID_VTH;
-
-    /* ── Pointer checks ───────────────────────────────────────── */
-    if (input.w == NULL)
-        return EVENTPROP_NULL_POINTER;
-    if (input.n_spikes > 0) {
-        if (input.times == NULL || input.sources == NULL)
-            return EVENTPROP_NULL_POINTER;
-    } else {
-        /* n_spikes == 0: times/sources may be NULL, nothing to iterate */
-        return EVENTPROP_OK;
-    }
-
-    /* ── Per-spike checks (single pass) ──────────────────────── */
-    double max_time = -1.0;   /* sentinel: will become >= 0 on first spike */
-    for (int i = 0; i < input.n_spikes; i++) {
-        if (input.sources[i] < 0 || input.sources[i] >= input.n_pre)
-            return EVENTPROP_INVALID_SOURCE;
-
-        const double t = input.times[i];
-        if (t < 0.0)
-            return EVENTPROP_NEGATIVE_SPIKE_TIME;
-        if (t > EVENTPROP_MAX_SPIKE_TIME)
-            return EVENTPROP_EXCESSIVE_SPIKE_TIME;
-        if (max_time < 0.0 || t > max_time)
-            max_time = t;
-    }
-
-    /* ── Cross-field: times vs tau overflow check ─────────────── */
-    /* exp(max_time / min_tau) must stay finite (< INF at ~709.78). */
-    {
-        const double min_tau = fmin(input.tau_mem, input.tau_syn);
-        if (max_time > 0.0 && max_time / min_tau >= EVENTPROP_EXP_OVERFLOW_THRESHOLD)
-            return EVENTPROP_TIMES_TAU_MISMATCH;
-    }
-
-    return EVENTPROP_OK;
-}
-
-/* ── Inline helpers ───────────────────────────────────────────────────── */
+    SumsOutput sums;              // eventprop_free_sums_output
+    double** post_times_arr;      // array + each [n]
+    double** post_currents_arr;   // array + each [n]
+    int* spike_caps;
+    int* spike_counts;
+    SpikeEntry* entries;          // sorted collection buffer
+} ComputeSpikesCtx;
 
 // Inline functions replacing GCC statement expressions ({ ... }) for MSVC compatibility.
 // compute_v_inline — direct evaluation, no precomputed exponential.
-static inline double compute_v_inline(double t, int i, int spike_count,
-    const double* post_spike_times, int neuron_offset,
-    const double* sum0, const double* sum1, int target_nrn,
-    const EventPropInput input, double k_prefactor)
+static inline double compute_v_inline(const double t, const int i, const int spike_count,
+    const double* post_spike_times, const int neuron_offset,
+    const double* sum0, const double* sum1, const int target_nrn,
+    const EventPropInput input, const double k_prefactor)
 {
     double mem = k_prefactor * (sum1[i * input.n_post + target_nrn] * exp(-t / input.tau_mem)
                     - sum0[i * input.n_post + target_nrn] * exp(-t / input.tau_syn));
@@ -182,54 +152,6 @@ static inline double compute_v_factored(const double t, const int i, const int s
     }
     return mem;
 }
-
-typedef struct RootContext {
-    const double* sum0; const double* sum1;
-    int i, spike_count, target_nrn, n_post;
-    const double* post_spike_times; int neuron_offset;
-    double k_prefactor, tau_mem_inv, tau_syn_inv, v_th;
-    /* Precomputed: exp(post_spike_times[s] * tau_mem_inv) for each spike.
-     * Factorization: exp(-(t-st)*tau-1) = exp(-t*tau-1) × exp(st*tau-1)
-     * Eliminates N exp() calls per iteration → just 1 (for base terms). */
-    const double* post_spike_exp_st;   /* NULL if not precomputed */
-} RootContext;
-
-typedef struct SpikeEntry {
-     double time; 
-     int source; 
-     double current; 
-} SpikeEntry;
-
-/* Merge spike comparison for qsort (descending by time) */
-typedef struct MergedSpike {
-     double time; 
-     int idx; 
-     int is_input; 
-} MergedSpike;
-
-
-void eventprop_free_spike_output(SpikeOutput output)
-{
-    free(output.times);
-    free(output.sources);
-    free(output.currents);
-    free(output.errors);
-}
-void eventprop_free_sums_output(SumsOutput output)
-{
-    free(output.sum0);
-    free(output.sum1);
-}
-void eventprop_free_maxima_output(MaximaOutput output)
-{
-    free(output.times);
-    free(output.values);
-    free(output.errors);
-}
-void eventprop_free_backward_output(BackwardOutput output){
-    free(output.grad);
-    free(output.spike_errors);
-}
 /* ── SIMD helper functions ───────────────────────────────────── */
 
 static int simd_vec_width(void)
@@ -252,7 +174,7 @@ static int simd_available(void)
 
 /* Fused multiply-add: dest[j] = src[j] + scalar * weights[j] */
 static void fma_row_simd(double* dest, const double* src, const double* weights,
-                               double scalar, int n)
+                               const double scalar, const int n)
 {
     if (!simd_available() || n < 2) {
         for (int j = 0; j < n; j++)
@@ -296,7 +218,7 @@ static void fma_row_simd(double* dest, const double* src, const double* weights,
 }
 
 /* Scale in-place: span[j] *= scalar */
-static void scale_inplace_simd(double* span, double scalar, int n)
+static void scale_inplace_simd(double* span, const double scalar, const int n)
 {
     if (!simd_available() || n < 2) {
         for (int j = 0; j < n; j++)
@@ -338,7 +260,7 @@ static void scale_inplace_simd(double* span, double scalar, int n)
 }
 
 /* Vector-scalar multiply-accumulate: dest[j] += src[j] * scalar */
-static void vadd_scaled_simd(double* dest, const double* src, double scalar, int n)
+static void vadd_scaled_simd(double* dest, const double* src, const double scalar, const int n)
 {
     if (!simd_available() || n < 2) {
         for (int j = 0; j < n; j++)
@@ -384,7 +306,7 @@ static void vadd_scaled_simd(double* dest, const double* src, double scalar, int
 }
 
 /* Dot product: sum(a[j] * b[j]) for j = 0...n-1 */
-static double dot_product_simd(const double* a, const double* b, int n)
+static double dot_product_simd(const double* a, const double* b, const int n)
 {
     if (!simd_available() || n < 2) {
         double sum = 0.0;
@@ -531,8 +453,8 @@ static double compute_tmax(const int i, const int n_spikes, const double* times,
     return INFINITY;
 }
 
-static double compute_i(double t, int n_spikes, const double* times,
-                        const double* sum0, int target_nrn, int n_post, double tau_syn)
+static double compute_i(const double t, const int n_spikes, const double* times,
+                        const double* sum0, const int target_nrn, const int n_post, const double tau_syn)
 {
     int idx = 0;
     for (; idx < n_spikes; idx++) {
@@ -608,17 +530,21 @@ static double toms748_solve(const RootContext* ctx, double a, double b) {
     return b;
 }
 
-// ── Internal context for compute_spikes memory management ─────────────────────
-typedef struct {
-    int n_post;  // needed for per-neuron clean-up loop
-
-    SumsOutput sums;              // eventprop_free_sums_output
-    double** post_times_arr;      // array + each [n]
-    double** post_currents_arr;   // array + each [n]
-    int* spike_caps;
-    int* spike_counts;
-    SpikeEntry* entries;          // sorted collection buffer
-} ComputeSpikesCtx;
+static void free_backward_spikes_ctx(const BackwardSpikesCtx* ctx) {
+    if (!ctx) return;
+    for (int i = 0; i < ctx->n_post_alloc; i++) {
+        free(ctx->jump_time[i]);
+        free(ctx->jump_mag[i]);
+    }
+    free(ctx->merged);
+    free(ctx->all_errors);
+    free(ctx->lambda_v);
+    free(ctx->lambda_i);
+    free(ctx->jump_time);
+    free(ctx->jump_mag);
+    free(ctx->jump_count);
+    free(ctx->jump_cap);
+}
 
 static void free_compute_spikes_ctx(const ComputeSpikesCtx* ctx) {
     eventprop_free_sums_output(ctx->sums);
@@ -633,6 +559,106 @@ static void free_compute_spikes_ctx(const ComputeSpikesCtx* ctx) {
     free(ctx->spike_caps);
     free(ctx->spike_counts);
     free(ctx->entries);
+}
+
+void eventprop_free_spike_output(const SpikeOutput output)
+{
+    free(output.times);
+    free(output.sources);
+    free(output.currents);
+    free(output.errors);
+}
+
+void eventprop_free_sums_output(const SumsOutput output)
+{
+    free(output.sum0);
+    free(output.sum1);
+}
+
+void eventprop_free_maxima_output(const MaximaOutput output)
+{
+    free(output.times);
+    free(output.values);
+    free(output.errors);
+}
+
+void eventprop_free_backward_output(const BackwardOutput output){
+    free(output.grad);
+    free(output.spike_errors);
+}
+
+EventPropError eventprop_validate_input(const EventPropInput input)
+{
+    /* ── Dimension checks ─────────────────────────────────────── */
+    if (input.n_pre <= 0 || input.n_post <= 0)
+        return EVENTPROP_INVALID_DIMENSION;
+    if (input.n_pre > EVENTPROP_MAX_DIM || input.n_post > EVENTPROP_MAX_DIM)
+        return EVENTPROP_DIMENSION_TOO_LARGE;
+    /* n_pre * n_post can overflow int even when both pass MAX_DIM */
+    if ((size_t)input.n_pre * input.n_post > INT_MAX)
+        return EVENTPROP_DIMENSION_TOO_LARGE;
+
+    /* ── Spike count ──────────────────────────────────────────── */
+    if (input.n_spikes < 0)
+        return EVENTPROP_NEGATIVE_SPIKES;
+
+    /* ── Tau bounds and proximity ─────────────────────────────── */
+    if (input.tau_mem <= 0.0 || input.tau_syn <= 0.0)
+        return EVENTPROP_INVALID_TAU;
+    if (input.tau_mem < EVENTPROP_MIN_TAU || input.tau_syn < EVENTPROP_MIN_TAU)
+        return EVENTPROP_TAU_TOO_SMALL;
+    if (input.tau_mem > EVENTPROP_MAX_TAU || input.tau_syn > EVENTPROP_MAX_TAU)
+        return EVENTPROP_TAU_TOO_LARGE;
+    if (input.tau_mem == input.tau_syn)
+        return EVENTPROP_INVALID_TAU;
+
+    /* Relative difference: |tau_mem - tau_syn| / min(tau) < 1e-6 → k_prefactor blows up */
+    {
+        const double min_tau = fmin(input.tau_mem, input.tau_syn);
+        const double rel_diff = fabs(input.tau_mem - input.tau_syn) / min_tau;
+        if (rel_diff < EVENTPROP_TAU_REL_DIFF_MIN)
+            return EVENTPROP_TAU_TOO_CLOSE;
+    }
+
+    /* ── Threshold voltage ────────────────────────────────────── */
+    if (input.v_th <= 0.0)
+        return EVENTPROP_INVALID_VTH;
+
+    /* ── Pointer checks ───────────────────────────────────────── */
+    if (input.w == NULL)
+        return EVENTPROP_NULL_POINTER;
+    if (input.n_spikes > 0) {
+        if (input.times == NULL || input.sources == NULL)
+            return EVENTPROP_NULL_POINTER;
+    } else {
+        /* n_spikes == 0: times/sources may be NULL, nothing to iterate */
+        return EVENTPROP_OK;
+    }
+
+    /* ── Per-spike checks (single pass) ──────────────────────── */
+    double max_time = -1.0;   /* sentinel: will become >= 0 on first spike */
+    for (int i = 0; i < input.n_spikes; i++) {
+        if (input.sources[i] < 0 || input.sources[i] >= input.n_pre)
+            return EVENTPROP_INVALID_SOURCE;
+
+        const double t = input.times[i];
+        if (t < 0.0)
+            return EVENTPROP_NEGATIVE_SPIKE_TIME;
+        if (t > EVENTPROP_MAX_SPIKE_TIME)
+            return EVENTPROP_EXCESSIVE_SPIKE_TIME;
+        if (max_time < 0.0 || t > max_time)
+            max_time = t;
+    }
+
+    /* ── Cross-field: times vs tau overflow check ─────────────── */
+    /* exp(max_time / min_tau) must stay finite (< INF at ~709.78). */
+    {
+        const double min_tau = fmin(input.tau_mem, input.tau_syn);
+        if (max_time > 0.0 && max_time / min_tau >= EVENTPROP_EXP_OVERFLOW_THRESHOLD)
+            return EVENTPROP_TIMES_TAU_MISMATCH;
+    }
+
+    return EVENTPROP_OK;
 }
 
 SpikeOutput eventprop_compute_spikes(const EventPropInput input)
@@ -688,7 +714,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
     }
 
     /* Start with 3× estimated spikes to reduce realloc overhead */
-    const size_t initial_cap = (size_t)(input.n_spikes * 3 + 1);
+    const size_t initial_cap = (size_t)(3 * input.n_spikes + 1);
     int failed = 0;
     for (int n = 0; n < input.n_post; n++) {
         ctx.post_times_arr[n]   = calloc(initial_cap, sizeof(double));
@@ -1266,35 +1292,6 @@ cleanup_and_return:
         eventprop_free_backward_output(result);
     }
     return result;
-}
-
-/** Context for eventprop_backward_spikes — groups all heap allocations. */
-typedef struct BackwardSpikesCtx {
-    MergedSpike* merged;
-    double* all_errors;
-    double* lambda_v;
-    double* lambda_i;
-    double** jump_time;   // array of pointers
-    double** jump_mag;
-    int* jump_count;
-    int* jump_cap;
-    int n_post_alloc;     // how many per-neuron arrays were actually allocated
-} BackwardSpikesCtx;
-
-static void free_backward_spikes_ctx(BackwardSpikesCtx* ctx) {
-    if (!ctx) return;
-    for (int i = 0; i < ctx->n_post_alloc; i++) {
-        free(ctx->jump_time[i]);
-        free(ctx->jump_mag[i]);
-    }
-    free(ctx->merged);
-    free(ctx->all_errors);
-    free(ctx->lambda_v);
-    free(ctx->lambda_i);
-    free(ctx->jump_time);
-    free(ctx->jump_mag);
-    free(ctx->jump_count);
-    free(ctx->jump_cap);
 }
 
 BackwardOutput eventprop_backward_spikes(const EventPropInput input, const SpikeOutput spike){
