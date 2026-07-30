@@ -260,7 +260,7 @@ static void fma_row_simd(double* dest, const double* src, const double* weights,
         return;
     }
 
-    int vec = simd_vec_width();
+    const int vec = simd_vec_width();
     const int vec_count = n / vec;
 
 #if defined(HAVE_AVX512F) || defined(HAVE_AVX2)
@@ -458,7 +458,7 @@ static void vsub_simd(double* dest, const double* a, const double* b, int n)
         return;
     }
 
-    int vec = simd_vec_width();
+    const int vec = simd_vec_width();
     const int vec_count = n / vec;
 
 #if defined(HAVE_AVX512F) || defined(HAVE_AVX2)
@@ -645,11 +645,11 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
         goto cleanup_and_return;
     }
     
-    double k_prefactor = input.tau_syn / (input.tau_mem - input.tau_syn);
-    double tmax_prefactor = 1.0 / (1.0 / input.tau_mem - 1.0 / input.tau_syn);
-    double tmax_summand = log(input.tau_syn / input.tau_mem);
-    double tau_mem_inv = 1.0 / input.tau_mem;
-    double tau_syn_inv = 1.0 / input.tau_syn;
+    const double k_prefactor = input.tau_syn / (input.tau_mem - input.tau_syn);
+    const double tmax_prefactor = 1.0 / (1.0 / input.tau_mem - 1.0 / input.tau_syn);
+    const double tmax_summand = log(input.tau_syn / input.tau_mem);
+    const double tau_mem_inv = 1.0 / input.tau_mem;
+    const double tau_syn_inv = 1.0 / input.tau_syn;
 
     /* Compute sums */
     ctx.sums = eventprop_compute_sums(input);
@@ -688,7 +688,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
     }
 
     /* Start with 3× estimated spikes to reduce realloc overhead */
-    size_t initial_cap = (size_t)(input.n_spikes * 3 + 1);
+    const size_t initial_cap = (size_t)(input.n_spikes * 3 + 1);
     int failed = 0;
     for (int n = 0; n < input.n_post; n++) {
         ctx.post_times_arr[n]   = calloc(initial_cap, sizeof(double));
@@ -1133,9 +1133,9 @@ MaximaOutput eventprop_compute_maxima(const EventPropInput input)
     double* sum1 = sums.sum1;
 
     /* Find maxima for each post-synaptic neuron */
-    double k_pref = input.tau_syn / (input.tau_mem - input.tau_syn);
-    double tmax_pref = 1.0 / (1.0/input.tau_mem - 1.0/input.tau_syn);
-    double tmax_sum = log(input.tau_syn / input.tau_mem);
+    const double k_pref = input.tau_syn / (input.tau_mem - input.tau_syn);
+    const double tmax_pref = 1.0 / (1.0/input.tau_mem - 1.0/input.tau_syn);
+    const double tmax_sum = log(input.tau_syn / input.tau_mem);
 
     /* No spikes → nothing to compute, return NaN/0 (matches Eigen) */
     if (input.n_spikes == 0) {
@@ -1227,8 +1227,8 @@ BackwardOutput eventprop_backward_maxima(const EventPropInput input,
         goto cleanup_and_return;
     }
 
-    double largest_time = input.times[input.n_spikes - 1];
-    double k_bwd_prefactor = input.tau_mem / (input.tau_mem - input.tau_syn);
+    const double largest_time = input.times[input.n_spikes - 1];
+    const double k_bwd_prefactor = input.tau_mem / (input.tau_mem - input.tau_syn);
 
     /* Precompute inverse time constants */
     const double tau_mem_inv = 1.0 / input.tau_mem;
@@ -1450,8 +1450,9 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
     MutableMatrixView grad = mv_mut(result.grad, input.n_pre, input.n_post);
     MatrixView w           = mv(input.w, input.n_pre, input.n_post);
 
-    double largest_time = ctx.merged[0].time, previous_t = largest_time;
-    double k_bwd = input.tau_mem / (input.tau_mem - input.tau_syn);
+    const double largest_time = ctx.merged[0].time;
+    double previous_t = largest_time;
+    const double k_bwd = input.tau_mem / (input.tau_mem - input.tau_syn);
 
     for (int s = 0; s < total; s++) {
         int spike_idx = ctx.merged[s].idx, is_input = ctx.merged[s].is_input;

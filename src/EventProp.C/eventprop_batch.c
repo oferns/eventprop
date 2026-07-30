@@ -254,7 +254,7 @@ AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
 {
     AccumulatedBackwardResult result = (AccumulatedBackwardResult)  { .error_no = EVENTPROP_OK };
 
-    int batch_size = spikes_batch.batch_size;
+    const int batch_size = spikes_batch.batch_size;
 
      if (batch_size <= 0) {
         result.has_errors = 1;
@@ -319,7 +319,7 @@ AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
 AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
     const EventPropInput* inputs, const MaximaBatch maxima_batch)
 {
-    int batch_size = maxima_batch.batch_size;
+    const int batch_size = maxima_batch.batch_size;
     AccumulatedBackwardResult result  = (AccumulatedBackwardResult) { .error_no = EVENTPROP_OK };
   
     if (batch_size <= 0) {

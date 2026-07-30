@@ -84,7 +84,7 @@ VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput input
         return result;
     }
 
-    double k_prefactor = fwd->tau_syn / (fwd->tau_mem - fwd->tau_syn);
+    const double k_prefactor = fwd->tau_syn / (fwd->tau_mem - fwd->tau_syn);
     MatrixView w = mv(fwd->w, fwd->n_pre, fwd->n_post);
 
     for (int ti = 0; ti < n_t; ti++) {
@@ -171,11 +171,11 @@ LambdaITraceOutput eventprop_compute_lambda_i_trace(const LambdaITraceInput inpu
             continue;
         }
 
-        double largest_time = input.fwd_times[input.n_post_spikes - 1];
+        const double largest_time = input.fwd_times[input.n_post_spikes - 1];
 
         double lambda_i = 0.0;
         double t_bwd_from_t = largest_time - t;
-        double k_bwd_prefactor = input.tau_mem / (input.tau_mem - input.tau_syn);
+        const double k_bwd_prefactor = input.tau_mem / (input.tau_mem - input.tau_syn);
 
         /* Collect jumps from post-synaptic spikes after time t */
         for (int i = input.n_post_spikes - 1; i >= 0; i--) {
