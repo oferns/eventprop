@@ -174,6 +174,14 @@ BackwardOutput eventprop_backward_maxima(EventPropInput input,
 /** Validate an EventPropInput and return the first error found (or OK). */
 EventPropError eventprop_validate_input(EventPropInput input);
 
+/**
+ * Return a human-readable description of an error code.
+ *
+ * Returns English strings.  Callers (Python/C#) can translate these if needed.
+ * Returns "Unknown error" for out-of-range codes.
+ */
+const char* eventprop_error_string(int error_no);
+
 #ifdef __cplusplus
 }
 #endif

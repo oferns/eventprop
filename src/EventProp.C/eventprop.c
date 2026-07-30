@@ -1523,3 +1523,63 @@ cleanup_and_return:
     }
     return result;
 }
+
+/** ── Error string helper ─────────────────────────────────────────────── */
+
+const char* eventprop_error_string(int error_no)
+{
+    switch (error_no) {
+        case EVENTPROP_OK:                      return "OK";
+        case EVENTPROP_INVALID_DIMENSION:       return "Invalid dimension: n_pre or n_post must be positive";
+        case EVENTPROP_NEGATIVE_SPIKES:         return "Negative spike count";
+        case EVENTPROP_NULL_POINTER:            return "NULL pointer: w, times, or sources is NULL when required";
+        case EVENTPROP_INVALID_SOURCE:          return "Invalid source neuron index (out of [0, n_pre) range)";
+        case EVENTPROP_INVALID_TAU:             return "Invalid tau: tau_mem and tau_syn must be positive and distinct";
+        case EVENTPROP_INVALID_CURRENT:         return "Invalid current: spike current equals threshold (division by zero)";
+        case EVENTPROP_NEGATIVE_SPIKE_TIME:     return "Negative spike time";
+        case EVENTPROP_EXCESSIVE_SPIKE_TIME:    return "Spike time exceeds maximum allowed value";
+        case EVENTPROP_TAU_TOO_SMALL:           return "Tau too small (below minimum threshold)";
+        case EVENTPROP_TAU_TOO_LARGE:           return "Tau too large (above maximum threshold)";
+        case EVENTPROP_INVALID_VTH:             return "Invalid spike threshold: v_th must be positive";
+        case EVENTPROP_DIMENSION_TOO_LARGE:     return "Dimension exceeds maximum allowed size";
+        case EVENTPROP_TIMES_TAU_MISMATCH:      return "Spike time and tau mismatch would cause exponential overflow";
+        case EVENTPROP_TAU_TOO_CLOSE:           return "tau_mem and tau_syn are too close together";
+        case EVENTPROP_BATCHSIZE_ZERO_OR_NEG:   return "Batch size must be positive";
+        case EVENTPROP_ALLOC_SUM0:              return "Allocation failed: sum0 array";
+        case EVENTPROP_ALLOC_SUM1:              return "Allocation failed: sum1 array";
+        case EVENTPROP_ALLOC_EXP_MEM:           return "Allocation failed: exp_mem lookup table";
+        case EVENTPROP_ALLOC_EXP_SYN:           return "Allocation failed: exp_syn lookup table";
+        case EVENTPROP_ALLOC_TIMES_ARR:         return "Allocation failed: post_times array";
+        case EVENTPROP_ALLOC_CURRENTS_ARR:      return "Allocation failed: post_currents array";
+        case EVENTPROP_ALLOC_SPIKE_CAPS:        return "Allocation failed: spike_caps array";
+        case EVENTPROP_ALLOC_SPIKE_COUNTS:      return "Allocation failed: spike_counts array";
+        case EVENTPROP_ALLOC_NEURON_BUF:        return "Allocation failed: per-neuron times/currents buffer";
+        case EVENTPROP_ALLOC_ENTRIES:           return "Allocation failed: entries (sorted collection)";
+        case EVENTPROP_ALLOC_RESULT_TIMES:      return "Allocation failed: result spike times";
+        case EVENTPROP_ALLOC_RESULT_SOURCES:    return "Allocation failed: result spike sources";
+        case EVENTPROP_ALLOC_RESULT_CURRENTS:   return "Allocation failed: result spike currents";
+        case EVENTPROP_ALLOC_RESULT_ERRORS:     return "Allocation failed: result errors buffer";
+        case EVENTPROP_ALLOC_MAXIMA_TIMES:      return "Allocation failed: maxima times array";
+        case EVENTPROP_ALLOC_MAXIMA_VALUES:     return "Allocation failed: maxima values array";
+        case EVENTPROP_ALLOC_MAXIMA_ERRORS:     return "Allocation failed: maxima errors array";
+        case EVENTPROP_ALLOC_BWD_GRAD:          return "Allocation failed: backward gradient matrix";
+        case EVENTPROP_ALLOC_BWD_SPIKE_ERRORS:  return "Allocation failed: backward spike errors buffer";
+        case EVENTPROP_ALLOC_BWD_MERGED:        return "Allocation failed: backward merged spike array";
+        case EVENTPROP_ALLOC_BWD_ALL_ERRORS:    return "Allocation failed: backward all_errors buffer";
+        case EVENTPROP_ALLOC_BWD_LAMBDA_V:      return "Allocation failed: backward lambda_v array";
+        case EVENTPROP_ALLOC_BWD_LAMBDA_I:      return "Allocation failed: backward lambda_i array";
+        case EVENTPROP_ALLOC_BWD_JUMP_TIME:     return "Allocation failed: backward jump_time array";
+        case EVENTPROP_ALLOC_BWD_JUMP_MAG:      return "Allocation failed: backward jump_mag array";
+        case EVENTPROP_ALLOC_BWD_JUMP_COUNT:    return "Allocation failed: backward jump_count array";
+        case EVENTPROP_ALLOC_BWD_JUMP_CAP:      return "Allocation failed: backward jump_cap array";
+        case EVENTPROP_ALLOC_BWD_PER_NEURON:    return "Allocation failed: per-neuron backward buffer";
+        case EVENTPROP_ALLOC_BATCH_OUTPUTS:     return "Allocation failed: batch outputs array";
+        case EVENTPROP_ALLOC_BATCH_GRAD:        return "Allocation failed: accumulated gradient pointer";
+        case EVENTPROP_ALLOC_DROPOUT_SAMPLE:    return "Allocation failed: dropout per-sample buffer";
+        case EVENTPROP_ALLOC_DIAG_V_TRACE:      return "Allocation failed: voltage trace array";
+        case EVENTPROP_ALLOC_DIAG_TS:           return "Allocation failed: time steps array";
+        case EVENTPROP_ALLOC_DIAG_LAMBDA:       return "Allocation failed: lambda-I trace array";
+        case EVENTPROP_BATCH_EMPTY:             return "Batch input was empty or NULL";
+        default:                                return "Unknown error";
+    }
+}
