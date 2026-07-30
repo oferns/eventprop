@@ -63,6 +63,9 @@ EventPropError eventprop_validate_input(const EventPropInput input)
         return EVENTPROP_INVALID_DIMENSION;
     if (input.n_pre > EVENTPROP_MAX_DIM || input.n_post > EVENTPROP_MAX_DIM)
         return EVENTPROP_DIMENSION_TOO_LARGE;
+    /* n_pre * n_post can overflow int even when both pass MAX_DIM */
+    if ((size_t)input.n_pre * input.n_post > INT_MAX)
+        return EVENTPROP_DIMENSION_TOO_LARGE;
 
     /* ── Spike count ──────────────────────────────────────────── */
     if (input.n_spikes < 0)
@@ -1042,12 +1045,7 @@ SumsOutput eventprop_compute_sums(const EventPropInput input)
         goto cleanup_and_return;
     }
 
-    if((result.n_rows > 0 && input.n_post > INT_MAX / result.n_rows)) {
-        result.error_no = EVENTPROP_DIMENSION_TOO_LARGE; /* n_rows*n_post overflows int */
-        goto cleanup_and_return;
-    }
-
-    size_t count = result.n_rows * input.n_post;
+    size_t count = (size_t)result.n_rows * input.n_post;
     
     result.sum0 = calloc(count, sizeof(double));
     if(!result.sum0) {
@@ -1223,12 +1221,6 @@ BackwardOutput eventprop_backward_maxima(const EventPropInput input,
         goto cleanup_and_return;
     }
 
-    /* Check for integer overflow in allocation size */
-    if (input.n_pre > 0 && input.n_post > INT_MAX / input.n_pre) {
-        result.error_no     = EVENTPROP_DIMENSION_TOO_LARGE; /* n_pre*n_post overflows int */
-        goto cleanup_and_return;
-    }
-
     /* Allocate output */
     result.grad         = calloc((size_t)(input.n_pre * input.n_post), sizeof(double));
     if (!result.grad) {
@@ -1315,12 +1307,6 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
     /* Validate output spike count */
     if (spike.n_spikes < 0) {
         result.error_no     = EVENTPROP_NEGATIVE_SPIKES;
-        return result;
-    }
-
-    /* Check for integer overflow in allocation sizes */
-    if (input.n_pre > 0 && input.n_post > INT_MAX / input.n_pre) {
-        result.error_no     = EVENTPROP_ALLOCATION_FAILED;
         return result;
     }
 
