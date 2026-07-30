@@ -68,14 +68,16 @@ VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput input
 
     result.n_t = n_t;
     result.v_trace = calloc(n_t, sizeof(double));
-    result.ts      = calloc(n_t, sizeof(double));
+    if (!result.v_trace) {
+        result.error_no = EVENTPROP_ALLOC_DIAG_V_TRACE;
+        return result;
+    }
 
-    if (!result.v_trace || !result.ts) {
+    result.ts = calloc(n_t, sizeof(double));
+    if (!result.ts) {
         free(result.v_trace);
-        free(result.ts);
         result.v_trace = NULL;
-        result.ts      = NULL;
-        result.error_no = EVENTPROP_ALLOCATION_FAILED;
+        result.error_no = EVENTPROP_ALLOC_DIAG_TS;
         return result;
     }
 
@@ -144,14 +146,16 @@ LambdaITraceOutput eventprop_compute_lambda_i_trace(const LambdaITraceInput inpu
 
     result.n_t = n_t;
     result.lambda_trace = calloc(n_t, sizeof(double));
-    result.ts           = calloc(n_t, sizeof(double));
+    if (!result.lambda_trace) {
+        result.error_no = EVENTPROP_ALLOC_DIAG_LAMBDA;
+        return result;
+    }
 
-    if (!result.lambda_trace || !result.ts) {
+    result.ts = calloc(n_t, sizeof(double));
+    if (!result.ts) {
         free(result.lambda_trace);
-        free(result.ts);
         result.lambda_trace = NULL;
-        result.ts           = NULL;
-        result.error_no     = EVENTPROP_ALLOCATION_FAILED;
+        result.error_no     = EVENTPROP_ALLOC_DIAG_TS;
         return result;
     }
 
