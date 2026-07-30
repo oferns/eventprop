@@ -124,8 +124,6 @@ typedef struct MaximaOutput {
     double* errors;          /* Maxima errors per post-neuron (malloc'd, n_post) — written by caller before backward pass */
 } MaximaOutput;
 
-
-
 typedef struct BackwardOutput {
     EventPropError error_no;  /* Error code (EVENTPROP_OK on success) */
     int n_pre;                /* Pre-synaptic neurons */
@@ -134,7 +132,6 @@ typedef struct BackwardOutput {
     double* grad;            /* Weight gradient (malloc'd, n_pre * n_post) */
     double* spike_errors;   /* Input spike errors (malloc'd, n_spikes) */
 } BackwardOutput;
-
 
 void eventprop_free_spike_output(SpikeOutput output);
 void eventprop_free_sums_output(SumsOutput output);

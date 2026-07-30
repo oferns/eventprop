@@ -12,13 +12,13 @@
 /* Numerical stability epsilon for lambda-I backward current computation */
 #define LAMBDA_I_VTH_EPS 0.001
 
-void eventprop_free_lambda_i_trace_output(LambdaITraceOutput output)
+void eventprop_free_lambda_i_trace_output(const LambdaITraceOutput output)
 {
     free(output.lambda_trace);
     free(output.ts);
 }
 
-void eventprop_free_voltage_trace_output(VoltageTraceOutput output)
+void eventprop_free_voltage_trace_output(const VoltageTraceOutput output)
 {
     free(output.v_trace);
     free(output.ts);

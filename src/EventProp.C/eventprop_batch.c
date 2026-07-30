@@ -10,6 +10,62 @@ static inline double lcg_rand(uint64_t* state)
     return ((double)(*state >> 11)) / 9007199254740992.0;  /* [0, 1), ~53 bits of precision */
 }
 
+void eventprop_free_spikes_batch(const SpikesBatch batch)
+{
+    for (int b = 0; b < batch.batch_size; b++) {
+        eventprop_free_spike_output(batch.spikes[b]);
+    }
+    free(batch.spikes);
+}
+
+void eventprop_free_maxima_batch(const MaximaBatch batch)
+{
+    for (int b = 0; b < batch.batch_size; b++) {
+        eventprop_free_maxima_output(batch.outputs[b]);
+    }
+    free(batch.outputs);
+}
+
+void eventprop_free_backwards_batch(const BackwardsBatch batch)
+{
+    for (int b = 0; b < batch.batch_size; b++) {
+        eventprop_free_backward_output(batch.outputs[b]);
+    }
+    free(batch.outputs);
+}
+
+void eventprop_free_gradient_output(const GradientOutput output)
+{
+    free(output.data);
+}
+
+void eventprop_free_accumulated_backward_result(const AccumulatedBackwardResult result)
+{
+    if (result.summed_grads) {
+        eventprop_free_gradient_output(*result.summed_grads);
+        free(result.summed_grads);
+    }
+
+    for (int b = 0; b < result.batch_size; b++) {
+        eventprop_free_backward_output(result.outputs[b]);
+    }
+    free(result.outputs);
+}
+
+void eventprop_free_dropout_output(const DropoutOutput output)
+{
+    free(output.times);
+    free(output.sources);
+}
+
+void eventprop_free_dropout_batch(const DropoutBatch batch)
+{
+    for (int b = 0; b < batch.batch_size; b++) {
+        eventprop_free_dropout_output(batch.outputs[b]);
+    }
+    free(batch.outputs);
+}
+
 SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, const int batch_size)
 {
     SpikesBatch result = (SpikesBatch){ .spikes = 0 };
@@ -383,17 +439,11 @@ AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
     return result;
 }
 
-/**
- * Flat-array dropout — randomly drop spikes from each sample.
- *
- * Accepts flat concatenated spike arrays and per-sample offset counts.
- * Designed for FFI callers (Cython, P/Invoke) that have flat numpy buffers.
- */
 DropoutBatch eventprop_dropout_spikes_batch(
     const double* times,
     const int* sources,
     const int* n_per_sample,
-    int batch_size,
+    const int batch_size,
     double p_drop,
     int seed
 )
@@ -478,60 +528,3 @@ DropoutBatch eventprop_dropout_spikes_batch(
     free(offsets);
     return result;
 }
-
-void eventprop_free_spikes_batch(SpikesBatch batch)
-{
-    for (int b = 0; b < batch.batch_size; b++) {
-        eventprop_free_spike_output(batch.spikes[b]);
-    }
-    free(batch.spikes);
-}
-
-void eventprop_free_maxima_batch(MaximaBatch batch)
-{
-    for (int b = 0; b < batch.batch_size; b++) {
-        eventprop_free_maxima_output(batch.outputs[b]);
-    }
-    free(batch.outputs);
-}
-
-void eventprop_free_backwards_batch(BackwardsBatch batch)
-{
-    for (int b = 0; b < batch.batch_size; b++) {
-        eventprop_free_backward_output(batch.outputs[b]);
-    }
-    free(batch.outputs);
-}
-
-void eventprop_free_gradient_output(GradientOutput output)
-{
-    free(output.data);
-}
-
-void eventprop_free_accumulated_backward_result(const AccumulatedBackwardResult result)
-{
-    if (result.summed_grads) {
-        eventprop_free_gradient_output(*result.summed_grads);
-        free(result.summed_grads);
-    }
-
-    for (int b = 0; b < result.batch_size; b++) {
-        eventprop_free_backward_output(result.outputs[b]);
-    }
-    free(result.outputs);
-}
-
-void eventprop_free_dropout_output(DropoutOutput output)
-{
-    free(output.times);
-    free(output.sources);
-}
-
-void eventprop_free_dropout_batch(DropoutBatch batch)
-{
-    for (int b = 0; b < batch.batch_size; b++) {
-        eventprop_free_dropout_output(batch.outputs[b]);
-    }
-    free(batch.outputs);
-}
-
