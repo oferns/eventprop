@@ -22,7 +22,8 @@ eventprop.net/
 │   ├── EventProp.Python/       # Reference library (git submodule, read-only)
 │   │                           # Python + C++ (Eigen/pybind11) — source of truth
 │   ├── EventProp.C/            # Pure C implementation (libeventprop_c_api)
-│   │                           # Batch API with flat-array FFI variants
+│   │                           # Batch API, flat-array FFI, strict warnings, ASan support
+│   ├── EventProp.C.Tests/      # Google Test v1.15.2 suite for C library (176 tests)
 │   ├── EventProp.Cpp.Wrapper/  # C++ Eigen core (convenience copy, no pybind11)
 │   │                           # Used for native benchmarks and parity tests
 │   ├── EventProp.Native/       # .NET P/Invoke bindings → C library
@@ -141,6 +142,21 @@ cd src/EventProp.Tests && dotnet run -c Release -- --no-progress
 ```
 
 > **Note**: TUnit uses Microsoft Testing Platform (MTP), not VSTest. `dotnet test` does NOT work. The `-c` flag goes BEFORE `--`, TUnit flags go AFTER `--`. Use `--treenode-filter` instead of `--filter`.
+
+### C Library Unit Tests (Google Test)
+
+```bash
+cd src/EventProp.C.Tests && rm -rf build && mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
+./eventprop_tests  # 176 tests
+```
+
+**With AddressSanitizer** (Debug builds only):
+```bash
+cd src/EventProp.C/build && rm -rf * && cmake .. -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=ON && cmake --build .
+cd ../EventProp.C.Tests/build && rm -rf * && cmake .. -DENABLE_ASAN=ON && cmake --build .
+./eventprop_tests  # detects use-after-free, buffer overflows
+```
 
 ### C/C++ Parity Tests (C vs Eigen)
 

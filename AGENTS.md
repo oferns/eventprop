@@ -18,6 +18,7 @@ This repository implements the **EventProp** algorithm — an event-based backpr
 | **EventProp.Native.Python/** | Python + Cython | Python layer using C library via Cython bindings (`eventprop_c/_native.pyx`) |
 | **EventProp.Native/** | C# (.NET 10) | P/Invoke bindings wrapping EventProp.C via `LibraryImport` |
 | **EventProp/** | C# (.NET 10) | Self-contained, fully managed .NET implementation of EventProp.Python |
+| **EventProp.C.Tests/** | C++ (Google Test v1.15.2) | Unit tests for EventProp.C library (176 tests, ASan-compatible) |
 | **EventProp.Tests/** | C# (.NET 10) | TUnit test suite for .NET projects (correctness + parity) |
 | **EventProp.Benchmarks/** | C# (.NET 10) | BenchmarkDotNet project comparing native vs managed .NET libraries |
 | **EventProp.Native.Benchmarks/** | C++ (Google Benchmark) | Benchmarks comparing EventProp.C vs EventProp.Python C++ code |
@@ -35,9 +36,11 @@ eventprop.net/
 │   ├── EventProp.C/            # Pure C implementation (libeventprop_c_api)
 │   │   ├── eventprop.h/.c      # Core algorithm + single-sample functions
 │   │   ├── eventprop_batch.h/.c# Batch API with flat-array FFI variants
-│   │   └── tests.c             # Unit tests (being rewritten to Google Test)
+│   │   ├── eventprop_diag.h/.c # Diagnostic functions (voltage traces, lambda sweeps)
+│   │   └── CMakeLists.txt      # Build config: strict warnings, SIMD, OpenMP, ASan
 │   ├── EventProp.Cpp.Wrapper/  # C++ Eigen core (convenience copy, no pybind11)
 │   ├── EventProp.Native/       # .NET P/Invoke bindings (C library)
+│   ├── EventProp.C.Tests/      # Google Test v1.15.2 suite for C library (176 tests)
 │   ├── EventProp/              # Managed .NET implementation
 │   ├── EventProp.Tests/        # TUnit test suite (correctness + parity)
 │   ├── EventProp.Benchmarks/   # BenchmarkDotNet (native vs managed .NET)
@@ -56,7 +59,7 @@ eventprop.net/
 - **Root namespace**: `CW.EventProp` (library), `CW.EventProp.Tests` (tests)
 - **Nullable**: enabled across all projects
 - **Implicit usings**: enabled
-- **Test framework**: TUnit 1.45+ (Microsoft Testing Platform) for .NET; Google Test planned for C/C++
+- **Test framework**: TUnit 1.45+ (Microsoft Testing Platform) for .NET; Google Test v1.15.2 for C/C++ (`EventProp.C.Tests/`)
 - **Coverage**: TUnit `--coverage --coverage-output-format=cobertura` + ReportGenerator
 
 ## Building
@@ -100,6 +103,22 @@ cd src/EventProp.Tests && dotnet run -c Release -- --treenode-filter "/*/*/Backw
 ```
 
 > **Note**: TUnit uses Microsoft Testing Platform (MTP), not VSTest. `dotnet test` does NOT work. The `-c` flag goes BEFORE `--`, TUnit flags go AFTER `--`. Use `--treenode-filter` instead of `--filter`.
+
+### C Library Unit Tests (Google Test)
+
+```bash
+cd src/EventProp.C.Tests && rm -rf build && mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
+./eventprop_tests
+```
+
+**With AddressSanitizer** (Debug builds only, detects use-after-free, buffer overflows):
+```bash
+cd src/EventProp.C/build && rm -rf * && cmake .. -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=ON && cmake --build .
+cd ../EventProp.C.Tests/build && rm -rf * && cmake .. -DENABLE_ASAN=ON && cmake --build .
+./eventprop_tests
+```
+> **Note**: On macOS, ASan automatically builds a static library (`.a`) instead of shared (`.dylib`) due to AppleClang linker limitations.
 
 ### C/C++ Parity Tests (C vs Eigen)
 
@@ -176,6 +195,79 @@ cd src/EventProp.Tests && dotnet run -c Release -- --coverage --coverage-output-
 export PATH="$PATH:$HOME/.dotnet/tools"
 reportgenerator -reports:bin/Release/net10.0/TestResults/*.cobertura.xml \
   -targetdir:../../coverage-report -reporttypes:Html
+```
+
+## C Library Coding Style
+
+### Error Handling: Single-Return Pattern
+
+All functions use a single `goto cleanup_and_return` at the end. On error, set `result.error_no` and jump to cleanup. Output free functions are only called when `result.error_no != EVENTPROP_OK`, preserving result data for successful returns.
+
+```c
+ResultType eventprop_foo(const Input input) {
+    ResultType result = {0};
+    SomeCtx ctx = {0};  // context groups heap allocations
+
+    if (eventprop_validate_input(input)) return result;
+
+    ctx.data = malloc(...);
+    if (!ctx.data) {
+        result.error_no = EVENTPROP_SPECIFIC_ALLOC_CODE;
+        goto cleanup_and_return;
+    }
+
+    /* ... main logic ... */
+
+cleanup_and_return:
+    if (result.error_no != EVENTPROP_OK) free_ctx(&ctx);
+    return result;
+}
+```
+
+### Error Codes: Specific, Not Generic
+
+Each allocation site gets its own error code. No generic `EVENTPROP_ALLOCATION_FAILED` — callers should know exactly which allocation failed.
+
+### Context Structs for Cleanup
+
+Group related heap allocations into a context struct with a single free function. This eliminates copy-pasted cleanup across multiple error paths and prevents forgotten frees.
+
+### Sequential Allocation Checks
+
+Never do simultaneous `realloc` calls (e.g., `realloc(a)` then `realloc(b)`). If the first succeeds but the second fails, you lose the original pointer to `a`. Always check each allocation before moving to the next:
+
+```c
+double* new_a = realloc(old_a, ...);
+if (!new_a) { result.error_no = CODE_A; goto cleanup_and_return; }
+a = new_a;
+
+double* new_b = realloc(old_b, ...);
+if (!new_b) { free(new_a); result.error_no = CODE_B; goto cleanup_and_return; }  // undo a
+b = new_b;
+```
+
+### Designated Initializers
+
+Use `{ .field = value }` syntax for struct initialization — remaining fields are zero-initialized per C99 §6.7.8/20.
+
+### Magic Numbers as Named Constants
+
+Extract hardcoded thresholds to named constants at the top of files (e.g., `TOMS748_NEAR_ZERO`, `SPIKE_THRESHOLD_EPS`).
+
+### Compiler Warnings
+
+The CMake build enables strict warnings: `-Wall -Wextra -Wpedantic -Wshadow -Wimplicit-fallthrough -Wformat=2 -Wnull-dereference` (GCC/Clang), `/W4` (MSVC). GCC additionally gets `-Wduplicated-cond`, `-Wmisleading-indentation`, `-Wlogical-op`. Code must compile with zero warnings.
+
+### Memory Testing: AddressSanitizer
+
+Both library and test CMakeLists support `-DENABLE_ASAN=ON` for memory error detection (use-after-free, buffer overflow). On macOS this builds a static library instead of shared (AppleClang limitation).
+
+```bash
+cd src/EventProp.C/build && cmake .. -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=ON
+cmake --build .
+cd ../EventProp.C.Tests/build && cmake .. -DENABLE_ASAN=ON
+cmake --build .
+./eventprop_tests
 ```
 
 ## C Library API Design
