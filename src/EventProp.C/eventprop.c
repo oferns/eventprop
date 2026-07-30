@@ -721,7 +721,10 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
     }
 
     /* Shared error flag for OpenMP region: threads bail out gracefully on OOM */
-    volatile int fwd_alloc_error = 0;
+#ifdef _OPENMP 
+    volatile 
+#endif
+    int fwd_alloc_error = 0;
 
     int target_nrn; // separated from initialization for the benefit of MSVCC
 #ifdef _OPENMP
@@ -937,7 +940,6 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
         ctx.spike_caps[target_nrn]       = cap;
         ctx.spike_counts[target_nrn]     = count;
     }
-
 
     if (fwd_alloc_error) {
         result.n_spikes = 0;
