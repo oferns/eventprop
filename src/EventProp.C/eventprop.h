@@ -60,7 +60,10 @@ typedef enum EventPropError {
     EVENTPROP_ALLOC_BWD_JUMP_COUNT    = 42,  /* backward jump_count array */
     EVENTPROP_ALLOC_BWD_JUMP_CAP      = 43,  /* backward jump_cap array */
     EVENTPROP_ALLOC_BWD_PER_NEURON    = 44,  /* per-neuron jump_time/mag buffer */
-    EVENTPROP_BATCH_EMPTY             = 45   /* batch input was null*/
+    EVENTPROP_ALLOC_BATCH_OUTPUTS     = 45,  /* batch outputs array */
+    EVENTPROP_ALLOC_BATCH_GRAD        = 46,  /* accumulate grad pointer */
+    EVENTPROP_ALLOC_DROPOUT_SAMPLE    = 47,  /* dropout per-sample buffer */
+    EVENTPROP_BATCH_EMPTY             = 48   /* batch input was null*/
 } EventPropError;
 
 /** ── Validation limits ──────────────────────────────────────────────── */
