@@ -21,7 +21,6 @@ typedef enum EventPropError {
     EVENTPROP_NULL_POINTER            = 3,   /* w/times/sources is NULL when required */
     EVENTPROP_INVALID_SOURCE          = 4,   /* sources[i] out of [0, n_pre) range */
     EVENTPROP_INVALID_TAU             = 5,   /* tau_mem <= 0, tau_syn <= 0, or tau_mem == tau_syn */
-    EVENTPROP_ALLOCATION_FAILED       = 6,   /* calloc/malloc returned NULL */
     EVENTPROP_INVALID_CURRENT         = 7,   /* spike.currents[i] == v_th (division by zero) */
     EVENTPROP_NEGATIVE_SPIKE_TIME     = 8,   /* times[i] < 0 */
     EVENTPROP_EXCESSIVE_SPIKE_TIME    = 9,   /* max(times) > MAX_SPIKE_TIME */
