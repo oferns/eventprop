@@ -51,7 +51,16 @@ typedef enum EventPropError {
     EVENTPROP_ALLOC_MAXIMA_ERRORS     = 33,  /* maxima result.errors */
     EVENTPROP_ALLOC_BWD_GRAD          = 34,  /* backward result.grad */
     EVENTPROP_ALLOC_BWD_SPIKE_ERRORS  = 35,  /* backward result.spike_errors */
-    EVENTPROP_BATCH_EMPTY             = 36   /* batch input was null*/
+    EVENTPROP_ALLOC_BWD_MERGED        = 36,  /* backward merged spike array */
+    EVENTPROP_ALLOC_BWD_ALL_ERRORS    = 37,  /* backward all_errors buffer */
+    EVENTPROP_ALLOC_BWD_LAMBDA_V      = 38,  /* backward lambda_v */
+    EVENTPROP_ALLOC_BWD_LAMBDA_I      = 39,  /* backward lambda_i */
+    EVENTPROP_ALLOC_BWD_JUMP_TIME     = 40,  /* backward jump_time array */
+    EVENTPROP_ALLOC_BWD_JUMP_MAG      = 41,  /* backward jump_mag array */
+    EVENTPROP_ALLOC_BWD_JUMP_COUNT    = 42,  /* backward jump_count array */
+    EVENTPROP_ALLOC_BWD_JUMP_CAP      = 43,  /* backward jump_cap array */
+    EVENTPROP_ALLOC_BWD_PER_NEURON    = 44,  /* per-neuron jump_time/mag buffer */
+    EVENTPROP_BATCH_EMPTY             = 45   /* batch input was null*/
 } EventPropError;
 
 /** ── Validation limits ──────────────────────────────────────────────── */

@@ -1282,6 +1282,35 @@ cleanup_and_return:
     return result;
 }
 
+/** Context for eventprop_backward_spikes — groups all heap allocations. */
+typedef struct BackwardSpikesCtx {
+    MergedSpike* merged;
+    double* all_errors;
+    double* lambda_v;
+    double* lambda_i;
+    double** jump_time;   // array of pointers
+    double** jump_mag;
+    int* jump_count;
+    int* jump_cap;
+    int n_post_alloc;     // how many per-neuron arrays were actually allocated
+} BackwardSpikesCtx;
+
+static void free_backward_spikes_ctx(BackwardSpikesCtx* ctx) {
+    if (!ctx) return;
+    for (int i = 0; i < ctx->n_post_alloc; i++) {
+        free(ctx->jump_time[i]);
+        free(ctx->jump_mag[i]);
+    }
+    free(ctx->merged);
+    free(ctx->all_errors);
+    free(ctx->lambda_v);
+    free(ctx->lambda_i);
+    free(ctx->jump_time);
+    free(ctx->jump_mag);
+    free(ctx->jump_count);
+    free(ctx->jump_cap);
+}
+
 BackwardOutput eventprop_backward_spikes(const EventPropInput input, const SpikeOutput spike){
 
     BackwardOutput result = (BackwardOutput){ 
@@ -1290,31 +1319,31 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
         .n_post = input.n_post,   
         .n_spikes = input.n_spikes
     };
+    BackwardSpikesCtx ctx = {0};
 
     if (result.error_no != EVENTPROP_OK) {
-        return result;
-    }
-
-
-    int total = input.n_spikes + spike.n_spikes;
-
-    /* Check for integer overflow in merged array size */
-    if (input.n_spikes > INT_MAX - spike.n_spikes) {
-        result.error_no     = EVENTPROP_ALLOCATION_FAILED;
-        return result;
+        goto cleanup_and_return;
     }
 
     /* Validate output spike count */
     if (spike.n_spikes < 0) {
         result.error_no     = EVENTPROP_NEGATIVE_SPIKES;
-        return result;
+        goto cleanup_and_return;
+    }
+
+    int total = input.n_spikes + spike.n_spikes;
+
+    /* Check for integer overflow in merged array size */
+    if (input.n_spikes > INT_MAX - spike.n_spikes) {
+        result.error_no     = EVENTPROP_ALLOC_BWD_MERGED; /* overflow guard */
+        goto cleanup_and_return;
     }
 
     /* Validate output spike source bounds: post-sources index post-neurons */
     for (int i = 0; i < spike.n_spikes; ++i) {
         if (spike.sources[i] < 0 || spike.sources[i] >= input.n_post) {
             result.error_no     = EVENTPROP_INVALID_SOURCE;
-            return result;
+            goto cleanup_and_return;
         }
     }
 
@@ -1322,150 +1351,144 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
     for (int i = 0; i < spike.n_spikes; ++i) {
         if (spike.currents[i] == input.v_th) {
             result.error_no     = EVENTPROP_INVALID_CURRENT;
-            return result;
+            goto cleanup_and_return;
         }
     }
 
     /* Allocate output */
     result.grad         = calloc((size_t)(input.n_pre * input.n_post), sizeof(double));
-    if(!result.grad){
-        result.error_no     = EVENTPROP_ALLOCATION_FAILED;
-        return result;
+    if (!result.grad) {
+        result.error_no     = EVENTPROP_ALLOC_BWD_GRAD;
+        goto cleanup_and_return;
     }
     
     result.spike_errors = calloc((size_t)input.n_spikes, sizeof(double));
-
     if (!result.spike_errors) {
-        result.error_no     = EVENTPROP_ALLOCATION_FAILED;
-        return result;
+        result.error_no     = EVENTPROP_ALLOC_BWD_SPIKE_ERRORS;
+        goto cleanup_and_return;
     }
 
-        // No output spikes to process
-    if(spike.n_spikes == 0) {
-        return result;
+    /* No output spikes to process */
+    if (spike.n_spikes == 0) {
+        goto cleanup_and_return;
     }
 
-    MergedSpike* merged = malloc((size_t)(total * sizeof(MergedSpike)));
-
-    if (!merged) {
-        result.error_no     = EVENTPROP_ALLOCATION_FAILED;
-        return result;
+    ctx.merged = malloc((size_t)(total * sizeof(MergedSpike)));
+    if (!ctx.merged) {
+        result.error_no     = EVENTPROP_ALLOC_BWD_MERGED;
+        goto cleanup_and_return;
     }
 
     for (int i = 0; i < input.n_spikes; i++) {
-        merged[i].time=input.times[i];
-        merged[i].idx=i;
-        merged[i].is_input=1;
+        ctx.merged[i].time   = input.times[i];
+        ctx.merged[i].idx    = i;
+        ctx.merged[i].is_input = 1;
     }
 
     for (int i = 0; i < spike.n_spikes; i++) {
-        merged[input.n_spikes+i].time = spike.times[i];
-        merged[input.n_spikes+i].idx = i;
-        merged[input.n_spikes+i].is_input=0;
+        ctx.merged[input.n_spikes+i].time     = spike.times[i];
+        ctx.merged[input.n_spikes+i].idx      = i;
+        ctx.merged[input.n_spikes+i].is_input = 0;
     }
 
-      /* Sort descending by time: O(n log n) via qsort */
-    qsort(merged, total, sizeof(MergedSpike), cmp_merged_desc);
+    /* Sort descending by time: O(n log n) via qsort */
+    qsort(ctx.merged, total, sizeof(MergedSpike), cmp_merged_desc);
 
-    double* all_errors = calloc(total, sizeof(double));
-    if(!all_errors){
-        result.error_no     = EVENTPROP_ALLOCATION_FAILED;
-        return result;
+    ctx.all_errors = calloc(total, sizeof(double));
+    if (!ctx.all_errors) {
+        result.error_no     = EVENTPROP_ALLOC_BWD_ALL_ERRORS;
+        goto cleanup_and_return;
     }
 
     for (int i = 0; i < spike.n_spikes; i++) {
-        all_errors[input.n_spikes + i] = spike.errors[i];
+        ctx.all_errors[input.n_spikes + i] = spike.errors[i];
     }
 
-    /* ── Allocate intermediate buffers (with NULL checks) ─────────────── */
+    /* ── Allocate intermediate buffers (sequential checks) ─────────────── */
 
-    double* lambda_v = calloc(input.n_post, sizeof(double));
-    if (!lambda_v) {
-        result.error_no     = EVENTPROP_ALLOCATION_FAILED;
-        return result;
+    ctx.lambda_v = calloc(input.n_post, sizeof(double));
+    if (!ctx.lambda_v) {
+        result.error_no     = EVENTPROP_ALLOC_BWD_LAMBDA_V;
+        goto cleanup_and_return;
     }
    
-    double* lambda_i = malloc(input.n_post * sizeof(double));
-    if (!lambda_i) { 
-        free(lambda_v); 
-        result.error_no     = EVENTPROP_ALLOCATION_FAILED;
-        return result;
+    ctx.lambda_i = malloc(input.n_post * sizeof(double));
+    if (!ctx.lambda_i) {
+        result.error_no     = EVENTPROP_ALLOC_BWD_LAMBDA_I;
+        goto cleanup_and_return;
     }
 
     /* Per-neuron jump storage (matching Eigen's vector<vector<pair<double,double>>> structure) */
-    double** jump_time = calloc(input.n_post, sizeof(double*));
-
-    if (!jump_time) { 
-        free(lambda_v); 
-        free(lambda_i); 
-        result.error_no     = EVENTPROP_ALLOCATION_FAILED;
-        return result;
+    ctx.jump_time  = calloc(input.n_post, sizeof(double*));
+    if (!ctx.jump_time) {
+        result.error_no     = EVENTPROP_ALLOC_BWD_JUMP_TIME;
+        goto cleanup_and_return;
     }
     
-    double** jump_mag  = calloc(input.n_post, sizeof(double*));
-    if (!jump_mag)  { 
-        free(lambda_v); 
-        free(lambda_i); 
-        free(jump_time); 
-        result.error_no     = EVENTPROP_ALLOCATION_FAILED;
-        return result;
+    ctx.jump_mag   = calloc(input.n_post, sizeof(double*));
+    if (!ctx.jump_mag) {
+        result.error_no     = EVENTPROP_ALLOC_BWD_JUMP_MAG;
+        goto cleanup_and_return;
     }
     
-    int*   jump_count  = calloc(input.n_post, sizeof(int));
-    if (!jump_count) { 
-        free(lambda_v); 
-        free(lambda_i); 
-        free(jump_time); 
-        free(jump_mag); 
-        result.error_no     = EVENTPROP_ALLOCATION_FAILED;
-        return result;
+    ctx.jump_count = calloc(input.n_post, sizeof(int));
+    if (!ctx.jump_count) {
+        result.error_no     = EVENTPROP_ALLOC_BWD_JUMP_COUNT;
+        goto cleanup_and_return;
     }
     
-    int*   jump_cap    = calloc(input.n_post, sizeof(int));
-    if (!jump_cap)     { 
-        free(lambda_v); 
-        free(lambda_i); 
-        free(jump_time); 
-        free(jump_mag); 
-        free(jump_count); 
-        result.error_no     = EVENTPROP_ALLOCATION_FAILED;
-        return result;  
+    ctx.jump_cap   = calloc(input.n_post, sizeof(int));
+    if (!ctx.jump_cap) {
+        result.error_no     = EVENTPROP_ALLOC_BWD_JUMP_CAP;
+        goto cleanup_and_return;
     }
 
+    /* Allocate per-neuron buffers — track how many succeeded for safe cleanup */
+    ctx.n_post_alloc = 0;
     for (int i = 0; i < input.n_post; i++) {
-        jump_cap[i] = 8;  /* initial capacity */
-        jump_time[i] = malloc(jump_cap[i] * sizeof(double));
-        if (!jump_time[i]) goto bwd_alloc_fail_partial;
-        jump_mag[i]  = malloc(jump_cap[i] * sizeof(double));
-        if (!jump_mag[i]) { free(jump_time[i]); goto bwd_alloc_fail_partial; }
+        ctx.jump_cap[i] = 8;  /* initial capacity */
+        ctx.jump_time[i] = malloc(ctx.jump_cap[i] * sizeof(double));
+        if (!ctx.jump_time[i]) {
+            result.error_no     = EVENTPROP_ALLOC_BWD_PER_NEURON;
+            goto cleanup_and_return;
+        }
+        ctx.jump_mag[i]  = malloc(ctx.jump_cap[i] * sizeof(double));
+        if (!ctx.jump_mag[i]) {
+            free(ctx.jump_time[i]);
+            result.error_no     = EVENTPROP_ALLOC_BWD_PER_NEURON;
+            goto cleanup_and_return;
+        }
+        ctx.n_post_alloc++;
     }
 
     MutableMatrixView grad = mv_mut(result.grad, input.n_pre, input.n_post);
     MatrixView w           = mv(input.w, input.n_pre, input.n_post);
 
-    double largest_time = merged[0].time, previous_t = largest_time;
+    double largest_time = ctx.merged[0].time, previous_t = largest_time;
     double k_bwd = input.tau_mem / (input.tau_mem - input.tau_syn);
 
     for (int s = 0; s < total; s++) {
-        int spike_idx = merged[s].idx, is_input = merged[s].is_input;
-        double spike_time = merged[s].time;
+        int spike_idx = ctx.merged[s].idx, is_input = ctx.merged[s].is_input;
+        double spike_time = ctx.merged[s].time;
         int spike_source = is_input ? input.sources[spike_idx] : spike.sources[spike_idx];
 
         double t_bwd = largest_time - spike_time;
         double dt = previous_t - t_bwd;
-        scale_inplace_simd(lambda_v, exp(dt / input.tau_mem), input.n_post);
+        scale_inplace_simd(ctx.lambda_v, exp(dt / input.tau_mem), input.n_post);
 
         if (is_input) {
             /* Compute lambda_i for ALL post-synaptic neurons (matching Eigen structure) */
-            memset(lambda_i, 0, input.n_post * sizeof(double));
+            memset(ctx.lambda_i, 0, input.n_post * sizeof(double));
             for (int nrn = 0; nrn < input.n_post; nrn++) {
-                for (int j = 0; j < jump_count[nrn]; j++) {
-                    double dt_jump = t_bwd - jump_time[nrn][j];
-                    lambda_i[nrn] += jump_mag[nrn][j] * k_bwd * (exp(-dt_jump / input.tau_mem) - exp(-dt_jump / input.tau_syn));
+                for (int j = 0; j < ctx.jump_count[nrn]; j++) {
+                    double dt_jump = t_bwd - ctx.jump_time[nrn][j];
+                    ctx.lambda_i[nrn] += ctx.jump_mag[nrn][j] * k_bwd *
+                        (exp(-dt_jump / input.tau_mem) - exp(-dt_jump / input.tau_syn));
                 }
             }
 
-            vadd_scaled_simd(mv_row_mut(grad, spike_source), lambda_i, -input.tau_syn, input.n_post);
+            vadd_scaled_simd(mv_row_mut(grad, spike_source), ctx.lambda_i,
+                             -input.tau_syn, input.n_post);
 
             /* Compute dot product: w[row] · (lambda_v - lambda_i)
                Use stack allocation for small n_post, heap otherwise. */
@@ -1474,64 +1497,46 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
             int use_stack = (input.n_post <= BACKWARD_DIFF_STACK_SIZE);
             double* diff = use_stack ? stack_diff : malloc(input.n_post * sizeof(double));
 
-            vsub_simd(diff, lambda_v, lambda_i, input.n_post);
+            vsub_simd(diff, ctx.lambda_v, ctx.lambda_i, input.n_post);
             double outbound = dot_product_simd(mv_row(w, spike_source), diff, input.n_post);
-            all_errors[spike_idx] += outbound;
+            ctx.all_errors[spike_idx] += outbound;
 
             if (!use_stack) free(diff);
 
             /* Write spike error to alloc buffer */
-            result.spike_errors[spike_idx] = all_errors[spike_idx];
+            result.spike_errors[spike_idx] = ctx.all_errors[spike_idx];
         } else {
             double current = spike.currents[spike_idx];
             double inv_ic = 1.0 / (current - input.v_th);
             int nrn = spike_source;  /* post-spike: spike_source is the post-synaptic neuron */
-            double post_err = all_errors[input.n_spikes + spike_idx];
+            double post_err = ctx.all_errors[input.n_spikes + spike_idx];
 
             /* Record jump for this neuron (with capacity management) */
-            if (jump_count[nrn] >= jump_cap[nrn]) {
-                jump_cap[nrn] *= 2;
-                double* new_time = realloc(jump_time[nrn], jump_cap[nrn] * sizeof(double));
-                if (!new_time) goto bwd_alloc_fail_partial;
-                jump_time[nrn] = new_time;
-                double* new_mag = realloc(jump_mag[nrn],  jump_cap[nrn] * sizeof(double));
-                if (!new_mag) { free(new_time); goto bwd_alloc_fail_partial; }
-                jump_mag[nrn] = new_mag;
+            if (ctx.jump_count[nrn] >= ctx.jump_cap[nrn]) {
+                ctx.jump_cap[nrn] *= 2;
+                double* new_time = realloc(ctx.jump_time[nrn], ctx.jump_cap[nrn] * sizeof(double));
+                if (!new_time) goto cleanup_and_return;
+                ctx.jump_time[nrn] = new_time;
+                double* new_mag = realloc(ctx.jump_mag[nrn], ctx.jump_cap[nrn] * sizeof(double));
+                if (!new_mag) {
+                    free(new_time);
+                    goto cleanup_and_return;
+                }
+                ctx.jump_mag[nrn] = new_mag;
             }
-            jump_time[nrn][jump_count[nrn]] = t_bwd;
-            jump_mag[nrn][jump_count[nrn]]  = inv_ic * (input.v_th * lambda_v[nrn] + post_err);
-            jump_count[nrn]++;
+            ctx.jump_time[nrn][ctx.jump_count[nrn]] = t_bwd;
+            ctx.jump_mag[nrn][ctx.jump_count[nrn]]  = inv_ic * (input.v_th * ctx.lambda_v[nrn] + post_err);
+            ctx.jump_count[nrn]++;
 
-            lambda_v[nrn] = (current / (current - input.v_th)) * lambda_v[nrn] + inv_ic * post_err;
+            ctx.lambda_v[nrn] = (current / (current - input.v_th)) * ctx.lambda_v[nrn] + inv_ic * post_err;
         }
         previous_t = t_bwd;
     }
 
-    for (int i = 0; i < input.n_post; i++) {
-        free(jump_time[i]); free(jump_mag[i]);
+cleanup_and_return:
+    free_backward_spikes_ctx(&ctx);
+    if (result.error_no != EVENTPROP_OK) {
+        eventprop_free_backward_output(result);
     }
-    free(merged); free(all_errors); free(lambda_v); free(lambda_i);
-    free(jump_time); free(jump_mag); free(jump_count); free(jump_cap);
-
-    result.n_pre = input.n_pre;
-    result.n_post = input.n_post;
-    result.n_spikes = input.n_spikes;
-    return result;
-
-/* ── Allocation failure cleanup paths ─────────────────────────────── */
-bwd_alloc_fail_partial:
-    for (int j = 0; j < input.n_post; j++) {
-        if (jump_time) free(jump_time[j]);
-        if (jump_mag)  free(jump_mag[j]);
-    }
-    free(lambda_v);   
-    free(lambda_i);
-    free(jump_time); 
-    free(jump_mag);
-    free(jump_count); 
-    free(jump_cap);
-    free(all_errors); 
-    free(merged);
-    result.error_no = EVENTPROP_ALLOCATION_FAILED;
     return result;
 }
