@@ -45,7 +45,7 @@ TEST(BackwardMaxima, ZeroInputSpikesReturnsZeroGradient) {
     EXPECT_DOUBLE_EQ(result.grad[0], 0.0);
     // spike_errors has input.n_spikes == 0 entries
 
-    eventprop_free_backward_output(&result);
+    eventprop_free_backward_output(result);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ TEST(BackwardMaxima, ZeroNpostReturnsError) {
     BackwardOutput result = eventprop_backward_maxima(input, nullptr, nullptr);
     EXPECT_EQ(result.error_no, EVENTPROP_INVALID_DIMENSION);
 
-    eventprop_free_backward_output(&result);
+    eventprop_free_backward_output(result);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -94,8 +94,8 @@ TEST(BackwardMaxima, SingleInputSinglePostNeuron) {
         EXPECT_FALSE(std::isinf(result.spike_errors[i]));
     }
 
-    eventprop_free_maxima_output(&maxima);
-    eventprop_free_backward_output(&result);
+    eventprop_free_maxima_output(maxima);
+    eventprop_free_backward_output(result);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -131,9 +131,9 @@ TEST(BackwardMaxima, LinearInMaximaErrors) {
         EXPECT_NEAR(r2.spike_errors[i], r1.spike_errors[i] * scale, 1e-12);
     }
 
-    eventprop_free_maxima_output(&maxima);
-    eventprop_free_backward_output(&r1);
-    eventprop_free_backward_output(&r2);
+    eventprop_free_maxima_output(maxima);
+    eventprop_free_backward_output(r1);
+    eventprop_free_backward_output(r2);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -160,8 +160,8 @@ TEST(BackwardMaxima, ZeroErrorsYieldsZeroGradient) {
         EXPECT_NEAR(result.grad[i], 0.0, 1e-15);
     }
 
-    eventprop_free_maxima_output(&maxima);
-    eventprop_free_backward_output(&result);
+    eventprop_free_maxima_output(maxima);
+    eventprop_free_backward_output(result);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -192,8 +192,8 @@ TEST(BackwardMaxima, NanMaximaTimeSkipped) {
     EXPECT_FALSE(std::isnan(result.grad[0]));
     EXPECT_FALSE(std::isinf(result.grad[0]));
 
-    eventprop_free_maxima_output(&maxima);
-    eventprop_free_backward_output(&result);
+    eventprop_free_maxima_output(maxima);
+    eventprop_free_backward_output(result);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -226,8 +226,8 @@ TEST(BackwardMaxima, MultiplePostNeurons) {
         EXPECT_FALSE(std::isinf(result.grad[i]));
     }
 
-    eventprop_free_maxima_output(&maxima);
-    eventprop_free_backward_output(&result);
+    eventprop_free_maxima_output(maxima);
+    eventprop_free_backward_output(result);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -256,8 +256,8 @@ TEST(BackwardMaxima, MultipleInputSpikes) {
         EXPECT_NE(result.spike_errors[i], 0.0);
     }
 
-    eventprop_free_maxima_output(&maxima);
-    eventprop_free_backward_output(&result);
+    eventprop_free_maxima_output(maxima);
+    eventprop_free_backward_output(result);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -287,8 +287,8 @@ TEST(BackwardMaxima, DifferentErrorsPerNeuron) {
     double grad_ratio = result.grad[1] / result.grad[0];   // [source=0, post=1] / [source=0, post=0]
     EXPECT_NEAR(grad_ratio, 3.0, 0.5);   // generous tolerance due to different maxima times
 
-    eventprop_free_maxima_output(&maxima);
-    eventprop_free_backward_output(&result);
+    eventprop_free_maxima_output(maxima);
+    eventprop_free_backward_output(result);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -301,10 +301,11 @@ TEST(BackwardMaxima, DifferentErrorsPerNeuron) {
 // ──────────────────────────────────────────────────────────────
 
 TEST(BackwardMaxima, ProducesFiniteResults) {
+    std::vector<double> w       = {10.0};
     std::vector<double> times   = {0.01};
     std::vector<int> sources    = {0};
 
-    auto input = make_input(std::vector<double>{10.0}, 1, 1, times, sources);
+    auto input = make_input(w, 1, 1, times, sources);
     MaximaOutput maxima = eventprop_compute_maxima(input);
     EXPECT_EQ(maxima.error_no, EVENTPROP_OK);
     maxima.errors[0] = 1.0;
@@ -318,8 +319,8 @@ TEST(BackwardMaxima, ProducesFiniteResults) {
         EXPECT_FALSE(std::isinf(result.grad[i]));
     }
 
-    eventprop_free_maxima_output(&maxima);
-    eventprop_free_backward_output(&result);
+    eventprop_free_maxima_output(maxima);
+    eventprop_free_backward_output(result);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -333,7 +334,7 @@ TEST(BackwardMaxima, NegativeNpostReturnsError) {
     BackwardOutput result = eventprop_backward_maxima(input, nullptr, nullptr);
     EXPECT_EQ(result.error_no, EVENTPROP_INVALID_DIMENSION);
 
-    eventprop_free_backward_output(&result);
+    eventprop_free_backward_output(result);
 }
 
 TEST(BackwardMaxima, ZeroNpreReturnsError) {
@@ -343,7 +344,7 @@ TEST(BackwardMaxima, ZeroNpreReturnsError) {
     BackwardOutput result = eventprop_backward_maxima(input, nullptr, nullptr);
     EXPECT_EQ(result.error_no, EVENTPROP_INVALID_DIMENSION);
 
-    eventprop_free_backward_output(&result);
+    eventprop_free_backward_output(result);
 }
 
 TEST(BackwardMaxima, EqualTausReturnsError) {
@@ -353,7 +354,7 @@ TEST(BackwardMaxima, EqualTausReturnsError) {
     BackwardOutput result = eventprop_backward_maxima(input, nullptr, nullptr);
     EXPECT_EQ(result.error_no, EVENTPROP_INVALID_TAU);
 
-    eventprop_free_backward_output(&result);
+    eventprop_free_backward_output(result);
 }
 
 TEST(BackwardMaxima, NullTimesWithInputSpikesReturnsError) {
@@ -363,7 +364,7 @@ TEST(BackwardMaxima, NullTimesWithInputSpikesReturnsError) {
     BackwardOutput result = eventprop_backward_maxima(input, nullptr, nullptr);
     EXPECT_EQ(result.error_no, EVENTPROP_NULL_POINTER);
 
-    eventprop_free_backward_output(&result);
+    eventprop_free_backward_output(result);
 }
 
 TEST(BackwardMaxima, OutOfBoundsInputSourceReturnsError) {
@@ -376,7 +377,7 @@ TEST(BackwardMaxima, OutOfBoundsInputSourceReturnsError) {
     BackwardOutput result = eventprop_backward_maxima(input, nullptr, nullptr);
     EXPECT_EQ(result.error_no, EVENTPROP_INVALID_SOURCE);
 
-    eventprop_free_backward_output(&result);
+    eventprop_free_backward_output(result);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -390,7 +391,7 @@ TEST(BackwardMaxima, NullMaximaTimesReturnsError) {
     BackwardOutput result = eventprop_backward_maxima(input, nullptr, nullptr);
     EXPECT_EQ(result.error_no, EVENTPROP_NULL_POINTER);
 
-    eventprop_free_backward_output(&result);
+    eventprop_free_backward_output(result);
 }
 
 TEST(BackwardMaxima, NullMaximaErrorsReturnsError) {
@@ -400,5 +401,5 @@ TEST(BackwardMaxima, NullMaximaErrorsReturnsError) {
     BackwardOutput result = eventprop_backward_maxima(input, nullptr, nullptr);
     EXPECT_EQ(result.error_no, EVENTPROP_NULL_POINTER);
 
-    eventprop_free_backward_output(&result);
+    eventprop_free_backward_output(result);
 }

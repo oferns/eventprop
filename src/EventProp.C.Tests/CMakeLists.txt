@@ -6,32 +6,34 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 
 
-# ── Pre-built C library (imported from EventProp.C build) ─────
-if(WIN32)
-    set(C_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.C/build/Release/eventprop_c_api.dll")
-    set(C_IMPLIB "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.C/build/Release/eventprop_c_api.lib")
-elseif(APPLE)
-    set(C_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.C/build/libeventprop_c_api.dylib")
+# -- Pre-built C library (imported from EventProp.C build) -----
+# When ASan is enabled on macOS, the library is built STATIC instead of SHARED.
+if(ENABLE_ASAN AND APPLE)
+    set(C_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.C/build/libeventprop_c_api.a")
 else()
-    set(C_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.C/build/libeventprop_c_api.so")
+    if(WIN32)
+        set(C_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.C/build/Release/eventprop_c_api.dll")
+        set(C_IMPLIB "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.C/build/Release/eventprop_c_api.lib")
+    elseif(APPLE)
+        set(C_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.C/build/libeventprop_c_api.dylib")
+    else()
+        set(C_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.C/build/libeventprop_c_api.so")
+    endif()
 endif()
 
-add_library(eventprop_c_api SHARED IMPORTED)
-if(WIN32)
-    set_target_properties(eventprop_c_api PROPERTIES
-        IMPORTED_LOCATION "${C_LIBRARY}"
-        IMPORTED_IMPLIB "${C_IMPLIB}"
-    )
+if(ENABLE_ASAN AND APPLE)
+    add_library(eventprop_c_api STATIC IMPORTED)
 else()
-    set_target_properties(eventprop_c_api PROPERTIES
-        IMPORTED_LOCATION "${C_LIBRARY}"
-    )
+    add_library(eventprop_c_api SHARED IMPORTED)
 endif()
+set_target_properties(eventprop_c_api PROPERTIES
+    IMPORTED_LOCATION "${C_LIBRARY}"
+)
 target_include_directories(eventprop_c_api SYSTEM INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.C"
 )
 
-# ── Google Test (FetchContent) ───────────────────────────────
+# -- Google Test (FetchContent) -------------------------------
 include(FetchContent)
 FetchContent_Declare(
     googletest
@@ -41,7 +43,7 @@ FetchContent_Declare(
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-# ── Test executable ──────────────────────────────────────────
+# -- Test executable ------------------------------------------
 enable_testing()
 add_executable(eventprop_tests
     test/test_main.cpp
@@ -62,13 +64,22 @@ if(NOT WIN32)
     target_link_libraries(eventprop_tests PRIVATE m)
 endif()
 
-# AddressSanitizer — must match library build (both ON or both OFF).
+# When using static library with ASan, OpenMP runtime must be linked explicitly.
+if(ENABLE_ASAN AND APPLE)
+    execute_process(COMMAND brew --prefix libomp OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _BREW_FAIL OUTPUT_VARIABLE _OPENMP_PREFIX)
+    if(_BREW_FAIL EQUAL 0 AND EXISTS "${_OPENMP_PREFIX}/lib/libomp.dylib")
+        target_link_libraries(eventprop_tests PRIVATE "${_OPENMP_PREFIX}/lib/libomp.dylib")
+    endif()
+endif()
+
+# AddressSanitizer - must match library build (both ON or both OFF).
 # Usage: cmake .. -DENABLE_ASAN=ON from EventProp.C/build, then rebuild tests.
 # Note: on macOS AppleClang, ASan in shared libraries has known issues.
 # Linux is the recommended platform for full ASan testing.
 option(ENABLE_ASAN "Enable AddressSanitizer for memory error detection" OFF)
 if(ENABLE_ASAN AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    message(STATUS "AddressSanitizer enabled for tests — run with ASAN_OPTIONS=detect_leaks=1")
+    message(STATUS "AddressSanitizer enabled for tests - run with ASAN_OPTIONS=detect_leaks=1")
     target_compile_options(eventprop_tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
     target_link_options(eventprop_tests PRIVATE -fsanitize=address)
 endif()

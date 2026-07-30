@@ -75,9 +75,18 @@ endif()
 
 # Pure C shared library (no external dependencies)
 # Optional OpenMP for parallel neuron processing in ComputeSpikes
+# ASan on macOS can't instrument shared libraries (AppleClang linker bug).
+# Build as static instead when ASan is enabled — tests link directly, no dylib issues.
+if(ENABLE_ASAN AND APPLE)
+    message(STATUS "macOS + ASan detected: building STATIC library for memory testing")
+    set(LIB_TYPE STATIC)
+else()
+    set(LIB_TYPE SHARED)
+endif()
+
 find_package(OpenMP QUIET)
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
-add_library(eventprop_c_api SHARED
+add_library(eventprop_c_api ${LIB_TYPE}
     eventprop.c
     eventprop_diag.c
     eventprop_batch.c
