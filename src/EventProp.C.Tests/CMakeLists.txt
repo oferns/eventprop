@@ -62,6 +62,17 @@ if(NOT WIN32)
     target_link_libraries(eventprop_tests PRIVATE m)
 endif()
 
+# AddressSanitizer — must match library build (both ON or both OFF).
+# Usage: cmake .. -DENABLE_ASAN=ON from EventProp.C/build, then rebuild tests.
+# Note: on macOS AppleClang, ASan in shared libraries has known issues.
+# Linux is the recommended platform for full ASan testing.
+option(ENABLE_ASAN "Enable AddressSanitizer for memory error detection" OFF)
+if(ENABLE_ASAN AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    message(STATUS "AddressSanitizer enabled for tests — run with ASAN_OPTIONS=detect_leaks=1")
+    target_compile_options(eventprop_tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+    target_link_options(eventprop_tests PRIVATE -fsanitize=address)
+endif()
+
 # Copy the C library DLL alongside the test executable at build time
 if(WIN32)
     add_custom_command(TARGET eventprop_tests POST_BUILD

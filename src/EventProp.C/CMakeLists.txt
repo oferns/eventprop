@@ -4,6 +4,16 @@ project(eventprop_c LANGUAGES C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+# AddressSanitizer — enables memory leak detection, use-after-free, buffer overflow checks.
+# Usage: cmake .. -DENABLE_ASAN=ON (Debug builds only)
+# Note: on macOS this must be applied to both library and tests together. See Tests/CMakeLists.txt.
+option(ENABLE_ASAN "Enable AddressSanitizer for memory error detection" OFF)
+if(ENABLE_ASAN AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    message(STATUS "AddressSanitizer enabled — rebuilds library + tests with instrumentation")
+    add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address")
+endif()
+
 # Generate compile_commands.json for clangd/IDE integration
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
