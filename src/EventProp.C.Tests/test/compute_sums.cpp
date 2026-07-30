@@ -40,7 +40,7 @@ TEST(ComputeSums, ZeroSpikesReturnsSingleZeroRow) {
     EXPECT_EQ(sums.error_no, EVENTPROP_OK);
     EXPECT_EQ(sums.sum0[0], 0.0);
     EXPECT_EQ(sums.sum1[0], 0.0);
-    eventprop_free_sums_output(&sums);
+    eventprop_free_sums_output(sums);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ TEST(ComputeSums, SingleSpikesExactFormula) {
         EXPECT_DOUBLE_EQ(sums.sum1[n_post + j], w[1 * n_post + j] * e_mem);
     }
 
-    eventprop_free_sums_output(&sums);
+    eventprop_free_sums_output(sums);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -104,7 +104,7 @@ TEST(ComputeSums, TwoSpikesDifferentSourcesAreAdditive) {
                          w[0 * n_post + j] * e_mem_0 + w[1 * n_post + j] * e_mem_1);
     }
 
-    eventprop_free_sums_output(&sums);
+    eventprop_free_sums_output(sums);
 }
 
 TEST(ComputeSums, TwoSpikesSameSourceAreAdditive) {
@@ -125,7 +125,7 @@ TEST(ComputeSums, TwoSpikesSameSourceAreAdditive) {
         EXPECT_DOUBLE_EQ(sums.sum1[2 * n_post + j], w[j] * (e_mem_0 + e_mem_1));
     }
 
-    eventprop_free_sums_output(&sums);
+    eventprop_free_sums_output(sums);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -140,7 +140,7 @@ TEST(ComputeSums, NegativeNpostDetected) {
     EXPECT_EQ(sums.error_no, EVENTPROP_INVALID_DIMENSION);
     EXPECT_EQ(sums.sum0, nullptr);
     EXPECT_EQ(sums.sum1, nullptr);
-    eventprop_free_sums_output(&sums);  // safe even if null
+    eventprop_free_sums_output(sums);  // safe even if null
 }
 
 TEST(ComputeSums, NegativeNspikesDetected) {
@@ -151,7 +151,7 @@ TEST(ComputeSums, NegativeNspikesDetected) {
     EXPECT_EQ(sums.error_no, EVENTPROP_NEGATIVE_SPIKES);
     EXPECT_EQ(sums.sum0, nullptr);
     EXPECT_EQ(sums.sum1, nullptr);
-    eventprop_free_sums_output(&sums);
+    eventprop_free_sums_output(sums);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -180,8 +180,8 @@ TEST(ComputeSums, SumsScaleLinearlyWithWeights) {
         EXPECT_DOUBLE_EQ(sums2.sum1[i], sums1.sum1[i] * 3.0);
     }
 
-    eventprop_free_sums_output(&sums1);
-    eventprop_free_sums_output(&sums2);
+    eventprop_free_sums_output(sums1);
+    eventprop_free_sums_output(sums2);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -197,7 +197,7 @@ TEST(ComputeSums, EqualTausReturnsError) {
     EXPECT_EQ(sums.error_no, EVENTPROP_INVALID_TAU);
     EXPECT_EQ(sums.sum0, nullptr);
     EXPECT_EQ(sums.sum1, nullptr);
-    eventprop_free_sums_output(&sums);
+    eventprop_free_sums_output(sums);
 }
 
 TEST(ComputeSums, ZeroNpreReturnsError) {
@@ -209,7 +209,7 @@ TEST(ComputeSums, ZeroNpreReturnsError) {
     EXPECT_EQ(sums.error_no, EVENTPROP_INVALID_DIMENSION);
     EXPECT_EQ(sums.sum0, nullptr);
     EXPECT_EQ(sums.sum1, nullptr);
-    eventprop_free_sums_output(&sums);
+    eventprop_free_sums_output(sums);
 }
 
 TEST(ComputeSums, NullTimesWithSpikesReturnsError) {
@@ -222,7 +222,7 @@ TEST(ComputeSums, NullTimesWithSpikesReturnsError) {
     EXPECT_EQ(sums.error_no, EVENTPROP_NULL_POINTER);
     EXPECT_EQ(sums.sum0, nullptr);
     EXPECT_EQ(sums.sum1, nullptr);
-    eventprop_free_sums_output(&sums);
+    eventprop_free_sums_output(sums);
 }
 
 TEST(ComputeSums, OutOfBoundsSourceReturnsError) {
@@ -236,5 +236,5 @@ TEST(ComputeSums, OutOfBoundsSourceReturnsError) {
     EXPECT_EQ(sums.error_no, EVENTPROP_INVALID_SOURCE);
     EXPECT_EQ(sums.sum0, nullptr);
     EXPECT_EQ(sums.sum1, nullptr);
-    eventprop_free_sums_output(&sums);
+    eventprop_free_sums_output(sums);
 }

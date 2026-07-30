@@ -77,15 +77,15 @@ TEST(BatchSpikes, ValidBatchHasNoErrors) {
         EXPECT_EQ(batch.spikes[i].error_no, EVENTPROP_OK);
     }
 
-    eventprop_free_spikes_batch(&batch);
+    eventprop_free_spikes_batch(batch);
     free_batch_data(data);
 }
 
-TEST(BatchSpikes, ZeroBatchSizeReturnsEmpty) {
+TEST(BatchSpikes, ZeroBatchSizeReturnsError) {
     SpikesBatch batch = eventprop_compute_spikes_batch(nullptr, 0);
     EXPECT_EQ(batch.batch_size, 0);
-    EXPECT_EQ(batch.has_errors, 0);
-    eventprop_free_spikes_batch(&batch);
+    EXPECT_EQ(batch.has_errors, 1); // zero batch size is now an error
+    eventprop_free_spikes_batch(batch);
 }
 
 TEST(BatchSpikes, OneBadSampleSetsHasErrors) {
@@ -106,7 +106,7 @@ TEST(BatchSpikes, OneBadSampleSetsHasErrors) {
     EXPECT_NE(batch.spikes[1].error_no, EVENTPROP_OK);
     EXPECT_EQ(batch.spikes[2].error_no, EVENTPROP_OK);
 
-    eventprop_free_spikes_batch(&batch);
+    eventprop_free_spikes_batch(batch);
 }
 
 TEST(BatchSpikes, AllBadSamplesSetsHasErrors) {
@@ -125,7 +125,7 @@ TEST(BatchSpikes, AllBadSamplesSetsHasErrors) {
         EXPECT_NE(batch.spikes[i].error_no, EVENTPROP_OK);
     }
 
-    eventprop_free_spikes_batch(&batch);
+    eventprop_free_spikes_batch(batch);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -148,14 +148,14 @@ TEST(BatchSpikesStruct, ValidBatchHasNoErrors) {
         EXPECT_EQ(batch.spikes[i].error_no, EVENTPROP_OK);
     }
 
-    eventprop_free_spikes_batch(&batch);
+    eventprop_free_spikes_batch(batch);
 }
 
-TEST(BatchSpikesStruct, ZeroBatchSizeReturnsEmpty) {
+TEST(BatchSpikesStruct, ZeroBatchSizeReturnsError) {
     SpikesBatch batch = eventprop_compute_spikes_batch(nullptr, 0);
     EXPECT_EQ(batch.batch_size, 0);
-    EXPECT_EQ(batch.has_errors, 0);
-    eventprop_free_spikes_batch(&batch);
+    EXPECT_EQ(batch.has_errors, 1); // zero batch size is now an error
+    eventprop_free_spikes_batch(batch);
 }
 
 TEST(BatchSpikesStruct, OneBadSampleSetsHasErrors) {
@@ -173,7 +173,7 @@ TEST(BatchSpikesStruct, OneBadSampleSetsHasErrors) {
     EXPECT_EQ(batch.spikes[0].error_no, EVENTPROP_OK);
     EXPECT_NE(batch.spikes[1].error_no, EVENTPROP_OK);
 
-    eventprop_free_spikes_batch(&batch);
+    eventprop_free_spikes_batch(batch);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -192,8 +192,8 @@ TEST(BatchBackwardSpikes, ValidBatchHasNoErrors) {
         EXPECT_EQ(batch.outputs[i].error_no, EVENTPROP_OK);
     }
 
-    eventprop_free_spikes_batch(&spikes);
-    eventprop_free_backwards_batch(&batch);
+    eventprop_free_spikes_batch(spikes);
+    eventprop_free_backwards_batch(batch);
     free_batch_data(data);
 }
 
@@ -215,8 +215,8 @@ TEST(BatchBackwardSpikes, OneBadSampleSetsHasErrors) {
     EXPECT_EQ(batch.outputs[0].error_no, EVENTPROP_OK);
     EXPECT_NE(batch.outputs[1].error_no, EVENTPROP_OK);
 
-    eventprop_free_spikes_batch(&spikes);
-    eventprop_free_backwards_batch(&batch);
+    eventprop_free_spikes_batch(spikes);
+    eventprop_free_backwards_batch(batch);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -234,8 +234,8 @@ TEST(BatchMaxima, ValidBatchHasNoErrors) {
         EXPECT_EQ(batch.outputs[i].error_no, EVENTPROP_OK);
     }
 
-    eventprop_free_spikes_batch(&spikes);
-    eventprop_free_maxima_batch(&batch);
+    eventprop_free_spikes_batch(spikes);
+    eventprop_free_maxima_batch(batch);
     free_batch_data(data);
 }
 
@@ -256,8 +256,8 @@ TEST(BatchMaxima, OneBadSampleSetsHasErrors) {
     EXPECT_EQ(batch.outputs[0].error_no, EVENTPROP_OK);
     EXPECT_NE(batch.outputs[1].error_no, EVENTPROP_OK);
 
-    eventprop_free_spikes_batch(&spikes);
-    eventprop_free_maxima_batch(&batch);
+    eventprop_free_spikes_batch(spikes);
+    eventprop_free_maxima_batch(batch);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -281,8 +281,8 @@ TEST(BatchMaximaStruct, ValidBatchHasNoErrors) {
         EXPECT_EQ(batch.outputs[i].error_no, EVENTPROP_OK);
     }
 
-    eventprop_free_spikes_batch(&spikes);
-    eventprop_free_maxima_batch(&batch);
+    eventprop_free_spikes_batch(spikes);
+    eventprop_free_maxima_batch(batch);
 }
 
 TEST(BatchMaximaStruct, OneBadSampleSetsHasErrors) {
@@ -301,8 +301,8 @@ TEST(BatchMaximaStruct, OneBadSampleSetsHasErrors) {
     EXPECT_EQ(batch.outputs[0].error_no, EVENTPROP_OK);
     EXPECT_NE(batch.outputs[1].error_no, EVENTPROP_OK);
 
-    eventprop_free_spikes_batch(&spikes);
-    eventprop_free_maxima_batch(&batch);
+    eventprop_free_spikes_batch(spikes);
+    eventprop_free_maxima_batch(batch);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -333,9 +333,9 @@ TEST(BatchBackwardMaxima, ValidBatchHasNoErrors) {
         EXPECT_EQ(batch.outputs[i].error_no, EVENTPROP_OK);
     }
 
-    eventprop_free_spikes_batch(&spikes);
-    eventprop_free_maxima_batch(&maxima);
-    eventprop_free_backwards_batch(&batch);
+    eventprop_free_spikes_batch(spikes);
+    eventprop_free_maxima_batch(maxima);
+    eventprop_free_backwards_batch(batch);
 }
 
 TEST(BatchBackwardMaxima, OneBadSampleSetsHasErrors) {
@@ -364,9 +364,9 @@ TEST(BatchBackwardMaxima, OneBadSampleSetsHasErrors) {
     EXPECT_EQ(batch.outputs[0].error_no, EVENTPROP_OK);       // valid sample still works
     EXPECT_NE(batch.outputs[1].error_no, EVENTPROP_OK);      // bad sample fails
 
-    eventprop_free_spikes_batch(&spikes);
-    eventprop_free_maxima_batch(&maxima);
-    eventprop_free_backwards_batch(&batch);
+    eventprop_free_spikes_batch(spikes);
+    eventprop_free_maxima_batch(maxima);
+    eventprop_free_backwards_batch(batch);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -387,7 +387,7 @@ TEST(BatchAccumulate, SumsGradientsCorrectly) {
         }
     }
 
-    BackwardsBatch batch{batch_size, 0, outputs};
+    BackwardsBatch batch = { .error_no = EVENTPROP_OK, .batch_size = batch_size, .has_errors = 0, .outputs = outputs };
 
     GradientOutput grad = eventprop_accumulate_gradients(batch, n_pre, n_post);
 
@@ -398,7 +398,7 @@ TEST(BatchAccumulate, SumsGradientsCorrectly) {
         EXPECT_DOUBLE_EQ(grad.data[i], 6.0);
     }
 
-    eventprop_free_gradient_output(&grad);
+    eventprop_free_gradient_output(grad);
     // Clean up manually since accumulate doesn't free the batch
     for (int b = 0; b < batch_size; ++b) {
         free(outputs[b].grad);
@@ -417,7 +417,7 @@ TEST(BatchAccumulateBackwardSpikes, ValidBatchHasNoErrors) {
     AccumulatedBackwardResult result = eventprop_backward_spikes_batch_accumulate(data.inputs, spikes);
 
     EXPECT_EQ(result.has_errors, 0);
-    EXPECT_NE(result.summed_grads.data, nullptr);
+    EXPECT_NE(result.summed_grads->data, nullptr);
     EXPECT_EQ(result.batch_size, 3);
 
     // All per-sample outputs should be OK (grad freed after accumulation)
@@ -425,8 +425,8 @@ TEST(BatchAccumulateBackwardSpikes, ValidBatchHasNoErrors) {
         EXPECT_EQ(result.outputs[i].error_no, EVENTPROP_OK);
     }
 
-    eventprop_free_spikes_batch(&spikes);
-    eventprop_free_accumulated_backward_result(&result);
+    eventprop_free_spikes_batch(spikes);
+    eventprop_free_accumulated_backward_result(result);
     free_batch_data(data);
 }
 
@@ -444,10 +444,10 @@ TEST(BatchAccumulateBackwardSpikes, OneBadSampleSetsHasErrors) {
     AccumulatedBackwardResult result = eventprop_backward_spikes_batch_accumulate(inputs, spikes);
 
     EXPECT_EQ(result.has_errors, 1);
-    EXPECT_NE(result.summed_grads.data, nullptr); // still produces a gradient (may be partial)
+    EXPECT_NE(result.summed_grads->data, nullptr); // still produces a gradient (may be partial)
 
-    eventprop_free_spikes_batch(&spikes);
-    eventprop_free_accumulated_backward_result(&result);
+    eventprop_free_spikes_batch(spikes);
+    eventprop_free_accumulated_backward_result(result);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -474,12 +474,12 @@ TEST(BatchAccumulateBackwardMaxima, ValidBatchHasNoErrors) {
     AccumulatedBackwardResult result = eventprop_backward_maxima_batch_accumulate(inputs, maxima);
 
     EXPECT_EQ(result.has_errors, 0);
-    EXPECT_NE(result.summed_grads.data, nullptr);
+    EXPECT_NE(result.summed_grads->data, nullptr);
     EXPECT_EQ(result.batch_size, 2);
 
-    eventprop_free_spikes_batch(&spikes);
-    eventprop_free_maxima_batch(&maxima);
-    eventprop_free_accumulated_backward_result(&result);
+    eventprop_free_spikes_batch(spikes);
+    eventprop_free_maxima_batch(maxima);
+    eventprop_free_accumulated_backward_result(result);
 }
 
 TEST(BatchAccumulateBackwardMaxima, OneBadSampleSetsHasErrors) {
@@ -505,11 +505,11 @@ TEST(BatchAccumulateBackwardMaxima, OneBadSampleSetsHasErrors) {
     AccumulatedBackwardResult result = eventprop_backward_maxima_batch_accumulate(inputs, maxima);
 
     EXPECT_EQ(result.has_errors, 1);
-    EXPECT_NE(result.summed_grads.data, nullptr); // still produces a gradient (partial)
+    EXPECT_NE(result.summed_grads->data, nullptr); // still produces a gradient (partial)
 
-    eventprop_free_spikes_batch(&spikes);
-    eventprop_free_maxima_batch(&maxima);
-    eventprop_free_accumulated_backward_result(&result);
+    eventprop_free_spikes_batch(spikes);
+    eventprop_free_maxima_batch(maxima);
+    eventprop_free_accumulated_backward_result(result);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -530,7 +530,7 @@ TEST(BatchDropout, NoDropoutKeepsAllSpikes) {
         EXPECT_EQ(batch.outputs[i].n_spikes, 2);
     }
 
-    eventprop_free_dropout_batch(&batch);
+    eventprop_free_dropout_batch(batch);
 }
 
 TEST(BatchDropout, FullDropoutRemovesAllSpikes) {
@@ -547,7 +547,7 @@ TEST(BatchDropout, FullDropoutRemovesAllSpikes) {
         EXPECT_EQ(batch.outputs[i].n_spikes, 0);
     }
 
-    eventprop_free_dropout_batch(&batch);
+    eventprop_free_dropout_batch(batch);
 }
 
 TEST(BatchDropout, ZeroBatchSizeReturnsEmpty) {
@@ -555,7 +555,7 @@ TEST(BatchDropout, ZeroBatchSizeReturnsEmpty) {
         nullptr, nullptr, nullptr, 0, 0.5, 42);
     EXPECT_EQ(batch.batch_size, 0);
     EXPECT_EQ(batch.has_errors, 0);
-    eventprop_free_dropout_batch(&batch);
+    eventprop_free_dropout_batch(batch);
 }
 
 TEST(BatchDropout, PartialDropoutReducesCount) {
@@ -573,7 +573,7 @@ TEST(BatchDropout, PartialDropoutReducesCount) {
     EXPECT_GT(batch.outputs[0].n_spikes, 0);
     EXPECT_LT(batch.outputs[0].n_spikes, 100);
 
-    eventprop_free_dropout_batch(&batch);
+    eventprop_free_dropout_batch(batch);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -581,23 +581,13 @@ TEST(BatchDropout, PartialDropoutReducesCount) {
 // ──────────────────────────────────────────────────────────────
 
 TEST(BatchFree, NullPointerSafety) {
-    eventprop_free_spikes_batch(nullptr);
-    eventprop_free_maxima_batch(nullptr);
-    eventprop_free_backwards_batch(nullptr);
-    eventprop_free_gradient_output(nullptr);
-    eventprop_free_dropout_batch(nullptr);
-    eventprop_free_accumulated_backward_result(nullptr);
+    // Free functions take values by value — zero-init structs are safe to free
+    eventprop_free_spikes_batch((SpikesBatch){});
+    eventprop_free_maxima_batch((MaximaBatch){});
+    eventprop_free_backwards_batch((BackwardsBatch){});
+    eventprop_free_gradient_output((GradientOutput){});
+    eventprop_free_dropout_batch((DropoutBatch){});
+    eventprop_free_accumulated_backward_result((AccumulatedBackwardResult){});
 }
 
-TEST(BatchFree, DoubleFreeSafety) {
-    BatchData data = make_valid_batch(2);
-    SpikesBatch spikes = eventprop_compute_spikes_batch(data.inputs, 2);
-    eventprop_free_spikes_batch(&spikes);
-    eventprop_free_spikes_batch(&spikes); // should not crash
 
-    MaximaBatch maxima = eventprop_compute_maxima_batch(data.inputs,
-        eventprop_compute_spikes_batch(data.inputs, 2));
-    eventprop_free_maxima_batch(&maxima);
-    eventprop_free_maxima_batch(&maxima); // should not crash
-    free_batch_data(data);
-}

@@ -37,7 +37,7 @@ TEST(ComputeSpikes, ZeroInputSpikesReturnsZeroOutput) {
     SpikeOutput spikes = eventprop_compute_spikes(input);
     EXPECT_EQ(spikes.error_no, EVENTPROP_OK);
     EXPECT_EQ(spikes.n_spikes, 0);
-    eventprop_free_spike_output(&spikes);
+    eventprop_free_spike_output(spikes);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -57,7 +57,7 @@ TEST(ComputeSpikes, StrongWeightProducesSpike) {
         EXPECT_GE(spikes.times[i], 0.0);       // times are non-negative
         EXPECT_EQ(spikes.sources[i], 0);        // only post-neuron is 0
     }
-    eventprop_free_spike_output(&spikes);
+    eventprop_free_spike_output(spikes);
 }
 
 TEST(ComputeSpikes, WeakWeightProducesNoSpike) {
@@ -69,7 +69,7 @@ TEST(ComputeSpikes, WeakWeightProducesNoSpike) {
     SpikeOutput spikes = eventprop_compute_spikes(input);
     EXPECT_EQ(spikes.error_no, EVENTPROP_OK);
     EXPECT_EQ(spikes.n_spikes, 0);
-    eventprop_free_spike_output(&spikes);
+    eventprop_free_spike_output(spikes);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -87,7 +87,7 @@ TEST(ComputeSpikes, SubThresholdInputsAccumulateToFire) {
     EXPECT_EQ(spikes.error_no, EVENTPROP_OK);
     // With two inputs at moderate weight, should fire at least once.
     EXPECT_GT(spikes.n_spikes, 0);
-    eventprop_free_spike_output(&spikes);
+    eventprop_free_spike_output(spikes);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ TEST(ComputeSpikes, OutputTimesAreSortedAndPositive) {
             EXPECT_GT(spikes.times[i], spikes.times[i - 1]);   // strictly increasing
         }
     }
-    eventprop_free_spike_output(&spikes);
+    eventprop_free_spike_output(spikes);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -129,7 +129,7 @@ TEST(ComputeSpikes, OutputSourcesWithinBounds) {
         EXPECT_GE(spikes.sources[i], 0);
         EXPECT_LT(spikes.sources[i], 3);   // n_post == 3
     }
-    eventprop_free_spike_output(&spikes);
+    eventprop_free_spike_output(spikes);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -154,8 +154,8 @@ TEST(ComputeSpikes, HigherThresholdReducesSpikeCount) {
     // Higher threshold should produce ≤ as many spikes (monotonicity)
     EXPECT_LE(spikesHigh.n_spikes, spikesLow.n_spikes);
 
-    eventprop_free_spike_output(&spikesLow);
-    eventprop_free_spike_output(&spikesHigh);
+    eventprop_free_spike_output(spikesLow);
+    eventprop_free_spike_output(spikesHigh);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -174,7 +174,7 @@ TEST(ComputeSpikes, SinglePostNeuronWorks) {
     for (int i = 0; i < spikes.n_spikes; ++i) {
         EXPECT_EQ(spikes.sources[i], 0);   // only one post-neuron exists
     }
-    eventprop_free_spike_output(&spikes);
+    eventprop_free_spike_output(spikes);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -193,7 +193,7 @@ TEST(ComputeSpikes, AllSpikesFromSameSource) {
     for (int i = 0; i < spikes.n_spikes; ++i) {
         EXPECT_EQ(spikes.sources[i], 0);
     }
-    eventprop_free_spike_output(&spikes);
+    eventprop_free_spike_output(spikes);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -208,7 +208,7 @@ TEST(ComputeSpikes, EqualTausPropagatesError) {
     SpikeOutput spikes = eventprop_compute_spikes(input);
     EXPECT_EQ(spikes.error_no, EVENTPROP_INVALID_TAU);
     EXPECT_EQ(spikes.n_spikes, 0);
-    eventprop_free_spike_output(&spikes);
+    eventprop_free_spike_output(spikes);
 }
 
 TEST(ComputeSpikes, NegativeNpostPropagatesError) {
@@ -218,7 +218,7 @@ TEST(ComputeSpikes, NegativeNpostPropagatesError) {
     SpikeOutput spikes = eventprop_compute_spikes(input);
     EXPECT_EQ(spikes.error_no, EVENTPROP_INVALID_DIMENSION);
     EXPECT_EQ(spikes.n_spikes, 0);
-    eventprop_free_spike_output(&spikes);
+    eventprop_free_spike_output(spikes);
 }
 
 TEST(ComputeSpikes, OutOfBoundsSourcePropagatesError) {
@@ -231,5 +231,5 @@ TEST(ComputeSpikes, OutOfBoundsSourcePropagatesError) {
     SpikeOutput spikes = eventprop_compute_spikes(input);
     EXPECT_EQ(spikes.error_no, EVENTPROP_INVALID_SOURCE);
     EXPECT_EQ(spikes.n_spikes, 0);
-    eventprop_free_spike_output(&spikes);
+    eventprop_free_spike_output(spikes);
 }

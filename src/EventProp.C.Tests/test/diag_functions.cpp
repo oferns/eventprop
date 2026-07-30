@@ -54,8 +54,8 @@ TEST(DiagVoltageTrace, BasicTraceHasCorrectLength) {
         EXPECT_DOUBLE_EQ(trace.ts[i], i * dt);
     }
 
-    eventprop_free_voltage_trace_output(&trace);
-    eventprop_free_spike_output(&spikes);
+    eventprop_free_voltage_trace_output(trace);
+    eventprop_free_spike_output(spikes);
 }
 
 TEST(DiagVoltageTrace, VoltageStartsNearZero) {
@@ -76,8 +76,8 @@ TEST(DiagVoltageTrace, VoltageStartsNearZero) {
     // At t=0 (before any input), voltage should be near zero
     EXPECT_NEAR(trace.v_trace[0], 0.0, 1e-6);
 
-    eventprop_free_voltage_trace_output(&trace);
-    eventprop_free_spike_output(&spikes);
+    eventprop_free_voltage_trace_output(trace);
+    eventprop_free_spike_output(spikes);
 }
 
 TEST(DiagVoltageTrace, VoltageRisesAfterInputSpike) {
@@ -101,8 +101,8 @@ TEST(DiagVoltageTrace, VoltageRisesAfterInputSpike) {
         EXPECT_GT(trace.v_trace[idx_after_spike], trace.v_trace[0]);
     }
 
-    eventprop_free_voltage_trace_output(&trace);
-    eventprop_free_spike_output(&spikes);
+    eventprop_free_voltage_trace_output(trace);
+    eventprop_free_spike_output(spikes);
 }
 
 TEST(DiagVoltageTrace, DifferentNeuronsProduceDifferentTraces) {
@@ -132,9 +132,9 @@ TEST(DiagVoltageTrace, DifferentNeuronsProduceDifferentTraces) {
     }
     EXPECT_TRUE(different);
 
-    eventprop_free_voltage_trace_output(&trace0);
-    eventprop_free_voltage_trace_output(&trace1);
-    eventprop_free_spike_output(&spikes);
+    eventprop_free_voltage_trace_output(trace0);
+    eventprop_free_voltage_trace_output(trace1);
+    eventprop_free_spike_output(spikes);
 }
 
 TEST(DiagVoltageTrace, ZeroInputSpikesProducesFlatTrace) {
@@ -156,8 +156,8 @@ TEST(DiagVoltageTrace, ZeroInputSpikesProducesFlatTrace) {
         EXPECT_NEAR(trace.v_trace[i], 0.0, 1e-9);
     }
 
-    eventprop_free_voltage_trace_output(&trace);
-    eventprop_free_spike_output(&spikes);
+    eventprop_free_voltage_trace_output(trace);
+    eventprop_free_spike_output(spikes);
 }
 
 TEST(DiagVoltageTrace, NullInputReturnsError) {
@@ -171,7 +171,7 @@ TEST(DiagVoltageTrace, NullInputReturnsError) {
     EXPECT_EQ(trace.v_trace, nullptr);
     EXPECT_EQ(trace.ts, nullptr);
 
-    eventprop_free_voltage_trace_output(&trace);
+    eventprop_free_voltage_trace_output(trace);
 }
 
 TEST(DiagVoltageTrace, ZeroDtReturnsError) {
@@ -185,7 +185,7 @@ TEST(DiagVoltageTrace, ZeroDtReturnsError) {
     VoltageTraceOutput trace = eventprop_compute_voltage_trace(trace_input);
     EXPECT_EQ(trace.error_no, EVENTPROP_INVALID_DIMENSION);
 
-    eventprop_free_voltage_trace_output(&trace);
+    eventprop_free_voltage_trace_output(trace);
 }
 
 TEST(DiagVoltageTrace, EqualTausReturnsError) {
@@ -199,7 +199,7 @@ TEST(DiagVoltageTrace, EqualTausReturnsError) {
     VoltageTraceOutput trace = eventprop_compute_voltage_trace(trace_input);
     EXPECT_EQ(trace.error_no, EVENTPROP_INVALID_TAU);
 
-    eventprop_free_voltage_trace_output(&trace);
+    eventprop_free_voltage_trace_output(trace);
 }
 
 TEST(DiagVoltageTrace, OutOfBoundsTargetNeuronReturnsError) {
@@ -213,7 +213,7 @@ TEST(DiagVoltageTrace, OutOfBoundsTargetNeuronReturnsError) {
     VoltageTraceOutput trace = eventprop_compute_voltage_trace(trace_input);
     EXPECT_EQ(trace.error_no, EVENTPROP_INVALID_SOURCE);
 
-    eventprop_free_voltage_trace_output(&trace);
+    eventprop_free_voltage_trace_output(trace);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -248,7 +248,7 @@ TEST(DiagLambdaITrace, BasicTraceHasCorrectLength) {
         EXPECT_DOUBLE_EQ(trace.ts[i], i * dt);
     }
 
-    eventprop_free_lambda_i_trace_output(&trace);
+    eventprop_free_lambda_i_trace_output(trace);
 }
 
 TEST(DiagLambdaITrace, LambdaGrowsNearSpike) {
@@ -268,7 +268,7 @@ TEST(DiagLambdaITrace, LambdaGrowsNearSpike) {
     double late_lambda  = std::abs(trace.lambda_trace[45]);   // t=0.045 (near spike)
     EXPECT_GT(late_lambda, early_lambda);
 
-    eventprop_free_lambda_i_trace_output(&trace);
+    eventprop_free_lambda_i_trace_output(trace);
 }
 
 TEST(DiagLambdaITrace, LambdaIsFiniteEverywhere) {
@@ -286,7 +286,7 @@ TEST(DiagLambdaITrace, LambdaIsFiniteEverywhere) {
             << "Non-finite at t=" << trace.ts[i];
     }
 
-    eventprop_free_lambda_i_trace_output(&trace);
+    eventprop_free_lambda_i_trace_output(trace);
 }
 
 TEST(DiagLambdaITrace, ZeroForwardSpikesProducesZeroTrace) {
@@ -303,7 +303,7 @@ TEST(DiagLambdaITrace, ZeroForwardSpikesProducesZeroTrace) {
         EXPECT_NEAR(trace.lambda_trace[i], 0.0, 1e-9);
     }
 
-    eventprop_free_lambda_i_trace_output(&trace);
+    eventprop_free_lambda_i_trace_output(trace);
 }
 
 TEST(DiagLambdaITrace, MultipleForwardSpikesAccumulateEffect) {
@@ -328,7 +328,7 @@ TEST(DiagLambdaITrace, MultipleForwardSpikesAccumulateEffect) {
     }
     EXPECT_TRUE(found_nonzero);
 
-    eventprop_free_lambda_i_trace_output(&trace);
+    eventprop_free_lambda_i_trace_output(trace);
 }
 
 TEST(DiagLambdaITrace, ZeroDtReturnsError) {
@@ -342,7 +342,7 @@ TEST(DiagLambdaITrace, ZeroDtReturnsError) {
     EXPECT_EQ(trace.lambda_trace, nullptr);
     EXPECT_EQ(trace.ts, nullptr);
 
-    eventprop_free_lambda_i_trace_output(&trace);
+    eventprop_free_lambda_i_trace_output(trace);
 }
 
 TEST(DiagLambdaITrace, EqualTausReturnsError) {
@@ -353,7 +353,7 @@ TEST(DiagLambdaITrace, EqualTausReturnsError) {
     LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
     EXPECT_EQ(trace.error_no, EVENTPROP_INVALID_TAU);
 
-    eventprop_free_lambda_i_trace_output(&trace);
+    eventprop_free_lambda_i_trace_output(trace);
 }
 
 TEST(DiagLambdaITrace, ZeroVThReturnsError) {
@@ -364,7 +364,7 @@ TEST(DiagLambdaITrace, ZeroVThReturnsError) {
     LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
     EXPECT_EQ(trace.error_no, EVENTPROP_INVALID_DIMENSION);
 
-    eventprop_free_lambda_i_trace_output(&trace);
+    eventprop_free_lambda_i_trace_output(trace);
 }
 
 TEST(DiagLambdaITrace, NullFwdTimesWithSpikesReturnsError) {
@@ -375,5 +375,5 @@ TEST(DiagLambdaITrace, NullFwdTimesWithSpikesReturnsError) {
     LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
     EXPECT_EQ(trace.error_no, EVENTPROP_NULL_POINTER);
 
-    eventprop_free_lambda_i_trace_output(&trace);
+    eventprop_free_lambda_i_trace_output(trace);
 }

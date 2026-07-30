@@ -52,7 +52,7 @@ TEST(BackwardSpikes, ZeroOutputSpikesReturnsZeroGradient) {
     // spike_errors has input.n_spikes entries, all zero
     EXPECT_NEAR(result.spike_errors[0], 0.0, 1e-15);
 
-    eventprop_free_backward_output(&result);
+    eventprop_free_backward_output(result);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -88,8 +88,8 @@ TEST(BackwardSpikes, SingleInputSingleOutputSpike) {
         EXPECT_FALSE(std::isinf(result.spike_errors[i]));
     }
 
-    eventprop_free_spike_output(&fwd);
-    eventprop_free_backward_output(&result);
+    eventprop_free_spike_output(fwd);
+    eventprop_free_backward_output(result);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -126,9 +126,9 @@ TEST(BackwardSpikes, LinearInPostErrors) {
         EXPECT_NEAR(r2.spike_errors[i], r1.spike_errors[i] * scale, 1e-12);
     }
 
-    eventprop_free_spike_output(&fwd);
-    eventprop_free_backward_output(&r1);
-    eventprop_free_backward_output(&r2);
+    eventprop_free_spike_output(fwd);
+    eventprop_free_backward_output(r1);
+    eventprop_free_backward_output(r2);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -156,8 +156,8 @@ TEST(BackwardSpikes, ZeroPostErrorsYieldsZeroGradient) {
         EXPECT_NEAR(result.grad[i], 0.0, 1e-15);
     }
 
-    eventprop_free_spike_output(&fwd);
-    eventprop_free_backward_output(&result);
+    eventprop_free_spike_output(fwd);
+    eventprop_free_backward_output(result);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -187,8 +187,8 @@ TEST(BackwardSpikes, OnlySourceRowsTouched) {
         EXPECT_NEAR(result.grad[1 * input.n_post + col], 0.0, 1e-15);
     }
 
-    eventprop_free_spike_output(&fwd);
-    eventprop_free_backward_output(&result);
+    eventprop_free_spike_output(fwd);
+    eventprop_free_backward_output(result);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -220,10 +220,10 @@ TEST(BackwardSpikes, SpikeErrorsDependOnWeights) {
         EXPECT_NE(r1.spike_errors[i], r2.spike_errors[i]);
     }
 
-    eventprop_free_spike_output(&fwd1);
-    eventprop_free_spike_output(&fwd2);
-    eventprop_free_backward_output(&r1);
-    eventprop_free_backward_output(&r2);
+    eventprop_free_spike_output(fwd1);
+    eventprop_free_spike_output(fwd2);
+    eventprop_free_backward_output(r1);
+    eventprop_free_backward_output(r2);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -255,8 +255,8 @@ TEST(BackwardSpikes, MultiplePostSpikesSameNeuron) {
     EXPECT_FALSE(std::isinf(result.grad[0]));
     EXPECT_NE(result.grad[0], 0.0);
 
-    eventprop_free_spike_output(&fwd);
-    eventprop_free_backward_output(&result);
+    eventprop_free_spike_output(fwd);
+    eventprop_free_backward_output(result);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -288,8 +288,8 @@ TEST(BackwardSpikes, MultiplePostNeuronsIndependent) {
     // Gradient for the firing neuron should be nonzero
     EXPECT_NE(result.grad[0], 0.0);   // grad[source=0, post=0]
 
-    eventprop_free_spike_output(&fwd);
-    eventprop_free_backward_output(&result);
+    eventprop_free_spike_output(fwd);
+    eventprop_free_backward_output(result);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -306,7 +306,7 @@ TEST(BackwardSpikes, NegativeNpostReturnsError) {
     BackwardOutput result = eventprop_backward_spikes(input, spike);
     EXPECT_EQ(result.error_no, EVENTPROP_INVALID_DIMENSION);
 
-    eventprop_free_backward_output(&result);
+    eventprop_free_backward_output(result);
 }
 
 TEST(BackwardSpikes, ZeroNpreReturnsError) {
@@ -319,7 +319,7 @@ TEST(BackwardSpikes, ZeroNpreReturnsError) {
     BackwardOutput result = eventprop_backward_spikes(input, spike);
     EXPECT_EQ(result.error_no, EVENTPROP_INVALID_DIMENSION);
 
-    eventprop_free_backward_output(&result);
+    eventprop_free_backward_output(result);
 }
 
 TEST(BackwardSpikes, EqualTausReturnsError) {
@@ -332,7 +332,7 @@ TEST(BackwardSpikes, EqualTausReturnsError) {
     BackwardOutput result = eventprop_backward_spikes(input, spike);
     EXPECT_EQ(result.error_no, EVENTPROP_INVALID_TAU);
 
-    eventprop_free_backward_output(&result);
+    eventprop_free_backward_output(result);
 }
 
 TEST(BackwardSpikes, NullTimesWithInputSpikesReturnsError) {
@@ -345,7 +345,7 @@ TEST(BackwardSpikes, NullTimesWithInputSpikesReturnsError) {
     BackwardOutput result = eventprop_backward_spikes(input, spike);
     EXPECT_EQ(result.error_no, EVENTPROP_NULL_POINTER);
 
-    eventprop_free_backward_output(&result);
+    eventprop_free_backward_output(result);
 }
 
 TEST(BackwardSpikes, OutOfBoundsInputSourceReturnsError) {
@@ -361,7 +361,7 @@ TEST(BackwardSpikes, OutOfBoundsInputSourceReturnsError) {
     BackwardOutput result = eventprop_backward_spikes(input, spike);
     EXPECT_EQ(result.error_no, EVENTPROP_INVALID_SOURCE);
 
-    eventprop_free_backward_output(&result);
+    eventprop_free_backward_output(result);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -384,8 +384,8 @@ TEST(BackwardSpikes, OutOfBoundsOutputSourceReturnsError) {
     BackwardOutput result = eventprop_backward_spikes(input, fwd);
     EXPECT_EQ(result.error_no, EVENTPROP_INVALID_SOURCE);
 
-    eventprop_free_spike_output(&fwd);
-    eventprop_free_backward_output(&result);
+    eventprop_free_spike_output(fwd);
+    eventprop_free_backward_output(result);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -411,6 +411,6 @@ TEST(BackwardSpikes, CurrentEqualsVthReturnsError) {
     BackwardOutput result = eventprop_backward_spikes(input, fwd);
     EXPECT_EQ(result.error_no, EVENTPROP_INVALID_CURRENT);
 
-    eventprop_free_spike_output(&fwd);
-    eventprop_free_backward_output(&result);
+    eventprop_free_spike_output(fwd);
+    eventprop_free_backward_output(result);
 }

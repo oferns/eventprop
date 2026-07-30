@@ -41,7 +41,7 @@ TEST(ComputeMaxima, ZeroSpikesReturnsNaNAndZero) {
         EXPECT_TRUE(std::isnan(maxima.times[i]));
         EXPECT_DOUBLE_EQ(maxima.values[i], 0.0);
     }
-    eventprop_free_maxima_output(&maxima);
+    eventprop_free_maxima_output(maxima);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ TEST(ComputeMaxima, SingleSpikeStrongWeightHasFiniteMaxima) {
     // With a strong weight the maximum should be found (not NaN)
     EXPECT_FALSE(std::isnan(maxima.times[0]));
     EXPECT_GT(maxima.values[0], 0.0);   // positive voltage peak
-    eventprop_free_maxima_output(&maxima);
+    eventprop_free_maxima_output(maxima);
 }
 
 TEST(ComputeMaxima, SingleSpikeWeakWeightHasSmallMaxima) {
@@ -73,7 +73,7 @@ TEST(ComputeMaxima, SingleSpikeWeakWeightHasSmallMaxima) {
     // Even a weak weight should produce some finite maximum (not NaN)
     EXPECT_FALSE(std::isnan(maxima.times[0]));
     EXPECT_GT(maxima.values[0], 0.0);
-    eventprop_free_maxima_output(&maxima);
+    eventprop_free_maxima_output(maxima);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -100,7 +100,7 @@ TEST(ComputeMaxima, MultiplePostNeuronsIndependent) {
     EXPECT_GT(maxima.values[0], maxima.values[1]);
     EXPECT_GT(maxima.values[1], maxima.values[2]);
 
-    eventprop_free_maxima_output(&maxima);
+    eventprop_free_maxima_output(maxima);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -120,7 +120,7 @@ TEST(ComputeMaxima, MaximaTimeAfterFirstSpike) {
     // It can extend beyond the last spike because the membrane
     // potential continues to evolve (last interval upper bound = INFINITY).
     EXPECT_GE(maxima.times[0], times.front());
-    eventprop_free_maxima_output(&maxima);
+    eventprop_free_maxima_output(maxima);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -148,8 +148,8 @@ TEST(ComputeMaxima, MoreSpikesIncreaseMaximum) {
     // Two spikes should produce a higher (or equal) maximum than one
     EXPECT_GE(maxima2.values[0], maxima1.values[0]);
 
-    eventprop_free_maxima_output(&maxima1);
-    eventprop_free_maxima_output(&maxima2);
+    eventprop_free_maxima_output(maxima1);
+    eventprop_free_maxima_output(maxima2);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -176,8 +176,8 @@ TEST(ComputeMaxima, ValuesScaleLinearlyWithWeights) {
     EXPECT_DOUBLE_EQ(maxima2.values[0], maxima1.values[0] * 3.0);
     EXPECT_DOUBLE_EQ(maxima2.times[0], maxima1.times[0]);
 
-    eventprop_free_maxima_output(&maxima1);
-    eventprop_free_maxima_output(&maxima2);
+    eventprop_free_maxima_output(maxima1);
+    eventprop_free_maxima_output(maxima2);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -202,7 +202,7 @@ TEST(ComputeMaxima, DifferentSourcesAffectDifferentPosts) {
         EXPECT_GT(maxima.values[i], 0.0);
     }
 
-    eventprop_free_maxima_output(&maxima);
+    eventprop_free_maxima_output(maxima);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -229,8 +229,8 @@ TEST(ComputeMaxima, TauMemAffectsMaximaTiming) {
     EXPECT_FALSE(std::isnan(maximaFast.times[0]));
     EXPECT_FALSE(std::isnan(maximaSlow.times[0]));
 
-    eventprop_free_maxima_output(&maximaFast);
-    eventprop_free_maxima_output(&maximaSlow);
+    eventprop_free_maxima_output(maximaFast);
+    eventprop_free_maxima_output(maximaSlow);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -245,7 +245,7 @@ TEST(ComputeMaxima, NegativeNpostReturnsError) {
     EXPECT_EQ(maxima.error_no, EVENTPROP_INVALID_DIMENSION);
     EXPECT_EQ(maxima.times, nullptr);
     EXPECT_EQ(maxima.values, nullptr);
-    eventprop_free_maxima_output(&maxima);
+    eventprop_free_maxima_output(maxima);
 }
 
 TEST(ComputeMaxima, ZeroNpreReturnsError) {
@@ -256,7 +256,7 @@ TEST(ComputeMaxima, ZeroNpreReturnsError) {
     EXPECT_EQ(maxima.error_no, EVENTPROP_INVALID_DIMENSION);
     EXPECT_EQ(maxima.times, nullptr);
     EXPECT_EQ(maxima.values, nullptr);
-    eventprop_free_maxima_output(&maxima);
+    eventprop_free_maxima_output(maxima);
 }
 
 TEST(ComputeMaxima, EqualTausReturnsError) {
@@ -268,7 +268,7 @@ TEST(ComputeMaxima, EqualTausReturnsError) {
     EXPECT_EQ(maxima.error_no, EVENTPROP_INVALID_TAU);
     EXPECT_EQ(maxima.times, nullptr);
     EXPECT_EQ(maxima.values, nullptr);
-    eventprop_free_maxima_output(&maxima);
+    eventprop_free_maxima_output(maxima);
 }
 
 TEST(ComputeMaxima, NullTimesWithSpikesReturnsError) {
@@ -281,7 +281,7 @@ TEST(ComputeMaxima, NullTimesWithSpikesReturnsError) {
     EXPECT_EQ(maxima.error_no, EVENTPROP_NULL_POINTER);
     EXPECT_EQ(maxima.times, nullptr);
     EXPECT_EQ(maxima.values, nullptr);
-    eventprop_free_maxima_output(&maxima);
+    eventprop_free_maxima_output(maxima);
 }
 
 TEST(ComputeMaxima, OutOfBoundsSourceReturnsError) {
@@ -295,5 +295,5 @@ TEST(ComputeMaxima, OutOfBoundsSourceReturnsError) {
     EXPECT_EQ(maxima.error_no, EVENTPROP_INVALID_SOURCE);
     EXPECT_EQ(maxima.times, nullptr);
     EXPECT_EQ(maxima.values, nullptr);
-    eventprop_free_maxima_output(&maxima);
+    eventprop_free_maxima_output(maxima);
 }
