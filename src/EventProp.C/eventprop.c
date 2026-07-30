@@ -42,6 +42,7 @@
 
 #define EXP_STACK_SIZE 1024
 #define DIFF_STACK_SIZE 512
+#define BACKWARD_DIFF_STACK_SIZE 512
 
 #define TOMS748_MAX_ITER 1024
 #define TOMS748_TOL 1e-14
@@ -1496,7 +1497,6 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
 
             /* Compute dot product: w[row] · (lambda_v - lambda_i)
                Use stack allocation for small n_post, heap otherwise. */
-#define BACKWARD_DIFF_STACK_SIZE 512
             double stack_diff[BACKWARD_DIFF_STACK_SIZE];
             int use_stack = (input.n_post <= BACKWARD_DIFF_STACK_SIZE);
             double* diff = use_stack ? stack_diff : malloc(input.n_post * sizeof(double));
