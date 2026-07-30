@@ -1,3 +1,5 @@
+"""Test backward pass through LIFLayer using native Cython bindings."""
+
 import numpy as np
 from eventprop_c.lif_layer import LIFLayer, LIFLayerParameters
 from eventprop_c.spikes import SpikesVector, Spikes
@@ -19,29 +21,19 @@ input_batch = SpikesVector(input_spikes)
 output = layer.forward(input_batch)
 print(f'Output batch size: {len(output)}')
 
-# Set errors
+# Set errors on output spikes (required before backward pass)
 for i in range(len(output)):
     for j in range(output[i].n_spikes):
         output[i].set_error(j, np.random.rand())
 print('Errors set OK')
 
-# Get flat buffers from input
-times, sources, n_per_sample = SpikesVector._extract_flat_buffers(layer.input_batch)
-print(f'Input flat: times={len(times)}, sources={len(sources)}')
-
-# Get errors from output
-errors = layer.post_batch._batch_output.get_flat_errors()
-print(f'Errors shape: {errors.shape}')
-
-# Call backward directly with debug
+# Call backward directly through the native binding
 from eventprop_c._native import backward_spikes_batch_accumulate
-result = backward_spikes_batch_accumulate(
-    times, sources, n_per_sample,
-    layer.post_batch._batch_output, errors,
-)
+result = backward_spikes_batch_accumulate(layer.post_batch._batch_output)
 print(f'Result grad shape: {result.grad.shape}')
+print(f'Rows: {result.rows}, Cols: {result.cols}')
 
-# Now test the full layer.backward()
+# Now test the full layer.backward() flow
 layer2 = LIFLayer(params)
 input_batch2 = SpikesVector(input_spikes)
 output2 = layer2.forward(input_batch2)
