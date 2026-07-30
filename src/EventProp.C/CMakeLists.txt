@@ -13,8 +13,17 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # -Wpedantic: strict C11 conformance diagnostics
 # -Wshadow: variable shadowing bugs
 # -Wimplicit-fallthrough: missing break/return in switch cases
+# -Wformat=2: stricter format string checks (signedness, %d vs %ld)
+# -Wnull-dereference: potential NULL pointer dereferences before checks
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-    add_compile_options(-Wall -Wextra -Wpedantic -Wshadow -Wimplicit-fallthrough)
+    add_compile_options(-Wall -Wextra -Wpedantic -Wshadow -Wimplicit-fallthrough
+                        -Wformat=2 -Wnull-dereference)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU")
+        # GCC-only diagnostics (not available on Clang/AppleClang)
+        add_compile_options(-Wduplicated-cond   # duplicate conditions in if/else chains
+                            -Wmisleading-indentation  # indentation that doesn't match control flow
+                            -Wlogical-op)          # suspicious & vs &&, || vs |
+    endif()
 elseif(CMAKE_C_COMPILER_ID MATCHES "MSVC")
     # MSVC equivalents (enabled by default: /W3, /W4 for extra warnings)
     add_compile_options(/W4)
