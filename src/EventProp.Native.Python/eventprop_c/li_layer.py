@@ -48,7 +48,7 @@ class LILayer(Layer):
 
         c_output = compute_maxima_batch(
             times, sources, n_per_sample,
-            self.w_in_flat, self.parameters.n_in, self.parameters.n,
+            self._w_in, self.parameters.n_in, self.parameters.n,
             self.parameters.tau_mem, self.parameters.tau_syn, float('inf'),  # LI: no threshold
         )
 
@@ -62,8 +62,8 @@ class LILayer(Layer):
 
     @w_in.setter
     def w_in(self, value: np.ndarray):
-        self._w_in = value
-        self.w_in_flat = np.ascontiguousarray(value).ravel().reshape(self.parameters.n_in, self.parameters.n)
+        # Ensure row-contiguous for zero-copy Cython transfer (double[:, ::1])
+        self._w_in = np.ascontiguousarray(value)
 
     def backward(self):
         # C owns inputs internally — no Python-side buffer extraction needed
