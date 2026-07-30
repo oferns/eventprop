@@ -48,7 +48,7 @@
 #define TOMS748_TOL 1e-14
 #define TOMS748_NEAR_ZERO 1e-300   /* near-zero guard to avoid div-by-zero in curvature checks */
 
-/* Voltage threshold crossing tolerance — "has v genuinely exceeded v_th?" */
+/* Voltage threshold crossing tolerance — has v genuinely exceeded v_th? */
 #define SPIKE_THRESHOLD_EPS 1e-14
 
 /* Evaluate v(t) - v_th for root-finding */
@@ -610,7 +610,7 @@ static double toms748_solve(const RootContext* ctx, double a, double b) {
 
 // ── Internal context for compute_spikes memory management ─────────────────────
 typedef struct {
-    int n_post;  // needed for per-neuron cleanup loop
+    int n_post;  // needed for per-neuron clean-up loop
 
     SumsOutput sums;              // eventprop_free_sums_output
     double** post_times_arr;      // array + each [n]
@@ -620,7 +620,7 @@ typedef struct {
     SpikeEntry* entries;          // sorted collection buffer
 } ComputeSpikesCtx;
 
-static void free_compute_spikes_ctx(ComputeSpikesCtx* ctx) {
+static void free_compute_spikes_ctx(const ComputeSpikesCtx* ctx) {
     eventprop_free_sums_output(ctx->sums);
     if (ctx->post_times_arr) {
         for (int n = 0; n < ctx->n_post; n++) {
@@ -637,7 +637,7 @@ static void free_compute_spikes_ctx(ComputeSpikesCtx* ctx) {
 
 SpikeOutput eventprop_compute_spikes(const EventPropInput input)
 {
-    /* Context tracks all heap allocations for unified cleanup */
+    /* Context tracks all heap allocations for unified clean-up */
     ComputeSpikesCtx ctx = { .n_post = input.n_post };
     SpikeOutput result = (SpikeOutput){ .error_no = eventprop_validate_input(input) };
 
@@ -707,10 +707,10 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
 
     // Something failed
     if (failed > 0) {
-        // It wasnt the first loop so we need to clean up to that.
+        // It wasn't the first loop so we need to clean up to that.
         if(failed > 1){            
         /* Free any successfully allocated per-neuron buffers before the failure point */
-        /*  The failing allocation cleans its array index so we only need to free up to that index. Hence failed - 1  */
+        /*  The failing allocation cleans its array index so we only need to free up to that index. Hence, failed - 1  */
         for (int n = 0; n < failed - 1; n++) {
             free(ctx.post_times_arr[n]);
             free(ctx.post_currents_arr[n]);
@@ -721,9 +721,8 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
     }
 
     /* Shared error flag for OpenMP region: threads bail out gracefully on OOM */
-#ifdef _OPENMP
     volatile int fwd_alloc_error = 0;
-#endif
+
     int target_nrn; // separated from initialization for the benefit of MSVCC
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
@@ -766,10 +765,8 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                             if (count > 0) {
                                 post_exp_st = (double*)malloc(count * sizeof(double));
                                 if (!post_exp_st) { 
-#ifdef _OPENMP
                                     fwd_alloc_error = 1; 
-#endif
-                                    finished = 1; 
+                                    finished = 1;
                                     break; 
                                 }
                                 for (int s = 0; s < count; s++)
@@ -783,13 +780,10 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                             if (t_post > t_lower && t_post < tmax) {
                                 if (count >= cap) {
                                     cap *= 3;
-                                    double* new_times    = realloc(p_times, cap * sizeof(double));
-                                    
+                                    double* new_times    = realloc(p_times, cap * sizeof(double));  
                                     if(!new_times) {
-#ifdef _OPENMP
-                                        fwd_alloc_error = 1; 
-#endif
-                                        finished = 1; 
+                                        fwd_alloc_error = 1;
+                                        finished = 1;
                                         break; 
                                     }
                                     
@@ -797,9 +791,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                                     double* new_currents = realloc(p_currents, cap * sizeof(double));
                                     if (!new_currents) { 
                                         free(new_times);  
-#ifdef _OPENMP
-                                        fwd_alloc_error = 1; 
-#endif
+                                        fwd_alloc_error = 1;
                                         finished = 1; 
                                         break; 
                                     }
@@ -836,10 +828,8 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                             if (count > 0) {
                                 post_exp_st = (double*)malloc(count * sizeof(double));
                                 if (!post_exp_st) { 
-#ifdef _OPENMP
                                     fwd_alloc_error = 1; 
-#endif
-                                    finished = 1; 
+                                    finished = 1;
                                     break; 
                                 }
                                 for (int s = 0; s < count; s++)
@@ -855,9 +845,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                                     cap *= 3;
                                     double* new_times    = realloc(p_times, cap * sizeof(double));
                                     if (!new_times) {
-#ifdef _OPENMP
                                          fwd_alloc_error = 1; 
-#endif
                                          finished = 1; 
                                          break;
                                         }
@@ -866,9 +854,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                                     double* new_currents = realloc(p_currents, cap * sizeof(double));
                                     if (!new_currents) {
                                          free(new_times); 
-#ifdef _OPENMP
                                          fwd_alloc_error = 1; 
-#endif
                                          finished = 1; 
                                          break;
                                         }
@@ -900,9 +886,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                         if (count > 0) {
                             post_exp_st = (double*)malloc(count * sizeof(double));
                             if (!post_exp_st) { 
-#ifdef _OPENMP
                                 fwd_alloc_error = 1; 
-#endif
                                 finished = 1; 
                                 break; 
                             }
@@ -919,9 +903,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                                 cap *= 3;
                                 double* new_times    = realloc(p_times, cap * sizeof(double));
                                 if (!new_times) { 
-#ifdef _OPENMP
                                     fwd_alloc_error = 1; 
-#endif
                                     finished = 1; 
                                     break;
                                  }
@@ -930,9 +912,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                                 double* new_currents = realloc(p_currents, cap * sizeof(double));
                                 if (!new_currents) { 
                                     free(new_times);   
-#ifdef _OPENMP
                                     fwd_alloc_error = 1; 
-#endif
                                     finished = 1; 
                                     break;
                                  }
@@ -958,13 +938,12 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
         ctx.spike_counts[target_nrn]     = count;
     }
 
-#ifdef _OPENMP
+
     if (fwd_alloc_error) {
         result.n_spikes = 0;
         result.error_no = EVENTPROP_ALLOC_NEURON_BUF;
         goto cleanup_and_return;
     }
-#endif
 
     /* Count total spikes and allocate exact-size output */
     result.n_spikes = 0;
