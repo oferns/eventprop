@@ -101,6 +101,9 @@ cdef extern from "eventprop.h":
     # Input validation helper
     int eventprop_validate_input(const EventPropInput input)
 
+    # Human-readable error message for an error code
+    const char* eventprop_error_string(int error_no)
+
 
 # ---------------------------------------------------------------------------
 # 3. C declarations — eventprop_batch.h (batch API)
@@ -663,6 +666,51 @@ cdef EventPropInput* _build_inputs(
 
 
 # ---------------------------------------------------------------------------
+# 6. Error checking helpers
+# ---------------------------------------------------------------------------
+
+cdef void check_spikes_batch_error(SpikesBatch result):
+    """Check SpikesBatch for errors, raise RuntimeError with message."""
+    if not result.has_errors:
+        return
+    cdef int i
+    for i in range(result.batch_size):
+        if result.spikes[i].error_no != 0:
+            raise RuntimeError(f"EventProp error {result.spikes[i].error_no}: "
+                               f"{eventprop_error_string(result.spikes[i].error_no).decode('utf-8')}")
+
+
+cdef void check_maxima_batch_error(MaximaBatch result):
+    """Check MaximaBatch for errors, raise RuntimeError with message."""
+    if not result.has_errors:
+        return
+    cdef int i
+    for i in range(result.batch_size):
+        if result.outputs[i].error_no != 0:
+            raise RuntimeError(f"EventProp error {result.outputs[i].error_no}: "
+                               f"{eventprop_error_string(result.outputs[i].error_no).decode('utf-8')}")
+
+
+cdef void check_backward_result_error(AccumulatedBackwardResult result):
+    """Check AccumulatedBackwardResult for errors, raise RuntimeError with message."""
+    if not result.has_errors:
+        return
+    cdef int i
+    for i in range(result.batch_size):
+        if result.outputs[i].error_no != 0:
+            raise RuntimeError(f"EventProp error {result.outputs[i].error_no}: "
+                               f"{eventprop_error_string(result.outputs[i].error_no).decode('utf-8')}")
+
+
+cdef void check_dropout_batch_error(DropoutBatch result):
+    """Check DropoutBatch for errors, raise RuntimeError with message."""
+    if not result.has_errors:
+        return
+    # Dropout only has batch-level error flag (no per-sample error_no)
+    raise RuntimeError("EventProp dropout failed: allocation or validation error")
+
+
+# ---------------------------------------------------------------------------
 # 7. Public API — Python-callable functions
 # ---------------------------------------------------------------------------
 
@@ -680,6 +728,7 @@ def compute_spikes_batch(
         times, sources, n_per_sample, w, n_pre, n_post, tau_mem, tau_syn, v_th)
 
     cdef SpikesBatch result = eventprop_compute_spikes_batch(inputs, batch_size)
+    check_spikes_batch_error(result)
 
     # Wrap: transfer input ownership to wrapper, copy spikes onto heap
     cdef _SpikesBatchOutput obj = _SpikesBatchOutput.from_c_result(inputs, result)
@@ -704,9 +753,11 @@ def compute_maxima_batch(
 
     # Compute spikes first (needed for maxima)
     cdef SpikesBatch spikes_result = eventprop_compute_spikes_batch(inputs, batch_size)
+    check_spikes_batch_error(spikes_result)
 
     # Compute maxima using the same inputs and spike results
     cdef MaximaBatch maxima_result = eventprop_compute_maxima_batch(inputs, spikes_result)
+    check_maxima_batch_error(maxima_result)
 
     # Free intermediate spikes batch (maxima doesn't need it after computation)
     eventprop_free_spikes_batch(spikes_result)
@@ -733,6 +784,7 @@ def backward_spikes_batch_accumulate(_SpikesBatchOutput batch_output):
     # Build a plain SpikesBatch view for the C API (shared with wrapper)
     cdef AccumulatedBackwardResult result = eventprop_backward_spikes_batch_accumulate(
         inputs, spikes_ptr[0])  # copy struct by value onto C stack
+    check_backward_result_error(result)
 
     # Build n_spikes_per_sample from inputs (needed for spike error sizing)
     cdef int batch_size = spikes_ptr.batch_size
@@ -758,6 +810,7 @@ def backward_maxima_batch_accumulate(_MaximaBatchOutput batch_output):
     # Pass inputs and maxima separately (new API)
     cdef AccumulatedBackwardResult result = eventprop_backward_maxima_batch_accumulate(
         inputs, maxima_ptr[0])  # copy struct by value onto C stack
+    check_backward_result_error(result)
 
     # Build n_spikes_per_sample from inputs (needed for spike error sizing)
     cdef int batch_size = maxima_ptr.batch_size
@@ -781,4 +834,5 @@ def dropout_spikes_batch(
     cdef DropoutBatch result = eventprop_dropout_spikes_batch(
         &times[0], &sources[0], &n_per_sample[0],
         batch_size, p_drop, seed)
+    check_dropout_batch_error(result)
     return _DropoutBatchOutput.from_c_result(result)
