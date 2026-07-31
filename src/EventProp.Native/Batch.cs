@@ -64,10 +64,12 @@ public static unsafe partial class Batch
     [StructLayout(LayoutKind.Sequential)]
     public readonly ref struct GradientOutput : IDisposable
     {
+        internal readonly Api.EventPropError errorNo;
         internal readonly IntPtr data;     // double* (malloc'd, rows * cols)
         internal readonly int rows;
         internal readonly int cols;
 
+        public Api.EventPropError ErrorNo => errorNo;
         public IntPtr Data => data;
         public int Rows => rows;
         public int Cols => cols;
