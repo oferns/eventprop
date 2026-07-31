@@ -13,10 +13,12 @@ public static unsafe partial class Batch
     [StructLayout(LayoutKind.Sequential)]
     public readonly ref struct SpikesBatch : IDisposable
     {
+        internal readonly Api.EventPropError errorNo;
         internal readonly int batchSize;
         internal readonly int hasErrors;
         internal readonly IntPtr spikes;   // Api.SpikeOutput* (malloc'd, length = batch_size)
 
+        public Api.EventPropError ErrorNo => errorNo;
         public int BatchSize => batchSize;
         public bool HasErrors => hasErrors != 0;
         public IntPtr Spikes => spikes;
@@ -28,10 +30,12 @@ public static unsafe partial class Batch
     [StructLayout(LayoutKind.Sequential)]
     public readonly ref struct BackwardsBatch : IDisposable
     {
+        internal readonly Api.EventPropError errorNo;
         internal readonly int batchSize;
         internal readonly int hasErrors;
         internal readonly IntPtr outputs;  // Api.BackwardOutput* (malloc'd, length = batch_size)
 
+        public Api.EventPropError ErrorNo => errorNo;
         public int BatchSize => batchSize;
         public bool HasErrors => hasErrors != 0;
         public IntPtr Outputs => outputs;
@@ -43,10 +47,12 @@ public static unsafe partial class Batch
     [StructLayout(LayoutKind.Sequential)]
     public readonly ref struct MaximaBatch : IDisposable
     {
+        internal readonly Api.EventPropError errorNo;
         internal readonly int batchSize;
         internal readonly int hasErrors;
         internal readonly IntPtr outputs;  // Api.MaximaOutput* (malloc'd, length = batch_size)
 
+        public Api.EventPropError ErrorNo => errorNo;
         public int BatchSize => batchSize;
         public bool HasErrors => hasErrors != 0;
         public IntPtr Outputs => outputs;
@@ -73,10 +79,13 @@ public static unsafe partial class Batch
     [StructLayout(LayoutKind.Sequential)]
     public readonly ref struct AccumulatedBackwardResult : IDisposable
     {
+        internal readonly Api.EventPropError errorNo;
         internal readonly IntPtr summedGrads;  // GradientOutput* (malloc'd)
         internal readonly int hasErrors;
         internal readonly IntPtr outputs;      // Api.BackwardOutput* (.grad freed, .spike_errors kept)
         internal readonly int batchSize;
+
+        public Api.EventPropError ErrorNo => errorNo;
 
         /// <summary>Get the owned gradient output as a ref struct view.</summary>
         public GradientOutput GetSummedGrads()
