@@ -12,21 +12,56 @@ public static unsafe partial class Api
     public enum EventPropError : int
     {
         Ok                       = 0,
-        InvalidDimension         = 1,
-        NegativeSpikes           = 2,
-        NullPointer              = 3,
-        InvalidSource            = 4,
-        InvalidTau               = 5,
-        AllocationFailed         = 6,
-        InvalidCurrent           = 7,
-        NegativeSpikeTime        = 8,
-        ExcessiveSpikeTime       = 9,
-        TauTooSmall              = 10,
-        TauTooLarge              = 11,
-        InvalidVTh               = 12,
-        DimensionTooLarge        = 13,
-        TimesTauMismatch         = 14,
-        TauTooClose              = 15,
+        InvalidDimension         = 1,   // n_pre <= 0 or n_post <= 0
+        NegativeSpikes           = 2,   // n_spikes < 0
+        NullPointer              = 3,   // w/times/sources is NULL when required
+        InvalidSource            = 4,   // sources[i] out of [0, n_pre) range
+        InvalidTau               = 5,   // tau_mem <= 0, tau_syn <= 0, or tau_mem == tau_syn
+        InvalidCurrent           = 6,   // spike.currents[i] == v_th (division by zero)
+        NegativeSpikeTime        = 7,   // times[i] < 0
+        ExcessiveSpikeTime       = 8,   // max(times) > MAX_SPIKE_TIME
+        TauTooSmall              = 9,   // tau_mem or tau_syn < MIN_TAU
+        TauTooLarge              = 10,  // tau_mem or tau_syn > MAX_TAU
+        InvalidVTh               = 11,  // v_th <= 0
+        DimensionTooLarge        = 12,  // n_pre or n_post > MAX_DIM
+        TimesTauMismatch         = 13,  // max(times)/min(tau) >= EXP_OVERFLOW_THRESHOLD
+        TauTooClose              = 14,  // |tau_mem - tau_syn| / min(tau) < TAU_REL_DIFF_MIN
+        BatchSizeZeroOrNeg       = 15,  // bad batch size
+        AllocSum0                = 16,  // result.sum0
+        AllocSum1                = 17,  // result.sum1
+        AllocExpMem              = 18,  // exp_mem lookup table
+        AllocExpSyn              = 19,  // exp_syn lookup table
+        AllocTimesArr            = 20,  // post_times_arr
+        AllocCurrentsArr         = 21,  // post_currents_arr
+        AllocSpikeCaps           = 22,  // spike_caps
+        AllocSpikeCounts         = 23,  // spike_counts
+        AllocNeuronBuf           = 24,  // per-neuron times/currents buffer
+        AllocEntries             = 25,  // entries (sorted collection)
+        AllocResultTimes         = 26,  // result.times
+        AllocResultSources       = 27,  // result.sources
+        AllocResultCurrents      = 28,  // result.currents
+        AllocResultErrors        = 29,  // result.errors
+        AllocMaximaTimes         = 30,  // maxima result.times
+        AllocMaximaValues        = 31,  // maxima result.values
+        AllocMaximaErrors        = 32,  // maxima result.errors
+        AllocBwdGrad             = 33,  // backward result.grad
+        AllocBwdSpikeErrors      = 34,  // backward result.spike_errors
+        AllocBwdMerged           = 35,  // backward merged spike array
+        AllocBwdAllErrors        = 36,  // backward all_errors buffer
+        AllocBwdLambdaV          = 37,  // backward lambda_v
+        AllocBwdLambdaI          = 38,  // backward lambda_i
+        AllocBwdJumpTime         = 39,  // backward jump_time array
+        AllocBwdJumpMag          = 40,  // backward jump_mag array
+        AllocBwdJumpCount        = 41,  // backward jump_count array
+        AllocBwdJumpCap          = 42,  // backward jump_cap array
+        AllocBwdPerNeuron        = 43,  // per-neuron jump_time/mag buffer
+        AllocBatchOutputs        = 44,  // batch outputs array
+        AllocBatchGrad           = 45,  // accumulate grad pointer
+        AllocDropoutSample       = 46,  // dropout per-sample buffer
+        AllocDiagVTrace          = 47,  // voltage trace v_trace array
+        AllocDiagTs              = 48,  // trace ts (time) array
+        AllocDiagLambda          = 49,  // lambda-I trace array
+        BatchEmpty               = 50,  // batch input was null
     }
 
     // ── Native structs (match C layout exactly) ───────────────────
@@ -86,6 +121,18 @@ public static unsafe partial class Api
         internal readonly IntPtr sources;     // int* (malloc'd)
         internal readonly IntPtr currents;    // double* (malloc'd)
         internal readonly IntPtr errors;      // double* (malloc'd, written by caller before backward)
+
+        /// <summary>Construct from borrowed pointers (for wrapper methods). Caller must keep arrays alive during the call.</summary>
+        internal SpikeOutput(EventPropError errorNo, int nSpikes, IntPtr times, IntPtr sources,
+            IntPtr currents, IntPtr errors)
+        {
+            this.errorNo = errorNo;
+            this.nSpikes = nSpikes;
+            this.times = times;
+            this.sources = sources;
+            this.currents = currents;
+            this.errors = errors;
+        }
 
         public EventPropError ErrorNo => errorNo;
         public int NSpikes => nSpikes;
@@ -193,6 +240,86 @@ public static unsafe partial class Api
 
     [LibraryImport(Lib)]
     public static partial EventPropError eventprop_validate_input(EventPropInput input);
+
+    /// <summary>Get human-readable error string for an error code.</summary>
+    [LibraryImport(Lib, EntryPoint = "eventprop_error_string")]
+    private static unsafe partial IntPtr NativeErrorString(int errorNo);
+
+    public static string GetErrorString(EventPropError error)
+    {
+        var ptr = NativeErrorString((int)error);
+        if (ptr == IntPtr.Zero) return $"Unknown error ({(int)error})";
+        return Marshal.PtrToStringUTF8(ptr) ?? $"Unknown error ({(int)error})";
+    }
+
+    // ── Convenience wrappers (managed arrays → P/Invoke) ─────────
+
+    /// <summary>Compute sums from managed arrays.</summary>
+    public static SumsOutput ComputeSums(ReadOnlySpan<double> w, int nPre, int nPost,
+        ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
+        double tauMem, double tauSyn)
+    {
+        var input = EventPropInput.Create(w, nPre, nPost, times, sources, 0.0, tauMem, tauSyn);
+        return eventprop_compute_sums(input);
+    }
+
+    /// <summary>Compute spikes from managed arrays.</summary>
+    public static SpikeOutput ComputeSpikes(ReadOnlySpan<double> w, int nPre, int nPost,
+        ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
+        double vTh, double tauMem, double tauSyn)
+    {
+        var input = EventPropInput.Create(w, nPre, nPost, times, sources, vTh, tauMem, tauSyn);
+        return eventprop_compute_spikes(input);
+    }
+
+    /// <summary>Compute maxima from managed arrays.</summary>
+    public static MaximaOutput ComputeMaxima(ReadOnlySpan<double> w, int nPre, int nPost,
+        ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
+        double tauMem, double tauSyn)
+    {
+        var input = EventPropInput.Create(w, nPre, nPost, times, sources, 0.0, tauMem, tauSyn);
+        return eventprop_compute_maxima(input);
+    }
+
+    /// <summary>Backward pass (spike loss) from managed arrays.</summary>
+    public static BackwardOutput BackwardSpikes(
+        ReadOnlySpan<double> inputTimes, ReadOnlySpan<int> inputSources,
+        ReadOnlySpan<double> postTimes, ReadOnlySpan<int> postSources,
+        ReadOnlySpan<double> postCurrents, ReadOnlySpan<double> postErrors,
+        int nPostSpikes,
+        ReadOnlySpan<double> w, int nPre, int nPost,
+        double vTh, double tauMem, double tauSyn)
+    {
+        var input = EventPropInput.Create(w, nPre, nPost, inputTimes, inputSources, vTh, tauMem, tauSyn);
+
+        // Pin post-spike arrays and construct SpikeOutput with borrowed pointers
+        fixed (double* pt = postTimes)
+        fixed (int* ps = postSources)
+        fixed (double* pc = postCurrents)
+        fixed (double* pe = postErrors)
+        {
+            var spike = new SpikeOutput(EventPropError.Ok, nPostSpikes,
+                (IntPtr)pt, (IntPtr)ps, (IntPtr)pc, (IntPtr)pe);
+            return eventprop_backward_spikes(input, spike);
+        }
+    }
+
+    /// <summary>Backward pass (maxima loss) from managed arrays.</summary>
+    public static BackwardOutput BackwardMaxima(
+        ReadOnlySpan<double> inputTimes, ReadOnlySpan<int> inputSources,
+        ReadOnlySpan<double> maximaTimes, ReadOnlySpan<double> maximaValues,
+        ReadOnlySpan<double> maximaErrors, int nMaxima,
+        ReadOnlySpan<double> w, int nPre, int nPost,
+        double tauMem, double tauSyn)
+    {
+        var input = EventPropInput.Create(w, nPre, nPost, inputTimes, inputSources, 0.0, tauMem, tauSyn);
+
+        fixed (double* mt = maximaTimes)
+        fixed (double* me = maximaErrors)
+        {
+            return eventprop_backward_maxima(input, (IntPtr)mt, (IntPtr)me);
+        }
+    }
 
     // ── Helpers ───────────────────────────────────────────────────
 
