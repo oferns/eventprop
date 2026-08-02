@@ -17,7 +17,7 @@ extern "C" {
 
 /** Input for voltage-trace computation. */
 typedef struct VoltageTraceInput {
-    const EventPropInput* input;       /* Forward pass parameters (weights, spikes, v_th, tau_mem, tau_syn) */
+    EventPropInput input;              /* Forward pass parameters (weights, spikes, v_th, tau_mem, tau_syn) */
     int target_nrn_idx;                /* Post-synaptic neuron to trace */
     const double* fwd_times;           /* Forward-pass spike times (borrowed) */
     const int* fwd_sources;            /* Forward-pass spike sources (borrowed) */

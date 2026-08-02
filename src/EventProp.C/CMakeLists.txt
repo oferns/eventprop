@@ -27,7 +27,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # -Wnull-dereference: potential NULL pointer dereferences before checks
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-Wall -Wextra -Wpedantic -Wshadow -Wimplicit-fallthrough
-                        -Wformat=2 -Wnull-dereference)
+                        -Wformat=2 -Wnull-dereference -Wsign-conversion)
     if(CMAKE_C_COMPILER_ID MATCHES "GNU")
         # GCC-only diagnostics (not available on Clang/AppleClang)
         add_compile_options(-Wduplicated-cond   # duplicate conditions in if/else chains

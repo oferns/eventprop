@@ -209,7 +209,7 @@ cdef extern from "eventprop_batch.h":
 cdef extern from "eventprop_diag.h":
 
     ctypedef struct VoltageTraceInput:
-        const EventPropInput* input
+        EventPropInput input
         int target_nrn_idx
         const double* fwd_times
         const int* fwd_sources

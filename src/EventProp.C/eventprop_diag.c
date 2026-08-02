@@ -26,42 +26,22 @@ void eventprop_free_voltage_trace_output(const VoltageTraceOutput output)
 
 VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput input)
 {
-    VoltageTraceOutput result;
-    result.n_t       = 0;
-    result.v_trace   = NULL;
-    result.ts        = NULL;
-    result.error_no  = EVENTPROP_OK;
+    VoltageTraceOutput result = (VoltageTraceOutput){0};
 
-    /* Validate pointers */
-    if (!input.input) {
-        result.error_no = EVENTPROP_NULL_POINTER;
+    /* Delegate shared validation to existing function */
+    EventPropError err = eventprop_validate_input(input.input);
+    if (err != EVENTPROP_OK) {
+        result.error_no = err;
         return result;
     }
-    const EventPropInput* fwd = input.input;
 
-    /* Validate dt and t_max */
+    /* Diag-specific checks */
     if (input.dt <= 0 || input.t_max <= 0) {
         result.error_no = EVENTPROP_INVALID_DIMENSION;
         return result;
     }
-
-    int n_t = (int)(input.t_max / input.dt);
-
-    /* Validate tau values (division by zero in k_prefactor) */
-    if (fwd->tau_mem <= 0 || fwd->tau_syn <= 0 || fwd->tau_mem == fwd->tau_syn) {
-        result.error_no = EVENTPROP_INVALID_TAU;
-        return result;
-    }
-
-    /* Validate target neuron index */
-    if (input.target_nrn_idx < 0 || input.target_nrn_idx >= fwd->n_post) {
+    if (input.target_nrn_idx < 0 || input.target_nrn_idx >= input.input.n_post) {
         result.error_no = EVENTPROP_INVALID_SOURCE;
-        return result;
-    }
-
-    /* Validate forward spike pointers */
-    if (fwd->n_spikes > 0 && (!fwd->times || !fwd->sources)) {
-        result.error_no = EVENTPROP_NULL_POINTER;
         return result;
     }
     if (input.n_post_spikes > 0 && (!input.fwd_times || !input.fwd_sources)) {
@@ -69,20 +49,24 @@ VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput input
         return result;
     }
 
-    result.n_t = n_t;
-    result.v_trace = calloc(n_t, sizeof(double));
+    /* All validation passed — safe to allocate and compute */
+    const int n_t = (int)(input.t_max / input.dt);
+    const EventPropInput* fwd = &input.input;  // local pointer for readability in loop
+
+    result.v_trace = calloc((size_t)n_t, sizeof(double));
     if (!result.v_trace) {
         result.error_no = EVENTPROP_ALLOC_DIAG_V_TRACE;
         return result;
     }
 
-    result.ts = calloc(n_t, sizeof(double));
+    result.ts = calloc((size_t)n_t, sizeof(double));
     if (!result.ts) {
         free(result.v_trace);
         result.v_trace = NULL;
         result.error_no = EVENTPROP_ALLOC_DIAG_TS;
         return result;
     }
+    result.n_t = n_t;  // only set after both allocations succeed
 
     const double k_prefactor = fwd->tau_syn / (fwd->tau_mem - fwd->tau_syn);
     MatrixView w = mv(fwd->w, fwd->n_pre, fwd->n_post);
@@ -115,19 +99,13 @@ VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput input
 
 LambdaITraceOutput eventprop_compute_lambda_i_trace(const LambdaITraceInput input)
 {
-    LambdaITraceOutput result;
-    result.n_t          = 0;
-    result.lambda_trace = NULL;
-    result.ts           = NULL;
-    result.error_no     = EVENTPROP_OK;
+    LambdaITraceOutput result = (LambdaITraceOutput){0};
 
     /* Validate dt and t_max */
     if (input.dt <= 0 || input.t_max <= 0) {
         result.error_no = EVENTPROP_INVALID_DIMENSION;
         return result;
     }
-
-    int n_t = (int)(input.t_max / input.dt);
 
     /* Validate tau values (division by zero in k_bwd_prefactor) */
     if (input.tau_mem <= 0 || input.tau_syn <= 0 || input.tau_mem == input.tau_syn) {
@@ -147,35 +125,41 @@ LambdaITraceOutput eventprop_compute_lambda_i_trace(const LambdaITraceInput inpu
         return result;
     }
 
-    result.n_t = n_t;
-    result.lambda_trace = calloc(n_t, sizeof(double));
+    const int n_t = (int)(input.t_max / input.dt);
+
+    result.lambda_trace = calloc((size_t)n_t, sizeof(double));
     if (!result.lambda_trace) {
         result.error_no = EVENTPROP_ALLOC_DIAG_LAMBDA;
         return result;
     }
 
-    result.ts = calloc(n_t, sizeof(double));
+    result.ts = calloc((size_t)n_t, sizeof(double));
     if (!result.ts) {
         free(result.lambda_trace);
         result.lambda_trace = NULL;
-        result.error_no     = EVENTPROP_ALLOC_DIAG_TS;
+        result.error_no = EVENTPROP_ALLOC_DIAG_TS;
         return result;
     }
+    result.n_t = n_t;  // only set after both allocations succeed
+
+    /* Handle zero forward spikes — trace is all zeros (already calloc'd) */
+    if (input.n_post_spikes == 0) {
+        for (int ti = 0; ti < n_t; ti++) {
+            result.ts[ti] = input.dt * ti;
+        }
+        return result;
+    }
+
+    /* Constants independent of time step */
+    const double largest_time = input.fwd_times[input.n_post_spikes - 1];
+    const double k_bwd_prefactor = input.tau_mem / (input.tau_mem - input.tau_syn);
 
     for (int ti = 0; ti < n_t; ti++) {
         double t = input.dt * ti;
         result.ts[ti] = t;
 
-        if (input.n_post_spikes == 0) {
-            result.lambda_trace[ti] = 0.0;
-            continue;
-        }
-
-        const double largest_time = input.fwd_times[input.n_post_spikes - 1];
-
         double lambda_i = 0.0;
-        double t_bwd_from_t = largest_time - t;
-        const double k_bwd_prefactor = input.tau_mem / (input.tau_mem - input.tau_syn);
+        const double t_bwd_from_t = largest_time - t;
 
         /* Collect jumps from post-synaptic spikes after time t */
         for (int i = input.n_post_spikes - 1; i >= 0; i--) {

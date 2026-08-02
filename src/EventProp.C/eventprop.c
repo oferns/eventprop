@@ -96,16 +96,29 @@ typedef struct BackwardSpikesCtx {
 } BackwardSpikesCtx;
 
 // ── Internal context for compute_spikes memory management ─────────────────────
-typedef struct {
+typedef struct ComputeSpikesCtx {
     int n_post;  // needed for per-neuron clean-up loop
-
     SumsOutput sums;              // eventprop_free_sums_output
     double** post_times_arr;      // array + each [n]
     double** post_currents_arr;   // array + each [n]
     int* spike_caps;
     int* spike_counts;
     SpikeEntry* entries;          // sorted collection buffer
+    /* Output fields (set by collect_spikes_result) */
+    double* result_times;
+    int*    result_sources;
+    double* result_currents;
+    double* result_errors;
+    int     result_n_spikes;
 } ComputeSpikesCtx;
+
+/** Per-neuron mutable state during spike detection. */
+typedef struct NeuronState {
+    double* p_times;
+    double* p_currents;
+    int cap;
+    int count;
+} NeuronState;
 
 // Inline functions replacing GCC statement expressions ({ ... }) for MSVC compatibility.
 // compute_v_inline — direct evaluation, no precomputed exponential.
@@ -530,6 +543,256 @@ static double toms748_solve(const RootContext* ctx, double a, double b) {
     return b;
 }
 
+/** Grow both times and currents buffers if needed.
+ *  Returns: EVENTPROP_OK on success, EVENTPROP_ALLOC_NEURON_BUF on failure. */
+static inline EventPropError grow_spike_buffers(double** p_times,
+                                                double** p_currents,
+                                                int* cap,
+                                                int count)
+{
+    if (count < (*cap)) return EVENTPROP_OK;
+
+    (*cap) *= 3;
+    const size_t new_size = (size_t)(*cap) * sizeof(double);
+
+    /* Sequential realloc: undo times if currents fails */
+    double* new_times = realloc(*p_times, new_size);
+    if (!new_times) return EVENTPROP_ALLOC_NEURON_BUF;
+
+    double* new_currents = realloc(*p_currents, new_size);
+    if (!new_currents) {
+        free(new_times);  /* rollback */
+        return EVENTPROP_ALLOC_NEURON_BUF;
+    }
+
+    *p_times = new_times;
+    *p_currents = new_currents;
+    return EVENTPROP_OK;
+}
+
+/** Try to find a spike root in [t_lower, t_upper] and record it.
+ *
+ *  Returns:
+ *    0  — spike found and recorded
+ *   -1  — allocation error (caller should abort)
+ *    1  — no valid spike in bracket
+ */
+static inline int try_find_root_spike(const RootContext* rctx_base,
+                                      const EventPropInput input,
+                                      double t_lower,
+                                      double t_upper,
+                                      NeuronState* state)
+{
+    /* Precompute exp(st * tau_mem_inv) for factorization */
+    double* post_exp_st = NULL;
+    if (state->count > 0) {
+        post_exp_st = malloc((size_t)state->count * sizeof(double));
+        if (!post_exp_st) return -1;
+
+        const double tau_mem_inv = 1.0 / input.tau_mem;
+        for (int s = 0; s < state->count; s++) {
+            post_exp_st[s] = exp(state->p_times[s] * tau_mem_inv);
+        }
+    }
+
+    RootContext rctx = *rctx_base;
+    /* Caller sets rctx_base.i to the current interval index */
+    rctx.spike_count = state->count;
+    rctx.post_spike_exp_st = post_exp_st;
+
+    const double t_post = toms748_solve(&rctx, t_lower, t_upper);
+    free(post_exp_st);
+
+    /* Validate root: must be strictly inside bracket */
+    if (!(t_post > t_lower && t_post < t_upper)) return 1;
+
+    /* Grow buffers if needed */
+    if (grow_spike_buffers(&state->p_times, &state->p_currents,
+                           &state->cap, state->count) != EVENTPROP_OK)
+        return -1;
+
+    /* Record spike */
+    state->p_times[state->count] = t_post;
+    state->p_currents[state->count] = compute_i(t_post,
+                                                 input.n_spikes,
+                                                 input.times,
+                                                 rctx_base->sum0,
+                                                 rctx_base->target_nrn,
+                                                 rctx_base->n_post,
+                                                 input.tau_syn);
+    state->count++;
+    return 0;
+}
+
+/* ── Collect per-neuron spikes into sorted SpikeOutput (shared by v1 and v2) ── */
+static inline EventPropError collect_spikes_result(ComputeSpikesCtx* ctx,
+                                                   int n_post)
+{
+    /* Count total spikes */
+    int total = 0;
+    for (int n = 0; n < n_post; n++)
+        total += ctx->spike_counts[n];
+
+    if (total == 0) return EVENTPROP_OK;  /* no spikes, nothing to do */
+
+    /* Collect into sortable entries */
+    SpikeEntry* entries = malloc((size_t)total * sizeof(SpikeEntry));
+    if (!entries) return EVENTPROP_ALLOC_ENTRIES;
+
+    int idx = 0;
+    for (int n = 0; n < n_post; n++) {
+        const int cnt = ctx->spike_counts[n];
+        const double* pt = ctx->post_times_arr[n];
+        const double* pc = ctx->post_currents_arr[n];
+        for (int k = 0; k < cnt; k++) {
+            entries[idx].time    = pt[k];
+            entries[idx].source  = n;
+            entries[idx].current = pc[k];
+            idx++;
+        }
+    }
+
+    qsort(entries, (size_t)total, sizeof(SpikeEntry), cmp_spike_asc);
+
+    /* Allocate output arrays */
+    double* times    = malloc((size_t)total * sizeof(double));
+    if (!times) { free(entries); return EVENTPROP_ALLOC_RESULT_TIMES; }
+
+    int* sources     = malloc((size_t)total * sizeof(int));
+    if (!sources) { free(times); free(entries); return EVENTPROP_ALLOC_RESULT_SOURCES; }
+
+    double* currents = malloc((size_t)total * sizeof(double));
+    if (!currents) { free(sources); free(times); free(entries);
+                     return EVENTPROP_ALLOC_RESULT_CURRENTS; }
+
+    double* errors   = calloc((size_t)total, sizeof(double));
+    if (!errors) { free(currents); free(sources); free(times); free(entries);
+                   return EVENTPROP_ALLOC_RESULT_ERRORS; }
+
+    /* Copy sorted data into output */
+    for (int i = 0; i < total; i++) {
+        times[i]    = entries[i].time;
+        sources[i]  = entries[i].source;
+        currents[i] = entries[i].current;
+    }
+
+    /* Store in ctx so caller can assign to result */
+    ctx->result_times   = times;
+    ctx->result_sources = sources;
+    ctx->result_currents = currents;
+    ctx->result_errors  = errors;
+    ctx->result_n_spikes = total;
+
+    free(entries);
+    return EVENTPROP_OK;
+}
+
+/* ── Allocate per-neuron dynamic spike buffers (used by v2) ── */
+static inline EventPropError allocate_neuron_buffers(ComputeSpikesCtx* ctx,
+                                                     const EventPropInput input)
+{
+    const size_t sz = (size_t)input.n_post;
+
+    ctx->post_times_arr = malloc(sz * sizeof(double*));
+    if (!ctx->post_times_arr) return EVENTPROP_ALLOC_TIMES_ARR;
+
+    ctx->post_currents_arr = malloc(sz * sizeof(double*));
+    if (!ctx->post_currents_arr) return EVENTPROP_ALLOC_CURRENTS_ARR;
+
+    ctx->spike_caps = calloc(sz, sizeof(int));
+    if (!ctx->spike_caps) return EVENTPROP_ALLOC_SPIKE_CAPS;
+
+    ctx->spike_counts = calloc(sz, sizeof(int));
+    if (!ctx->spike_counts) return EVENTPROP_ALLOC_SPIKE_COUNTS;
+
+    const size_t initial_cap = (size_t)(3 * input.n_spikes + 1);
+    int failed = 0;
+    for (int n = 0; n < input.n_post; n++) {
+        ctx->post_times_arr[n]   = calloc(initial_cap, sizeof(double));
+        if (!ctx->post_times_arr[n]) { failed = n + 1; break; }
+        ctx->post_currents_arr[n] = calloc(initial_cap, sizeof(double));
+        if (!ctx->post_currents_arr[n]) {
+            free(ctx->post_times_arr[n]);
+            failed = n + 1;
+            break;
+        }
+        ctx->spike_caps[n] = (int)initial_cap;
+    }
+
+    if (failed > 0) {
+        for (int n = 0; n < failed - 1; n++) {
+            free(ctx->post_times_arr[n]);
+            free(ctx->post_currents_arr[n]);
+        }
+        return EVENTPROP_ALLOC_NEURON_BUF;
+    }
+
+    return EVENTPROP_OK;
+}
+
+/** Generate candidate upper bounds for interval i.
+ *  Returns the number of candidates (0, 1, or 2). */
+static inline int generate_bracket_candidates(int i,
+                                              int n_spikes,
+                                              const double* input_times,
+                                              int target_nrn,
+                                              int n_post,
+                                              int count,
+                                              const double* p_times,
+                                              const double* sum0,
+                                              const double* sum1,
+                                              const EventPropInput input,
+                                              double k_prefactor,
+                                              double tmax_prefactor,
+                                              double tmax_summand,
+                                              double t_before,
+                                              double candidates[2])
+{
+    int n_candidates = 0;
+
+    if (i == n_spikes) {
+        /* ── Last interval: one candidate — analytical tmax from adjusted sums ── */
+        double s0 = sum0[n_spikes * n_post + target_nrn];
+        double s1 = sum1[n_spikes * n_post + target_nrn];
+        for (int s = 0; s < count; s++)
+            s1 += -input.v_th * exp(p_times[s] / input.tau_mem);
+
+        if (s0 > 0) {
+            const double tmax = tmax_prefactor * (tmax_summand + log(s1 / s0));
+            /* Validate bracket: tmax must be >= t_before (matches compute_tmax bounds check) */
+            if (!isinf(tmax) && t_before <= tmax) {
+                const double v = compute_v_inline(tmax, i, count, p_times, 0,
+                                            sum0, sum1, target_nrn, input, k_prefactor);
+                if (v > input.v_th + SPIKE_THRESHOLD_EPS)
+                    candidates[n_candidates++] = tmax;
+            }
+        }
+    } else {
+        /* ── Regular interval: up to 2 candidates ── */
+        double t_input = input_times[i];
+
+        /* Candidate 1: analytical tmax */
+        const double tmax = compute_tmax(i, n_spikes, input_times, count, p_times, 0,
+                                   sum0, sum1, target_nrn, n_post,
+                                   tmax_prefactor, tmax_summand, input.tau_mem, input.v_th);
+        if (!isinf(tmax)) {
+            const double v = compute_v_inline(tmax, i, count, p_times, 0,
+                                        sum0, sum1, target_nrn, input, k_prefactor);
+            if (v > input.v_th + SPIKE_THRESHOLD_EPS)
+                candidates[n_candidates++] = tmax;
+        }
+
+        /* Candidate 2: voltage at input spike time */
+        const double v_at_input = compute_v_inline(t_input, i, count, p_times, 0,
+                                             sum0, sum1, target_nrn, input, k_prefactor);
+        if (v_at_input > input.v_th + SPIKE_THRESHOLD_EPS)
+            candidates[n_candidates++] = t_input;
+    }
+
+    return n_candidates;
+}
+
+
 static void free_backward_spikes_ctx(const BackwardSpikesCtx* ctx) {
     if (!ctx) return;
     for (int i = 0; i < ctx->n_post_alloc; i++) {
@@ -595,7 +858,7 @@ EventPropError eventprop_validate_input(const EventPropInput input)
     if (input.n_pre > EVENTPROP_MAX_DIM || input.n_post > EVENTPROP_MAX_DIM)
         return EVENTPROP_DIMENSION_TOO_LARGE;
     /* n_pre * n_post can overflow int even when both pass MAX_DIM */
-    if ((size_t)input.n_pre * input.n_post > INT_MAX)
+    if ((size_t)input.n_pre * (size_t)input.n_post > (size_t)INT_MAX)
         return EVENTPROP_DIMENSION_TOO_LARGE;
 
     /* ── Spike count ──────────────────────────────────────────── */
@@ -667,10 +930,9 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
     ComputeSpikesCtx ctx = { .n_post = input.n_post };
     SpikeOutput result = (SpikeOutput){ .error_no = eventprop_validate_input(input) };
 
-    if (result.error_no != EVENTPROP_OK){
+    if (result.error_no != EVENTPROP_OK)
         goto cleanup_and_return;
-    }
-    
+
     const double k_prefactor = input.tau_syn / (input.tau_mem - input.tau_syn);
     const double tmax_prefactor = 1.0 / (1.0 / input.tau_mem - 1.0 / input.tau_syn);
     const double tmax_summand = log(input.tau_syn / input.tau_mem);
@@ -680,85 +942,31 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
     /* Compute sums */
     ctx.sums = eventprop_compute_sums(input);
     if (ctx.sums.error_no != EVENTPROP_OK) {
-        result.error_no = ctx.sums.error_no;      /* propagate specific error from compute_sums */
+        result.error_no = ctx.sums.error_no;
         goto cleanup_and_return;
     }
 
     const double* sum0 = ctx.sums.sum0;
     const double* sum1 = ctx.sums.sum1;
-    const size_t sz = (size_t)input.n_post;
 
-    /* Per-neuron dynamic buffers - growable to handle burst patterns */
-    ctx.post_times_arr = malloc(sz * sizeof(double*));
-    if (!ctx.post_times_arr) {
-        result.error_no = EVENTPROP_ALLOC_TIMES_ARR;
+    /* Allocate per-neuron dynamic buffers */
+    result.error_no = allocate_neuron_buffers(&ctx, input);
+    if (result.error_no != EVENTPROP_OK)
         goto cleanup_and_return;
-    }
 
-    ctx.post_currents_arr = malloc(sz * sizeof(double*));
-    if (!ctx.post_currents_arr) {
-        result.error_no = EVENTPROP_ALLOC_CURRENTS_ARR;
-        goto cleanup_and_return;
-    }
-
-    ctx.spike_caps = calloc(sz, sizeof(int));
-    if (!ctx.spike_caps) {
-        result.error_no = EVENTPROP_ALLOC_SPIKE_CAPS;
-        goto cleanup_and_return;
-    }
-
-    ctx.spike_counts = calloc(sz, sizeof(int));
-    if (!ctx.spike_counts) {
-        result.error_no = EVENTPROP_ALLOC_SPIKE_COUNTS;
-        goto cleanup_and_return;
-    }
-
-    /* Start with 3× estimated spikes to reduce realloc overhead */
-    const size_t initial_cap = (size_t)(3 * input.n_spikes + 1);
-    int failed = 0;
-    for (int n = 0; n < input.n_post; n++) {
-        ctx.post_times_arr[n]   = calloc(initial_cap, sizeof(double));
-        if (!ctx.post_times_arr[n]){
-            failed = n + 1;
-            break;
-        }
-        ctx.post_currents_arr[n] = calloc(initial_cap, sizeof(double));
-        if (!ctx.post_currents_arr[n]) {
-            free(ctx.post_times_arr[n]);
-            failed = n + 1;
-            break;
-        }
-        ctx.spike_caps[n]       = initial_cap;
-    }
-
-    // Something failed
-    if (failed > 0) {
-        // It wasn't the first loop so we need to clean up to that.
-        if(failed > 1){            
-        /* Free any successfully allocated per-neuron buffers before the failure point */
-        /*  The failing allocation cleans its array index so we only need to free up to that index. Hence, failed - 1  */
-        for (int n = 0; n < failed - 1; n++) {
-            free(ctx.post_times_arr[n]);
-            free(ctx.post_currents_arr[n]);
-        }
-    }
-        result.error_no = EVENTPROP_ALLOC_NEURON_BUF;
-        goto cleanup_and_return;
-    }
-
-    /* Shared error flag for OpenMP region: threads bail out gracefully on OOM */
-#ifdef _OPENMP 
-    volatile 
+    /* Shared error flag for OpenMP region */
+#ifdef _OPENMP
+    volatile
 #endif
     int fwd_alloc_error = 0;
 
-    int target_nrn; // separated from initialization for the benefit of MSVCC
+    int target_nrn;
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
     for (target_nrn = 0; target_nrn < input.n_post; target_nrn++) {
 
-        double* p_times   = ctx.post_times_arr[target_nrn];
+        double* p_times    = ctx.post_times_arr[target_nrn];
         double* p_currents = ctx.post_currents_arr[target_nrn];
         int cap = ctx.spike_caps[target_nrn];
         int count = 0;
@@ -776,188 +984,69 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
         while (!finished) {
             int found = 0;
             for (int i = processed; i <= input.n_spikes; i++) {
+
+                /* ── Compute t_lower (bracket start) ── */
+                const double t_input = (i == input.n_spikes) ? INFINITY : input.times[i];
+
+                double t_before;
                 if (i == input.n_spikes) {
-                    /* Last interval */
-                    double s0 = sum0[input.n_spikes * input.n_post + target_nrn];
-                    double s1 = sum1[input.n_spikes * input.n_post + target_nrn];
-                    for (int s = 0; s < count; s++)
-                        s1 += -input.v_th * exp(p_times[s] / input.tau_mem);
-
-                    double tmax = tmax_prefactor * (tmax_summand + log(s1 / s0));
-                    if (!isinf(tmax)) {
-                        double v = compute_v_inline(tmax, i, count, p_times, 0, sum0, sum1,
-                                             target_nrn, input, k_prefactor);
-                        if (v > input.v_th + SPIKE_THRESHOLD_EPS) {
-                            double t_lower = count > 0 ? p_times[count - 1] : 0.0;
-                            /* Precompute exp(st * tau_mem_inv) for each post-spike → factorization */
-                            double* post_exp_st = NULL;
-                            if (count > 0) {
-                                post_exp_st = (double*)malloc(count * sizeof(double));
-                                if (!post_exp_st) { 
-                                    fwd_alloc_error = 1; 
-                                    finished = 1;
-                                    break; 
-                                }
-                                for (int s = 0; s < count; s++)
-                                    post_exp_st[s] = exp(p_times[s] * tau_mem_inv);
-                            }
-                            RootContext rctx = rctx_base;
-                            rctx.i = i; rctx.spike_count = count;
-                            rctx.post_spike_exp_st = post_exp_st;
-                            double t_post = toms748_solve(&rctx, t_lower, tmax);
-                            free(post_exp_st);
-                            if (t_post > t_lower && t_post < tmax) {
-                                if (count >= cap) {
-                                    cap *= 3;
-                                    double* new_times    = realloc(p_times, cap * sizeof(double));  
-                                    if(!new_times) {
-                                        fwd_alloc_error = 1;
-                                        finished = 1;
-                                        break; 
-                                    }
-                                    
-                                    
-                                    double* new_currents = realloc(p_currents, cap * sizeof(double));
-                                    if (!new_currents) { 
-                                        free(new_times);  
-                                        fwd_alloc_error = 1;
-                                        finished = 1; 
-                                        break; 
-                                    }
-                                    p_times    = new_times;
-                                    p_currents = new_currents;
-                                }
-                                p_times[count]   = t_post;
-                                p_currents[count] = compute_i(t_post, input.n_spikes, input.times, sum0,
-                                                              target_nrn, input.n_post, input.tau_syn);
-                                count++; found = 1;
-                            }
-                        }
-                    }
-                    if (!found) finished = 1;
-                    else processed = input.n_spikes;
+                    /* Last interval: lower bound is last post-spike or 0 */
+                    t_before = count > 0 ? p_times[count - 1] : 0.0;
                 } else {
-                    double t_input = input.times[i];
-                    double tmax = compute_tmax(i, input.n_spikes, input.times, count, p_times, 0,
-                                               sum0, sum1, target_nrn, input.n_post,
-                                               tmax_prefactor, tmax_summand, input.tau_mem, input.v_th);
-
-                    if (!isinf(tmax)) {
-                        double v = compute_v_inline(tmax, i, count, p_times, 0, sum0, sum1,
-                                             target_nrn, input, k_prefactor);
-                        if (v > input.v_th + SPIKE_THRESHOLD_EPS) {
-                            double t_before = (i > 0) ? input.times[i-1] : 0.0;
-                            for (int s = 0; s < count; s++) {
-                                double st = p_times[s];
-                                if (st > t_input) break;
-                                if (st > t_before) t_before = st;
-                            }
-                            /* Precompute exp(st * tau_mem_inv) for each post-spike → factorization */
-                            double* post_exp_st = NULL;
-                            if (count > 0) {
-                                post_exp_st = (double*)malloc(count * sizeof(double));
-                                if (!post_exp_st) { 
-                                    fwd_alloc_error = 1; 
-                                    finished = 1;
-                                    break; 
-                                }
-                                for (int s = 0; s < count; s++)
-                                    post_exp_st[s] = exp(p_times[s] * tau_mem_inv);
-                            }
-                            RootContext rctx = rctx_base;
-                            rctx.i = i; rctx.spike_count = count;
-                            rctx.post_spike_exp_st = post_exp_st;
-                            double t_post = toms748_solve(&rctx, t_before, tmax);
-                            free(post_exp_st);
-                            if (t_post > t_before && t_post < tmax) {
-                                if (count >= cap) {
-                                    cap *= 3;
-                                    double* new_times    = realloc(p_times, cap * sizeof(double));
-                                    if (!new_times) {
-                                         fwd_alloc_error = 1; 
-                                         finished = 1; 
-                                         break;
-                                        }
-                                    
-                                    
-                                    double* new_currents = realloc(p_currents, cap * sizeof(double));
-                                    if (!new_currents) {
-                                         free(new_times); 
-                                         fwd_alloc_error = 1; 
-                                         finished = 1; 
-                                         break;
-                                        }
-                                    p_times    = new_times;
-                                    p_currents = new_currents;
-                                }
-                                p_times[count]   = t_post;
-                                p_currents[count] = compute_i(t_post, input.n_spikes, input.times, sum0,
-                                                              target_nrn, input.n_post, input.tau_syn);
-                                count++; found = 1;
-                            }
-                            processed = i; break;
-                        }
-                    }
-
-                    /* Check at input spike time */
-                    double v_at_input = compute_v_inline(t_input, i, count, p_times, 0,
-                                                          sum0, sum1, target_nrn, input,
-                                                          k_prefactor);
-                    if (v_at_input > input.v_th + SPIKE_THRESHOLD_EPS) {
-                        double t_before = (i > 0) ? input.times[i-1] : 0.0;
-                        for (int s = 0; s < count; s++) {
-                            double st = p_times[s];
-                            if (st > t_input) break;
-                            if (st > t_before) t_before = st;
-                        }
-                        /* Precompute exp(st * tau_mem_inv) for each post-spike → factorization */
-                        double* post_exp_st = NULL;
-                        if (count > 0) {
-                            post_exp_st = (double*)malloc(count * sizeof(double));
-                            if (!post_exp_st) { 
-                                fwd_alloc_error = 1; 
-                                finished = 1; 
-                                break; 
-                            }
-                            for (int s = 0; s < count; s++)
-                                post_exp_st[s] = exp(p_times[s] * tau_mem_inv);
-                        }
-                        RootContext rctx = rctx_base;
-                        rctx.i = i; rctx.spike_count = count;
-                        rctx.post_spike_exp_st = post_exp_st;
-                        double t_post = toms748_solve(&rctx, t_before, t_input);
-                        free(post_exp_st);
-                        if (t_post > t_before && t_post < t_input) {
-                            if (count >= cap) {
-                                cap *= 3;
-                                double* new_times    = realloc(p_times, cap * sizeof(double));
-                                if (!new_times) { 
-                                    fwd_alloc_error = 1; 
-                                    finished = 1; 
-                                    break;
-                                 }
-                                
-                                
-                                double* new_currents = realloc(p_currents, cap * sizeof(double));
-                                if (!new_currents) { 
-                                    free(new_times);   
-                                    fwd_alloc_error = 1; 
-                                    finished = 1; 
-                                    break;
-                                 }
-                                p_times    = new_times;
-                                p_currents = new_currents;
-                            }
-                            p_times[count]   = t_post;
-                            p_currents[count] = compute_i(t_post, input.n_spikes, input.times, sum0,
-                                                          target_nrn, input.n_post, input.tau_syn);
-                            count++; found = 1;
-                        }
-                        processed = i; break;
+                    /* Regular interval: latest of (prev input time, post spikes before current input) */
+                    t_before = (i > 0) ? input.times[i - 1] : 0.0;
+                    for (int s = 0; s < count; s++) {
+                        double st = p_times[s];
+                        if (st > t_input) break;
+                        if (st > t_before) t_before = st;
                     }
                 }
+
+                /* ── Generate candidate upper bounds ── */
+                double candidates[2];
+                int n_candidates = generate_bracket_candidates(
+                    i, input.n_spikes, input.times,
+                    target_nrn, input.n_post, count, p_times,
+                    sum0, sum1, input, k_prefactor,
+                    tmax_prefactor, tmax_summand, t_before, candidates);
+
+                /* ── Try each candidate bracket with shared solver ── */
+                for (int c = 0; c < n_candidates; c++) {
+                    NeuronState state = { .p_times = p_times,
+                                          .p_currents = p_currents,
+                                          .cap = cap, .count = count };
+                    rctx_base.i = i;
+
+                    const int rc = try_find_root_spike(&rctx_base, input, t_before,
+                                                 candidates[c], &state);
+
+                    if (rc == -1) {
+                        fwd_alloc_error = 1;
+                        finished = 1;
+                        break;
+                    }
+                    if (rc == 0) {
+                        /* Spike found — update local state from NeuronState */
+                        p_times    = state.p_times;
+                        p_currents = state.p_currents;
+                        cap        = state.cap;
+                        count      = state.count;
+                        found = 1;
+                        break;  /* short-circuit: don't try remaining candidates */
+                    }
+                }
+
+                if (found) {
+                    processed = i;
+                    break;  /* re-scan this interval next while iteration */
+                }
+                if (i == input.n_spikes) {
+                    finished = 1;  /* exhausted last interval with no spike */
+                }
             }
-            if (!found) processed = (processed + 1 < input.n_spikes) ? processed + 1 : input.n_spikes;
+
+            if (!found)
+                processed = (processed + 1 < input.n_spikes) ? processed + 1 : input.n_spikes;
         }
 
         /* Write back updated pointers */
@@ -973,74 +1062,22 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
         goto cleanup_and_return;
     }
 
-    /* Count total spikes and allocate exact-size output */
-    result.n_spikes = 0;
-    for (int n = 0; n < input.n_post; n++)
-        result.n_spikes += ctx.spike_counts[n];
-
-    // No error, just no spikes to process
-    if (result.n_spikes == 0) {
+    /* Collect, sort, and copy output */
+    const EventPropError err = collect_spikes_result(&ctx, input.n_post);
+    if (err != EVENTPROP_OK) {
+        result.error_no = err;
         goto cleanup_and_return;
     }
 
-    /* Collect all spikes into sortable array */
-    ctx.entries = malloc(result.n_spikes * sizeof(SpikeEntry));
-    if (!ctx.entries) {
-        result.error_no = EVENTPROP_ALLOC_ENTRIES;
-        goto cleanup_and_return;
-    }
-
-    int idx = 0;
-    for (int n = 0; n < input.n_post; n++) {
-        int cnt = ctx.spike_counts[n];
-        double* pt   = ctx.post_times_arr[n];
-        double* pc   = ctx.post_currents_arr[n];
-        for (int k = 0; k < cnt; k++) {
-            ctx.entries[idx].time    = pt[k];
-            ctx.entries[idx].source  = n;
-            ctx.entries[idx].current = pc[k];
-            idx++;
-        }
-    }
-
-    /* Sort by time ascending */
-    qsort(ctx.entries, result.n_spikes, sizeof(SpikeEntry), cmp_spike_asc);
-
-    /* Allocate and copy to output */
-    result.times = malloc(result.n_spikes * sizeof(double));
-    if (!result.times) {
-        result.error_no = EVENTPROP_ALLOC_RESULT_TIMES;
-        goto cleanup_and_return;
-    }
-
-    result.sources = malloc(result.n_spikes * sizeof(int));
-    if (!result.sources) {
-        result.error_no = EVENTPROP_ALLOC_RESULT_SOURCES;
-        goto cleanup_and_return;
-    }
-
-    result.currents = malloc(result.n_spikes * sizeof(double));
-    if (!result.currents) {
-        result.error_no = EVENTPROP_ALLOC_RESULT_CURRENTS;
-        goto cleanup_and_return;
-    }
-
-    result.errors = calloc(result.n_spikes, sizeof(double));
-    if (!result.errors) {
-        result.error_no = EVENTPROP_ALLOC_RESULT_ERRORS;
-        goto cleanup_and_return;
-    }
-
-    for (int i = 0; i < result.n_spikes; i++) {
-        result.times[i]     = ctx.entries[i].time;
-        result.sources[i]   = ctx.entries[i].source;
-        result.currents[i]  = ctx.entries[i].current;
-    }
+    result.n_spikes   = ctx.result_n_spikes;
+    result.times      = ctx.result_times;
+    result.sources    = ctx.result_sources;
+    result.currents   = ctx.result_currents;
+    result.errors     = ctx.result_errors;
 
 cleanup_and_return:
-    if (result.error_no != EVENTPROP_OK) {
-        eventprop_free_spike_output(result);  // free partial output fields
-    }
+    if (result.error_no != EVENTPROP_OK)
+        eventprop_free_spike_output(result);
     free_compute_spikes_ctx(&ctx);
     return result;
 }
@@ -1057,7 +1094,7 @@ SumsOutput eventprop_compute_sums(const EventPropInput input)
         goto cleanup_and_return;
     }
 
-    size_t count = (size_t)result.n_rows * input.n_post;
+    size_t count = (size_t)result.n_rows * (size_t)input.n_post;
     
     result.sum0 = calloc(count, sizeof(double));
     if(!result.sum0) {
@@ -1356,7 +1393,7 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
         goto cleanup_and_return;
     }
 
-    ctx.merged = malloc((size_t)(total * sizeof(MergedSpike)));
+    ctx.merged = malloc((size_t)total * sizeof(MergedSpike));
     if (!ctx.merged) {
         result.error_no     = EVENTPROP_ALLOC_BWD_MERGED;
         goto cleanup_and_return;
@@ -1375,9 +1412,9 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
     }
 
     /* Sort descending by time: O(n log n) via qsort */
-    qsort(ctx.merged, total, sizeof(MergedSpike), cmp_merged_desc);
+    qsort(ctx.merged, (size_t)total, sizeof(MergedSpike), cmp_merged_desc);
 
-    ctx.all_errors = calloc(total, sizeof(double));
+    ctx.all_errors = calloc((size_t)total, sizeof(double));
     if (!ctx.all_errors) {
         result.error_no     = EVENTPROP_ALLOC_BWD_ALL_ERRORS;
         goto cleanup_and_return;
@@ -1389,38 +1426,38 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
 
     /* ── Allocate intermediate buffers (sequential checks) ─────────────── */
 
-    ctx.lambda_v = calloc(input.n_post, sizeof(double));
+    ctx.lambda_v = calloc((size_t)input.n_post, sizeof(double));
     if (!ctx.lambda_v) {
         result.error_no     = EVENTPROP_ALLOC_BWD_LAMBDA_V;
         goto cleanup_and_return;
     }
    
-    ctx.lambda_i = malloc(input.n_post * sizeof(double));
+    ctx.lambda_i = malloc((size_t)input.n_post * sizeof(double));
     if (!ctx.lambda_i) {
         result.error_no     = EVENTPROP_ALLOC_BWD_LAMBDA_I;
         goto cleanup_and_return;
     }
 
     /* Per-neuron jump storage (matching Eigen's vector<vector<pair<double,double>>> structure) */
-    ctx.jump_time  = calloc(input.n_post, sizeof(double*));
+    ctx.jump_time  = calloc((size_t)input.n_post, sizeof(double*));
     if (!ctx.jump_time) {
         result.error_no     = EVENTPROP_ALLOC_BWD_JUMP_TIME;
         goto cleanup_and_return;
     }
     
-    ctx.jump_mag   = calloc(input.n_post, sizeof(double*));
+    ctx.jump_mag   = calloc((size_t)input.n_post, sizeof(double*));
     if (!ctx.jump_mag) {
         result.error_no     = EVENTPROP_ALLOC_BWD_JUMP_MAG;
         goto cleanup_and_return;
     }
     
-    ctx.jump_count = calloc(input.n_post, sizeof(int));
+    ctx.jump_count = calloc((size_t)input.n_post, sizeof(int));
     if (!ctx.jump_count) {
         result.error_no     = EVENTPROP_ALLOC_BWD_JUMP_COUNT;
         goto cleanup_and_return;
     }
     
-    ctx.jump_cap   = calloc(input.n_post, sizeof(int));
+    ctx.jump_cap   = calloc((size_t)input.n_post, sizeof(int));
     if (!ctx.jump_cap) {
         result.error_no     = EVENTPROP_ALLOC_BWD_JUMP_CAP;
         goto cleanup_and_return;
@@ -1430,12 +1467,12 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
     ctx.n_post_alloc = 0;
     for (int i = 0; i < input.n_post; i++) {
         ctx.jump_cap[i] = 8;  /* initial capacity */
-        ctx.jump_time[i] = malloc(ctx.jump_cap[i] * sizeof(double));
+        ctx.jump_time[i] = malloc((size_t)ctx.jump_cap[i] * sizeof(double));
         if (!ctx.jump_time[i]) {
             result.error_no     = EVENTPROP_ALLOC_BWD_PER_NEURON;
             goto cleanup_and_return;
         }
-        ctx.jump_mag[i]  = malloc(ctx.jump_cap[i] * sizeof(double));
+        ctx.jump_mag[i]  = malloc((size_t)ctx.jump_cap[i] * sizeof(double));
         if (!ctx.jump_mag[i]) {
             free(ctx.jump_time[i]);
             result.error_no     = EVENTPROP_ALLOC_BWD_PER_NEURON;
@@ -1462,7 +1499,7 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
 
         if (is_input) {
             /* Compute lambda_i for ALL post-synaptic neurons (matching Eigen structure) */
-            memset(ctx.lambda_i, 0, input.n_post * sizeof(double));
+            memset(ctx.lambda_i, 0, (size_t)input.n_post * sizeof(double));
             for (int nrn = 0; nrn < input.n_post; nrn++) {
                 for (int j = 0; j < ctx.jump_count[nrn]; j++) {
                     double dt_jump = t_bwd - ctx.jump_time[nrn][j];
@@ -1478,7 +1515,7 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
                Use stack allocation for small n_post, heap otherwise. */
             double stack_diff[BACKWARD_DIFF_STACK_SIZE];
             int use_stack = (input.n_post <= BACKWARD_DIFF_STACK_SIZE);
-            double* diff = use_stack ? stack_diff : malloc(input.n_post * sizeof(double));
+            double* diff = use_stack ? stack_diff : malloc((size_t)input.n_post * sizeof(double));
 
             vsub_simd(diff, ctx.lambda_v, ctx.lambda_i, input.n_post);
             double outbound = dot_product_simd(mv_row(w, spike_source), diff, input.n_post);
@@ -1497,14 +1534,15 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
             /* Record jump for this neuron (with capacity management) */
             if (ctx.jump_count[nrn] >= ctx.jump_cap[nrn]) {
                 ctx.jump_cap[nrn] *= 2;
-                double* new_time = realloc(ctx.jump_time[nrn], ctx.jump_cap[nrn] * sizeof(double));
+                double* new_time = realloc(ctx.jump_time[nrn], (size_t)ctx.jump_cap[nrn] * sizeof(double));
                 if (!new_time) goto cleanup_and_return;
-                ctx.jump_time[nrn] = new_time;
-                double* new_mag = realloc(ctx.jump_mag[nrn], ctx.jump_cap[nrn] * sizeof(double));
+                double* new_mag = realloc(ctx.jump_mag[nrn], (size_t)ctx.jump_cap[nrn] * sizeof(double));
                 if (!new_mag) {
                     free(new_time);
                     goto cleanup_and_return;
                 }
+                /* Only update ctx pointers after both succeed */
+                ctx.jump_time[nrn] = new_time;
                 ctx.jump_mag[nrn] = new_mag;
             }
             ctx.jump_time[nrn][ctx.jump_count[nrn]] = t_bwd;
@@ -1526,12 +1564,12 @@ cleanup_and_return:
 
 /** ── Error string helper ─────────────────────────────────────────────── */
 
-const char* eventprop_error_string(int error_no)
+const char* eventprop_error_string(const int error_no)
 {
     switch (error_no) {
         case EVENTPROP_OK:                      return "OK";
         case EVENTPROP_INVALID_DIMENSION:       return "Invalid dimension: n_pre or n_post must be positive";
-        case EVENTPROP_NEGATIVE_SPIKES:         return "Negative spike count";
+        case EVENTPROP_NEGATIVE_SPIKES:         return "Negayestive spike count";
         case EVENTPROP_NULL_POINTER:            return "NULL pointer: w, times, or sources is NULL when required";
         case EVENTPROP_INVALID_SOURCE:          return "Invalid source neuron index (out of [0, n_pre) range)";
         case EVENTPROP_INVALID_TAU:             return "Invalid tau: tau_mem and tau_syn must be positive and distinct";

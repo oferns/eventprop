@@ -81,6 +81,15 @@ else()
 endif()
 if(OpenMP_CXX_FOUND)
     target_link_libraries(parity_test PRIVATE OpenMP::OpenMP_CXX)
+else()
+    # macOS fallback: Homebrew libomp
+    execute_process(COMMAND brew --prefix libomp OUTPUT_STRIP_TRAILING_WHITESPACE
+                    OUTPUT_VARIABLE _OPENMP_PREFIX RESULT_VARIABLE _BREW_FAIL)
+    if(_BREW_FAIL EQUAL 0 AND EXISTS "${_OPENMP_PREFIX}/lib/libomp.dylib")
+        target_compile_options(parity_test PRIVATE "-Xpreprocessor" "-fopenmp")
+        target_include_directories(parity_test PRIVATE "${_OPENMP_PREFIX}/include")
+        target_link_libraries(parity_test PRIVATE "${_OPENMP_PREFIX}/lib/libomp.dylib")
+    endif()
 endif()
 
 # Runtime library search path

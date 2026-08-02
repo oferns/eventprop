@@ -266,7 +266,7 @@ static void test_voltage_trace(const TestCase& tc) {
     int target_nrn = 0;
     double t_max = 1.0, dt = 0.005;
 
-    VoltageTraceInput vti = {&fi_spikes, target_nrn, fwd_c.times, fwd_c.sources, fwd_c.n_spikes, t_max, dt};
+    VoltageTraceInput vti = {fi_spikes, target_nrn, fwd_c.times, fwd_c.sources, fwd_c.n_spikes, t_max, dt};
     VoltageTraceOutput trace_c = eventprop_compute_voltage_trace(vti);
 
     auto [ts_eig, v_eig] = compute_voltage_trace(t_max, dt, target_nrn,

@@ -33,7 +33,7 @@ TEST(DiagVoltageTrace, BasicTraceHasCorrectLength) {
     double dt = 0.001;
 
     VoltageTraceInput trace_input{
-        &input,           // input
+        input,            // input (value)
         0,                // target_nrn_idx (first post-neuron)
         spikes.times,     // fwd_times
         spikes.sources,   // fwd_sources
@@ -68,7 +68,7 @@ TEST(DiagVoltageTrace, VoltageStartsNearZero) {
     EXPECT_EQ(spikes.error_no, EVENTPROP_OK);
 
     VoltageTraceInput trace_input{
-        &input, 0, spikes.times, spikes.sources, spikes.n_spikes, 0.1, 0.001
+        input, 0, spikes.times, spikes.sources, spikes.n_spikes, 0.1, 0.001
     };
 
     VoltageTraceOutput trace = eventprop_compute_voltage_trace(trace_input);
@@ -90,7 +90,7 @@ TEST(DiagVoltageTrace, VoltageRisesAfterInputSpike) {
     EXPECT_EQ(spikes.error_no, EVENTPROP_OK);
 
     VoltageTraceInput trace_input{
-        &input, 0, spikes.times, spikes.sources, spikes.n_spikes, 0.1, 0.001
+        input, 0, spikes.times, spikes.sources, spikes.n_spikes, 0.1, 0.001
     };
 
     VoltageTraceOutput trace = eventprop_compute_voltage_trace(trace_input);
@@ -115,10 +115,10 @@ TEST(DiagVoltageTrace, DifferentNeuronsProduceDifferentTraces) {
     EXPECT_EQ(spikes.error_no, EVENTPROP_OK);
 
     VoltageTraceInput trace_input0{
-        &input, 0, spikes.times, spikes.sources, spikes.n_spikes, 0.1, 0.001
+        input, 0, spikes.times, spikes.sources, spikes.n_spikes, 0.1, 0.001
     };
     VoltageTraceInput trace_input1{
-        &input, 1, spikes.times, spikes.sources, spikes.n_spikes, 0.1, 0.001
+        input, 1, spikes.times, spikes.sources, spikes.n_spikes, 0.1, 0.001
     };
 
     VoltageTraceOutput trace0 = eventprop_compute_voltage_trace(trace_input0);
@@ -146,7 +146,7 @@ TEST(DiagVoltageTrace, ZeroInputSpikesProducesFlatTrace) {
     EXPECT_EQ(spikes.n_spikes, 0);
 
     VoltageTraceInput trace_input{
-        &input, 0, nullptr, nullptr, 0, 0.1, 0.001
+        input, 0, nullptr, nullptr, 0, 0.1, 0.001
     };
 
     VoltageTraceOutput trace = eventprop_compute_voltage_trace(trace_input);
@@ -160,26 +160,13 @@ TEST(DiagVoltageTrace, ZeroInputSpikesProducesFlatTrace) {
     eventprop_free_spike_output(spikes);
 }
 
-TEST(DiagVoltageTrace, NullInputReturnsError) {
-    VoltageTraceInput trace_input{
-        nullptr, 0, nullptr, nullptr, 0, 0.1, 0.001
-    };
-
-    VoltageTraceOutput trace = eventprop_compute_voltage_trace(trace_input);
-    EXPECT_EQ(trace.error_no, EVENTPROP_NULL_POINTER);
-    EXPECT_EQ(trace.n_t, 0);
-    EXPECT_EQ(trace.v_trace, nullptr);
-    EXPECT_EQ(trace.ts, nullptr);
-
-    eventprop_free_voltage_trace_output(trace);
-}
 
 TEST(DiagVoltageTrace, ZeroDtReturnsError) {
     std::vector<double> w = {1.0, 2.0};
     EventPropInput input{w.data(), 1, 2, nullptr, nullptr, 0, kTauMem, kTauSyn, kVTh};
 
     VoltageTraceInput trace_input{
-        &input, 0, nullptr, nullptr, 0, 0.1, 0.0
+        input, 0, nullptr, nullptr, 0, 0.1, 0.0
     };
 
     VoltageTraceOutput trace = eventprop_compute_voltage_trace(trace_input);
@@ -193,7 +180,7 @@ TEST(DiagVoltageTrace, EqualTausReturnsError) {
     EventPropInput input{w.data(), 1, 2, nullptr, nullptr, 0, kTauMem, kTauMem, kVTh}; // tau_mem == tau_syn
 
     VoltageTraceInput trace_input{
-        &input, 0, nullptr, nullptr, 0, 0.1, 0.001
+        input, 0, nullptr, nullptr, 0, 0.1, 0.001
     };
 
     VoltageTraceOutput trace = eventprop_compute_voltage_trace(trace_input);
@@ -207,7 +194,7 @@ TEST(DiagVoltageTrace, OutOfBoundsTargetNeuronReturnsError) {
     EventPropInput input{w.data(), 1, 2, nullptr, nullptr, 0, kTauMem, kTauSyn, kVTh};
 
     VoltageTraceInput trace_input{
-        &input, 5, nullptr, nullptr, 0, 0.1, 0.001 // target_nrn_idx=5 >= n_post=2
+        input, 5, nullptr, nullptr, 0, 0.1, 0.001 // target_nrn_idx=5 >= n_post=2
     };
 
     VoltageTraceOutput trace = eventprop_compute_voltage_trace(trace_input);

@@ -13,22 +13,22 @@ public static unsafe partial class Diag
     [StructLayout(LayoutKind.Sequential)]
     public struct VoltageTraceInput
     {
-        public IntPtr Input;       // const Api.EventPropInput*
+        public Api.EventPropInput Input;  // embedded EventPropInput (value)
         public int TargetNrnIdx;
-        public IntPtr FwdTimes;    // const double*
-        public IntPtr FwdSources;  // const int*
+        public IntPtr FwdTimes;           // const double*
+        public IntPtr FwdSources;         // const int*
         public int NPostSpikes;
         public double TMax;
         public double Dt;
 
         /// <summary>Build from raw pointers.</summary>
-        public static VoltageTraceInput Create(Api.EventPropInput* input,
+        public static VoltageTraceInput Create(Api.EventPropInput input,
             int targetNrnIdx, double* fwdTimes, int* fwdSources, int nPostSpikes,
             double tMax, double dt)
         {
             return new VoltageTraceInput
             {
-                Input = (IntPtr)input,
+                Input = input,
                 TargetNrnIdx = targetNrnIdx,
                 FwdTimes = (IntPtr)fwdTimes,
                 FwdSources = (IntPtr)fwdSources,
@@ -55,7 +55,7 @@ public static unsafe partial class Diag
 
                 return new VoltageTraceInput
                 {
-                    Input = (IntPtr)(void*)&epInput,
+                    Input = epInput,
                     TargetNrnIdx = targetNrnIdx,
                     FwdTimes = (IntPtr)pft,
                     FwdSources = (IntPtr)pfs,

@@ -139,7 +139,7 @@ void eventprop_free_maxima_output(MaximaOutput output);
 void eventprop_free_backward_output(BackwardOutput output);
 
 /**
- * Forward pass
+ * Forward pass (original).
  * Returns a SpikeOutput struct — caller must free via eventprop_free_spike_output().
  */
 SpikeOutput eventprop_compute_spikes(EventPropInput input);
