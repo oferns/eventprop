@@ -732,17 +732,10 @@ static inline EventPropError allocate_neuron_buffers(ComputeSpikesCtx* ctx,
 
 /** Generate candidate upper bounds for interval i.
  *  Returns the number of candidates (0, 1, or 2). */
-static inline int generate_bracket_candidates(int i,
-                                              int n_spikes,
-                                              const double* input_times,
-                                              int target_nrn,
-                                              int n_post,
+static inline int generate_bracket_candidates(const RootContext* rctx,
                                               int count,
                                               const double* p_times,
-                                              const double* sum0,
-                                              const double* sum1,
                                               const EventPropInput input,
-                                              double k_prefactor,
                                               double tmax_prefactor,
                                               double tmax_summand,
                                               double t_before,
@@ -750,10 +743,10 @@ static inline int generate_bracket_candidates(int i,
 {
     int n_candidates = 0;
 
-    if (i == n_spikes) {
+    if (rctx->i == input.n_spikes) {
         /* ── Last interval: one candidate — analytical tmax from adjusted sums ── */
-        double s0 = sum0[n_spikes * n_post + target_nrn];
-        double s1 = sum1[n_spikes * n_post + target_nrn];
+        double s0 = rctx->sum0[input.n_spikes * input.n_post + rctx->target_nrn];
+        double s1 = rctx->sum1[input.n_spikes * input.n_post + rctx->target_nrn];
         for (int s = 0; s < count; s++)
             s1 += -input.v_th * exp(p_times[s] / input.tau_mem);
 
@@ -761,30 +754,30 @@ static inline int generate_bracket_candidates(int i,
             const double tmax = tmax_prefactor * (tmax_summand + log(s1 / s0));
             /* Validate bracket: tmax must be >= t_before (matches compute_tmax bounds check) */
             if (!isinf(tmax) && t_before <= tmax) {
-                const double v = compute_v_inline(tmax, i, count, p_times, 0,
-                                            sum0, sum1, target_nrn, input, k_prefactor);
+                const double v = compute_v_inline(tmax, rctx->i, count, p_times, 0,
+                                            rctx->sum0, rctx->sum1, rctx->target_nrn, input, rctx->k_prefactor);
                 if (v > input.v_th + SPIKE_THRESHOLD_EPS)
                     candidates[n_candidates++] = tmax;
             }
         }
     } else {
         /* ── Regular interval: up to 2 candidates ── */
-        double t_input = input_times[i];
+        const double t_input = input.times[rctx->i];
 
         /* Candidate 1: analytical tmax */
-        const double tmax = compute_tmax(i, n_spikes, input_times, count, p_times, 0,
-                                   sum0, sum1, target_nrn, n_post,
+        const double tmax = compute_tmax(rctx->i, input.n_spikes, input.times, count, p_times, 0,
+                                   rctx->sum0, rctx->sum1, rctx->target_nrn, rctx->n_post,
                                    tmax_prefactor, tmax_summand, input.tau_mem, input.v_th);
         if (!isinf(tmax)) {
-            const double v = compute_v_inline(tmax, i, count, p_times, 0,
-                                        sum0, sum1, target_nrn, input, k_prefactor);
+            const double v = compute_v_inline(tmax, rctx->i, count, p_times, 0,
+                                        rctx->sum0, rctx->sum1, rctx->target_nrn, input, rctx->k_prefactor);
             if (v > input.v_th + SPIKE_THRESHOLD_EPS)
                 candidates[n_candidates++] = tmax;
         }
 
         /* Candidate 2: voltage at input spike time */
-        const double v_at_input = compute_v_inline(t_input, i, count, p_times, 0,
-                                             sum0, sum1, target_nrn, input, k_prefactor);
+        const double v_at_input = compute_v_inline(t_input, rctx->i, count, p_times, 0,
+                                             rctx->sum0, rctx->sum1, rctx->target_nrn, input, rctx->k_prefactor);
         if (v_at_input > input.v_th + SPIKE_THRESHOLD_EPS)
             candidates[n_candidates++] = t_input;
     }
@@ -1003,19 +996,17 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                 }
 
                 /* ── Generate candidate upper bounds ── */
+                rctx_base.i = i;
                 double candidates[2];
                 int n_candidates = generate_bracket_candidates(
-                    i, input.n_spikes, input.times,
-                    target_nrn, input.n_post, count, p_times,
-                    sum0, sum1, input, k_prefactor,
-                    tmax_prefactor, tmax_summand, t_before, candidates);
+                    &rctx_base, count, p_times,
+                    input, tmax_prefactor, tmax_summand, t_before, candidates);
 
                 /* ── Try each candidate bracket with shared solver ── */
                 for (int c = 0; c < n_candidates; c++) {
                     NeuronState state = { .p_times = p_times,
                                           .p_currents = p_currents,
                                           .cap = cap, .count = count };
-                    rctx_base.i = i;
 
                     const int rc = try_find_root_spike(&rctx_base, input, t_before,
                                                  candidates[c], &state);
