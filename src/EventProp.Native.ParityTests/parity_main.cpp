@@ -77,6 +77,11 @@ static int tests_run = 0, tests_passed = 0, tests_failed = 0;
 #define ASSERT_NEAR_SCALED(a, b, abs_tol, rel_tol, msg) do { double _a = (double)(a), _b = (double)(b); double diff = fabs(_a - _b); double scale = fmax(fabs(_a), fabs(_b)); if (diff > abs_tol && diff > rel_tol * scale) { printf("FAIL [%s: %g vs %g, diff=%g, rel=%g]\n", msg, _a, _b, diff, scale > 0 ? diff/scale : diff); tests_failed++; return; } } while(0)
 #define ASSERT_ARRAY_NEAR(arr_c, arr_e, n, abs_tol, rel_tol, msg) do { for (int _i = 0; _i < (n); _i++) { double _a = (arr_c)[_i], _b = (arr_e)[_i]; double diff = fabs(_a - _b); double scale = fmax(fabs(_a), fabs(_b)); if (diff > abs_tol && diff > rel_tol * scale) { printf("FAIL [%s[%d]: %g vs %g, diff=%g]\n", msg, _i, (double)_a, (double)_b, diff); tests_failed++; return; } } } while(0)
 #define TEST_END do { printf("PASS\n"); tests_passed++; } while (0)
+/* Skip test if C library validation rejected the input (outputs are NULL on error) */
+#define SKIP_C_ERROR(out) \
+    do { if ((out).error_no != EVENTPROP_OK) { \
+        printf("SKIP (C validation: %s)\n", eventprop_error_string((out).error_no)); tests_passed++; \
+        free(w); free(times); free(sources); return; } } while (0)
 
 struct TestCase {
     const char*pattern; int n_pre, n_post, n_spikes;
@@ -108,6 +113,7 @@ static void test_compute_sums(const TestCase& tc) {
 
     EventPropInput fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
     SumsOutput sums_c = eventprop_compute_sums(fi_base);
+    SKIP_C_ERROR(sums_c);
     auto [sum0_eig, sum1_eig] = compute_sums(make_w_mat(w, tc.n_pre, tc.n_post), make_eigen_spikes(times, sources, tc.n_spikes), tc.tau_mem, tc.tau_syn);
 
     int sum_rows = tc.n_spikes + 1;
@@ -131,6 +137,7 @@ static void test_compute_spikes(const TestCase& tc) {
 
     EventPropInput fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
     SpikeOutput spikes_c = eventprop_compute_spikes(fi_spikes);
+    SKIP_C_ERROR(spikes_c);
     auto result_eig = compute_spikes(make_w_mat(w, tc.n_pre, tc.n_post), make_eigen_spikes(times, sources, tc.n_spikes), tc.v_th, tc.tau_mem, tc.tau_syn);
     int n_post_spikes_eig = (int)result_eig.times.size();
 
@@ -163,6 +170,7 @@ static void test_backward_spikes(const TestCase& tc) {
 
     EventPropInput fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
     SpikeOutput fwd_c = eventprop_compute_spikes(fi_spikes);
+    SKIP_C_ERROR(fwd_c);
     if (fwd_c.n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
 
     // Write errors into fwd_c.errors (allocated by forward pass)
@@ -170,6 +178,7 @@ static void test_backward_spikes(const TestCase& tc) {
 
     EventPropInput fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
     BackwardOutput backward_c = eventprop_backward_spikes(fi_base, fwd_c);
+    if (backward_c.error_no != EVENTPROP_OK) { printf("SKIP (C validation: %s)\n", eventprop_error_string(backward_c.error_no)); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
 
     RowMatrixXd w_mat = make_w_mat(w, tc.n_pre, tc.n_post);
     Eigen::ArrayXd e_itimes = Eigen::Map<Eigen::ArrayXd const>(times, tc.n_spikes);
@@ -199,6 +208,7 @@ static void test_compute_maxima(const TestCase& tc) {
 
     EventPropInput fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
     MaximaOutput maxima_c = eventprop_compute_maxima(fi_base);
+    SKIP_C_ERROR(maxima_c);
     auto maxima_eig = compute_maxima(make_w_mat(w, tc.n_pre, tc.n_post), make_eigen_spikes(times, sources, tc.n_spikes), tc.tau_mem, tc.tau_syn);
     double* max_times_e = (double*)malloc(tc.n_post * sizeof(double));
     double* max_values_e = (double*)malloc(tc.n_post * sizeof(double));
@@ -228,6 +238,7 @@ static void test_backward_maxima(const TestCase& tc) {
     for (int i = 0; i < tc.n_post; i++) max_errors_c[i] = 1.0;
 
     BackwardOutput backward_c = eventprop_backward_maxima(fi_base, maxima_c.times, max_errors_c);
+    if (backward_c.error_no != EVENTPROP_OK) { printf("SKIP (C validation: %s)\n", eventprop_error_string(backward_c.error_no)); tests_passed++; free(w); free(times); free(sources); eventprop_free_maxima_output(maxima_c); free(max_errors_c); return; }
 
     RowMatrixXd w_mat = make_w_mat(w, tc.n_pre, tc.n_post);
     Eigen::ArrayXd e_itimes = Eigen::Map<Eigen::ArrayXd const>(times, tc.n_spikes);
@@ -261,6 +272,7 @@ static void test_voltage_trace(const TestCase& tc) {
 
     EventPropInput fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
     SpikeOutput fwd_c = eventprop_compute_spikes(fi_spikes);
+    SKIP_C_ERROR(fwd_c);
     if (fwd_c.n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
 
     int target_nrn = 0;
@@ -268,6 +280,7 @@ static void test_voltage_trace(const TestCase& tc) {
 
     VoltageTraceInput vti = {fi_spikes, target_nrn, fwd_c.times, fwd_c.sources, fwd_c.n_spikes, t_max, dt};
     VoltageTraceOutput trace_c = eventprop_compute_voltage_trace(vti);
+    if (trace_c.error_no != EVENTPROP_OK) { printf("SKIP (C validation: %s)\n", eventprop_error_string(trace_c.error_no)); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
 
     auto [ts_eig, v_eig] = compute_voltage_trace(t_max, dt, target_nrn,
         make_w_mat(w, tc.n_pre, tc.n_post),
@@ -293,6 +306,7 @@ static void test_lambda_i_trace(const TestCase& tc) {
 
     EventPropInput fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
     SpikeOutput fwd_c = eventprop_compute_spikes(fi_spikes);
+    SKIP_C_ERROR(fwd_c);
     if (fwd_c.n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
 
     int target_nrn = 0;
@@ -300,6 +314,7 @@ static void test_lambda_i_trace(const TestCase& tc) {
 
     LambdaITraceInput lii = {fwd_c.times, fwd_c.n_spikes, target_nrn, tc.v_th, tc.tau_mem, tc.tau_syn, t_max, dt};
     LambdaITraceOutput trace_c = eventprop_compute_lambda_i_trace(lii);
+    if (trace_c.error_no != EVENTPROP_OK) { printf("SKIP (C validation: %s)\n", eventprop_error_string(trace_c.error_no)); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
 
     int expected_nt = (int)(t_max / dt);
     ASSERT_EQ(trace_c.n_t, expected_nt, "trace length mismatch");

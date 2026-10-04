@@ -71,13 +71,13 @@ SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, const i
     SpikesBatch result = (SpikesBatch){ .spikes = 0 };
   
     if (batch_size <= 0) {
-        result.has_errors = 1;
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
         result.error_no = EVENTPROP_BATCHSIZE_ZERO_OR_NEG;
         return result;
     }
 
     if (inputs == NULL) {
-        result.has_errors = 1;
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
         result.error_no = EVENTPROP_BATCH_EMPTY; 
         return result;
     }
@@ -87,7 +87,7 @@ SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, const i
     result.spikes = (SpikeOutput*)calloc((size_t)batch_size, sizeof(SpikeOutput));
     
     if (!result.spikes) {
-        result.has_errors = 1;
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
         result.error_no = EVENTPROP_ALLOC_BATCH_OUTPUTS;
         return result;
     }
@@ -99,7 +99,7 @@ SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, const i
         for (b = 0; b < batch_size; b++) {
             result.spikes[b] = eventprop_compute_spikes(inputs[b]);
             if (result.spikes[b].error_no != EVENTPROP_OK)
-                result.has_errors = 1;
+                atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
         }
     } else
 #endif
@@ -107,7 +107,7 @@ SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, const i
         for (b = 0; b < batch_size; b++) {
             result.spikes[b] = eventprop_compute_spikes(inputs[b]);
             if (result.spikes[b].error_no != EVENTPROP_OK)
-                result.has_errors = 1;
+                atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
         }
     }
     return result;
@@ -120,13 +120,13 @@ BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs, con
     const int batch_size = spikes_batch.batch_size;
 
     if (batch_size <= 0) {
-        batch.has_errors = 1;
+        atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
         batch.error_no = EVENTPROP_BATCHSIZE_ZERO_OR_NEG;
         return batch;
     }
 
     if (inputs == NULL) {
-        batch.has_errors = 1;
+        atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
         batch.error_no = EVENTPROP_BATCH_EMPTY;
         return batch;
     }
@@ -134,7 +134,7 @@ BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs, con
     /* Parallel per-sample backward */
     batch.outputs = (BackwardOutput*)calloc((size_t)batch_size, sizeof(BackwardOutput));
     if (!batch.outputs) {
-        batch.has_errors = 1;
+        atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
         batch.error_no = EVENTPROP_ALLOC_BATCH_OUTPUTS;
         return batch;
     }
@@ -146,7 +146,7 @@ BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs, con
         for (b = 0; b < batch_size; b++) {
             batch.outputs[b] = eventprop_backward_spikes(inputs[b], spikes_batch.spikes[b]);
             if (batch.outputs[b].error_no != EVENTPROP_OK)
-                batch.has_errors = 1;
+                atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
         }
     } else
 #endif
@@ -154,7 +154,7 @@ BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs, con
         for (b = 0; b < batch_size; b++) {
             batch.outputs[b] = eventprop_backward_spikes(inputs[b], spikes_batch.spikes[b]);
             if (batch.outputs[b].error_no != EVENTPROP_OK)
-                batch.has_errors = 1;
+                atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
         }
     }
 
@@ -169,13 +169,13 @@ MaximaBatch eventprop_compute_maxima_batch(const EventPropInput* inputs, const S
     const int batch_size = spikes_batch.batch_size;
  
     if (batch_size <= 0) {
-        batch.has_errors = 1;
+        atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
         batch.error_no = EVENTPROP_BATCHSIZE_ZERO_OR_NEG;
         return batch;
     }
 
     if (inputs == NULL) {
-        batch.has_errors = 1;
+        atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
         batch.error_no = EVENTPROP_BATCH_EMPTY; 
         return batch;
     }
@@ -183,7 +183,7 @@ MaximaBatch eventprop_compute_maxima_batch(const EventPropInput* inputs, const S
     /* Parallel per-sample maxima */
     batch.outputs = (MaximaOutput*)calloc((size_t)batch_size, sizeof(MaximaOutput));
     if (!batch.outputs) {
-        batch.has_errors = 1;
+        atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
         batch.error_no = EVENTPROP_ALLOC_BATCH_OUTPUTS;
         return batch;
     }
@@ -195,7 +195,7 @@ MaximaBatch eventprop_compute_maxima_batch(const EventPropInput* inputs, const S
         for (b = 0; b < batch_size; b++) {
             batch.outputs[b] = eventprop_compute_maxima(inputs[b]);
             if (batch.outputs[b].error_no != EVENTPROP_OK)
-                batch.has_errors = 1;
+                atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
         }
     } else
 #endif
@@ -203,7 +203,7 @@ MaximaBatch eventprop_compute_maxima_batch(const EventPropInput* inputs, const S
         for (b = 0; b < batch_size; b++) {
             batch.outputs[b] = eventprop_compute_maxima(inputs[b]);
             if (batch.outputs[b].error_no != EVENTPROP_OK)
-                batch.has_errors = 1;
+                atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
         }
     }
 
@@ -218,13 +218,13 @@ BackwardsBatch eventprop_backward_maxima_batch(const EventPropInput* inputs, con
     const int batch_size = maxima_batch.batch_size;
 
     if (batch_size <= 0) {
-        batch.has_errors = 1;
+        atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
         batch.error_no = EVENTPROP_BATCHSIZE_ZERO_OR_NEG;
         return batch;
     }
 
     if (inputs == NULL) {
-        batch.has_errors = 1;
+        atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
         batch.error_no = EVENTPROP_BATCH_EMPTY;
         return batch;
     }
@@ -232,7 +232,7 @@ BackwardsBatch eventprop_backward_maxima_batch(const EventPropInput* inputs, con
     /* Parallel per-sample backward */
     batch.outputs = (BackwardOutput*)calloc((size_t)batch_size, sizeof(BackwardOutput));
     if (!batch.outputs) {
-        batch.has_errors = 1;
+        atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
         batch.error_no = EVENTPROP_ALLOC_BATCH_OUTPUTS;
         return batch;
     }
@@ -247,7 +247,7 @@ BackwardsBatch eventprop_backward_maxima_batch(const EventPropInput* inputs, con
                 maxima_batch.outputs[b].times,
                 maxima_batch.outputs[b].errors);
             if (batch.outputs[b].error_no != EVENTPROP_OK)
-                batch.has_errors = 1;
+                atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
         }
     } else
 #endif
@@ -258,7 +258,7 @@ BackwardsBatch eventprop_backward_maxima_batch(const EventPropInput* inputs, con
                 maxima_batch.outputs[b].times,
                 maxima_batch.outputs[b].errors);
             if (batch.outputs[b].error_no != EVENTPROP_OK)
-                batch.has_errors = 1;
+                atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
         }
     }
 
@@ -296,11 +296,16 @@ GradientOutput eventprop_accumulate_gradients(const BackwardsBatch batch, const 
         return result;
     }
 
+    int skipped = 0;
     for (int b = 0; b < batch.batch_size; b++) {
-        if (batch.outputs[b].error_no != EVENTPROP_OK) continue;
+        if (batch.outputs[b].error_no != EVENTPROP_OK) { skipped++; continue; }
         for (int i = 0; i < n_pre * n_post; i++)
             result.data[i] += batch.outputs[b].grad[i];
     }
+
+    /* Partial sum is still returned, but must not masquerade as a full one */
+    if (skipped > 0)
+        result.error_no = EVENTPROP_BATCH_PARTIAL_ACCUMULATION;
 
     return result;
 }
@@ -313,7 +318,7 @@ AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
     const int batch_size = spikes_batch.batch_size;
 
      if (batch_size <= 0) {
-        result.has_errors = 1;
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
         result.error_no = EVENTPROP_BATCHSIZE_ZERO_OR_NEG;
         return result;
     }
@@ -321,7 +326,7 @@ AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
     result.batch_size = batch_size;
 
     if (inputs == NULL) {
-        result.has_errors = 1;
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
         result.error_no = EVENTPROP_BATCH_EMPTY; 
         return result;
     }
@@ -340,7 +345,7 @@ AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
         for (b = 0; b < batch_size; b++) {
             outputs[b] = eventprop_backward_spikes(inputs[b], spikes_batch.spikes[b]);
             if (outputs[b].error_no != EVENTPROP_OK)
-                result.has_errors = 1;
+                atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
         }
     } else
 #endif
@@ -348,13 +353,13 @@ AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
         for (b = 0; b < batch_size; b++) {
             outputs[b] = eventprop_backward_spikes(inputs[b], spikes_batch.spikes[b]);
             if (outputs[b].error_no != EVENTPROP_OK)
-                result.has_errors = 1;
+                atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
         }
     }
 
     BackwardsBatch batch = {
         .batch_size = batch_size,
-        .has_errors = 0,   /* not used here */
+        .has_errors = ATOMIC_VAR_INIT(0),   /* not used here */
         .outputs = outputs
     };
 
@@ -404,7 +409,7 @@ AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
                 maxima_batch.outputs[b].times,
                 maxima_batch.outputs[b].errors);
             if (outputs[b].error_no != EVENTPROP_OK)
-                result.has_errors = 1;
+                atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
         }
     } else
 #endif
@@ -415,13 +420,13 @@ AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
                 maxima_batch.outputs[b].times,
                 maxima_batch.outputs[b].errors);
             if (outputs[b].error_no != EVENTPROP_OK)
-                result.has_errors = 1;
+                atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
         }
     }
 
     BackwardsBatch batch = {
         .batch_size = batch_size,
-        .has_errors = 0,   /* not used here */
+        .has_errors = ATOMIC_VAR_INIT(0),   /* not used here */
         .outputs = outputs
     };
 
@@ -449,17 +454,25 @@ DropoutBatch eventprop_dropout_spikes_batch(
 )
 {
     DropoutBatch result;
+    result.error_no = EVENTPROP_OK;
     result.batch_size = 0;
-    result.has_errors = 0;
+    atomic_store_explicit(&result.has_errors, 0, memory_order_relaxed);
     result.outputs = NULL;
 
-    if (batch_size <= 0) return result;
-    if (times == NULL || sources == NULL || n_per_sample == NULL) return result;
+    if (batch_size <= 0) {
+        result.error_no = EVENTPROP_BATCHSIZE_ZERO_OR_NEG;
+        return result;
+    }
+    if (times == NULL || sources == NULL || n_per_sample == NULL) {
+        result.error_no = EVENTPROP_BATCH_EMPTY;
+        return result;
+    }
 
     result.batch_size = batch_size;
     result.outputs = (DropoutOutput*)calloc((size_t)batch_size, sizeof(DropoutOutput));
     if (!result.outputs) {
         result.batch_size = 0;
+        result.error_no = EVENTPROP_ALLOC_BATCH_OUTPUTS;
         return result;
     }
 
@@ -467,6 +480,7 @@ DropoutBatch eventprop_dropout_spikes_batch(
     int* offsets = (int*)malloc(((size_t)batch_size + 1) * sizeof(int));
     if (!offsets) {
         eventprop_free_dropout_batch(result);
+        result.error_no = EVENTPROP_ALLOC_DROPOUT_OFFSETS;
         return result;
     }
     offsets[0] = 0;
@@ -493,9 +507,12 @@ DropoutBatch eventprop_dropout_spikes_batch(
                     free(result.outputs[b].sources);
                     result.outputs[b].times = NULL;
                     result.outputs[b].sources = NULL;
-                    result.has_errors = 1;
+                    atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
                     eventprop_free_dropout_batch(result);
-                    return (DropoutBatch){0};
+                    result.outputs = NULL; /* already freed above — keep caller's free() safe */
+                    result.error_no = EVENTPROP_ALLOC_DROPOUT_SAMPLE;
+                    result.batch_size = 0;
+                    return result;
                 }
                 for (int i = 0; i < n_spikes; i++) {
                     result.outputs[b].times[i] = times[offset + i];
@@ -513,9 +530,12 @@ DropoutBatch eventprop_dropout_spikes_batch(
             free(result.outputs[b].sources);
             result.outputs[b].times = NULL;
             result.outputs[b].sources = NULL;
-            result.has_errors = 1;
+            atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
             eventprop_free_dropout_batch(result);
-            return (DropoutBatch){0};
+            result.outputs = NULL; /* already freed above — keep caller's free() safe */
+            result.error_no = EVENTPROP_ALLOC_DROPOUT_SAMPLE;
+            result.batch_size = 0;
+            return result;
         }
 
         int idx = 0;

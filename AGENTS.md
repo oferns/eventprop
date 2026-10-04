@@ -34,10 +34,18 @@ eventprop.net/
 ├── src/
 │   ├── EventProp.Python/       # Reference library (git submodule, read-only)
 │   ├── EventProp.C/            # Pure C implementation (libeventprop_c_api)
-│   │   ├── eventprop.h/.c      # Core algorithm + single-sample functions
-│   │   ├── eventprop_batch.h/.c# Batch API with flat-array FFI variants
-│   │   ├── eventprop_diag.h/.c # Diagnostic functions (voltage traces, lambda sweeps)
-│   │   └── CMakeLists.txt      # Build config: strict warnings, SIMD, OpenMP, ASan
+│   │   ├── eventprop.h         # Public API + single-sample functions
+│   │   ├── eventprop_validation.c  # Input validation + error strings
+│   │   ├── eventprop_simd.c/h      # SIMD vector helpers (AVX2/NEON, exported non-static)
+│   │   ├── eventprop_memory.c      # Public output-freeing functions
+│   │   ├── eventprop_sums.c        # Cumulative exponential sums
+│   │   ├── eventprop_maxima.c      # Maxima + voltage-based backward pass
+│   │   ├── eventprop_spikes.c      # Forward pass (TOMS748/Brent root finding)
+│   │   ├── eventprop_backward.c    # Adjoint (lambda) sweep backward pass
+│   │   ├── eventprop_internal.h    # Shared constants, VOLTAGE macro, context types
+│   │   ├── eventprop_batch.h/.c    # Batch API with flat-array FFI variants
+│   │   ├── eventprop_diag.h/.c     # Diagnostic functions (voltage traces, lambda sweeps)
+│   │   └── CMakeLists.txt          # Build config: strict warnings, SIMD, OpenMP, ASan
 │   ├── EventProp.Cpp.Wrapper/  # C++ Eigen core (convenience copy, no pybind11)
 │   ├── EventProp.Native/       # .NET P/Invoke bindings (C library)
 │   ├── EventProp.C.Tests/      # Google Test v1.15.2 suite for C library (176 tests)
@@ -287,21 +295,7 @@ The C library (`eventprop_batch.h`) provides batch operations as the primary int
 | `AccumulatedBackwardResult` | Combined backward + summed gradient | `eventprop_free_accumulated_backward_result` |
 | `DropoutBatch` | Dropout output (per-sample surviving spikes) | `eventprop_free_dropout_batch` |
 
-### Flat-Array FFI Variants
-
-Functions suffixed `_flat` accept flat numpy-compatible arrays and per-sample offset counts. They are designed for Cython/P/Invoke callers that have contiguous buffers:
-
-```c
-SpikesBatchWithInputs eventprop_compute_spikes_batch_flat(
-    const double* w, int n_pre, int n_post,
-    const double* times, const int* sources, const int* n_per_sample,
-    int batch_size, double tau_mem, double tau_syn, double v_th);
-
-MaximaBatchWithInputs eventprop_compute_maxima_batch_flat(...);
-DropoutBatch eventprop_dropout_spikes_batch(
-    const double* times, const int* sources, const int* n_per_sample,
-    int batch_size, double p_drop, int seed);
-```
+> **Note:** Batch structs expose an atomic `has_errors` flag (`atomic_int`, set via `atomic_store_explicit(..., memory_order_relaxed)` from OpenMP loops — safe because all threads store the same value and the parallel region's exit barrier provides visibility). Error *details* are in the top-level `error_no` field and per-sample `error_no` values.
 
 ### Combined Backward + Accumulate
 
@@ -340,7 +334,7 @@ All wrappers use `__dealloc__` to call the appropriate C free function. Numpy vi
 
 ### Layer Chain Flow
 
-1. Python constructs input once via flat variant (`compute_spikes_batch_flat`)
+1. Python constructs `EventPropInput[]` once and passes it to batch functions
 2. All subsequent batch calls receive direct pointers to C-owned memory from previous returns
 3. No concatenation, no array rebuilding in Python after initial input
 4. Backward pass uses combined accumulate function — one FFI call per layer

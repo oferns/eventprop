@@ -65,7 +65,9 @@ typedef enum EventPropError {
     EVENTPROP_ALLOC_DIAG_V_TRACE      = 47,  /* voltage trace v_trace array */
     EVENTPROP_ALLOC_DIAG_TS           = 48,  /* trace ts (time) array */
     EVENTPROP_ALLOC_DIAG_LAMBDA       = 49,  /* lambda-I trace array */
-    EVENTPROP_BATCH_EMPTY             = 50   /* batch input was null*/
+    EVENTPROP_BATCH_EMPTY             = 50,  /* batch input was null */
+    EVENTPROP_ALLOC_DROPOUT_OFFSETS   = 51,  /* dropout offsets scratch buffer */
+    EVENTPROP_BATCH_PARTIAL_ACCUMULATION = 52 /* gradient sum excludes failed samples — data is a partial sum */
 } EventPropError;
 
 /** ── Validation limits ──────────────────────────────────────────────── */

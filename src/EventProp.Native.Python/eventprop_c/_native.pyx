@@ -114,7 +114,6 @@ cdef extern from "eventprop_batch.h":
     ctypedef struct SpikesBatch:
         int error_no
         int batch_size
-        int has_errors
         SpikeOutput* spikes
 
     void eventprop_free_spikes_batch(SpikesBatch batch)
@@ -123,7 +122,6 @@ cdef extern from "eventprop_batch.h":
     ctypedef struct BackwardsBatch:
         int error_no
         int batch_size
-        int has_errors
         BackwardOutput* outputs
 
     void eventprop_free_backwards_batch(BackwardsBatch batch)
@@ -131,7 +129,6 @@ cdef extern from "eventprop_batch.h":
     ctypedef struct MaximaBatch:
         int error_no
         int batch_size
-        int has_errors
         MaximaOutput* outputs
 
     void eventprop_free_maxima_batch(MaximaBatch batch)
@@ -145,6 +142,7 @@ cdef extern from "eventprop_batch.h":
     void eventprop_free_dropout_output(DropoutOutput output)
 
     ctypedef struct DropoutBatch:
+        int error_no
         int batch_size
         int has_errors
         DropoutOutput* outputs
@@ -171,7 +169,6 @@ cdef extern from "eventprop_batch.h":
     ctypedef struct AccumulatedBackwardResult:
         int error_no                  # Batch error code
         GradientOutput* summed_grads  # heap-allocated gradient with dimensions
-        int has_errors                # 1 if any sample returned an error
         BackwardOutput* outputs       # per-sample (.grad freed, .spike_errors kept)
         int batch_size
 
@@ -347,13 +344,6 @@ cdef class _SpikesBatchOutput:
         return self._spikes.batch_size
 
     @property
-    def has_errors(self):
-        """True if any sample in the batch returned an error."""
-        if self._spikes == NULL:
-            return False
-        return bool(self._spikes.has_errors)
-
-    @property
     def n_pre(self):
         if self._inputs == NULL:
             return 0
@@ -421,13 +411,6 @@ cdef class _MaximaBatchOutput:
         if self._maxima == NULL:
             return 0
         return self._maxima.batch_size
-
-    @property
-    def has_errors(self):
-        """True if any sample in the batch returned an error."""
-        if self._maxima == NULL:
-            return False
-        return bool(self._maxima.has_errors)
 
     @property
     def n_post(self):
@@ -533,13 +516,6 @@ cdef class _AccumulatedBackwardResult:
             return 0
         return self._ptr.batch_size
 
-    @property
-    def has_errors(self):
-        """True if any sample in the batch returned an error."""
-        if self._ptr == NULL:
-            return False
-        return bool(self._ptr.has_errors)
-
     def get_spike_errors(self, int idx):
         """Get spike errors for sample idx (for layer chain propagation)."""
         cdef BackwardOutput* out = &self._ptr.outputs[idx]
@@ -608,13 +584,6 @@ cdef class _DropoutBatchOutput:
             return 0
         return self._ptr.batch_size
 
-    @property
-    def has_errors(self):
-        """True if any sample in the batch returned an error."""
-        if self._ptr == NULL:
-            return False
-        return bool(self._ptr.has_errors)
-
     def __dealloc__(self):
         if self._owned and self._ptr != NULL:
             eventprop_free_dropout_batch(self._ptr[0])
@@ -671,8 +640,6 @@ cdef EventPropInput* _build_inputs(
 
 cdef void check_spikes_batch_error(SpikesBatch result):
     """Check SpikesBatch for errors, raise RuntimeError with message."""
-    if not result.has_errors:
-        return
     cdef int i
     for i in range(result.batch_size):
         if result.spikes[i].error_no != 0:
@@ -682,8 +649,6 @@ cdef void check_spikes_batch_error(SpikesBatch result):
 
 cdef void check_maxima_batch_error(MaximaBatch result):
     """Check MaximaBatch for errors, raise RuntimeError with message."""
-    if not result.has_errors:
-        return
     cdef int i
     for i in range(result.batch_size):
         if result.outputs[i].error_no != 0:
@@ -693,8 +658,6 @@ cdef void check_maxima_batch_error(MaximaBatch result):
 
 cdef void check_backward_result_error(AccumulatedBackwardResult result):
     """Check AccumulatedBackwardResult for errors, raise RuntimeError with message."""
-    if not result.has_errors:
-        return
     cdef int i
     for i in range(result.batch_size):
         if result.outputs[i].error_no != 0:
@@ -704,10 +667,9 @@ cdef void check_backward_result_error(AccumulatedBackwardResult result):
 
 cdef void check_dropout_batch_error(DropoutBatch result):
     """Check DropoutBatch for errors, raise RuntimeError with message."""
-    if not result.has_errors:
-        return
-    # Dropout only has batch-level error flag (no per-sample error_no)
-    raise RuntimeError("EventProp dropout failed: allocation or validation error")
+    if result.error_no != 0:
+        raise RuntimeError(f"EventProp error {result.error_no}: "
+                           f"{eventprop_error_string(result.error_no).decode('utf-8')}")
 
 
 # ---------------------------------------------------------------------------

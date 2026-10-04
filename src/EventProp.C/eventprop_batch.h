@@ -11,6 +11,7 @@
 #define EVENTPROP_BATCH_H
 
 #include "eventprop.h"
+#include <stdatomic.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,7 +23,7 @@ extern "C" {
 typedef struct SpikesBatch {
     EventPropError error_no;           /* Batch Errors */
     int batch_size;                    /* Number of samples in the batch */
-    int has_errors;                    /* 1 if any sample returned an error, 0 otherwise — safe to set from parallel loop */
+    atomic_int has_errors;             /* 1 if any sample returned an error — atomically settable from parallel loop */
     SpikeOutput* spikes;               /* Per-sample outputs (malloc'd, length = batch_size) */
 } SpikesBatch;
 
@@ -34,7 +35,7 @@ void eventprop_free_spikes_batch(SpikesBatch batch);
 typedef struct BackwardsBatch {
     EventPropError error_no;           /* Batch Errors */
     int batch_size;                    /* Number of samples in the batch */
-    int has_errors;                    /* 1 if any sample returned an error, 0 otherwise — safe to set from parallel loop */
+    atomic_int has_errors;             /* 1 if any sample returned an error — atomically settable from parallel loop */
     BackwardOutput* outputs;           /* Per-sample outputs (malloc'd, length = batch_size) */
 } BackwardsBatch;
 
@@ -46,7 +47,7 @@ void eventprop_free_backwards_batch(BackwardsBatch batch);
 typedef struct MaximaBatch {
     EventPropError error_no;           /* Batch Errors */    
     int batch_size;                    /* Number of samples in the batch */
-    int has_errors;                    /* 1 if any sample returned an error, 0 otherwise — safe to set from parallel loop */
+    atomic_int has_errors;             /* 1 if any sample returned an error — atomically settable from parallel loop */
     MaximaOutput* outputs;             /* Per-sample outputs (malloc'd, length = batch_size) */
 } MaximaBatch;
 
@@ -79,9 +80,10 @@ void eventprop_free_dropout_output(DropoutOutput output);
  * Batch dropout result — per-sample outputs.
  */
 typedef struct DropoutBatch {
+    EventPropError error_no;           /* Batch Errors */
     int batch_size;
-    int has_errors;            /* 1 if any sample returned an error, 0 otherwise — safe to set from parallel loop */
-    DropoutOutput* outputs;    /* Per-sample surviving spikes (malloc'd, length = batch_size) */
+    atomic_int has_errors;             /* 1 if any sample returned an error — atomically settable from parallel loop */
+    DropoutOutput* outputs;            /* Per-sample surviving spikes (malloc'd, length = batch_size) */
 } DropoutBatch;
 
 void eventprop_free_dropout_batch(DropoutBatch batch);
@@ -98,7 +100,7 @@ void eventprop_free_dropout_batch(DropoutBatch batch);
 typedef struct AccumulatedBackwardResult {
     EventPropError error_no;           /* Batch Errors */   
     GradientOutput* summed_grads;  /* malloc'd — freed by caller via eventprop_free_accumulated_backward_result */
-    int has_errors;                /* 1 if any sample returned an error, 0 otherwise — safe to set from parallel loop */
+    atomic_int has_errors;             /* 1 if any sample returned an error — atomically settable from parallel loop */
     BackwardOutput* outputs;       /* Per-sample outputs (.grad freed, .spike_errors kept) */
     int batch_size;
 } AccumulatedBackwardResult;

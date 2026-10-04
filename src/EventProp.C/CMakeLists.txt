@@ -87,7 +87,13 @@ endif()
 find_package(OpenMP QUIET)
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 add_library(eventprop_c_api ${LIB_TYPE}
-    eventprop.c
+    eventprop_validation.c
+    eventprop_simd.c
+    eventprop_memory.c
+    eventprop_sums.c
+    eventprop_maxima.c
+    eventprop_spikes.c
+    eventprop_backward.c
     eventprop_diag.c
     eventprop_batch.c
 )

@@ -119,10 +119,12 @@ public static unsafe partial class Batch
     [StructLayout(LayoutKind.Sequential)]
     public readonly ref struct DropoutBatch : IDisposable
     {
+        internal readonly int errorNo;     // EventPropError (0 = OK)
         internal readonly int batchSize;
         internal readonly int hasErrors;
         internal readonly IntPtr outputs;  // DropoutOutput* (malloc'd, length = batch_size)
 
+        public int ErrorNo => errorNo;
         public int BatchSize => batchSize;
         public bool HasErrors => hasErrors != 0;
         public IntPtr Outputs => outputs;

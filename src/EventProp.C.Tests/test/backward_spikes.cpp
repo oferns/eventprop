@@ -414,3 +414,48 @@ TEST(BackwardSpikes, CurrentEqualsVthReturnsError) {
     eventprop_free_spike_output(fwd);
     eventprop_free_backward_output(result);
 }
+
+// ──────────────────────────────────────────────────────────────
+// Validation: NULL output spike arrays with n_spikes > 0
+// ──────────────────────────────────────────────────────────────
+
+TEST(BackwardSpikes, NullOutputSpikeArraysReturnError) {
+    std::vector<double> w = {10.0};
+    std::vector<double> times   = {0.01};
+    std::vector<int> sources    = {0};
+    auto input = make_input(w, 1, 1, times, sources);
+
+    SpikeOutput fwd = eventprop_compute_spikes(input);
+    EXPECT_EQ(fwd.error_no, EVENTPROP_OK);
+    EXPECT_GT(fwd.n_spikes, 0);
+
+    // Each array must be non-NULL when n_spikes > 0 — NULL → EVENTPROP_NULL_POINTER,
+    // not a segfault. (Regression: check was missing entirely.)
+    double* saved_times    = fwd.times;
+    int*    saved_sources  = fwd.sources;
+    double* saved_currents = fwd.currents;
+    double* saved_errors   = fwd.errors;
+
+    fwd.times = nullptr;
+    EXPECT_EQ(eventprop_backward_spikes(input, fwd).error_no, EVENTPROP_NULL_POINTER);
+    fwd.times = saved_times;
+
+    fwd.sources = nullptr;
+    EXPECT_EQ(eventprop_backward_spikes(input, fwd).error_no, EVENTPROP_NULL_POINTER);
+    fwd.sources = saved_sources;
+
+    fwd.currents = nullptr;
+    EXPECT_EQ(eventprop_backward_spikes(input, fwd).error_no, EVENTPROP_NULL_POINTER);
+    fwd.currents = saved_currents;
+
+    fwd.errors = nullptr;
+    EXPECT_EQ(eventprop_backward_spikes(input, fwd).error_no, EVENTPROP_NULL_POINTER);
+    fwd.errors = saved_errors;
+
+    // Sanity: with all arrays restored the call succeeds again.
+    BackwardOutput ok = eventprop_backward_spikes(input, fwd);
+    EXPECT_EQ(ok.error_no, EVENTPROP_OK);
+    eventprop_free_backward_output(ok);
+
+    eventprop_free_spike_output(fwd);
+}
