@@ -13,12 +13,12 @@ This repository implements the **EventProp** algorithm — an event-based backpr
 | Project | Language | Role |
 |---------|----------|------|
 | **EventProp.Python/** | Python + C++ (Eigen/pybind11) | Reference library (git submodule, read-only) |
-| **EventProp.C/** | C | Pure C reimplementation with batch API and flat-array FFI variants |
+| **EventProp.C/** | C | Pure C reimplementation with a batch-first API (per-sample input arrays) |
 | **EventProp.Cpp.Wrapper/** | C++ (Eigen) | Convenience copy of the C++ core. Used for native benchmarks and parity tests |
 | **EventProp.Native.Python/** | Python + Cython | Python layer using C library via Cython bindings (`eventprop_c/_native.pyx`) |
 | **EventProp.Native/** | C# (.NET 10) | P/Invoke bindings wrapping EventProp.C via `LibraryImport` |
 | **EventProp/** | C# (.NET 10) | Self-contained, fully managed .NET implementation of EventProp.Python |
-| **EventProp.C.Tests/** | C++ (Google Test v1.15.2) | Unit tests for EventProp.C library (176 tests, ASan-compatible) |
+| **EventProp.C.Tests/** | C++ (Google Test v1.15.2) | Unit tests for EventProp.C library (178 tests, ASan-compatible) |
 | **EventProp.Tests/** | C# (.NET 10) | TUnit test suite for .NET projects (correctness + parity) |
 | **EventProp.Benchmarks/** | C# (.NET 10) | BenchmarkDotNet project comparing native vs managed .NET libraries |
 | **EventProp.Native.Benchmarks/** | C++ (Google Benchmark) | Benchmarks comparing EventProp.C vs EventProp.Python C++ code |
@@ -43,12 +43,12 @@ eventprop.net/
 │   │   ├── eventprop_spikes.c      # Forward pass (TOMS748/Brent root finding)
 │   │   ├── eventprop_backward.c    # Adjoint (lambda) sweep backward pass
 │   │   ├── eventprop_internal.h    # Shared constants, VOLTAGE macro, context types
-│   │   ├── eventprop_batch.h/.c    # Batch API with flat-array FFI variants
+│   │   ├── eventprop_batch.h/.c    # Batch-first API (per-sample input arrays)
 │   │   ├── eventprop_diag.h/.c     # Diagnostic functions (voltage traces, lambda sweeps)
 │   │   └── CMakeLists.txt          # Build config: strict warnings, SIMD, OpenMP, ASan
 │   ├── EventProp.Cpp.Wrapper/  # C++ Eigen core (convenience copy, no pybind11)
 │   ├── EventProp.Native/       # .NET P/Invoke bindings (C library)
-│   ├── EventProp.C.Tests/      # Google Test v1.15.2 suite for C library (176 tests)
+│   ├── EventProp.C.Tests/      # Google Test v1.15.2 suite for C library (178 tests)
 │   ├── EventProp/              # Managed .NET implementation
 │   ├── EventProp.Tests/        # TUnit test suite (correctness + parity)
 │   ├── EventProp.Benchmarks/   # BenchmarkDotNet (native vs managed .NET)
@@ -288,11 +288,10 @@ The C library (`eventprop_batch.h`) provides batch operations as the primary int
 
 | Type | Role | Free Function |
 |------|------|---------------|
-| `SpikesBatch` | Forward spike output (borrowed inputs) | `eventprop_free_spikes_batch` |
-| `SpikesBatchWithInputs` | Forward spike output (owned inputs, flat-FFI variant) | `eventprop_free_spikes_with_inputs_batch` |
-| `MaximaBatch` / `MaximaBatchWithInputs` | Maxima output | `eventprop_free_maxima_batch` / `_with_inputs` |
+| `SpikesBatch` | Forward spike output (per-sample, borrowed inputs) | `eventprop_free_spikes_batch` |
+| `MaximaBatch` | Maxima output (per-sample) | `eventprop_free_maxima_batch` |
 | `BackwardsBatch` | Per-sample backward results | `eventprop_free_backwards_batch` |
-| `AccumulatedBackwardResult` | Combined backward + summed gradient | `eventprop_free_accumulated_backward_result` |
+| `AccumulatedBackwardResult` | Combined backward + summed gradient (`GradientOutput*`) | `eventprop_free_accumulated_backward_result` |
 | `DropoutBatch` | Dropout output (per-sample surviving spikes) | `eventprop_free_dropout_batch` |
 
 > **Note:** Batch structs expose an atomic `has_errors` flag (`atomic_int`, set via `atomic_store_explicit(..., memory_order_relaxed)` from OpenMP loops — safe because all threads store the same value and the parallel region's exit barrier provides visibility). Error *details* are in the top-level `error_no` field and per-sample `error_no` values.
@@ -313,8 +312,8 @@ Returns `GradientOutput summed_grads` (ready for weight update) + per-sample `.s
 
 ### Memory Ownership Rules
 
-- Batch free functions take pointers (`Type*`) to safely null out internal fields after freeing
-- Individual output free functions exist for all types: `eventprop_free_spike_output`, `eventprop_free_maxima_output`, `eventprop_free_backward_output`, `eventprop_free_dropout_output`
+- All free functions (batch and single-sample) take their struct **by value**
+- Free functions exist for every heap-backed type: `eventprop_free_spike_output`, `eventprop_free_sums_output`, `eventprop_free_maxima_output`, `eventprop_free_backward_output`, `eventprop_free_dropout_output`, `eventprop_free_gradient_output`
 - Dimension fields are removed from output structs — dimensions are inferred from input parameters
 
 ## Python Bindings (`_native.pyx`)
@@ -325,8 +324,8 @@ Thin Cython wrappers with managed heap-backed wrapper classes that own C memory:
 
 | Wrapper Class | Owns | Provides |
 |---------------|------|----------|
-| `_SpikesBatchOutput` | `SpikesBatchWithInputs*` | Zero-copy views via `.get_spike_times(i)`, `.get_sources(i)` |
-| `_MaximaBatchOutput` | `MaximaBatchWithInputs*` | Zero-copy views for maxima times/values |
+| `_SpikesBatchOutput` | heap `EventPropInput[]` + `SpikesBatch*` | Zero-copy views via `.get_spike_times(i)`, `.get_sources(i)`; inputs reused by backward/maxima calls |
+| `_MaximaBatchOutput` | heap `EventPropInput[]` + `MaximaBatch*` | Zero-copy views for maxima times/values; inputs reused by backward calls |
 | `_AccumulatedBackwardResult` | `AccumulatedBackwardResult*` | `.grad` (flat), `.rows`, `.cols`, `.get_spike_errors(i)` |
 | `_DropoutBatchOutput` | `DropoutBatch*` | Zero-copy views via `[i]` → `(times, sources)` tuple |
 
