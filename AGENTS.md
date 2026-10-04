@@ -312,6 +312,7 @@ Returns `GradientOutput summed_grads` (ready for weight update) + per-sample `.s
 
 ### Memory Ownership Rules
 
+- All 13 public free functions are consolidated in `eventprop_memory.c` (core, batch, and diagnostic outputs)
 - All free functions (batch and single-sample) take their struct **by value**
 - Free functions exist for every heap-backed type: `eventprop_free_spike_output`, `eventprop_free_sums_output`, `eventprop_free_maxima_output`, `eventprop_free_backward_output`, `eventprop_free_dropout_output`, `eventprop_free_gradient_output`
 - Dimension fields are removed from output structs — dimensions are inferred from input parameters
