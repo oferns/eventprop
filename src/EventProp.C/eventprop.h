@@ -67,7 +67,14 @@ typedef enum EventPropError {
     EVENTPROP_ALLOC_DIAG_LAMBDA       = 49,  /* lambda-I trace array */
     EVENTPROP_BATCH_EMPTY             = 50,  /* batch input was null */
     EVENTPROP_ALLOC_DROPOUT_OFFSETS   = 51,  /* dropout offsets scratch buffer */
-    EVENTPROP_BATCH_PARTIAL_ACCUMULATION = 52 /* gradient sum excludes failed samples — data is a partial sum */
+    EVENTPROP_BATCH_PARTIAL_ACCUMULATION = 52, /* gradient sum excludes failed samples — data is a partial sum */
+    EVENTPROP_NONFINITE_SPIKE_TIME    = 53,  /* times[i] is NaN (±Inf caught by range checks) */
+    EVENTPROP_DIAG_TIMESTEP_INVALID   = 54,  /* trace dt <= 0 or t_max <= 0 */
+    EVENTPROP_DIAG_TARGET_OUT_OF_RANGE = 55, /* trace target_nrn_idx out of [0, n_post) */
+    EVENTPROP_DIAG_TRACE_TOO_LONG     = 56,  /* t_max / dt exceeds max trace samples */
+    EVENTPROP_INVALID_DROPOUT_PROB    = 57,  /* p_drop outside [0, 1] */
+    EVENTPROP_NEGATIVE_SAMPLE_COUNT   = 58,  /* n_per_sample[i] < 0 */
+    EVENTPROP_BATCH_DIMENSION_MISMATCH = 59  /* sample dims differ from requested n_pre/n_post */
 } EventPropError;
 
 /** ── Validation limits ──────────────────────────────────────────────── */
@@ -85,6 +92,8 @@ typedef enum EventPropError {
 /// Minimum relative difference between tau_mem and tau_syn (tau_mem == tau_syn already caught).
 /// Below this, k_prefactor = tau_syn / (tau_mem - tau_syn) blows up.
 #define EVENTPROP_TAU_REL_DIFF_MIN      1e-6
+/// Maximum number of samples in a diagnostic trace (guards t_max/dt int overflow).
+#define EVENTPROP_MAX_DIAG_SAMPLES      100000000
 
 /** Non-owning view into a flat row-major double array.
  *  Mimics Eigen::Ref<RowMatrixXd const>: attached dimensions,
@@ -93,8 +102,8 @@ typedef struct EventPropInput {
     const double* w;           /* Weight matrix (row-major) */
     int n_pre;                 /* Pre-synaptic neurons */
     int n_post;                /* Post-synaptic neurons */
-    const double* times;       /* Input spike times */
-    const int* sources;        /* Input source neurons  */
+    const double* times;       /* Input spike times — MUST be sorted non-decreasing (precondition) */
+    const int* sources;        /* Input source neurons (must match times ordering) */
     int n_spikes;              /* Number of input spikes */
     double tau_mem;            /* Membrane time constant (seconds) */
     double tau_syn;            /* Synaptic time constant (seconds) */
@@ -112,7 +121,7 @@ typedef struct SpikeOutput {
 
 typedef struct SumsOutput {
     EventPropError error_no;  /* Error code (EVENTPROP_OK on success) */
-    int n_rows;               /* Pre-synaptic neurons */
+    int n_rows;               /* Time intervals (n_spikes + 1) */
     int n_post;               /* Post-synaptic neurons */
     double* sum0;             /* Cumulative sums (malloc'd, n_rows * n_post) */
     double* sum1;             /* Cumulative sums (malloc'd, n_rows * n_post) */

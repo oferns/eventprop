@@ -27,20 +27,22 @@ VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput input
 
     /* Diag-specific checks */
     if (input.dt <= 0 || input.t_max <= 0) {
-        result.error_no = EVENTPROP_INVALID_DIMENSION;
+        result.error_no = EVENTPROP_DIAG_TIMESTEP_INVALID;
         return result;
     }
     if (input.target_nrn_idx < 0 || input.target_nrn_idx >= input.input.n_post) {
-        result.error_no = EVENTPROP_INVALID_SOURCE;
+        result.error_no = EVENTPROP_DIAG_TARGET_OUT_OF_RANGE;
         return result;
     }
     if (input.n_post_spikes > 0 && (!input.fwd_times || !input.fwd_sources)) {
         result.error_no = EVENTPROP_NULL_POINTER;
         return result;
     }
-
-    /* All validation passed — safe to allocate and compute */
     const int n_t = (int)(input.t_max / input.dt);
+    if (n_t <= 0 || n_t > EVENTPROP_MAX_DIAG_SAMPLES) {
+        result.error_no = EVENTPROP_DIAG_TRACE_TOO_LONG;
+        return result;
+    }
     const EventPropInput* fwd = &input.input;  // local pointer for readability in loop
 
     result.v_trace = calloc((size_t)n_t, sizeof(double));
@@ -93,7 +95,7 @@ LambdaITraceOutput eventprop_compute_lambda_i_trace(const LambdaITraceInput inpu
 
     /* Validate dt and t_max */
     if (input.dt <= 0 || input.t_max <= 0) {
-        result.error_no = EVENTPROP_INVALID_DIMENSION;
+        result.error_no = EVENTPROP_DIAG_TIMESTEP_INVALID;
         return result;
     }
 
@@ -105,7 +107,7 @@ LambdaITraceOutput eventprop_compute_lambda_i_trace(const LambdaITraceInput inpu
 
     /* Validate v_th (division in jump computation) */
     if (input.v_th <= 0) {
-        result.error_no = EVENTPROP_INVALID_DIMENSION;
+        result.error_no = EVENTPROP_INVALID_VTH;
         return result;
     }
 
@@ -116,6 +118,10 @@ LambdaITraceOutput eventprop_compute_lambda_i_trace(const LambdaITraceInput inpu
     }
 
     const int n_t = (int)(input.t_max / input.dt);
+    if (n_t <= 0 || n_t > EVENTPROP_MAX_DIAG_SAMPLES) {
+        result.error_no = EVENTPROP_DIAG_TRACE_TOO_LONG;
+        return result;
+    }
 
     result.lambda_trace = calloc((size_t)n_t, sizeof(double));
     if (!result.lambda_trace) {

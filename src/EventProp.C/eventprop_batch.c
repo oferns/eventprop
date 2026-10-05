@@ -245,6 +245,11 @@ GradientOutput eventprop_accumulate_gradients(const BackwardsBatch batch, const 
     int skipped = 0;
     for (int b = 0; b < batch.batch_size; b++) {
         if (batch.outputs[b].error_no != EVENTPROP_OK) { skipped++; continue; }
+        /* Homogeneous-batch guard: a smaller sample would read past its .grad buffer */
+        if (batch.outputs[b].n_pre != n_pre || batch.outputs[b].n_post != n_post) {
+            skipped++;
+            continue;
+        }
         for (int i = 0; i < n_pre * n_post; i++)
             result.data[i] += batch.outputs[b].grad[i];
     }
@@ -280,6 +285,7 @@ AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
     /* Parallel per-sample backward */
     BackwardOutput* outputs = calloc((size_t)batch_size, sizeof(BackwardOutput));
     if (!outputs) {
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
         result.error_no = EVENTPROP_ALLOC_BATCH_OUTPUTS;
         return result;
     }
@@ -311,7 +317,10 @@ AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
 
     GradientOutput* grad = (GradientOutput*)malloc(sizeof(GradientOutput));
     if (!grad) {
+        for (int i = 0; i < batch_size; i++)
+            eventprop_free_backward_output(outputs[i]);
         free(outputs);
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
         result.error_no = EVENTPROP_ALLOC_BATCH_GRAD;
         return result;
     }
@@ -330,10 +339,12 @@ AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
     AccumulatedBackwardResult result  = (AccumulatedBackwardResult) { .error_no = EVENTPROP_OK };
   
     if (batch_size <= 0) {
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
         result.error_no = EVENTPROP_BATCHSIZE_ZERO_OR_NEG;
         return result;
     }
     if (inputs == NULL) {
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
         result.error_no = EVENTPROP_BATCH_EMPTY;
         return result;
     }
@@ -341,6 +352,7 @@ AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
     /* Parallel per-sample backward */
     BackwardOutput* outputs = (BackwardOutput*)calloc((size_t)batch_size, sizeof(BackwardOutput));
     if (!outputs) {
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
         result.error_no = EVENTPROP_ALLOC_BATCH_OUTPUTS;
         return result;
     }
@@ -378,7 +390,10 @@ AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
 
     GradientOutput* grad = (GradientOutput*)malloc(sizeof(GradientOutput));
     if (!grad) {
+        for (int i = 0; i < batch_size; i++)
+            eventprop_free_backward_output(outputs[i]);
         free(outputs);
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
         result.error_no = EVENTPROP_ALLOC_BATCH_GRAD;
         return result;
     }
@@ -413,6 +428,18 @@ DropoutBatch eventprop_dropout_spikes_batch(
         result.error_no = EVENTPROP_BATCH_EMPTY;
         return result;
     }
+    /* Dropout probability must be a real probability (NaN rejected) */
+    if (!(p_drop >= 0.0 && p_drop <= 1.0)) {
+        result.error_no = EVENTPROP_INVALID_DROPOUT_PROB;
+        return result;
+    }
+    /* Per-sample spike counts must be non-negative */
+    for (int i = 0; i < batch_size; i++) {
+        if (n_per_sample[i] < 0) {
+            result.error_no = EVENTPROP_NEGATIVE_SAMPLE_COUNT;
+            return result;
+        }
+    }
 
     result.batch_size = batch_size;
     result.outputs = (DropoutOutput*)calloc((size_t)batch_size, sizeof(DropoutOutput));
@@ -426,12 +453,24 @@ DropoutBatch eventprop_dropout_spikes_batch(
     int* offsets = (int*)malloc(((size_t)batch_size + 1) * sizeof(int));
     if (!offsets) {
         eventprop_free_dropout_batch(result);
+        result.outputs = NULL;   /* already freed — keep caller's free() safe */
+        result.batch_size = 0;
         result.error_no = EVENTPROP_ALLOC_DROPOUT_OFFSETS;
         return result;
     }
     offsets[0] = 0;
+    long long running = 0;
     for (int i = 0; i < batch_size; i++) {
-        offsets[i+1] = offsets[i] + n_per_sample[i];
+        running += n_per_sample[i];
+        if (running > INT_MAX) {   /* total spike count would overflow int offsets */
+            free(offsets);
+            eventprop_free_dropout_batch(result);
+            result.outputs = NULL;
+            result.batch_size = 0;
+            result.error_no = EVENTPROP_DIMENSION_TOO_LARGE;
+            return result;
+        }
+        offsets[i+1] = (int)running;
     }
 
     /* Process each sample — sequential (malloc per-sample) */

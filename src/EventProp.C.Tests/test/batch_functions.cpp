@@ -380,6 +380,8 @@ TEST(BatchAccumulate, SumsGradientsCorrectly) {
 
     BackwardOutput* outputs = (BackwardOutput*)calloc(batch_size, sizeof(BackwardOutput));
     for (int b = 0; b < batch_size; ++b) {
+        outputs[b].n_pre = n_pre;
+        outputs[b].n_post = n_post;
         outputs[b].grad = (double*)malloc(n_pre * n_post * sizeof(double));
         // Each sample has grad[i] = b+1 (so sum should be batch_size*(b+1))
         for (int i = 0; i < n_pre * n_post; ++i) {
@@ -413,6 +415,8 @@ TEST(BatchAccumulate, FailedSampleYieldsPartialSumFlag) {
 
     BackwardOutput* outputs = (BackwardOutput*)calloc(batch_size, sizeof(BackwardOutput));
     for (int b = 0; b < batch_size; ++b) {
+        outputs[b].n_pre = n_pre;
+        outputs[b].n_post = n_post;
         outputs[b].grad = (double*)malloc(n_pre * n_post * sizeof(double));
         for (int i = 0; i < n_pre * n_post; ++i)
             outputs[b].grad[i] = 1.0;
@@ -543,6 +547,16 @@ TEST(BatchAccumulateBackwardMaxima, OneBadSampleSetsHasErrors) {
     eventprop_free_accumulated_backward_result(result);
 }
 
+TEST(BatchAccumulateBackwardMaxima, ZeroBatchSizeSetsHasErrors) {
+    MaximaBatch maxima = (MaximaBatch){};
+
+    AccumulatedBackwardResult result = eventprop_backward_maxima_batch_accumulate(nullptr, maxima);
+    EXPECT_EQ(result.error_no, EVENTPROP_BATCHSIZE_ZERO_OR_NEG);
+    EXPECT_EQ(result.has_errors, 1);
+
+    eventprop_free_accumulated_backward_result(result);
+}
+
 // ──────────────────────────────────────────────────────────────
 // dropout_spikes_batch
 // ──────────────────────────────────────────────────────────────
@@ -628,6 +642,106 @@ TEST(BatchDropout, PartialDropoutReducesCount) {
     EXPECT_LT(batch.outputs[0].n_spikes, 100);
 
     eventprop_free_dropout_batch(batch);
+}
+
+TEST(BatchDropout, InvalidDropoutProbReturnsError) {
+    std::vector<double> times = {0.01, 0.02};
+    std::vector<int> sources = {0, 1};
+    std::vector<int> n_per_sample = {2};
+
+    // p_drop > 1 would silently drop everything — must be rejected
+    DropoutBatch batch = eventprop_dropout_spikes_batch(
+        times.data(), sources.data(), n_per_sample.data(), 1, 1.5, 42);
+    EXPECT_EQ(batch.error_no, EVENTPROP_INVALID_DROPOUT_PROB);
+    EXPECT_EQ(batch.batch_size, 0);
+    eventprop_free_dropout_batch(batch);
+
+    // Negative probability is equally invalid
+    batch = eventprop_dropout_spikes_batch(
+        times.data(), sources.data(), n_per_sample.data(), 1, -0.1, 42);
+    EXPECT_EQ(batch.error_no, EVENTPROP_INVALID_DROPOUT_PROB);
+    eventprop_free_dropout_batch(batch);
+
+    // NaN probability must be rejected too
+    batch = eventprop_dropout_spikes_batch(
+        times.data(), sources.data(), n_per_sample.data(), 1, std::nan(""), 42);
+    EXPECT_EQ(batch.error_no, EVENTPROP_INVALID_DROPOUT_PROB);
+    eventprop_free_dropout_batch(batch);
+}
+
+TEST(BatchDropout, NegativeSampleCountReturnsError) {
+    std::vector<double> times = {0.01, 0.02};
+    std::vector<int> sources = {0, 1};
+    std::vector<int> n_per_sample = {2, -1};
+
+    DropoutBatch batch = eventprop_dropout_spikes_batch(
+        times.data(), sources.data(), n_per_sample.data(), 2, 0.5, 42);
+    EXPECT_EQ(batch.error_no, EVENTPROP_NEGATIVE_SAMPLE_COUNT);
+    EXPECT_EQ(batch.batch_size, 0);
+    eventprop_free_dropout_batch(batch);
+}
+
+TEST(BatchAccumulate, DimensionMismatchSkippedAsPartial) {
+    // Sample 1 has smaller dims than requested — must be excluded, not read OOB
+    BackwardsBatch batch = (BackwardsBatch){};
+    batch.batch_size = 2;
+    batch.error_no = EVENTPROP_OK;
+    batch.outputs = (BackwardOutput*)calloc(2, sizeof(BackwardOutput));
+
+    batch.outputs[0].error_no = EVENTPROP_OK;
+    batch.outputs[0].n_pre = 2;
+    batch.outputs[0].n_post = 3;
+    batch.outputs[0].n_spikes = 0;
+    batch.outputs[0].grad = (double*)malloc(6 * sizeof(double));
+    for (int i = 0; i < 6; ++i) batch.outputs[0].grad[i] = 1.0;
+    batch.outputs[0].spike_errors = nullptr;
+
+    batch.outputs[1].error_no = EVENTPROP_OK;
+    batch.outputs[1].n_pre = 1;
+    batch.outputs[1].n_post = 3;
+    batch.outputs[1].n_spikes = 0;
+    batch.outputs[1].grad = (double*)malloc(3 * sizeof(double));
+    for (int i = 0; i < 3; ++i) batch.outputs[1].grad[i] = 100.0;
+    batch.outputs[1].spike_errors = nullptr;
+
+    GradientOutput sum = eventprop_accumulate_gradients(batch, 2, 3);
+    EXPECT_EQ(sum.error_no, EVENTPROP_BATCH_PARTIAL_ACCUMULATION);
+    for (int i = 0; i < 6; ++i) EXPECT_DOUBLE_EQ(sum.data[i], 1.0);
+
+    eventprop_free_gradient_output(sum);
+    eventprop_free_backwards_batch(batch);
+}
+
+TEST(BatchAccumulate, ErrorStructWithNullOutputsFreesSafely) {
+    // Error paths return batch_size > 0 with outputs == NULL — the free
+    // functions must not dereference the NULL array.
+    AccumulatedBackwardResult r = (AccumulatedBackwardResult){};
+    r.batch_size = 3;
+    r.error_no = EVENTPROP_ALLOC_BATCH_OUTPUTS;
+    r.summed_grads = nullptr;
+    r.outputs = nullptr;
+    eventprop_free_accumulated_backward_result(r);
+
+    SpikesBatch sb = (SpikesBatch){};
+    sb.batch_size = 3;
+    sb.error_no = EVENTPROP_ALLOC_BATCH_OUTPUTS;
+    sb.spikes = nullptr;
+    eventprop_free_spikes_batch(sb);
+
+    BackwardsBatch wb = (BackwardsBatch){};
+    wb.batch_size = 3;
+    wb.outputs = nullptr;
+    eventprop_free_backwards_batch(wb);
+
+    MaximaBatch mb = (MaximaBatch){};
+    mb.batch_size = 3;
+    mb.outputs = nullptr;
+    eventprop_free_maxima_batch(mb);
+
+    DropoutBatch db = (DropoutBatch){};
+    db.batch_size = 3;
+    db.outputs = nullptr;
+    eventprop_free_dropout_batch(db);
 }
 
 // ──────────────────────────────────────────────────────────────

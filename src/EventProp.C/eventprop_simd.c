@@ -5,17 +5,34 @@
 #include "eventprop_simd.h"
 
 /* ── SIMD detection and intrinsics ─────────────────────────────────────── */
-#ifndef EVENTPROP_SIMD_AVAILABLE
-#define EVENTPROP_SIMD_AVAILABLE 1
+/* Detection is compiler-flag based: CMake passes -mavx2 / -mavx512f only
+ * after runtime CPU detection, so __AVX2__ / __AVX512F__ are the reliable
+ * signal. Do NOT key on __x86_64__ alone — the CPU may lack AVX2. */
+#ifndef HAVE_AVX512F
+#if defined(__AVX512F__)
+#define HAVE_AVX512F 1
+#endif
 #endif
 
-#if defined(__AVX2__) || (defined(__x86_64__) && EVENTPROP_SIMD_AVAILABLE)
+#ifndef HAVE_AVX2
+#if defined(__AVX2__)
 #define HAVE_AVX2 1
+#endif
+#endif
+
+#ifdef HAVE_AVX512F
+#include <immintrin.h>
+#elif defined(HAVE_AVX2)
 #include <immintrin.h>
 #endif
 
-#if defined(__aarch64__) || (defined(__arm__) && EVENTPROP_SIMD_AVAILABLE)
+#ifndef HAVE_NEON
+#if defined(__aarch64__) || defined(__ARM_NEON)
 #define HAVE_NEON 1
+#endif
+#endif
+
+#ifdef HAVE_NEON
 #include <arm_neon.h>
 #endif
 
@@ -25,7 +42,7 @@ int simd_vec_width(void)
     return 8;
 #elif defined(HAVE_AVX2)
     return 4;
-#elif defined(__ARM_NEON)
+#elif defined(HAVE_NEON)
     return 2;
 #else
     return 0;
@@ -66,7 +83,7 @@ void fma_row_simd(double* dest, const double* src, const double* weights,
 #endif
         }
     }
-#elif defined(__ARM_NEON)
+#elif defined(HAVE_NEON)
     {
         const float64x2_t sc = vdupq_n_f64(scalar);
         for (int i = 0; i < vec_count; i++) {
@@ -110,7 +127,7 @@ void scale_inplace_simd(double* span, const double scalar, const int n)
         }
 #endif
     }
-#elif defined(__ARM_NEON)
+#elif defined(HAVE_NEON)
     {
         const float64x2_t sc = vdupq_n_f64(scalar);
         for (int i = 0; i < vec_count; i++) {
@@ -155,7 +172,7 @@ void vadd_scaled_simd(double* dest, const double* src, const double scalar, cons
         }
 #endif
     }
-#elif defined(__ARM_NEON)
+#elif defined(HAVE_NEON)
     {
         const float64x2_t sc = vdupq_n_f64(scalar);
         for (int i = 0; i < vec_count; i++) {
@@ -213,7 +230,7 @@ double dot_product_simd(const double* a, const double* b, const int n)
         return sum;
 #endif
     }
-#elif defined(__ARM_NEON)
+#elif defined(HAVE_NEON)
     {
         float64x2_t acc = vdupq_n_f64(0.0);
         for (int i = 0; i < vec_count; i++) {
@@ -262,7 +279,7 @@ void vsub_simd(double* dest, const double* a, const double* b, int n)
 #endif
         }
     }
-#elif defined(__ARM_NEON)
+#elif defined(HAVE_NEON)
     {
         for (int i = 0; i < vec_count; i++) {
             const float64x2_t va = vld1q_f64(a + i * vec);

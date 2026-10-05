@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 #include "eventprop.h"
 #include <vector>
+#include <cmath>
 
 static constexpr double kTauMem = 0.02;
 static constexpr double kTauSyn = 0.005;
@@ -361,4 +362,41 @@ TEST(ValidateInput, NegativeTimeCheckedBeforeExcessiveTime) {
     EventPropInput input{w.data(), 1, 1, times.data(), sources.data(),
                          (int)times.size(), kTauMem, kTauSyn, kVTh};
     EXPECT_EQ(eventprop_validate_input(input), EVENTPROP_NEGATIVE_SPIKE_TIME);
+}
+
+// ──────────────────────────────────────────────────────────────
+// Finiteness checks (NaN rejection)
+// ──────────────────────────────────────────────────────────────
+
+TEST(ValidateInput, NanSpikeTimeReturnsNonfiniteTime) {
+    std::vector<double> w = {1.0, 2.0};
+    std::vector<double> times = {0.1, std::nan("")};
+    std::vector<int> sources  = {0, 0};
+    EventPropInput input{w.data(), 1, 2, times.data(), sources.data(),
+                         (int)times.size(), kTauMem, kTauSyn, kVTh};
+    EXPECT_EQ(eventprop_validate_input(input), EVENTPROP_NONFINITE_SPIKE_TIME);
+}
+
+TEST(ValidateInput, InfiniteSpikeTimeReturnsNonfiniteTime) {
+    std::vector<double> w = {1.0, 2.0};
+    std::vector<double> times = {0.1, INFINITY};
+    std::vector<int> sources  = {0, 0};
+    EventPropInput input{w.data(), 1, 2, times.data(), sources.data(),
+                         (int)times.size(), kTauMem, kTauSyn, kVTh};
+    EXPECT_EQ(eventprop_validate_input(input), EVENTPROP_NONFINITE_SPIKE_TIME);
+}
+
+TEST(ValidateInput, NanTauRejectedAsInvalidTau) {
+    std::vector<double> w = {1.0};
+    // NaN comparisons are false — the negated tau check must still reject
+    EventPropInput input{w.data(), 1, 1, nullptr, nullptr, 0,
+                         std::nan(""), kTauSyn, kVTh};
+    EXPECT_EQ(eventprop_validate_input(input), EVENTPROP_INVALID_TAU);
+}
+
+TEST(ValidateInput, NanVthRejectedAsInvalidVth) {
+    std::vector<double> w = {1.0};
+    EventPropInput input{w.data(), 1, 1, nullptr, nullptr, 0,
+                         kTauMem, kTauSyn, std::nan("")};
+    EXPECT_EQ(eventprop_validate_input(input), EVENTPROP_INVALID_VTH);
 }

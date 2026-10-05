@@ -170,7 +170,7 @@ TEST(DiagVoltageTrace, ZeroDtReturnsError) {
     };
 
     VoltageTraceOutput trace = eventprop_compute_voltage_trace(trace_input);
-    EXPECT_EQ(trace.error_no, EVENTPROP_INVALID_DIMENSION);
+    EXPECT_EQ(trace.error_no, EVENTPROP_DIAG_TIMESTEP_INVALID);
 
     eventprop_free_voltage_trace_output(trace);
 }
@@ -198,7 +198,7 @@ TEST(DiagVoltageTrace, OutOfBoundsTargetNeuronReturnsError) {
     };
 
     VoltageTraceOutput trace = eventprop_compute_voltage_trace(trace_input);
-    EXPECT_EQ(trace.error_no, EVENTPROP_INVALID_SOURCE);
+    EXPECT_EQ(trace.error_no, EVENTPROP_DIAG_TARGET_OUT_OF_RANGE);
 
     eventprop_free_voltage_trace_output(trace);
 }
@@ -324,7 +324,7 @@ TEST(DiagLambdaITrace, ZeroDtReturnsError) {
     };
 
     LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
-    EXPECT_EQ(trace.error_no, EVENTPROP_INVALID_DIMENSION);
+    EXPECT_EQ(trace.error_no, EVENTPROP_DIAG_TIMESTEP_INVALID);
     EXPECT_EQ(trace.n_t, 0);
     EXPECT_EQ(trace.lambda_trace, nullptr);
     EXPECT_EQ(trace.ts, nullptr);
@@ -349,7 +349,7 @@ TEST(DiagLambdaITrace, ZeroVThReturnsError) {
     };
 
     LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
-    EXPECT_EQ(trace.error_no, EVENTPROP_INVALID_DIMENSION);
+    EXPECT_EQ(trace.error_no, EVENTPROP_INVALID_VTH);
 
     eventprop_free_lambda_i_trace_output(trace);
 }
@@ -363,4 +363,34 @@ TEST(DiagLambdaITrace, NullFwdTimesWithSpikesReturnsError) {
     EXPECT_EQ(trace.error_no, EVENTPROP_NULL_POINTER);
 
     eventprop_free_lambda_i_trace_output(trace);
+}
+
+TEST(DiagLambdaITrace, ExcessiveSampleCountReturnsError) {
+    // t_max / dt = 1e9 samples — exceeds EVENTPROP_MAX_DIAG_SAMPLES
+    LambdaITraceInput input{
+        nullptr, 0, 0, kVTh, kTauMem, kTauSyn, 1e6, 1e-3
+    };
+
+    LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
+    EXPECT_EQ(trace.error_no, EVENTPROP_DIAG_TRACE_TOO_LONG);
+    EXPECT_EQ(trace.n_t, 0);
+    EXPECT_EQ(trace.lambda_trace, nullptr);
+    EXPECT_EQ(trace.ts, nullptr);
+
+    eventprop_free_lambda_i_trace_output(trace);
+}
+
+TEST(DiagVoltageTrace, ExcessiveSampleCountReturnsError) {
+    std::vector<double> w = {1.0, 2.0};
+    EventPropInput input{w.data(), 1, 2, nullptr, nullptr, 0, kTauMem, kTauSyn, kVTh};
+
+    VoltageTraceInput trace_input{
+        input, 0, nullptr, nullptr, 0, 1e6, 1e-3   // 1e9 samples
+    };
+
+    VoltageTraceOutput trace = eventprop_compute_voltage_trace(trace_input);
+    EXPECT_EQ(trace.error_no, EVENTPROP_DIAG_TRACE_TOO_LONG);
+    EXPECT_EQ(trace.n_t, 0);
+
+    eventprop_free_voltage_trace_output(trace);
 }

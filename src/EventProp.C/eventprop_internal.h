@@ -8,8 +8,6 @@
 #include "eventprop.h"
 #include <stddef.h>
 
-#define EXP_STACK_SIZE 1024
-#define DIFF_STACK_SIZE 512
 #define BACKWARD_DIFF_STACK_SIZE 512
 
 #define TOMS748_MAX_ITER 1024

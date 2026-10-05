@@ -51,24 +51,30 @@ void eventprop_free_backward_output(const BackwardOutput output)
 
 void eventprop_free_spikes_batch(const SpikesBatch batch)
 {
-    for (int b = 0; b < batch.batch_size; b++) {
-        eventprop_free_spike_output(batch.spikes[b]);
+    if (batch.spikes) {
+        for (int b = 0; b < batch.batch_size; b++) {
+            eventprop_free_spike_output(batch.spikes[b]);
+        }
     }
     free(batch.spikes);
 }
 
 void eventprop_free_maxima_batch(const MaximaBatch batch)
 {
-    for (int b = 0; b < batch.batch_size; b++) {
-        eventprop_free_maxima_output(batch.outputs[b]);
+    if (batch.outputs) {
+        for (int b = 0; b < batch.batch_size; b++) {
+            eventprop_free_maxima_output(batch.outputs[b]);
+        }
     }
     free(batch.outputs);
 }
 
 void eventprop_free_backwards_batch(const BackwardsBatch batch)
 {
-    for (int b = 0; b < batch.batch_size; b++) {
-        eventprop_free_backward_output(batch.outputs[b]);
+    if (batch.outputs) {
+        for (int b = 0; b < batch.batch_size; b++) {
+            eventprop_free_backward_output(batch.outputs[b]);
+        }
     }
     free(batch.outputs);
 }
@@ -85,8 +91,10 @@ void eventprop_free_accumulated_backward_result(const AccumulatedBackwardResult 
         free(result.summed_grads);
     }
 
-    for (int b = 0; b < result.batch_size; b++) {
-        eventprop_free_backward_output(result.outputs[b]);
+    if (result.outputs) {
+        for (int b = 0; b < result.batch_size; b++) {
+            eventprop_free_backward_output(result.outputs[b]);
+        }
     }
     free(result.outputs);
 }
@@ -99,8 +107,10 @@ void eventprop_free_dropout_output(const DropoutOutput output)
 
 void eventprop_free_dropout_batch(const DropoutBatch batch)
 {
-    for (int b = 0; b < batch.batch_size; b++) {
-        eventprop_free_dropout_output(batch.outputs[b]);
+    if (batch.outputs) {
+        for (int b = 0; b < batch.batch_size; b++) {
+            eventprop_free_dropout_output(batch.outputs[b]);
+        }
     }
     free(batch.outputs);
 }

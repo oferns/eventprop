@@ -24,7 +24,8 @@ EventPropError eventprop_validate_input(const EventPropInput input)
         return EVENTPROP_NEGATIVE_SPIKES;
 
     /* ── Tau bounds and proximity ─────────────────────────────── */
-    if (input.tau_mem <= 0.0 || input.tau_syn <= 0.0)
+    /* Negated comparisons so NaN taus are rejected (NaN <= 0 would pass). */
+    if (!(input.tau_mem > 0.0) || !(input.tau_syn > 0.0))
         return EVENTPROP_INVALID_TAU;
     if (input.tau_mem < EVENTPROP_MIN_TAU || input.tau_syn < EVENTPROP_MIN_TAU)
         return EVENTPROP_TAU_TOO_SMALL;
@@ -42,7 +43,7 @@ EventPropError eventprop_validate_input(const EventPropInput input)
     }
 
     /* ── Threshold voltage ────────────────────────────────────── */
-    if (input.v_th <= 0.0)
+    if (!(input.v_th > 0.0))
         return EVENTPROP_INVALID_VTH;
 
     /* ── Pointer checks ───────────────────────────────────────── */
@@ -63,6 +64,8 @@ EventPropError eventprop_validate_input(const EventPropInput input)
             return EVENTPROP_INVALID_SOURCE;
 
         const double t = input.times[i];
+        if (!isfinite(t))
+            return EVENTPROP_NONFINITE_SPIKE_TIME;
         if (t < 0.0)
             return EVENTPROP_NEGATIVE_SPIKE_TIME;
         if (t > EVENTPROP_MAX_SPIKE_TIME)
@@ -89,7 +92,7 @@ const char* eventprop_error_string(const int error_no)
     switch (error_no) {
         case EVENTPROP_OK:                      return "OK";
         case EVENTPROP_INVALID_DIMENSION:       return "Invalid dimension: n_pre or n_post must be positive";
-        case EVENTPROP_NEGATIVE_SPIKES:         return "Negayestive spike count";
+        case EVENTPROP_NEGATIVE_SPIKES:         return "Negative spike count";
         case EVENTPROP_NULL_POINTER:            return "NULL pointer: w, times, or sources is NULL when required";
         case EVENTPROP_INVALID_SOURCE:          return "Invalid source neuron index (out of [0, n_pre) range)";
         case EVENTPROP_INVALID_TAU:             return "Invalid tau: tau_mem and tau_syn must be positive and distinct";
@@ -141,6 +144,13 @@ const char* eventprop_error_string(const int error_no)
         case EVENTPROP_BATCH_EMPTY:             return "Batch input was empty or NULL";
         case EVENTPROP_BATCH_PARTIAL_ACCUMULATION:
                                                 return "Gradient sum is partial — one or more samples failed and were excluded";
+        case EVENTPROP_NONFINITE_SPIKE_TIME:    return "Spike time is not finite (NaN)";
+        case EVENTPROP_DIAG_TIMESTEP_INVALID:   return "Invalid trace timestep: dt and t_max must be positive";
+        case EVENTPROP_DIAG_TARGET_OUT_OF_RANGE: return "Trace target neuron index out of [0, n_post) range";
+        case EVENTPROP_DIAG_TRACE_TOO_LONG:     return "Trace would exceed maximum number of time samples";
+        case EVENTPROP_INVALID_DROPOUT_PROB:    return "Invalid dropout probability: p_drop must be in [0, 1]";
+        case EVENTPROP_NEGATIVE_SAMPLE_COUNT:   return "Negative per-sample spike count (n_per_sample[i] < 0)";
+        case EVENTPROP_BATCH_DIMENSION_MISMATCH: return "Sample gradient dimensions do not match requested n_pre/n_post";
         default:                                return "Unknown error";
     }
 }
