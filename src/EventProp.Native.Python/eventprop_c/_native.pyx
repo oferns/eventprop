@@ -181,7 +181,7 @@ cdef extern from "eventprop_batch.h":
         const EventPropInput* inputs, const SpikesBatch spikes_batch)
 
     MaximaBatch eventprop_compute_maxima_batch(
-        const EventPropInput* inputs, const SpikesBatch spikes_batch)
+        const EventPropInput* inputs, int batch_size)
 
     # backward_maxima_batch uses MaximaOutput.errors written by caller
     BackwardsBatch eventprop_backward_maxima_batch(
@@ -717,8 +717,8 @@ def compute_maxima_batch(
     cdef SpikesBatch spikes_result = eventprop_compute_spikes_batch(inputs, batch_size)
     check_spikes_batch_error(spikes_result)
 
-    # Compute maxima using the same inputs and spike results
-    cdef MaximaBatch maxima_result = eventprop_compute_maxima_batch(inputs, spikes_result)
+    # Compute maxima from the same inputs (maxima need only the sample count)
+    cdef MaximaBatch maxima_result = eventprop_compute_maxima_batch(inputs, batch_size)
     check_maxima_batch_error(maxima_result)
 
     # Free intermediate spikes batch (maxima doesn't need it after computation)

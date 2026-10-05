@@ -7,12 +7,48 @@
  * - Batch results (eventprop_batch.h)
  * - Diagnostic traces (eventprop_diag.h)
  *
+ * Also hosts the allocation-fault-injection shim used to exercise error paths
+ * in tests (see eventprop_test_alloc_fail_nth).
+ *
  * All take their struct by value. Freeing a zeroed/empty struct is safe.
  */
 #include "eventprop.h"
 #include "eventprop_batch.h"
 #include "eventprop_diag.h"
 #include <stdlib.h>
+
+/* ------------------------------------------------------------------ */
+/* Allocation fault injection (test-only)                              */
+/* ------------------------------------------------------------------ */
+/* Library code allocates through these wrappers so tests can force the */
+/* n-th allocation to fail and exercise every EVENTPROP_ALLOC_* path.   */
+/* When disabled (the default) the cost is a single predictable branch. */
+static int alloc_fail_target = 0;   /* <= 0 disables injection */
+static int alloc_count = 0;         /* allocations since last reset */
+
+void eventprop_test_alloc_reset(void)
+{
+    alloc_count = 0;
+}
+
+void eventprop_test_alloc_fail_nth(const int nth)
+{
+    alloc_fail_target = nth;
+}
+
+void* eventprop_try_malloc(const size_t size)
+{
+    if (alloc_fail_target > 0 && ++alloc_count == alloc_fail_target)
+        return NULL;
+    return malloc(size);
+}
+
+void* eventprop_try_calloc(const size_t count, const size_t elem_size)
+{
+    if (alloc_fail_target > 0 && ++alloc_count == alloc_fail_target)
+        return NULL;
+    return calloc(count, elem_size);
+}
 
 /* ------------------------------------------------------------------ */
 /* Core single-sample outputs                                          */

@@ -30,17 +30,17 @@ MaximaOutput eventprop_compute_maxima(const EventPropInput input)
 
     size_t sz = (size_t)input.n_post;
     /* Allocate output - always exactly n_post elements */
-    result.times   = calloc(sz, sizeof(double));
+    result.times   = eventprop_try_calloc(sz, sizeof(double));
     if (!result.times) {
         result.error_no = EVENTPROP_ALLOC_MAXIMA_TIMES;
         goto cleanup_and_return;
     }
-    result.values  = calloc(sz, sizeof(double));
+    result.values  = eventprop_try_calloc(sz, sizeof(double));
     if (!result.values) {
         result.error_no = EVENTPROP_ALLOC_MAXIMA_VALUES;
         goto cleanup_and_return;
     }
-    result.errors  = calloc(sz, sizeof(double));
+    result.errors  = eventprop_try_calloc(sz, sizeof(double));
     if (!result.errors) {
         result.error_no = EVENTPROP_ALLOC_MAXIMA_ERRORS;
         goto cleanup_and_return;
@@ -120,6 +120,9 @@ cleanup_and_return:
     eventprop_free_sums_output(sums);
     if (result.error_no != EVENTPROP_OK) {
         eventprop_free_maxima_output(result);
+        result.times = NULL;   /* already freed — keep a caller-side free() safe */
+        result.values = NULL;
+        result.errors = NULL;
     }
     return result;
 }
@@ -141,12 +144,12 @@ BackwardOutput eventprop_backward_maxima(const EventPropInput input,
     }
 
     /* Allocate output */
-    result.grad         = calloc((size_t)(input.n_pre * input.n_post), sizeof(double));
+    result.grad         = eventprop_try_calloc((size_t)(input.n_pre * input.n_post), sizeof(double));
     if (!result.grad) {
         result.error_no     = EVENTPROP_ALLOC_BWD_GRAD;
         goto cleanup_and_return;
     }
-    result.spike_errors = calloc((size_t)input.n_spikes, sizeof(double));
+    result.spike_errors = eventprop_try_calloc((size_t)input.n_spikes, sizeof(double));
     if (!result.spike_errors) {
         result.error_no     = EVENTPROP_ALLOC_BWD_SPIKE_ERRORS;
         goto cleanup_and_return;
@@ -197,6 +200,8 @@ BackwardOutput eventprop_backward_maxima(const EventPropInput input,
 cleanup_and_return:
     if (result.error_no != EVENTPROP_OK) {
         eventprop_free_backward_output(result);
+        result.grad = NULL;          /* already freed — keep a caller-side free() safe */
+        result.spike_errors = NULL;
     }
     return result;
 }

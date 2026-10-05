@@ -22,13 +22,13 @@ SumsOutput eventprop_compute_sums(const EventPropInput input)
 
     size_t count = (size_t)result.n_rows * (size_t)input.n_post;
     
-    result.sum0 = calloc(count, sizeof(double));
+    result.sum0 = eventprop_try_calloc(count, sizeof(double));
     if(!result.sum0) {
         result.error_no = EVENTPROP_ALLOC_SUM0;
         goto cleanup_and_return;
     }
 
-    result.sum1 = calloc(count, sizeof(double));
+    result.sum1 = eventprop_try_calloc(count, sizeof(double));
     if (!result.sum1) {
         result.error_no = EVENTPROP_ALLOC_SUM1;
         goto cleanup_and_return;
@@ -39,12 +39,12 @@ SumsOutput eventprop_compute_sums(const EventPropInput input)
     }
 
     /* Pre-compute exponential lookup tables */
-    exp_mem = calloc((size_t)input.n_spikes, sizeof(double));
+    exp_mem = eventprop_try_calloc((size_t)input.n_spikes, sizeof(double));
     if (!exp_mem) {
         result.error_no = EVENTPROP_ALLOC_EXP_MEM;
         goto cleanup_and_return;
     }
-    exp_syn = calloc((size_t)input.n_spikes, sizeof(double));
+    exp_syn = eventprop_try_calloc((size_t)input.n_spikes, sizeof(double));
     if (!exp_syn) {
         result.error_no = EVENTPROP_ALLOC_EXP_SYN;
         goto cleanup_and_return;
@@ -69,6 +69,8 @@ SumsOutput eventprop_compute_sums(const EventPropInput input)
 cleanup_and_return:
     if (result.error_no != EVENTPROP_OK) {
         eventprop_free_sums_output(result);
+        result.sum0 = NULL;   /* already freed — keep a caller-side free() safe */
+        result.sum1 = NULL;
     }
     free(exp_mem);
     free(exp_syn);

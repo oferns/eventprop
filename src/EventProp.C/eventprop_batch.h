@@ -133,8 +133,11 @@ BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs, Spi
 
 /**
  * Batch forward pass — compute membrane potential maxima for each sample.
+ *
+ * Only the sample count is needed here (maxima depend on the input, not on
+ * forward spikes); pass the same batch_size used for compute_spikes_batch.
  */
-MaximaBatch eventprop_compute_maxima_batch(const EventPropInput* inputs, SpikesBatch spikes_batch);
+MaximaBatch eventprop_compute_maxima_batch(const EventPropInput* inputs, int batch_size);
 
 /**
  * Batch backward pass (maxima loss) — returns per-sample gradients.

@@ -400,3 +400,21 @@ TEST(ValidateInput, NanVthRejectedAsInvalidVth) {
                          kTauMem, kTauSyn, std::nan("")};
     EXPECT_EQ(eventprop_validate_input(input), EVENTPROP_INVALID_VTH);
 }
+
+TEST(ValidateInput, UnsortedTimesRejected) {
+    std::vector<double> w = {1.0, 2.0};
+    std::vector<double> times = {0.2, 0.1};   // descending — algorithms assume ascending
+    std::vector<int> sources  = {0, 0};
+    EventPropInput input{w.data(), 1, 2, times.data(), sources.data(),
+                         (int)times.size(), kTauMem, kTauSyn, kVTh};
+    EXPECT_EQ(eventprop_validate_input(input), EVENTPROP_UNSORTED_SPIKE_TIMES);
+}
+
+TEST(ValidateInput, EqualTimesAreAllowed) {
+    std::vector<double> w = {1.0};
+    std::vector<double> times = {0.1, 0.1, 0.3};   // non-decreasing is valid
+    std::vector<int> sources  = {0, 0, 0};
+    EventPropInput input{w.data(), 1, 2, times.data(), sources.data(),
+                         (int)times.size(), kTauMem, kTauSyn, kVTh};
+    EXPECT_EQ(eventprop_validate_input(input), EVENTPROP_OK);
+}

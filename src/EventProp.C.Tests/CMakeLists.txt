@@ -54,7 +54,9 @@ add_executable(eventprop_tests
     test/backward_maxima.cpp
     test/batch_functions.cpp
     test/validate_input.cpp
+    test/error_strings.cpp
     test/free_functions.cpp
+    test/alloc_fault_injection.cpp
     test/diag_functions.cpp
     test/matrix_view.cpp
 )

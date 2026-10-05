@@ -8,6 +8,8 @@
 #ifndef EVENTPROP_H
 #define EVENTPROP_H
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -74,7 +76,8 @@ typedef enum EventPropError {
     EVENTPROP_DIAG_TRACE_TOO_LONG     = 56,  /* t_max / dt exceeds max trace samples */
     EVENTPROP_INVALID_DROPOUT_PROB    = 57,  /* p_drop outside [0, 1] */
     EVENTPROP_NEGATIVE_SAMPLE_COUNT   = 58,  /* n_per_sample[i] < 0 */
-    EVENTPROP_BATCH_DIMENSION_MISMATCH = 59  /* sample dims differ from requested n_pre/n_post */
+    EVENTPROP_BATCH_DIMENSION_MISMATCH = 59,  /* sample dims differ from requested n_pre/n_post */
+    EVENTPROP_UNSORTED_SPIKE_TIMES    = 60   /* times[i] < times[i-1] (algorithms require ascending order) */
 } EventPropError;
 
 /** ── Validation limits ──────────────────────────────────────────────── */
@@ -102,7 +105,7 @@ typedef struct EventPropInput {
     const double* w;           /* Weight matrix (row-major) */
     int n_pre;                 /* Pre-synaptic neurons */
     int n_post;                /* Post-synaptic neurons */
-    const double* times;       /* Input spike times — MUST be sorted non-decreasing (precondition) */
+    const double* times;       /* Input spike times — MUST be sorted non-decreasing (enforced by eventprop_validate_input) */
     const int* sources;        /* Input source neurons (must match times ordering) */
     int n_spikes;              /* Number of input spikes */
     double tau_mem;            /* Membrane time constant (seconds) */
@@ -144,6 +147,10 @@ typedef struct BackwardOutput {
     double* spike_errors;   /* Input spike errors (malloc'd, n_spikes) */
 } BackwardOutput;
 
+/* Ownership: every compute/backward function above returns a heap-backed struct.
+ * Call the matching free function exactly once, whether the call succeeded or
+ * failed — on failure the library frees its own buffers and NULLs the fields,
+ * so a caller-side free is always safe and never a double free. */
 void eventprop_free_spike_output(SpikeOutput output);
 void eventprop_free_sums_output(SumsOutput output);
 void eventprop_free_maxima_output(MaximaOutput output);
@@ -181,6 +188,15 @@ BackwardOutput eventprop_backward_spikes(EventPropInput input, SpikeOutput spike
 BackwardOutput eventprop_backward_maxima(EventPropInput input,
                                          const double* maxima_times,
                                          const double* maxima_errors);
+
+/** Allocation fault injection (test-only): force the n-th allocation to fail. */
+void eventprop_test_alloc_reset(void);
+void eventprop_test_alloc_fail_nth(int nth);   /* <= 0 disables; not thread-safe */
+
+/** Library allocation shim — routes every malloc/calloc through the injection */
+/** counter above. Defined in eventprop_memory.c. */
+void* eventprop_try_malloc(size_t size);
+void* eventprop_try_calloc(size_t count, size_t elem_size);
 
 /** Validate an EventPropInput and return the first error found (or OK). */
 EventPropError eventprop_validate_input(EventPropInput input);

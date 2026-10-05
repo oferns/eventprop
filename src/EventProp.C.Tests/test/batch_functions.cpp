@@ -227,7 +227,7 @@ TEST(BatchMaxima, ValidBatchHasNoErrors) {
     BatchData data = make_valid_batch(3);
     SpikesBatch spikes = eventprop_compute_spikes_batch(data.inputs, 3);
 
-    MaximaBatch batch = eventprop_compute_maxima_batch(data.inputs, spikes);
+    MaximaBatch batch = eventprop_compute_maxima_batch(data.inputs, 3);
 
     EXPECT_EQ(batch.has_errors, 0);
     for (int i = 0; i < 3; ++i) {
@@ -250,7 +250,7 @@ TEST(BatchMaxima, OneBadSampleSetsHasErrors) {
 
     SpikesBatch spikes = eventprop_compute_spikes_batch(inputs, 2);
 
-    MaximaBatch batch = eventprop_compute_maxima_batch(inputs, spikes);
+    MaximaBatch batch = eventprop_compute_maxima_batch(inputs, 2);
 
     EXPECT_EQ(batch.has_errors, 1);
     EXPECT_EQ(batch.outputs[0].error_no, EVENTPROP_OK);
@@ -274,7 +274,7 @@ TEST(BatchMaximaStruct, ValidBatchHasNoErrors) {
     inputs[1] = make_input(w, 2, 3, times1, sources1);
 
     SpikesBatch spikes = eventprop_compute_spikes_batch(inputs, 2);
-    MaximaBatch batch = eventprop_compute_maxima_batch(inputs, spikes);
+    MaximaBatch batch = eventprop_compute_maxima_batch(inputs, 2);
 
     EXPECT_EQ(batch.has_errors, 0);
     for (int i = 0; i < 2; ++i) {
@@ -295,7 +295,7 @@ TEST(BatchMaximaStruct, OneBadSampleSetsHasErrors) {
     inputs[1] = make_input(w, 1, 3, times1, sources1);
 
     SpikesBatch spikes = eventprop_compute_spikes_batch(inputs, 2);
-    MaximaBatch batch = eventprop_compute_maxima_batch(inputs, spikes);
+    MaximaBatch batch = eventprop_compute_maxima_batch(inputs, 2);
 
     EXPECT_EQ(batch.has_errors, 1);
     EXPECT_EQ(batch.outputs[0].error_no, EVENTPROP_OK);
@@ -319,7 +319,7 @@ TEST(BatchBackwardMaxima, ValidBatchHasNoErrors) {
     inputs[1] = make_input(w, 2, 3, times1, sources1);
 
     SpikesBatch spikes = eventprop_compute_spikes_batch(inputs, 2);
-    MaximaBatch maxima = eventprop_compute_maxima_batch(inputs, spikes);
+    MaximaBatch maxima = eventprop_compute_maxima_batch(inputs, 2);
 
     // Set errors before backward pass
     for (int i = 0; i < 2; ++i) {
@@ -348,7 +348,7 @@ TEST(BatchBackwardMaxima, OneBadSampleSetsHasErrors) {
     inputs[1] = make_input(w, 2, 3, times1, sources1);
 
     SpikesBatch spikes = eventprop_compute_spikes_batch(inputs, 2);
-    MaximaBatch maxima = eventprop_compute_maxima_batch(inputs, spikes);
+    MaximaBatch maxima = eventprop_compute_maxima_batch(inputs, 2);
 
     // Set errors before backward pass
     for (int i = 0; i < 2; ++i) {
@@ -497,7 +497,7 @@ TEST(BatchAccumulateBackwardMaxima, ValidBatchHasNoErrors) {
     inputs[1] = make_input(w, 2, 3, times1, sources1);
 
     SpikesBatch spikes = eventprop_compute_spikes_batch(inputs, 2);
-    MaximaBatch maxima = eventprop_compute_maxima_batch(inputs, spikes);
+    MaximaBatch maxima = eventprop_compute_maxima_batch(inputs, 2);
 
     // Set errors before backward pass
     for (int i = 0; i < 2; ++i) {
@@ -526,7 +526,7 @@ TEST(BatchAccumulateBackwardMaxima, OneBadSampleSetsHasErrors) {
     inputs[1] = make_input(w, 2, 3, times1, sources1);
 
     SpikesBatch spikes = eventprop_compute_spikes_batch(inputs, 2);
-    MaximaBatch maxima = eventprop_compute_maxima_batch(inputs, spikes);
+    MaximaBatch maxima = eventprop_compute_maxima_batch(inputs, 2);
 
     // Set errors before backward pass
     for (int i = 0; i < 2; ++i) {

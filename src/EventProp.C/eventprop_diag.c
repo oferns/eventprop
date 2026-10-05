@@ -45,13 +45,13 @@ VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput input
     }
     const EventPropInput* fwd = &input.input;  // local pointer for readability in loop
 
-    result.v_trace = calloc((size_t)n_t, sizeof(double));
+    result.v_trace = eventprop_try_calloc((size_t)n_t, sizeof(double));
     if (!result.v_trace) {
         result.error_no = EVENTPROP_ALLOC_DIAG_V_TRACE;
         return result;
     }
 
-    result.ts = calloc((size_t)n_t, sizeof(double));
+    result.ts = eventprop_try_calloc((size_t)n_t, sizeof(double));
     if (!result.ts) {
         free(result.v_trace);
         result.v_trace = NULL;
@@ -123,13 +123,13 @@ LambdaITraceOutput eventprop_compute_lambda_i_trace(const LambdaITraceInput inpu
         return result;
     }
 
-    result.lambda_trace = calloc((size_t)n_t, sizeof(double));
+    result.lambda_trace = eventprop_try_calloc((size_t)n_t, sizeof(double));
     if (!result.lambda_trace) {
         result.error_no = EVENTPROP_ALLOC_DIAG_LAMBDA;
         return result;
     }
 
-    result.ts = calloc((size_t)n_t, sizeof(double));
+    result.ts = eventprop_try_calloc((size_t)n_t, sizeof(double));
     if (!result.ts) {
         free(result.lambda_trace);
         result.lambda_trace = NULL;

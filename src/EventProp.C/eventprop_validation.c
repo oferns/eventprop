@@ -59,6 +59,7 @@ EventPropError eventprop_validate_input(const EventPropInput input)
 
     /* ── Per-spike checks (single pass) ──────────────────────── */
     double max_time = -1.0;   /* sentinel: will become >= 0 on first spike */
+    double prev_time = -1.0;  /* ascending-order enforcement */
     for (int i = 0; i < input.n_spikes; i++) {
         if (input.sources[i] < 0 || input.sources[i] >= input.n_pre)
             return EVENTPROP_INVALID_SOURCE;
@@ -66,6 +67,9 @@ EventPropError eventprop_validate_input(const EventPropInput input)
         const double t = input.times[i];
         if (!isfinite(t))
             return EVENTPROP_NONFINITE_SPIKE_TIME;
+        if (i > 0 && t < prev_time)
+            return EVENTPROP_UNSORTED_SPIKE_TIMES;
+        prev_time = t;
         if (t < 0.0)
             return EVENTPROP_NEGATIVE_SPIKE_TIME;
         if (t > EVENTPROP_MAX_SPIKE_TIME)
@@ -151,6 +155,7 @@ const char* eventprop_error_string(const int error_no)
         case EVENTPROP_INVALID_DROPOUT_PROB:    return "Invalid dropout probability: p_drop must be in [0, 1]";
         case EVENTPROP_NEGATIVE_SAMPLE_COUNT:   return "Negative per-sample spike count (n_per_sample[i] < 0)";
         case EVENTPROP_BATCH_DIMENSION_MISMATCH: return "Sample gradient dimensions do not match requested n_pre/n_post";
+        case EVENTPROP_UNSORTED_SPIKE_TIMES:    return "Spike times are not sorted in ascending order";
         default:                                return "Unknown error";
     }
 }
