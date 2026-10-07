@@ -42,7 +42,7 @@ typedef enum EventPropError {
     EVENTPROP_ALLOC_SPIKE_CAPS        = 22,  /* spike_caps */
     EVENTPROP_ALLOC_SPIKE_COUNTS      = 23,  /* spike_counts */
     EVENTPROP_ALLOC_NEURON_BUF        = 24,  /* per-neuron times/currents buffer */
-    EVENTPROP_ALLOC_ENTRIES           = 25,  /* entries (sorted collection) */
+    EVENTPROP_ALLOC_ENTRIES           = 25,  /* entries (sorted collection) — no longer reachable; kept so codes stay stable */
     EVENTPROP_ALLOC_RESULT_TIMES      = 26,  /* result.times */
     EVENTPROP_ALLOC_RESULT_SOURCES    = 27,  /* result.sources */
     EVENTPROP_ALLOC_RESULT_CURRENTS   = 28,  /* result.currents */

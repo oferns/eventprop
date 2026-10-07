@@ -79,7 +79,6 @@ typedef struct ComputeSpikesCtx {
     SumsOutput sums;              // eventprop_free_sums_output
     SweepThread* threads;         // array of slots; each slot is heap-backed
     int n_threads;                // slots actually allocated
-    SpikeEntry* entries;          // concatenated + sorted collection buffer
     /* Output fields (set by collect_spikes_result) */
     double* result_times;
     int*    result_sources;

@@ -337,11 +337,17 @@ static inline EventPropError collect_spikes_result(ComputeSpikesCtx* ctx,
 {
     if (total == 0) return EVENTPROP_OK;  /* no spikes, nothing to do */
 
-    SpikeEntry* entries = ctx->entries;   /* allocated + filled by the caller */
+    /* Sort each thread's own run, then merge the runs straight into the */
+    /* output arrays: a concatenated staging buffer would cost a second */
+    /* full-size allocation, which dominates when spikes are dense. */
+    for (int t = 0; t < ctx->n_threads; t++) {
+        SweepThread* run = &ctx->threads[t];
+        if (run->n_entries > 1)
+            qsort(run->entries, (size_t)run->n_entries,
+                  sizeof(SpikeEntry), cmp_spike_asc);
+    }
 
-    qsort(entries, (size_t)total, sizeof(SpikeEntry), cmp_spike_asc);
-
-    /* Allocate output arrays — entries stays owned by ctx on every path. */
+    /* Allocate output arrays — the runs stay owned by ctx on every path. */
     double* times    = eventprop_try_malloc((size_t)total * sizeof(double));
     if (!times) return EVENTPROP_ALLOC_RESULT_TIMES;
 
@@ -356,12 +362,28 @@ static inline EventPropError collect_spikes_result(ComputeSpikesCtx* ctx,
     if (!errors) { free(currents); free(sources); free(times);
                    return EVENTPROP_ALLOC_RESULT_ERRORS; }
 
-    /* Copy sorted data into output */
+    int* cursor      = eventprop_try_calloc((size_t)ctx->n_threads, sizeof(int));
+    if (!cursor) { free(errors); free(currents); free(sources); free(times);
+                   return EVENTPROP_ALLOC_THREAD_SCRATCH; }
+
+    /* k-way merge over the sorted runs (k is the thread count, so a linear */
+    /* scan of the run heads is cheaper than a heap). */
     for (int i = 0; i < total; i++) {
-        times[i]    = entries[i].time;
-        sources[i]  = entries[i].source;
-        currents[i] = entries[i].current;
+        int best = -1;
+        for (int t = 0; t < ctx->n_threads; t++) {
+            const SweepThread* run = &ctx->threads[t];
+            if (cursor[t] >= run->n_entries) continue;
+            if (best < 0 ||
+                run->entries[cursor[t]].time < ctx->threads[best].entries[cursor[best]].time)
+                best = t;
+        }
+        const SpikeEntry* e = &ctx->threads[best].entries[cursor[best]];
+        times[i]    = e->time;
+        sources[i]  = e->source;
+        currents[i] = e->current;
+        cursor[best]++;
     }
+    free(cursor);
 
     /* Store in ctx so caller can assign to result */
     ctx->result_times   = times;
@@ -442,7 +464,6 @@ static void free_compute_spikes_ctx(const ComputeSpikesCtx* ctx) {
         }
         free(ctx->threads);
     }
-    free(ctx->entries);
 }
 
 SpikeOutput eventprop_compute_spikes(const EventPropInput input)
@@ -632,26 +653,12 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
         goto cleanup_and_return;
     }
 
-    /* Concatenate the per-thread entry lists into one sortable buffer. */
+    /* No concatenated buffer: collect_spikes_result merges the per-thread */
+    /* runs into the output arrays, which keeps peak memory at one full-size */
+    /* allocation instead of two. */
     int total = 0;
     for (int t = 0; t < ctx.n_threads; t++)
         total += ctx.threads[t].n_entries;
-
-    if (total > 0) {
-        ctx.entries = eventprop_try_malloc((size_t)total * sizeof(SpikeEntry));
-        if (!ctx.entries) {
-            result.error_no = EVENTPROP_ALLOC_ENTRIES;
-            goto cleanup_and_return;
-        }
-        int idx = 0;
-        for (int t = 0; t < ctx.n_threads; t++) {
-            const SweepThread* th = &ctx.threads[t];
-            if (!th->entries) continue;
-            memcpy(&ctx.entries[idx], th->entries,
-                   (size_t)th->n_entries * sizeof(SpikeEntry));
-            idx += th->n_entries;
-        }
-    }
 
     /* Collect, sort, and copy output */
     const EventPropError err = collect_spikes_result(&ctx, total);
