@@ -77,7 +77,8 @@ typedef enum EventPropError {
     EVENTPROP_INVALID_DROPOUT_PROB    = 57,  /* p_drop outside [0, 1] */
     EVENTPROP_NEGATIVE_SAMPLE_COUNT   = 58,  /* n_per_sample[i] < 0 */
     EVENTPROP_BATCH_DIMENSION_MISMATCH = 59,  /* sample dims differ from requested n_pre/n_post */
-    EVENTPROP_UNSORTED_SPIKE_TIMES    = 60   /* times[i] < times[i-1] (algorithms require ascending order) */
+    EVENTPROP_UNSORTED_SPIKE_TIMES    = 60,  /* times[i] < times[i-1] (algorithms require ascending order) */
+    EVENTPROP_ALLOC_THREAD_SCRATCH    = 61   /* per-thread forward-pass scratch row failed */
 } EventPropError;
 
 /** ── Validation limits ──────────────────────────────────────────────── */
@@ -192,6 +193,11 @@ BackwardOutput eventprop_backward_maxima(EventPropInput input,
 /** Allocation fault injection (test-only): force the n-th allocation to fail. */
 void eventprop_test_alloc_reset(void);
 void eventprop_test_alloc_fail_nth(int nth);   /* <= 0 disables; not thread-safe */
+
+/** Test-only: pin the OpenMP width used by the forward sweep (0 = runtime */
+/** default). The sweep allocates scratch per thread, so tests that walk */
+/** allocation indices need this pinned to stay deterministic. */
+void eventprop_test_set_max_threads(int n);
 
 /** Library allocation shim — routes every malloc/calloc/realloc through the injection */
 /** counter above. Defined in eventprop_memory.c. */

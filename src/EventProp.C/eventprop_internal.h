@@ -61,15 +61,25 @@ typedef struct BackwardSpikesCtx {
     int n_post_alloc;     // how many per-neuron arrays were actually allocated
 } BackwardSpikesCtx;
 
+/** Per-thread scratch during spike detection.
+ *  One row is reused across neurons and grown x3 through the injection shim
+ *  when a neuron needs more entries than it currently holds, and each thread
+ *  accumulates its own entries, so peak memory no longer scales with n_post. */
+typedef struct SweepThread {
+    double* scratch_times;
+    double* scratch_currents;
+    SpikeEntry* entries;      /* grows x2 as this thread collects */
+    int row_cap;
+    int entries_cap;
+    int n_entries;
+} SweepThread;
+
 // ── Internal context for compute_spikes memory management ─────────────────────
 typedef struct ComputeSpikesCtx {
-    int n_post;  // needed for per-neuron clean-up loop
     SumsOutput sums;              // eventprop_free_sums_output
-    double** post_times_arr;      // array + each [n]
-    double** post_currents_arr;   // array + each [n]
-    int* spike_caps;
-    int* spike_counts;
-    SpikeEntry* entries;          // sorted collection buffer
+    SweepThread* threads;         // array of slots; each slot is heap-backed
+    int n_threads;                // slots actually allocated
+    SpikeEntry* entries;          // concatenated + sorted collection buffer
     /* Output fields (set by collect_spikes_result) */
     double* result_times;
     int*    result_sources;

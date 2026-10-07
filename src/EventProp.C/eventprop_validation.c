@@ -118,7 +118,7 @@ const char* eventprop_error_string(const int error_no)
         case EVENTPROP_ALLOC_CURRENTS_ARR:      return "Allocation failed: post_currents array";
         case EVENTPROP_ALLOC_SPIKE_CAPS:        return "Allocation failed: spike_caps array";
         case EVENTPROP_ALLOC_SPIKE_COUNTS:      return "Allocation failed: spike_counts array";
-        case EVENTPROP_ALLOC_NEURON_BUF:        return "Allocation failed: per-neuron times/currents buffer";
+        case EVENTPROP_ALLOC_NEURON_BUF:        return "Allocation failed: forward-pass scratch row growth";
         case EVENTPROP_ALLOC_ENTRIES:           return "Allocation failed: entries (sorted collection)";
         case EVENTPROP_ALLOC_RESULT_TIMES:      return "Allocation failed: result spike times";
         case EVENTPROP_ALLOC_RESULT_SOURCES:    return "Allocation failed: result spike sources";
@@ -156,6 +156,7 @@ const char* eventprop_error_string(const int error_no)
         case EVENTPROP_NEGATIVE_SAMPLE_COUNT:   return "Negative per-sample spike count (n_per_sample[i] < 0)";
         case EVENTPROP_BATCH_DIMENSION_MISMATCH: return "Sample gradient dimensions do not match requested n_pre/n_post";
         case EVENTPROP_UNSORTED_SPIKE_TIMES:    return "Spike times are not sorted in ascending order";
+        case EVENTPROP_ALLOC_THREAD_SCRATCH:    return "Allocation failed: forward-pass thread scratch";
         default:                                return "Unknown error";
     }
 }

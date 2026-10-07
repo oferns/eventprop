@@ -30,7 +30,7 @@ constexpr double kTauSyn = 0.005;
 constexpr double kVTh    = 1.0;
 
 bool IsAllocErrorCode(EventPropError e) {
-    return e >= EVENTPROP_ALLOC_SUM0 && e <= EVENTPROP_ALLOC_DROPOUT_OFFSETS;
+    return e >= EVENTPROP_ALLOC_SUM0 && e <= EVENTPROP_ALLOC_THREAD_SCRATCH;
 }
 
 /** Codes that are legitimate alongside allocation failures: a failed sample is
@@ -57,13 +57,22 @@ void ExpectCodesReached(const std::set<int>& observed,
 
 /** Per-neuron buffers for the fixture: deterministic allocation order, no OpenMP.
  *  Fires twice, so the backward and collection paths are exercised. */
+/** Same shape as SmallInput, but one neuron fires many times so the */
+/* scratch-row growth (realloc) path is exercised. */
+struct GrowthInput {
+    std::vector<double> w     = { 15.0 };
+    std::vector<double> times = { 0.01, 0.02, 0.03 };
+    std::vector<int>    src   = { 0, 0, 0 };
+};
+
 struct SmallInput {
     std::vector<double> w     = { 10.0, -8.0, 10.0 };
     std::vector<double> times = { 0.05, 0.20, 0.40 };
     std::vector<int>    src   = { 0, 1, 2 };
 };
 
-EventPropInput make_input(const SmallInput& d) {
+template <typename T>
+EventPropInput make_input(const T& d) {
     return EventPropInput{ d.w.data(), (int)d.w.size(), 1, d.times.data(), d.src.data(),
                            (int)d.times.size(), kTauMem, kTauSyn, kVTh };
 }
@@ -75,10 +84,14 @@ class AllocFaultInjection : public ::testing::Test {
     void SetUp() override {
         eventprop_test_alloc_reset();
         eventprop_test_alloc_fail_nth(0);  // injection off by default
+        /* The forward sweep allocates scratch per thread, so the allocation */
+        /* indices this suite walks shift with the OpenMP width. Pin it. */
+        eventprop_test_set_max_threads(1);
     }
     void TearDown() override {
         eventprop_test_alloc_reset();
         eventprop_test_alloc_fail_nth(0);
+        eventprop_test_set_max_threads(0);  // restore the runtime default
     }
 };
 
@@ -114,28 +127,39 @@ TEST_F(AllocFaultInjection, ComputeSumsFailsCleanly) {
 // ---------------------------------------------------------------------------
 TEST_F(AllocFaultInjection, ComputeSpikesFailsCleanly) {
     static const EventPropError expected[] = {
-        EVENTPROP_ALLOC_SUM0,        EVENTPROP_ALLOC_SUM1,
-        EVENTPROP_ALLOC_EXP_MEM,     EVENTPROP_ALLOC_EXP_SYN,
-        EVENTPROP_ALLOC_TIMES_ARR,   EVENTPROP_ALLOC_CURRENTS_ARR,
-        EVENTPROP_ALLOC_SPIKE_CAPS,  EVENTPROP_ALLOC_SPIKE_COUNTS,
-        EVENTPROP_ALLOC_NEURON_BUF,  EVENTPROP_ALLOC_ENTRIES,
-        EVENTPROP_ALLOC_RESULT_TIMES, EVENTPROP_ALLOC_RESULT_SOURCES,
+        EVENTPROP_ALLOC_SUM0,         EVENTPROP_ALLOC_SUM1,
+        EVENTPROP_ALLOC_EXP_MEM,      EVENTPROP_ALLOC_EXP_SYN,
+        EVENTPROP_ALLOC_THREAD_SCRATCH,
+        EVENTPROP_ALLOC_ENTRIES,
+        EVENTPROP_ALLOC_RESULT_TIMES,  EVENTPROP_ALLOC_RESULT_SOURCES,
         EVENTPROP_ALLOC_RESULT_CURRENTS, EVENTPROP_ALLOC_RESULT_ERRORS,
     };
     std::set<int> observed;
 
-    SmallInput data;
-    const EventPropInput input = make_input(data);
+    /* Two fixtures: the small one covers the entry-point allocations, the */
+    /* strong-weight one fires the same neuron many times so the scratch row */
+    /* growth path (realloc) is reached as well. */
+    SmallInput small;
+    const EventPropInput in_small = make_input(small);
 
-    for (int nth = 1; nth <= 256; ++nth) {
-        eventprop_test_alloc_reset();
-        eventprop_test_alloc_fail_nth(nth);
+    GrowthInput big;
+    const EventPropInput in_big = make_input(big);
 
-        SpikeOutput out = eventprop_compute_spikes(input);
-        EXPECT_TRUE(out.error_no == EVENTPROP_OK || IsAllocErrorCode(out.error_no))
-            << "nth=" << nth << " returned " << eventprop_error_string(out.error_no);
-        observed.insert(out.error_no);
-        eventprop_free_spike_output(out);
+    const EventPropInput inputs[] = { in_small, in_big };
+    for (const EventPropInput& input : inputs) {
+        /* With the parallel width pinned in SetUp, the total allocation */
+        /* count of a call is fixed; this bound only has to exceed it, and */
+        /* covers the per-attempt temporary of the root-finding sweep. */
+        for (int nth = 1; nth <= 4096; ++nth) {
+            eventprop_test_alloc_reset();
+            eventprop_test_alloc_fail_nth(nth);
+
+            SpikeOutput out = eventprop_compute_spikes(input);
+            EXPECT_TRUE(out.error_no == EVENTPROP_OK || IsAllocErrorCode(out.error_no))
+                << "nth=" << nth << " returned " << eventprop_error_string(out.error_no);
+            observed.insert(out.error_no);
+            eventprop_free_spike_output(out);
+        }
     }
 
     ExpectCodesReached(observed, expected, std::size(expected), "compute_spikes");
