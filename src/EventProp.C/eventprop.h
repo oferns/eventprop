@@ -193,10 +193,11 @@ BackwardOutput eventprop_backward_maxima(EventPropInput input,
 void eventprop_test_alloc_reset(void);
 void eventprop_test_alloc_fail_nth(int nth);   /* <= 0 disables; not thread-safe */
 
-/** Library allocation shim — routes every malloc/calloc through the injection */
+/** Library allocation shim — routes every malloc/calloc/realloc through the injection */
 /** counter above. Defined in eventprop_memory.c. */
 void* eventprop_try_malloc(size_t size);
 void* eventprop_try_calloc(size_t count, size_t elem_size);
+void* eventprop_try_realloc(void* ptr, size_t size);
 
 /** Validate an EventPropInput and return the first error found (or OK). */
 EventPropError eventprop_validate_input(EventPropInput input);

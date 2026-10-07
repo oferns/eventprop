@@ -50,6 +50,15 @@ void* eventprop_try_calloc(const size_t count, const size_t elem_size)
     return calloc(count, elem_size);
 }
 
+/* realloc is counted too: the per-neuron growth paths are the ones that can */
+/* overflow, so they must be injectable like every other allocation. */
+void* eventprop_try_realloc(void* ptr, const size_t size)
+{
+    if (alloc_fail_target > 0 && ++alloc_count == alloc_fail_target)
+        return NULL;
+    return realloc(ptr, size);
+}
+
 /* ------------------------------------------------------------------ */
 /* Core single-sample outputs                                          */
 /* ------------------------------------------------------------------ */

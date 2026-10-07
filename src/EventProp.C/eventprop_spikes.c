@@ -187,16 +187,26 @@ static inline EventPropError grow_spike_buffers(double** p_times,
 {
     if (count < (*cap)) return EVENTPROP_OK;
 
-    (*cap) *= 3;
+    const int old_cap = *cap;
+    if (old_cap > INT_MAX / 3) {          /* *cap * 3 would overflow int */
+        return EVENTPROP_DIMENSION_TOO_LARGE;
+    }
+    *cap = old_cap * 3;
     const size_t new_size = (size_t)(*cap) * sizeof(double);
 
-    /* Sequential realloc: undo times if currents fails */
-    double* new_times = realloc(*p_times, new_size);
-    if (!new_times) return EVENTPROP_ALLOC_NEURON_BUF;
+    double* new_times = eventprop_try_realloc(*p_times, new_size);
+    if (!new_times) {
+        *cap = old_cap;                   /* buffer unchanged — keep cap truthful */
+        return EVENTPROP_ALLOC_NEURON_BUF;
+    }
 
-    double* new_currents = realloc(*p_currents, new_size);
+    /* Never roll back with free(): realloc may have moved the block, which */
+    /* frees the old one and leaves *p_times dangling. Hand the grown buffer to */
+    /* the caller instead — it owns it through the context arrays. */
+    double* new_currents = eventprop_try_realloc(*p_currents, new_size);
     if (!new_currents) {
-        free(new_times);  /* rollback */
+        *p_times = new_times;
+        *cap = old_cap;                   /* currents still holds only old_cap */
         return EVENTPROP_ALLOC_NEURON_BUF;
     }
 
@@ -535,6 +545,12 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                                                  candidates[c], &state);
 
                     if (rc == -1) {
+                        /* A realloc may have moved the buffers even on failure — */
+                        /* sync so the context write-back below cannot dangle. */
+                        p_times    = state.p_times;
+                        p_currents = state.p_currents;
+                        cap        = state.cap;
+                        count      = state.count;
                         atomic_store_explicit(&fwd_alloc_error, 1, memory_order_relaxed);
                         finished = 1;
                         break;
@@ -545,6 +561,9 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                         p_currents = state.p_currents;
                         cap        = state.cap;
                         count      = state.count;
+                        /* Buffers may have been moved by realloc: re-point the */
+                        /* cached view the voltage helpers read. */
+                        rctx_base.post_spike_times = p_times;
                         found = 1;
                         break;  /* short-circuit: don't try remaining candidates */
                     }

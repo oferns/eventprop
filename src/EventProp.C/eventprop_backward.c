@@ -244,20 +244,30 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
 
             /* Record jump for this neuron (with capacity management) */
             if (ctx.jump_count[nrn] >= ctx.jump_cap[nrn]) {
-                ctx.jump_cap[nrn] *= 2;
-                double* new_time = realloc(ctx.jump_time[nrn], (size_t)ctx.jump_cap[nrn] * sizeof(double));
+                if (ctx.jump_cap[nrn] > INT_MAX / 2) {   /* *2 would overflow int */
+                    result.error_no = EVENTPROP_DIMENSION_TOO_LARGE;
+                    goto cleanup_and_return;
+                }
+                const int old_cap = ctx.jump_cap[nrn];
+                ctx.jump_cap[nrn] = old_cap * 2;
+                const size_t jump_size = (size_t)ctx.jump_cap[nrn] * sizeof(double);
+
+                double* new_time = eventprop_try_realloc(ctx.jump_time[nrn], jump_size);
                 if (!new_time) {
+                    ctx.jump_cap[nrn] = old_cap;   /* buffer unchanged */
                     result.error_no = EVENTPROP_ALLOC_BWD_PER_NEURON;
                     goto cleanup_and_return;
                 }
-                double* new_mag = realloc(ctx.jump_mag[nrn], (size_t)ctx.jump_cap[nrn] * sizeof(double));
-                if (!new_mag) {
-                    free(new_time);
-                    result.error_no = EVENTPROP_ALLOC_BWD_PER_NEURON;
-                    goto cleanup_and_return;
-                }
-                /* Only update ctx pointers after both succeed */
+                /* Adopt immediately: realloc may have moved the block, which */
+                /* frees the old one and would leave ctx.jump_time[nrn] dangling. */
                 ctx.jump_time[nrn] = new_time;
+
+                double* new_mag = eventprop_try_realloc(ctx.jump_mag[nrn], jump_size);
+                if (!new_mag) {
+                    ctx.jump_cap[nrn] = old_cap;   /* mag buffer still old_cap */
+                    result.error_no = EVENTPROP_ALLOC_BWD_PER_NEURON;
+                    goto cleanup_and_return;
+                }
                 ctx.jump_mag[nrn] = new_mag;
             }
             ctx.jump_time[nrn][ctx.jump_count[nrn]] = t_bwd;

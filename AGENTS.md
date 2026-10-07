@@ -18,7 +18,7 @@ This repository implements the **EventProp** algorithm — an event-based backpr
 | **EventProp.Native.Python/** | Python + Cython | Python layer using C library via Cython bindings (`eventprop_c/_native.pyx`) |
 | **EventProp.Native/** | C# (.NET 10) | P/Invoke bindings wrapping EventProp.C via `LibraryImport` |
 | **EventProp/** | C# (.NET 10) | Self-contained, fully managed .NET implementation of EventProp.Python |
-| **EventProp.C.Tests/** | C++ (Google Test v1.15.2) | Unit tests for EventProp.C library (200 tests, ASan-compatible) |
+| **EventProp.C.Tests/** | C++ (Google Test v1.15.2) | Unit tests for EventProp.C library (201 tests, ASan-compatible) |
 | **EventProp.Tests/** | C# (.NET 10) | TUnit test suite for .NET projects (correctness + parity) |
 | **EventProp.Benchmarks/** | C# (.NET 10) | BenchmarkDotNet project comparing native vs managed .NET libraries |
 | **EventProp.Native.Benchmarks/** | C++ (Google Benchmark) | Benchmarks comparing EventProp.C vs EventProp.Python C++ code |
@@ -48,7 +48,7 @@ eventprop.net/
 │   │   └── CMakeLists.txt          # Build config: strict warnings, SIMD, OpenMP, ASan
 │   ├── EventProp.Cpp.Wrapper/  # C++ Eigen core (convenience copy, no pybind11)
 │   ├── EventProp.Native/       # .NET P/Invoke bindings (C library)
-│   ├── EventProp.C.Tests/      # Google Test v1.15.2 suite for C library (200 tests)
+│   ├── EventProp.C.Tests/      # Google Test v1.15.2 suite for C library (201 tests)
 │   ├── EventProp/              # Managed .NET implementation
 │   ├── EventProp.Tests/        # TUnit test suite (correctness + parity)
 │   ├── EventProp.Benchmarks/   # BenchmarkDotNet (native vs managed .NET)
