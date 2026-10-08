@@ -36,9 +36,8 @@ typedef struct RootContext {
 } RootContext;
 
 typedef struct SpikeEntry {
-     double time; 
-     int source; 
-     double current; 
+     double time;
+     int source;
 } SpikeEntry;
 
 /* Merge spike comparison for qsort (descending by time) */
@@ -67,7 +66,6 @@ typedef struct BackwardSpikesCtx {
  *  accumulates its own entries, so peak memory no longer scales with n_post. */
 typedef struct SweepThread {
     double* scratch_times;
-    double* scratch_currents;
     SpikeEntry* entries;      /* grows x2 as this thread collects */
     int row_cap;
     int entries_cap;
@@ -90,7 +88,6 @@ typedef struct ComputeSpikesCtx {
 /** Per-neuron mutable state during spike detection. */
 typedef struct NeuronState {
     double* p_times;
-    double* p_currents;
     int cap;
     int count;
 } NeuronState;

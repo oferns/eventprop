@@ -131,15 +131,9 @@ static double compute_tmax(const int i, const int n_spikes, const double* times,
     return INFINITY;
 }
 
-static double compute_i(const double t, const int n_spikes, const double* times,
-                        const double* sum0, const int target_nrn, const int n_post, const double tau_syn)
-{
-    int idx = 0;
-    for (; idx < n_spikes; idx++) {
-        if (times[idx] > t) break;
-    }
-    return sum0[idx * n_post + target_nrn] * exp(-t / tau_syn);
-}
+/* The post-synaptic current at a spike time is not stored per entry: it is */
+/* recomputed while merging, which keeps SpikeEntry at 16 bytes instead of 24 */
+/* and drops one scratch row per thread. See collect_spikes_result. */
 
 static int cmp_spike_asc(const void* a, const void* b) {
     const double ta = ((const SpikeEntry*)a)->time;
@@ -208,12 +202,11 @@ static double toms748_solve(const RootContext* ctx, double a, double b) {
     return b;
 }
 
-/** Grow both times and currents buffers if needed.
+/** Grow this thread's spike-time row if needed.
  *  Returns: EVENTPROP_OK on success, EVENTPROP_ALLOC_NEURON_BUF on failure. */
-static inline EventPropError grow_spike_buffers(double** p_times,
-                                                double** p_currents,
-                                                int* cap,
-                                                int count)
+static inline EventPropError grow_spike_row(double** p_times,
+                                            int* cap,
+                                            int count)
 {
     if (count < (*cap)) return EVENTPROP_OK;
 
@@ -233,15 +226,7 @@ static inline EventPropError grow_spike_buffers(double** p_times,
     /* Never roll back with free(): realloc may have moved the block, which */
     /* frees the old one and leaves *p_times dangling. Hand the grown buffer to */
     /* the caller instead — it owns it through the thread slot. */
-    double* new_currents = eventprop_try_realloc(*p_currents, new_size);
-    if (!new_currents) {
-        *p_times = new_times;
-        *cap = old_cap;                   /* currents still holds only old_cap */
-        return EVENTPROP_ALLOC_NEURON_BUF;
-    }
-
     *p_times = new_times;
-    *p_currents = new_currents;
     return EVENTPROP_OK;
 }
 
@@ -250,8 +235,7 @@ static inline EventPropError grow_spike_buffers(double** p_times,
 static inline int append_entries(SweepThread* th,
                                  const int source,
                                  const int count,
-                                 const double* times,
-                                 const double* currents)
+                                 const double* times)
 {
     if (count == 0) return 0;
 
@@ -271,7 +255,6 @@ static inline int append_entries(SweepThread* th,
     for (int k = 0; k < count; k++) {
         th->entries[th->n_entries].time    = times[k];
         th->entries[th->n_entries].source  = source;
-        th->entries[th->n_entries].current = currents[k];
         th->n_entries++;
     }
     return 0;
@@ -313,29 +296,37 @@ static inline int try_find_root_spike(const RootContext* rctx_base,
     /* Validate root: must be strictly inside bracket */
     if (!(t_post > t_lower && t_post < t_upper)) return 1;
 
-    /* Grow buffers if needed */
-    if (grow_spike_buffers(&state->p_times, &state->p_currents,
-                           &state->cap, state->count) != EVENTPROP_OK)
+    /* Record spike — the post-synaptic current is recomputed at merge time */
+    if (grow_spike_row(&state->p_times, &state->cap, state->count) != EVENTPROP_OK)
         return -1;
 
-    /* Record spike */
     state->p_times[state->count] = t_post;
-    state->p_currents[state->count] = compute_i(t_post,
-                                                 input.n_spikes,
-                                                 input.times,
-                                                 rctx_base->sum0,
-                                                 rctx_base->target_nrn,
-                                                 rctx_base->n_post,
-                                                 input.tau_syn);
     state->count++;
     return 0;
 }
 
 /* ── Collect per-neuron spikes into sorted SpikeOutput (shared by v1 and v2) ── */
 static inline EventPropError collect_spikes_result(ComputeSpikesCtx* ctx,
-                                                   const int total)
+                                                   const int total,
+                                                   const EventPropInput input,
+                                                   const double* sum0)
 {
     if (total == 0) return EVENTPROP_OK;  /* no spikes, nothing to do */
+
+    /* Trim the doubling slack first: at spike-dense sizes the slack is the */
+    /* same order as the data itself. A failed (or injected) shrink leaves */
+    /* the larger buffer, which is still valid. */
+    for (int t = 0; t < ctx->n_threads; t++) {
+        SweepThread* run = &ctx->threads[t];
+        if (run->n_entries > 0 && run->n_entries < run->entries_cap) {
+            SpikeEntry* trimmed = eventprop_try_realloc(run->entries,
+                                        (size_t)run->n_entries * sizeof(SpikeEntry));
+            if (trimmed) {
+                run->entries = trimmed;
+                run->entries_cap = run->n_entries;
+            }
+        }
+    }
 
     /* Sort each thread's own run, then merge the runs straight into the */
     /* output arrays: a concatenated staging buffer would cost a second */
@@ -362,12 +353,17 @@ static inline EventPropError collect_spikes_result(ComputeSpikesCtx* ctx,
     if (!errors) { free(currents); free(sources); free(times);
                    return EVENTPROP_ALLOC_RESULT_ERRORS; }
 
-    int* cursor      = eventprop_try_calloc((size_t)ctx->n_threads, sizeof(int));
-    if (!cursor) { free(errors); free(currents); free(sources); free(times);
-                   return EVENTPROP_ALLOC_THREAD_SCRATCH; }
+    /* One cursor + one input-spike index per run, in a single allocation. */
+    int* aux = eventprop_try_calloc((size_t)(2 * ctx->n_threads), sizeof(int));
+    if (!aux) { free(errors); free(currents); free(sources); free(times);
+                return EVENTPROP_ALLOC_THREAD_SCRATCH; }
+    int* cursor   = aux;
+    int* run_idx  = aux + ctx->n_threads;
 
     /* k-way merge over the sorted runs (k is the thread count, so a linear */
-    /* scan of the run heads is cheaper than a heap). */
+    /* scan of the run heads is cheaper than a heap). The post-synaptic */
+    /* current is rebuilt here instead of stored per entry: each run is */
+    /* ascending, so its index into input.times only ever moves forward. */
     for (int i = 0; i < total; i++) {
         int best = -1;
         for (int t = 0; t < ctx->n_threads; t++) {
@@ -378,12 +374,17 @@ static inline EventPropError collect_spikes_result(ComputeSpikesCtx* ctx,
                 best = t;
         }
         const SpikeEntry* e = &ctx->threads[best].entries[cursor[best]];
-        times[i]    = e->time;
-        sources[i]  = e->source;
-        currents[i] = e->current;
+        times[i]   = e->time;
+        sources[i] = e->source;
+
+        int k = run_idx[best];
+        while (k < input.n_spikes && input.times[k] <= e->time) k++;
+        run_idx[best] = k;
+        currents[i] = sum0[k * input.n_post + e->source] * exp(-e->time / input.tau_syn);
+
         cursor[best]++;
     }
-    free(cursor);
+    free(aux);
 
     /* Store in ctx so caller can assign to result */
     ctx->result_times   = times;
@@ -459,7 +460,6 @@ static void free_compute_spikes_ctx(const ComputeSpikesCtx* ctx) {
         /* Slots are calloc'd, so unset slots hold NULL and are safe to free. */
         for (int t = 0; t < ctx->n_threads; t++) {
             free(ctx->threads[t].scratch_times);
-            free(ctx->threads[t].scratch_currents);
             free(ctx->threads[t].entries);
         }
         free(ctx->threads);
@@ -530,15 +530,13 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
         th->entries_cap = 64;
         th->entries = eventprop_try_calloc((size_t)th->entries_cap, sizeof(SpikeEntry));
         th->scratch_times = eventprop_try_calloc((size_t)row_cap, sizeof(double));
-        th->scratch_currents = eventprop_try_calloc((size_t)row_cap, sizeof(double));
 
         /* A thread that cannot get its scratch sets the flag but still enters */
         /* the loop: an omp for must be encountered by every thread. */
-        const int ok = (th->entries && th->scratch_times && th->scratch_currents) ? 1 : 0;
+        const int ok = (th->entries && th->scratch_times) ? 1 : 0;
         if (!ok) atomic_store_explicit(&fwd_alloc_error, 1, memory_order_relaxed);
 
         double* p_times    = th->scratch_times;
-        double* p_currents = th->scratch_currents;
         int cap              = row_cap;
 
 #ifdef _OPENMP
@@ -590,7 +588,6 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                 /* ── Try each candidate bracket with shared solver ── */
                 for (int c = 0; c < n_candidates; c++) {
                     NeuronState state = { .p_times = p_times,
-                                          .p_currents = p_currents,
                                           .cap = cap, .count = count };
 
                     const int rc = try_find_root_spike(&rctx_base, input, t_before,
@@ -600,7 +597,6 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                         /* A realloc may have moved the buffers even on failure — */
                         /* sync so the row pointers below cannot dangle. */
                         p_times    = state.p_times;
-                        p_currents = state.p_currents;
                         cap        = state.cap;
                         count      = state.count;
                         atomic_store_explicit(&fwd_alloc_error, 1, memory_order_relaxed);
@@ -610,7 +606,6 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                     if (rc == 0) {
                         /* Spike found — update local state from NeuronState */
                         p_times    = state.p_times;
-                        p_currents = state.p_currents;
                         cap        = state.cap;
                         count      = state.count;
                         /* Buffers may have been moved by realloc: re-point the */
@@ -637,11 +632,10 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
             /* The row may have been moved by realloc: hand the new pointers */
             /* back to the slot so the context free cannot double-free. */
             th->scratch_times = p_times;
-            th->scratch_currents = p_currents;
             th->row_cap = cap;
 
             /* Hand this neuron's spikes to the thread's entry list. */
-            if (append_entries(th, target_nrn, count, p_times, p_currents) != 0) {
+            if (append_entries(th, target_nrn, count, p_times) != 0) {
                 atomic_store_explicit(&fwd_alloc_error, 1, memory_order_relaxed);
             }
         }
@@ -661,7 +655,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
         total += ctx.threads[t].n_entries;
 
     /* Collect, sort, and copy output */
-    const EventPropError err = collect_spikes_result(&ctx, total);
+    const EventPropError err = collect_spikes_result(&ctx, total, input, sum0);
     if (err != EVENTPROP_OK) {
         result.error_no = err;
         goto cleanup_and_return;
