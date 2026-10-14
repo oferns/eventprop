@@ -52,23 +52,32 @@ where P/Invoke marshalling dominates).
 
 ## Suite 3 — pybind11 vs Cython (Cython/pybind11, >1 = Cython slower)
 
+After removing per-call Python-side work from the Cython wrappers (see below):
+
 | Cell | pybind11 (us) | Cython (us) | Cython/py |
 |---|---:|---:|---:|
-| batch[4] | 75.98 | 87.55 | 1.15 |
-| batch[8] | 93.25 | 104.05 | 1.12 |
-| batch[16] | 228.70 | 163.12 | 0.71 |
-| dropout[4] | 3.66 | 9.91 | 2.71 |
-| dropout[8] | 6.12 | 10.19 | 1.67 |
-| dropout[16] | 11.69 | 16.46 | 1.41 |
-| ttfs_step[4] | 136.45 | 203.00 | 1.49 |
-| ttfs_step[8] | 194.38 | 390.65 | 2.01 |
-| vmax_step[4] | 119.56 | 166.77 | 1.39 |
-| vmax_step[8] | 177.70 | 217.49 | 1.22 |
-| **GEOMEAN** | | | **1.40x** |
+| batch[4] | 75.98 | 57.83 | 0.76 |
+| batch[8] | 93.25 | 95.42 | 1.02 |
+| batch[16] | 228.70 | 157.12 | 0.69 |
+| dropout[4] | 3.66 | 1.91 | 0.52 |
+| dropout[8] | 6.12 | 2.20 | 0.36 |
+| dropout[16] | 11.69 | 2.85 | 0.24 |
+| ttfs_step[4] | 136.45 | 184.03 | 1.35 |
+| ttfs_step[8] | 194.38 | 267.89 | 1.38 |
+| vmax_step[4] | 119.56 | 146.55 | 1.23 |
+| vmax_step[8] | 177.70 | 194.12 | 1.09 |
+| **GEOMEAN** | | | **0.76x** |
 
-**Headline**: the Cython wrappers are ~1.40x slower than the zero-copy pybind11
-`Eigen::Ref` path on batch/step calls. (Required rebuilding `_native.c` with Cython 3.0.x —
-Cython 3.2.5 emits NumPy-2.x C-API that does not compile against NumPy 1.26.4.)
+**Headline**: Cython is now **0.76x** of pybind11 — i.e. faster overall. The dropout path
+went from 2.71x slower to 0.24x (4x faster) by reusing `SpikesVector._extract_flat_buffers`
+instead of re-`np.concatenate`-ing + `.astype`-ing every call. The remaining gap is the
+loss-layer training steps (`ttfs_step`/`vmax_step`, 1.09–1.38x), which run through
+`vmax_training.py`/`ttfs_training.py` and still do per-call Python-side assembly.
+
+**Build note**: the Cython extension must be generated with Cython 3.0.x. Cython 3.2.5
+emits NumPy-2.x C-API (`PyDataType_TYPEOBJ`/`_KIND`/`_TYPE`) that does not compile against
+NumPy 1.26.4. Regenerate with `python -m cython -3 eventprop_c/_native.pyx -o
+eventprop_c/_native.c` then `python setup.py build_ext --inplace`.
 
 ---
 

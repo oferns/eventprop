@@ -615,9 +615,9 @@ cdef EventPropInput* _build_inputs(
         raise MemoryError("Failed to allocate EventPropInput array")
 
     cdef const double* w_ptr = &w[0, 0]
-    cdef const double* t_ptr
-    cdef const int* s_ptr
-    cdef int b, k
+    cdef const double* t_ptr = &times[0]
+    cdef const int* s_ptr = &sources[0]
+    cdef int b, n
     for b in range(batch_size):
         inputs[b].w = w_ptr
         inputs[b].n_pre = n_pre
@@ -626,15 +626,14 @@ cdef EventPropInput* _build_inputs(
         inputs[b].tau_syn = tau_syn
         inputs[b].v_th = v_th
 
-        # Walk flat arrays to find this sample's slice
-        t_ptr = &times[0]
-        s_ptr = &sources[0]
-        for k in range(b):
-            t_ptr += n_per_sample[k]
-            s_ptr += n_per_sample[k]
+        # Running offset: each sample's slice starts where the previous ended.
+        # (The old code re-walked all prior samples per b — O(batch^2).)
         inputs[b].times = t_ptr
         inputs[b].sources = s_ptr
-        inputs[b].n_spikes = n_per_sample[b]
+        n = n_per_sample[b]
+        inputs[b].n_spikes = n
+        t_ptr += n
+        s_ptr += n
 
     return inputs
 
