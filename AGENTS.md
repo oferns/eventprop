@@ -47,7 +47,8 @@ eventprop.net/
 │   │   ├── eventprop_diag.h/.c     # Diagnostic functions (voltage traces, lambda sweeps)
 │   │   └── CMakeLists.txt          # Build config: strict warnings, SIMD, OpenMP, ASan
 │   ├── EventProp.Cpp.Wrapper/  # C++ Eigen core (convenience copy, no pybind11)
-│   ├── EventProp.Native/       # .NET P/Invoke bindings (C library)
+│   ├── EventProp.Native/       # .NET P/Invoke bindings (C library) + native LIFLayer/LILayer
+│   ├── EventProp.Abstractions/ # Shared Layer contract (SpikesData, *Parameters, WeightInitializer)
 │   ├── EventProp.C.Tests/      # Google Test v1.15.2 suite for C library (201 tests)
 │   ├── EventProp/              # Managed .NET implementation
 │   ├── EventProp.Tests/        # TUnit test suite (correctness + parity)
@@ -187,6 +188,10 @@ MIN_TIME=0.05s FILTER=ComputeSpikes/Tiny ./run_benchmarks.sh
 
 > **Note**: Full suite runs can take several minutes. Use `FILTER` for quick validation of specific benchmark families.
 
+**Benchmark data contract** (`bench_main.cpp`): every generator ends with `SortTimesSources`, because the C library rejects non-decreasing input spike times (`EVENTPROP_UNSORTED_SPIKE_TIMES`, 60) while the Eigen reference does not validate. `GenerateBurstData` fills its arrays neuron by neuron, so its bursts interleave — without the sort the C side returns 0 spikes in ~0 ns and the C-vs-C++ comparison measures a validation short-circuit (it did: `ComputeSpikes/Small/burst` reported 36 ns against the Eigen side's 83 µs). The C benchmarks also publish `c_error` / `c_fwd_error` / `c_bwd_error` counters; a non-zero value means the row measures an error path, not the algorithm. Rows with `output_spikes == 0` are legitimate (high threshold, no neuron fires) but time an empty loop — `BackwardSpikes/Tiny|Small/uniform` are in that regime, so their ratios are overhead-on-noise and should be excluded from any geomean.
+
+**Burst at Medium/Large/XL** is registered behind `#ifndef _MSC_VER` for `ComputeSpikes`, `BackwardSpikes` and `FullTrainingStep`, and unconditionally for `ComputeSums` (which has no root finding, so the Toms748 caveat never applied). Probed on macOS: both backends complete with matching spike counts (Medium 10669, Large 58287, XL 771544) and `c_err = 0`. Burst is the heaviest workload in the suite — XL produces ~770k output spikes against ~56k for XL poisson — so it is the best stress on the forward pass's per-neuron spike-row growth. XL costs ~16 s per iteration for `BackwardSpikes`, so keep it out of quick runs (`FILTER` excludes `XL`).
+
 ### Python Benchmarks (pytest-benchmark)
 
 ```bash
@@ -302,13 +307,25 @@ The primary FFI entry point for backward pass is the combined function — one c
 
 ```c
 AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
-    const EventPropInput* inputs, const SpikesBatch spikes_batch);
+    const EventPropInput* inputs, const SpikesBatch spikes_batch,
+    const double* const* post_spike_errors);
 
 AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
-    const EventPropInput* inputs, const SpikesBatch spikes_batch);
+    const EventPropInput* inputs, const MaximaBatch maxima_batch);
 ```
 
 Returns `GradientOutput summed_grads` (ready for weight update) + per-sample `.spike_errors` preserved. Per-sample `.grad` buffers are freed after summation.
+
+### Spike Output Ownership
+
+`SpikeOutput` carries only `times` + `sources` (+ `n_spikes`). Two former fields are gone:
+
+- **`currents`** — the synaptic current at each output spike is *derived*, not stored. `eventprop_backward_spikes` rebuilds it with one ascending cursor over `input.times` into a row of `n_post` scratch doubles (`ctx.cur_sum`) plus one double per output spike (`ctx.currents`). The forward pass never needed it beyond that one line, and the backward pass already walks the input spikes, so storing it was pure overhead. The accumulation must run **ascending** and be scaled once at the end — the sweep runs time-reversed, and a row rebased at the sweep time loses six significant digits per post spike at benchmark sizes (gradient drifts ~1e-5 relative).
+- **`errors`** — the caller-owned loss/error signal per output spike. It moved to an argument: `eventprop_backward_spikes(input, spike, post_spike_errors)` and `eventprop_backward_spikes_batch(inputs, spikes_batch, post_spike_errors)`, where `post_spike_errors` is an array of `batch_size` `const double*` (one per sample, may be `NULL` for empty samples). The library no longer allocates a buffer the caller only writes into.
+
+Post-spike times must be non-decreasing; the backward pass validates this and returns `EVENTPROP_UNSORTED_SPIKE_TIMES` (60). New allocation codes: `EVENTPROP_ALLOC_BWD_CUR_SUM` (62), `EVENTPROP_ALLOC_BWD_CURRENTS` (63).
+
+`MaximaOutput.errors` is unchanged (still library-allocated), as is `BackwardOutput.spike_errors`.
 
 ### Memory Ownership Rules
 
@@ -316,6 +333,57 @@ Returns `GradientOutput summed_grads` (ready for weight update) + per-sample `.s
 - All free functions (batch and single-sample) take their struct **by value**
 - Free functions exist for every heap-backed type: `eventprop_free_spike_output`, `eventprop_free_sums_output`, `eventprop_free_maxima_output`, `eventprop_free_backward_output`, `eventprop_free_dropout_output`, `eventprop_free_gradient_output`
 - Dimension fields are removed from output structs — dimensions are inferred from input parameters
+
+### Spike Time Ordering: A Shared Contract, Not a Parity Gap
+
+Every spike list the library consumes must be **non-decreasing**. `eventprop_validate_input_no_v_th` enforces it on input times (`EVENTPROP_UNSORTED_SPIKE_TIMES`, 60) and `eventprop_backward_spikes` enforces it on post-spike times, because the currents there are rebuilt with one forward cursor over the post spikes.
+
+The requirement is not a C-only strictness — it follows from the algorithm both implementations share. `compute_sums` builds prefix sums **in array order** (`sum0.row(i+1) = sum0.row(i) + exp(t_i/tau_syn) * w.row(sources[i])`), and the forward pass then indexes `sum0[k][nrn]` by position while treating `k` as "all input spikes up to `times[k]`". That is only true if `times` is sorted. An unsorted array is therefore not a valid alternative input; it describes a different network.
+
+The Eigen reference has the same requirement and does not check it. Measured on a 4x2, 10-spike input with two interleaved bursts:
+
+| Call | Result |
+|---|---|
+| C, unsorted | `error_no = 60`, 0 spikes |
+| Eigen, unsorted | **3 spikes** — plausible-looking garbage |
+| Eigen, sorted | 5 spikes |
+| C, sorted | 5 spikes, identical times/sources, max delta **2.8e-15** |
+
+So the C library is the stricter *diagnostic*, not the divergent *implementation*: on sorted input the two agree to root-finder tolerance. The Eigen `backward` does build a sorted index list internally, but that merges input and post spikes for the time-reversed sweep and does nothing for the prefix-sum ordering. Callers must sort; the C library tells you when they didn't, the reference silently returns wrong numbers.
+
+Pinned by `ComputeSpikes.UnsortedTimesRejected` and `ComputeSpikes.EqualTimesAccepted` (`src/EventProp.C.Tests/test/compute_spikes.cpp`), alongside the existing validator and `BackwardSpikes` ordering tests. Non-decreasing (equal times) is valid and is the simultaneous-spike case the parity suite covers.
+
+### Cross-Suite Benchmark Data Contract
+
+Three suites benchmark the same algorithms — native `bench_main.cpp` (C vs Eigen), .NET `EventProp.Benchmarks` (BenchmarkDotNet, managed vs P/Invoke), and `EventProp.Python.Benchmarks` (pytest-benchmark, pybind11 vs Cython). They share sizes (Tiny 10/5/20, Small 50/20/100, Medium 200/80/500, Large 500/200/1000; native and .NET add XL), taus (0.02 / 0.005), `v_th = 1.0`, and weights U(0.5, 2.0).
+
+Spike patterns are generated by **one canonical definition implemented three times**, and the copies must stay in sync:
+
+| Suite | Entry point |
+|---|---|
+| native | `GenerateBurstData` / `GeneratePoissonData` in `src/EventProp.Native.Benchmarks/bench_main.cpp` |
+| .NET | `SpikePatterns.Burst` / `SpikePatterns.Poisson` in `src/EventProp.Benchmarks/SpikePatterns.cs` |
+| Python | `generate_burst_spikes` / `generate_poisson_spikes` in `src/EventProp.Python.Benchmarks/conftest.py` |
+
+Every generator upholds, and the Python suite asserts it at generation time (`validate_spike_data` in `conftest.py`):
+
+- **times are non-decreasing** — the C library returns `EVENTPROP_UNSORTED_SPIKE_TIMES` (60) otherwise, and the Cython layer reports `error_no` without raising, so an unsorted array silently measures a validation short-circuit.
+- **every spike lands inside [0, 1)** — `max_time / tau_syn` must stay under `EVENTPROP_EXP_OVERFLOW_THRESHOLD` (700). The old .NET burst reached 5.94 s → ratio 1188 → `EVENTPROP_TIMES_TAU_MISMATCH`, so that pattern could not be fed to the native side at all.
+- **exactly `n_spikes` are produced, none left unwritten** — a fixed per-neuron burst offset saturates at a handful of bursting neurons, and the remaining slots keep their zero-initialised value: thousands of simultaneous spikes at t = 0. That inflated XL burst to 771k output spikes and made `BackwardSpikes/XL/burst` cost 15.6 s per iteration; the canonical generator uses a computed stagger and yields 757k spikes in 7.9 s.
+
+Burst is deterministic (no RNG in times/sources), so Python and native produce **bit-identical** burst data. Uniform times are identical by construction (only `sources` differ, since `std::mt19937`, `System.Random` and PCG64 cannot agree). Poisson uses the same inverse-CDF form in all three (`-log(1-u)/rate` plus a strictly-increasing fix), so it is distributionally identical. Cross-suite numbers are therefore statistical, not exact — compare ratios, not absolute counts.
+
+Two known caveats: the poisson form concentrates the whole spike train in ~40 ms rather than spreading it over [0, 1) ("Poisson @200 Hz" is a misnomer shared by all three suites), and the Python suite skips Medium+/burst as `SLOW_BURST` — a runtime-cost guard written against the old pathological data, worth re-measuring now that the pattern is sane.
+
+**The poisson misnomer, quantified.** Each spike time is an independent exponential order statistic `-log(1-u)/200`, not a homogeneous Poisson process over [0, 1). Measured (seed 42): max_time ~11 ms / effective ~1.8 kHz at Tiny (20 spikes), ~30 ms / ~3.3 kHz at Small (100), ~46 ms / ~10.8 kHz at Medium (500), ~39 ms / ~25.6 kHz at Large (1000) — 9–128x the 200 Hz label. The pattern key stays `poisson` across all three suites (renaming would break the shared `kPatterns`/`SIZES`/parametrize contract); the generators' docstrings state the real distribution. Cross-suite ratios remain valid because all three use the identical form.
+
+### Layer gradient semantics (C# == Python)
+
+`Layer.Backward()` **accumulates** into `Gradient` and never zeroes it, matching the Python reference (`backward_spikes_batch_cpp(..., self.gradient)` adds; the training loop calls `optimizer.zero_grad()` separately). `ZeroGrad()` is the only zeroing. Call `ZeroGrad()` before `Backward()` for a single-step gradient. This is pinned by `LayerContractTests.Backward_AccumulatesAcrossCalls`, which asserts a second `Backward()` **doubles** the gradient (and guards against a vacuous all-zero gradient by requiring the layer to fire). The managed and native layers implement the same semantic; the native layers add the summed gradient out of the native buffer rather than overwriting.
+
+### Chaining model (intentional C# divergence from Python)
+
+Python threads layers through an `ancestor_layer` field and a `__call__(SpikesVector, Layer)` idiom; its base `backward()` recurses into the ancestor and raises `RuntimeError("Run backward to create errors first.")` when the child has not run. C# has no `ancestor_layer` and no `__call__`; chaining is the explicit `Layer.Chain<TLayerA,TLayerB>` whose `Backward()` calls `A.Backward(); B.Backward()` directly. The ancestor-recursion and its "run backward first" guard have no C# counterpart — this is a deliberate simplification, documented on `LayerChain.Backward`.
 
 ## Python Bindings (`_native.pyx`)
 
@@ -341,11 +409,43 @@ All wrappers use `__dealloc__` to call the appropriate C free function. Numpy vi
 
 ## Architecture Notes (.NET)
 
+### Shared Layer Contract (`EventProp.Abstractions`)
+
+`EventProp.Abstractions` (assembly `CW.EventProp.Abstractions`, namespace `CW.EventProp`, no dependencies) holds the types both backends share, mirroring the Python library's `ABC`-based `layer.py`:
+
+- `Layer` — abstract base class (not an interface) with abstract `Forward`/`Backward`/`ZeroGrad`/`GetWeights`/`SetWeights`/`NIn`/`NOut` and the nested `LayerChain<TA,TB>`. An abstract class (not `IDisposable`-style interfaces) is used because the contract passes concrete reference types (`SpikesVector`, `SpikesData`) and shares state (`Gradient`, `_inputBatch`, `_ranForward`); the Python reference uses `ABC` + `@abstractmethod` the same way.
+- `SpikesData`, `MaximaData`, `SpikesVector`, `MaximaVector` — heap-backed data carriers (ArrayPool-rentable), shared by both backends.
+- `LIFLayerParameters`, `LILayerParameters`, `WeightInitializer` (+ Gaussian/Uniform/Diagonal).
+
+`EventProp` (managed) and `EventProp.Native` (P/Invoke) each `ProjectReference` Abstractions and implement `Layer`. The compiler enforces the contract; benchmarks and parity tests run the same scenario against both backends.
+
+### Native Layers (`EventProp.Native.LIFLayer` / `LILayer`)
+
+Thin P/Invoke-backed `Layer` implementations so `EventProp.Benchmarks` compares managed vs native like-for-like. Key design points:
+
+- **Friendly batch wrappers** (`BatchFriendly.cs`): `Batch.ComputeSpikesBatch` / `ComputeMaximaBatch` / `BackwardSpikesBatchAccumulate` / `BackwardMaximaBatchAccumulate` take flat arrays (`w`, concatenated `times`/`sources`, `nSpikesPerSample`) and marshal to an `EventPropInput[]` on the stack, so callers never hand-build per-sample structs. `SpikesBatch`/`MaximaBatch` expose per-sample indexing (`SpikeAt`/`MaximaAt`, plus a `this[int]` indexer on `SpikesBatch`).
+- **`ref struct` outputs cannot be stored on a class field.** `SpikesBatch`/`MaximaBatch` are `ref struct`s, so the native layers cannot cache the forward batch across `Forward()`→`Backward()`. `Backward()` recomputes the forward batch (deterministic for the same weights + input) in the same scope and feeds the accumulate call.
+- **Loss-derivative plumbing differs by loss type.** For the spike loss, the C backward reads `post_spike_errors` from a caller-supplied pointer array; the layer pins each `SpikesData.Errors` array (`GCHandle`) and passes that array. For the maxima loss, the C backward reads `errors` from the **native** `MaximaOutput` (library-allocated), so `LILayer.Backward` copies the managed `MaximaData.Errors` into the native batch's errors array before the accumulate call.
+- Native layers are `IDisposable` (free pinned handles); the managed layers expose `Dispose()` for their scratch buffers.
+
+Parity is pinned by `EventProp.Tests/NativeLayerParityTests.cs` (LIF spikes+gradient, LI maxima+gradient, native batch forward).
+
+### Layer Contract Suite (`EventProp.Tests/LayerContractTests.cs`)
+
+The `Layer` contract is tested against **every** backend, so a new backend must satisfy the same behaviour and the managed/native pair cannot drift. A `LayerBackend` record carries the factory (`CreateLif`/`CreateLi`) plus the backend-specific plumbing (`SetSpikeError`, `GetMaxima`); each scenario runs over `AllBackends()`.
+
+Covered per backend: gradient shape, forward/backward determinism, `ZeroGrad`, backward accumulation (a second `Backward()` doubles the gradient — Python semantics, with a firing guard so the check is non-vacuous), weight span round-trip, weight-length validation (ctor + `SetWeights`), Backward/Output-before-Forward throws, forward-replaces-output, batch forward == per-sample, batch gradient == sum of per-sample gradients, LI maxima shape, LI backward determinism. Cross-backend: LIF/LI/batch gradients match between managed and native (with firing + non-zero-gradient guards), and a **mixed managed↔native `LayerChain`** produces the same output as a homogeneous chain.
+
+`Layer` is `IDisposable` (managed layers own ArrayPool buffers, native layers own pinned handles + native batches); `LayerChain.Dispose()` disposes both children. `SyncAssert` gained a `bool` overload (`IsTrue`/`IsFalse`).
+
+> TUnit 1.45 has no `PropertySource`; `MethodDataSource` on a non-static test needs `[CombinedDataSources]` (TUnit0070). The suite sidesteps that by looping `AllBackends()` inside each `[Test]` body.
+
 ### Zero-Allocation Hot Paths
 
 - **`MatrixView`** — `ref struct` providing zero-copy row-major matrix views over flat `double[]` arrays
 - **`StridedSpan`** — column access without allocation (strided read-only span)
 - **`ScratchBuffers`** — pre-allocated reusable buffers; callers allocate once and pass in
+- **`PostSpikeRow`** — one growable scratch row per post-synaptic neuron (`times` / `currents` / `exp(st/tau_mem)`), rented once from `ArrayPool` and grown ×3 in place. A neuron may cross the threshold any number of times, so its spikes cannot live in a fixed-stride slice of a shared slab; each `Parallel.For` iteration owns exactly one row, so growth needs no atomics
 
 ### Biophysical Parameters
 
@@ -364,6 +464,40 @@ Row-major: `w[row * cols + col]` where rows = pre-synaptic neurons, cols = post-
 - **`ComputeSpikes`**: Forward pass — finds threshold-crossing times via root-finding (Toms748/Brent)
 - **`Backward`**: Adjoint method — time-reversed sweep propagating λ_v (membrane) and λ_i (synaptic) adjoints
 - **`ComputeMaxima`**: Finds membrane potential maxima per neuron (for voltage-based loss)
+
+## Known Defects
+
+### Fixed — Managed .NET forward pass: per-neuron spike buffers overflow
+
+`EventPropMath.ComputeSpikesParallel` (`src/EventProp/EventPropMath.cs`) used to size each post-synaptic neuron's scratch run at `maxSpikesPerNeuron = max(nSpikes + 1, buffers.MaxSpikesPerNeuron)` and index it as `neuronOffset = targetNrn * maxSpikesPerNeuron`. A neuron can emit **more** spikes than that bound, and the only guard was against the end of the whole buffer (`neuronOffset + neuronSpikeCount < buffers.PostSpikeTimes.Length`), so past the bound writes spilled into the neighbouring neuron's run. Because the loop is a `Parallel.For` over neurons, adjacent runs were written concurrently and the surviving spike set depended on thread interleaving.
+
+Symptoms (input `w = 15.0 + i`, `tau_mem=0.02`, `tau_syn=0.005`, `v_th=1.0`, input times `[0.01, 0.02, 0.03]`, sources `[0, 1, 0]`, `n_post=3`, capacity hint 4):
+
+- Spike count nondeterministic across runs: 21, 26, 26, 26, 27, 27 — the C library returns 31 every time.
+- Per-neuron counts exceeded the bound (10 / 8 / 8), i.e. every run past slot 4 was outside its region.
+- Post spikes sharing an identical time also shared one current (`t=0.036340173829084`, `src=0,1,2` all reporting `4.9835283556` instead of `4.9835283556 / 5.3081473409 / 5.6327663262`) — the wrong entries were spillover, not the formula.
+
+**Fix** (mirrors the C refactor `54fa50a refactor(C): replace per-neuron spike slab with per-thread scratch rows`): `ScratchBuffers` now owns `PostSpikeRow[]`, one growable row per neuron, and `ComputeSpikesParallel` appends with `row.Grow(neuronSpikeCount, neuronSpikeCount + 1)` instead of bounding writes. `MaxSpikesPerNeuron` is an initial capacity hint, no longer a bound. Two invariants matter for any future change here:
+
+- `Grow` must **copy the live spikes** into the new arrays — `ArrayPool.Rent` hands back dirty memory, so losing them silently corrupts the neuron's voltage model (observed as spike counts *dropping*, e.g. 4156 vs C's 6381 on `ComputeSpikes_Uniform_Medium`).
+- `Grow` must **not return the superseded arrays to the pool** while the sweep still caches them in locals; handing them over can give the same memory to another thread. Growth is logarithmic, so the abandoned arrays are a handful per row and the GC reclaims them.
+
+Regression tests: `ComputeSpikes_PerNeuronSpikeBurst_MatchesNativeSpikeSet` (`src/EventProp.Tests/NativeVsManagedEdgeTests.cs`, pins the 31-spike set against C) and `PostSpikeRow_GrowPreservesLiveSpikes` (`src/EventProp.Tests/ScratchBuffersTests.cs`).
+
+### Fixed — C input validation rejected `v_th <= 0` on entry points that never read it
+
+`eventprop_validate_input` (`src/EventProp.C/eventprop_validation.c`) required `v_th > 0` for every entry point, but `ComputeSums`, `ComputeMaxima`, and `backward_maxima` never read the threshold voltage — the cumulative sums and the maxima loss are defined for any `v_th`. The Eigen reference and the managed .NET implementations accept `v_th = 0`, and `src/EventProp.Native/Api.cs` builds `EventPropInput.Create(..., 0.0, tauMem, tauSyn)` because those .NET-facing APIs have no `v_th` parameter at all. Result: 40 parity tests failed with `EVENTPROP_INVALID_VTH` (11) on the C side.
+
+**Fix**: the validator was split rather than loosened, so no check is duplicated and no call site lost coverage:
+
+| Function | Checks | Used by |
+|---|---|---|
+| `eventprop_validate_input_no_v_th` | dimensions, spike count, taus, spike times/sources, pointers | `ComputeSums`, `ComputeMaxima`, `backward_maxima` |
+| `eventprop_validate_input` | the above **plus** `!(v_th > 0.0)` (negated so NaN is rejected) | `ComputeSpikes`, `BackwardSpikes`, diagnostic traces |
+
+The strict wrapper calls the structural one first, so the two can never drift apart. `eventprop_diag.c` keeps its own `v_th <= 0` guard at line ~108 — that one guards the division in the λ_I jump computation, not the input.
+
+New C tests pinning the contract: `ValidateInputNoVth_*` (5 in `src/EventProp.C.Tests/test/validate_input.cpp` — zero/negative/NaN `v_th` accepted, structural errors still caught) and `ZeroVthAcceptedAndIgnored` in `compute_sums.cpp`, `compute_maxima.cpp`, `backward_maxima.cpp`, each running one input with `v_th = 1.0` and `v_th = 0.0` and asserting identical output.
 
 ## Platform Support
 

@@ -59,7 +59,9 @@ SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, const i
     return result;
 }
 
-BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs, const SpikesBatch spikes_batch)
+BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs,
+                                                const SpikesBatch spikes_batch,
+                                                const double* const* post_spike_errors)
 {
     BackwardsBatch batch = (BackwardsBatch){ .error_no = EVENTPROP_OK };
  
@@ -90,7 +92,8 @@ BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs, con
     if (batch_size >= 2) {
 #pragma omp parallel for schedule(static)
         for (b = 0; b < batch_size; b++) {
-            batch.outputs[b] = eventprop_backward_spikes(inputs[b], spikes_batch.spikes[b]);
+            batch.outputs[b] = eventprop_backward_spikes(inputs[b], spikes_batch.spikes[b],
+                                       post_spike_errors ? post_spike_errors[b] : NULL);
             if (batch.outputs[b].error_no != EVENTPROP_OK)
                 atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
         }
@@ -98,7 +101,8 @@ BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs, con
 #endif
     {
         for (b = 0; b < batch_size; b++) {
-            batch.outputs[b] = eventprop_backward_spikes(inputs[b], spikes_batch.spikes[b]);
+            batch.outputs[b] = eventprop_backward_spikes(inputs[b], spikes_batch.spikes[b],
+                                       post_spike_errors ? post_spike_errors[b] : NULL);
             if (batch.outputs[b].error_no != EVENTPROP_OK)
                 atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
         }
@@ -260,7 +264,9 @@ GradientOutput eventprop_accumulate_gradients(const BackwardsBatch batch, const 
 }
 
 AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
-    const EventPropInput* inputs, const SpikesBatch spikes_batch)
+    const EventPropInput* inputs,
+    const SpikesBatch spikes_batch,
+    const double* const* post_spike_errors)
 {
     AccumulatedBackwardResult result = (AccumulatedBackwardResult)  { .error_no = EVENTPROP_OK };
 
@@ -293,7 +299,8 @@ AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
     if (batch_size >= 2) {
 #pragma omp parallel for schedule(static)
         for (b = 0; b < batch_size; b++) {
-            outputs[b] = eventprop_backward_spikes(inputs[b], spikes_batch.spikes[b]);
+            outputs[b] = eventprop_backward_spikes(inputs[b], spikes_batch.spikes[b],
+                                       post_spike_errors ? post_spike_errors[b] : NULL);
             if (outputs[b].error_no != EVENTPROP_OK)
                 atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
         }
@@ -301,7 +308,8 @@ AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
 #endif
     {
         for (b = 0; b < batch_size; b++) {
-            outputs[b] = eventprop_backward_spikes(inputs[b], spikes_batch.spikes[b]);
+            outputs[b] = eventprop_backward_spikes(inputs[b], spikes_batch.spikes[b],
+                                       post_spike_errors ? post_spike_errors[b] : NULL);
             if (outputs[b].error_no != EVENTPROP_OK)
                 atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
         }

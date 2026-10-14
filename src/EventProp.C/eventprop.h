@@ -78,7 +78,9 @@ typedef enum EventPropError {
     EVENTPROP_NEGATIVE_SAMPLE_COUNT   = 58,  /* n_per_sample[i] < 0 */
     EVENTPROP_BATCH_DIMENSION_MISMATCH = 59,  /* sample dims differ from requested n_pre/n_post */
     EVENTPROP_UNSORTED_SPIKE_TIMES    = 60,  /* times[i] < times[i-1] (algorithms require ascending order) */
-    EVENTPROP_ALLOC_THREAD_SCRATCH    = 61   /* per-thread forward-pass scratch row failed */
+    EVENTPROP_ALLOC_THREAD_SCRATCH    = 61,  /* per-thread forward-pass scratch row failed */
+    EVENTPROP_ALLOC_BWD_CUR_SUM       = 62,  /* backward-pass running current sum failed */
+    EVENTPROP_ALLOC_BWD_CURRENTS      = 63   /* backward-pass per-post-spike current array failed */
 } EventPropError;
 
 /** ── Validation limits ──────────────────────────────────────────────── */
@@ -118,9 +120,12 @@ typedef struct SpikeOutput {
     EventPropError error_no;  /* Error code (EVENTPROP_OK on success) */
     int n_spikes;            /* Number of output spikes */
     double* times;           /* Output spike times (malloc'd) */
-    int* sources;        /* Output source neurons (malloc'd) */
-    double* currents;        /* Synaptic currents at spike times (malloc'd) */
-    double* errors;          /* Post-synaptic errors (malloc'd, same size as n_spikes) — written by caller before backward pass */
+    int* sources;            /* Output source neurons (malloc'd) */
+    /* The synaptic current at a spike time is not stored: it is exactly
+     *  sum0[k][nrn] * exp(-t / tau_syn) with k the number of input spikes at
+     *  or before t, so the backward pass rebuilds it with one ascending cursor
+     *  over the two spike lists. Passing it around costs 8 bytes per spike for
+     *  a value that is never independent of the input spikes and the time. */
 } SpikeOutput;
 
 typedef struct SumsOutput {
@@ -177,9 +182,13 @@ MaximaOutput eventprop_compute_maxima(EventPropInput input);
 
 /**
  * Backward pass (spikes).
+ * `post_spike_errors` is a borrowed array of length spike.n_spikes — the loss
+ * derivative at each output spike, owned by the caller (it used to be a
+ * library-allocated array that only the caller wrote).
  * Returns a BackwardOutput struct — caller must free via eventprop_free_backward_output().
  */
-BackwardOutput eventprop_backward_spikes(EventPropInput input, SpikeOutput spike);
+BackwardOutput eventprop_backward_spikes(EventPropInput input, SpikeOutput spike,
+                                         const double* post_spike_errors);
 
 /**
  * Backward pass (maxima loss).
@@ -205,8 +214,14 @@ void* eventprop_try_malloc(size_t size);
 void* eventprop_try_calloc(size_t count, size_t elem_size);
 void* eventprop_try_realloc(void* ptr, size_t size);
 
-/** Validate an EventPropInput and return the first error found (or OK). */
+/** Validate an EventPropInput and return the first error found (or OK).
+ * Includes the v_th > 0 requirement — use it for entry points that read the
+ * threshold voltage (the spike search, the adjoint sweep, the diagnostic traces). */
 EventPropError eventprop_validate_input(EventPropInput input);
+
+/** Same structural checks, without the v_th requirement, for entry points that
+ * never read the threshold voltage (ComputeSums, ComputeMaxima, backward_maxima). */
+EventPropError eventprop_validate_input_no_v_th(EventPropInput input);
 
 /**
  * Return a human-readable description of an error code.

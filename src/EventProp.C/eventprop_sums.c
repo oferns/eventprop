@@ -10,7 +10,7 @@
 
 SumsOutput eventprop_compute_sums(const EventPropInput input)
 {
-    SumsOutput result = (SumsOutput){ .error_no = eventprop_validate_input(input) };
+    SumsOutput result = (SumsOutput){ .error_no = eventprop_validate_input_no_v_th(input) };
     double* exp_mem = NULL, *exp_syn = NULL;
 
     result.n_rows = input.n_spikes + 1;

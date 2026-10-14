@@ -12,7 +12,7 @@ namespace CW.EventProp;
 /// 
 /// Zero-allocation hot paths via pre-allocated ScratchBuffers.
 /// </summary>
-public sealed class LIFLayer : Layer
+public sealed class LIFLayer : Layer, IDisposable
 {
     private readonly LIFLayerParameters _params;
 
@@ -157,16 +157,15 @@ public sealed class LIFLayer : Layer
 
     /// <summary>
     /// Run backward pass: compute weight gradients via the adjoint method.
-    /// Gradients are accumulated into self.Gradient (not zeroed — call ZeroGrad() first if needed).
+    /// Gradients are **accumulated** into <see cref="Layer.Gradient"/> (not zeroed) —
+    /// matching the Python reference, whose training loop calls zero_grad() separately.
+    /// Call <see cref="ZeroGrad"/> before Backward for a single-step gradient.
     /// Processes samples in parallel when batch size >= 2.
     /// </summary>
     public override void Backward()
     {
         if (!_ranForward)
             throw new InvalidOperationException("Run Forward() before Backward().");
-
-        // Zero gradient before accumulation
-        Gradient.AsSpan().Clear();
 
         int batchCount = _inputBatch!.Count;
         int totalSpikes = 0;
@@ -372,5 +371,5 @@ public sealed class LIFLayer : Layer
     }
 
     /// <summary>Dispose scratch buffers.</summary>
-    public void Dispose() => _buffers.Dispose();
+    public override void Dispose() => _buffers.Dispose();
 }

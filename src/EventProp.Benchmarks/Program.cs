@@ -30,7 +30,6 @@ public abstract class BenchBase
     protected SpikesData PostSpikesManaged { get; set; } = null!;
     protected double[] PostTimesNative { get; set; } = null!;
     protected int[] PostSourcesNative { get; set; } = null!;
-    protected double[] PostCurrentsNative { get; set; } = null!;
     protected double[] PostErrorsNative { get; set; } = null!;
     protected double[] SpikeErrorsNative { get; set; } = null!;
 
@@ -91,14 +90,12 @@ public abstract class BenchBase
 
         PostTimesNative = new double[NPostSpikes];
         PostSourcesNative = new int[NPostSpikes];
-        PostCurrentsNative = new double[NPostSpikes];
         PostErrorsNative = new double[NPostSpikes];
         SpikeErrorsNative = new double[NSpikes];
         for (int i = 0; i < NPostSpikes; i++)
         {
             PostTimesNative[i] = fwdResult.Times[i];
             PostSourcesNative[i] = fwdResult.Sources[i];
-            PostCurrentsNative[i] = fwdResult.Currents[i];
             PostErrorsNative[i] = 1.0;
         }
 
@@ -250,7 +247,7 @@ public class Bench_BackwardSpikes_Small : BenchBase
     public void Native()
     {
         using var output = CApi.Api.BackwardSpikes(Times, Sources,
-            PostTimesNative, PostSourcesNative, PostCurrentsNative,
+            PostTimesNative, PostSourcesNative,
             PostErrorsNative, NPostSpikes, W, NPre, NPost,
             VTh, TauMem, TauSyn);
         var _ = output.Gradient[0]; // Access to prevent optimization
@@ -274,7 +271,7 @@ public class Bench_BackwardSpikes_Medium : BenchBase
     public void Native()
     {
         using var output = CApi.Api.BackwardSpikes(Times, Sources,
-            PostTimesNative, PostSourcesNative, PostCurrentsNative,
+            PostTimesNative, PostSourcesNative,
             PostErrorsNative, NPostSpikes, W, NPre, NPost,
             VTh, TauMem, TauSyn);
         var _ = output.Gradient[0]; // Access to prevent optimization
@@ -298,7 +295,7 @@ public class Bench_BackwardSpikes_Large : BenchBase
     public void Native()
     {
         using var output = CApi.Api.BackwardSpikes(Times, Sources,
-            PostTimesNative, PostSourcesNative, PostCurrentsNative,
+            PostTimesNative, PostSourcesNative,
             PostErrorsNative, NPostSpikes, W, NPre, NPost,
             VTh, TauMem, TauSyn);
         var _ = output.Gradient[0]; // Access to prevent optimization

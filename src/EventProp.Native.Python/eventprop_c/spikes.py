@@ -147,16 +147,11 @@ class SpikesVector:
     def __getitem__(self, idx: int):
         if self._batch_output is not None:
             if idx not in self._cached_views:
-                result = self._batch_output.__getitem__(idx)
-                # DropoutBatchOutput returns (times, sources) — no error buffer
-                # BatchSpikeOutput returns (times, sources, errors)
-                if len(result) == 2:
-                    times, sources = result
-                    currents = None
-                else:
-                    times, sources, currents = result
+                # Both batch outputs hand back (times, sources): the current and
+                # the derivative buffer are no longer part of the spike output.
+                times, sources = self._batch_output.__getitem__(idx)
                 self._cached_views[idx] = _CythonSpikesView(
-                    times, sources, currents,
+                    times, sources,
                     batch_output=self._batch_output,
                     sample_idx=idx
                 )
@@ -183,6 +178,17 @@ class SpikesVector:
     def n_spikes_per_sample(self) -> np.ndarray:
         """Per-sample spike counts — ready for C batch calls."""
         return self._n_spikes_per_sample
+
+    @staticmethod
+    def _error_arrays(batch: 'SpikesVector') -> list:
+        """One caller-owned derivative array per sample, in sample order.
+
+        The C forward pass no longer carries these, so backward() collects them
+        through the views — the arrays are allocated on first use and cached —
+        and hands the list to the batch backward call, which reads it straight
+        into C.
+        """
+        return [batch[i].errors for i in range(len(batch))]
 
     # ── Chain support: extract flat buffers from output mode ───
 
@@ -265,19 +271,20 @@ class SpikesVector:
 class _CythonSpikesView:
     """Zero-copy view of a single sample from Cython BatchSpikeOutput.
 
-    Wraps numpy arrays that reference C-owned memory. Errors are stored
-    in the BatchSpikeOutput native buffer — writing here goes directly to C memory.
+    Times and sources reference C-owned memory. The derivative buffer is not in
+    C any more — backward() takes caller-owned arrays — so it is allocated here
+    and kept alive by the view.
     """
 
-    __slots__ = ('_times', '_sources', '_currents', '_batch_output', '_sample_idx', '_errors_buf')
+    __slots__ = ('_times', '_sources', '_batch_output', '_sample_idx', '_errors_buf')
 
-    def __init__(self, times: np.ndarray, sources: np.ndarray, currents: np.ndarray,
+    def __init__(self, times: np.ndarray, sources: np.ndarray,
                  batch_output=None, sample_idx: int = 0):
         self._times = times
         self._sources = sources
-        self._currents = currents
-        self._batch_output = batch_output  # BatchSpikeOutput holding native error buffer
+        self._batch_output = batch_output  # BatchSpikeOutput holding C spike memory
         self._sample_idx = sample_idx
+        self._errors_buf = None            # caller-owned, allocated on first use
 
     @property
     def times(self) -> np.ndarray:
@@ -293,15 +300,11 @@ class _CythonSpikesView:
 
     @property
     def errors(self) -> np.ndarray:
-        # Return view into native error buffer — zero-copy, writes go to C memory
-        if self._batch_output is not None and self._currents is not None:
-            return self._batch_output.get_errors(self._sample_idx)
-        # Check for fallback buffer (set via _errors setter on dropout output)
-        errors_buf = getattr(self, '_errors_buf', None)
-        if errors_buf is not None:
-            return errors_buf
-        # Fallback: allocate Python array (dropout output has no error buffer)
-        return np.zeros(self.n_spikes, dtype=np.float64)
+        # Caller-owned buffer: allocated once per view, then handed to C by
+        # backward_spikes_batch_accumulate.
+        if self._errors_buf is None:
+            self._errors_buf = np.zeros(self.n_spikes, dtype=np.float64)
+        return self._errors_buf
 
     @property
     def _errors(self) -> np.ndarray:
@@ -310,17 +313,8 @@ class _CythonSpikesView:
 
     @_errors.setter
     def _errors(self, value: np.ndarray):
-        """Backward compatibility — layer backward() sets this directly.
-
-        For batch output views, copy into the native error buffer.
-        For dropout views (no error buffer), allocate a Python array.
-        """
-        if self._batch_output is not None and self._currents is not None:
-            # Write into native error buffer via get_errors
-            self._batch_output.get_errors(self._sample_idx)[:] = value
-        else:
-            # Dropout output or standalone view — allocate Python array
-            object.__setattr__(self, '_errors_buf', np.asarray(value, dtype=np.float64))
+        """Backward compatibility — layer backward() sets this directly."""
+        object.__setattr__(self, '_errors_buf', np.asarray(value, dtype=np.float64))
 
     def set_error(self, spike_idx: int, error: float):
         self.errors[spike_idx] = error

@@ -30,7 +30,7 @@ constexpr double kTauSyn = 0.005;
 constexpr double kVTh    = 1.0;
 
 bool IsAllocErrorCode(EventPropError e) {
-    return e >= EVENTPROP_ALLOC_SUM0 && e <= EVENTPROP_ALLOC_THREAD_SCRATCH;
+    return e >= EVENTPROP_ALLOC_SUM0 && e <= EVENTPROP_ALLOC_BWD_CURRENTS;
 }
 
 /** Codes that are legitimate alongside allocation failures: a failed sample is
@@ -131,7 +131,6 @@ TEST_F(AllocFaultInjection, ComputeSpikesFailsCleanly) {
         EVENTPROP_ALLOC_EXP_MEM,      EVENTPROP_ALLOC_EXP_SYN,
         EVENTPROP_ALLOC_THREAD_SCRATCH,
         EVENTPROP_ALLOC_RESULT_TIMES,  EVENTPROP_ALLOC_RESULT_SOURCES,
-        EVENTPROP_ALLOC_RESULT_CURRENTS, EVENTPROP_ALLOC_RESULT_ERRORS,
     };
     std::set<int> observed;
 
@@ -203,7 +202,8 @@ TEST_F(AllocFaultInjection, BackwardSpikesFailsCleanly) {
         EVENTPROP_ALLOC_BWD_LAMBDA_V,    EVENTPROP_ALLOC_BWD_LAMBDA_I,
         EVENTPROP_ALLOC_BWD_JUMP_TIME,   EVENTPROP_ALLOC_BWD_JUMP_MAG,
         EVENTPROP_ALLOC_BWD_JUMP_COUNT,  EVENTPROP_ALLOC_BWD_JUMP_CAP,
-        EVENTPROP_ALLOC_BWD_PER_NEURON,
+        EVENTPROP_ALLOC_BWD_PER_NEURON,  EVENTPROP_ALLOC_BWD_CUR_SUM,
+        EVENTPROP_ALLOC_BWD_CURRENTS,
     };
     std::set<int> observed;
 
@@ -215,11 +215,14 @@ TEST_F(AllocFaultInjection, BackwardSpikesFailsCleanly) {
     SpikeOutput spikes = eventprop_compute_spikes(input);
     ASSERT_EQ(spikes.error_no, EVENTPROP_OK) << "fixture must produce spikes";
 
+    /* The post-spike derivatives are caller-owned now. */
+    std::vector<double> errs((size_t)spikes.n_spikes, 1.0);
+
     for (int nth = 1; nth <= 128; ++nth) {
         eventprop_test_alloc_reset();
         eventprop_test_alloc_fail_nth(nth);
 
-        BackwardOutput out = eventprop_backward_spikes(input, spikes);
+        BackwardOutput out = eventprop_backward_spikes(input, spikes, errs.data());
         EXPECT_TRUE(out.error_no == EVENTPROP_OK || IsAllocErrorCode(out.error_no))
             << "nth=" << nth << " returned " << eventprop_error_string(out.error_no);
         observed.insert(out.error_no);
@@ -289,7 +292,8 @@ TEST_F(AllocFaultInjection, AccumulateEntryPointsFailCleanly) {
         EVENTPROP_ALLOC_BWD_LAMBDA_V,     EVENTPROP_ALLOC_BWD_LAMBDA_I,
         EVENTPROP_ALLOC_BWD_JUMP_TIME,    EVENTPROP_ALLOC_BWD_JUMP_MAG,
         EVENTPROP_ALLOC_BWD_JUMP_COUNT,   EVENTPROP_ALLOC_BWD_JUMP_CAP,
-        EVENTPROP_ALLOC_BWD_PER_NEURON,
+        EVENTPROP_ALLOC_BWD_PER_NEURON,   EVENTPROP_ALLOC_BWD_CUR_SUM,
+        EVENTPROP_ALLOC_BWD_CURRENTS,
     };
     std::set<int> observed;
 
@@ -301,11 +305,15 @@ TEST_F(AllocFaultInjection, AccumulateEntryPointsFailCleanly) {
     SpikesBatch spikes = eventprop_compute_spikes_batch(&input, 1);
     ASSERT_EQ(spikes.error_no, EVENTPROP_OK) << "fixture must produce spikes";
 
+    /* The post-spike derivatives are caller-owned: one array per sample. */
+    std::vector<double> errs((size_t)spikes.spikes[0].n_spikes, 1.0);
+    const double* ptrs[1] = { errs.data() };
+
     for (int nth = 1; nth <= 128; ++nth) {
         eventprop_test_alloc_reset();
         eventprop_test_alloc_fail_nth(nth);
         AccumulatedBackwardResult acc =
-            eventprop_backward_spikes_batch_accumulate(&input, spikes);
+            eventprop_backward_spikes_batch_accumulate(&input, spikes, ptrs);
         EXPECT_TRUE(acc.error_no == EVENTPROP_OK || IsExpectedInjectionCode(acc.error_no))
             << "nth=" << nth << " returned " << eventprop_error_string(acc.error_no);
         observed.insert(acc.error_no);
@@ -313,7 +321,7 @@ TEST_F(AllocFaultInjection, AccumulateEntryPointsFailCleanly) {
 
         eventprop_test_alloc_reset();
         eventprop_test_alloc_fail_nth(nth);
-        BackwardsBatch bw = eventprop_backward_spikes_batch(&input, spikes);
+        BackwardsBatch bw = eventprop_backward_spikes_batch(&input, spikes, ptrs);
         EXPECT_TRUE(bw.error_no == EVENTPROP_OK || IsExpectedInjectionCode(bw.error_no))
             << "nth=" << nth << " returned " << eventprop_error_string(bw.error_no);
         observed.insert(bw.error_no);

@@ -25,13 +25,13 @@ public class NumericalGradientTests
     private static (double[] gradient, double[] spikeErrors) GetNativeBackwardSpikes(
         ReadOnlySpan<double> inputTimes, ReadOnlySpan<int> inputSources,
         ReadOnlySpan<double> postTimes, ReadOnlySpan<int> postSources,
-        ReadOnlySpan<double> postCurrents, ReadOnlySpan<double> postErrors,
+        ReadOnlySpan<double> postErrors,
         int nPostSpikes,
         ReadOnlySpan<double> w, int nPre, int nPost,
         double vTh, double tauMem, double tauSyn)
     {
         using var output = Native.Api.BackwardSpikes(inputTimes, inputSources,
-            postTimes, postSources, postCurrents, postErrors, nPostSpikes,
+            postTimes, postSources, postErrors, nPostSpikes,
             w, nPre, nPost, vTh, tauMem, tauSyn);
         return (output.Gradient.ToArray(), output.SpikeErrors.ToArray());
     }
@@ -105,7 +105,7 @@ public class NumericalGradientTests
         // C++ gradient via P/Invoke
         (var nativeGradient, _) = GetNativeBackwardSpikes(inputTimes, inputSources,
             postSpikes.Times[..postSpikes.NSpikes], postSpikes.Sources[..postSpikes.NSpikes],
-            postSpikes.Currents[..postSpikes.NSpikes], postSpikes.Errors[..postSpikes.NSpikes],
+            postSpikes.Errors[..postSpikes.NSpikes],
             postSpikes.NSpikes, w, nPre, nPost, 1.0, tauMem, tauSyn);
 
         // All weights should match within tolerance
@@ -167,7 +167,7 @@ public class NumericalGradientTests
 
             (var nativeGradient, _) = GetNativeBackwardSpikes(inputTimes, inputSources,
                 postSpikes.Times[..postSpikes.NSpikes], postSpikes.Sources[..postSpikes.NSpikes],
-                postSpikes.Currents[..postSpikes.NSpikes], postSpikes.Errors[..postSpikes.NSpikes],
+                postSpikes.Errors[..postSpikes.NSpikes],
                 postSpikes.NSpikes, w, nPre, nPost, 1.0, tauMem, tauSyn);
 
             await Assert.That(gradient[src * nPost + nrn]).IsCloseTo(nativeGradient[src * nPost + nrn], 1e-10);
@@ -270,7 +270,7 @@ public class NumericalGradientTests
         // C++ gradient
         (var nativeGradient, _) = GetNativeBackwardSpikes(inputTimes, inputSources,
             postSpikes.Times[..postSpikes.NSpikes], postSpikes.Sources[..postSpikes.NSpikes],
-            postSpikes.Currents[..postSpikes.NSpikes], postSpikes.Errors[..postSpikes.NSpikes],
+            postSpikes.Errors[..postSpikes.NSpikes],
             postSpikes.NSpikes, w, nPre, nPost, 1.0, tauMem, tauSyn);
 
         // All weights should match
@@ -313,7 +313,7 @@ public class NumericalGradientTests
 
         (var nativeGradient, _) = GetNativeBackwardSpikes(inputTimes, inputSources,
             postSpikes.Times[..postSpikes.NSpikes], postSpikes.Sources[..postSpikes.NSpikes],
-            postSpikes.Currents[..postSpikes.NSpikes], postSpikes.Errors[..postSpikes.NSpikes],
+            postSpikes.Errors[..postSpikes.NSpikes],
             postSpikes.NSpikes, w, nPre, nPost, 1.0, tauMem, tauSyn);
 
         await Assert.That(csGradient[0]).IsCloseTo(nativeGradient[0], 1e-10);

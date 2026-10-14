@@ -403,3 +403,40 @@ TEST(BackwardMaxima, NullMaximaErrorsReturnsError) {
 
     eventprop_free_backward_output(result);
 }
+
+// ──────────────────────────────────────────────────────────────
+// v_th is not part of the maxima-loss backward contract — the entry point
+// must accept any threshold, including the zero the language bindings
+// pass when their own API has no v_th parameter.
+// ──────────────────────────────────────────────────────────────
+
+TEST(BackwardMaxima, ZeroVthAcceptedAndIgnored) {
+    std::vector<double> w = {1.0, 2.0, 3.0, 4.0};
+    std::vector<double> times = {0.1, 0.2};
+    std::vector<int> sources  = {0, 1};
+    std::vector<double> max_times  = {0.15, 0.15};
+    std::vector<double> max_errors = {1.0, -2.0};
+
+    EventPropInput with_vth{w.data(), 2, 2, times.data(), sources.data(),
+                            (int)times.size(), kTauMem, kTauSyn, kVTh};
+    EventPropInput zero_vth{w.data(), 2, 2, times.data(), sources.data(),
+                            (int)times.size(), kTauMem, kTauSyn, 0.0};
+
+    BackwardOutput reference = eventprop_backward_maxima(with_vth, max_times.data(), max_errors.data());
+    BackwardOutput under_test = eventprop_backward_maxima(zero_vth, max_times.data(), max_errors.data());
+
+    EXPECT_EQ(reference.error_no, EVENTPROP_OK);
+    EXPECT_EQ(under_test.error_no, EVENTPROP_OK);
+
+    const auto same = [](double a, double b) {
+        if (std::isnan(a) && std::isnan(b)) return true;
+        return a == b;
+    };
+    for (int i = 0; i < reference.n_pre * reference.n_post; i++)
+        EXPECT_TRUE(same(under_test.grad[i], reference.grad[i]));
+    for (int i = 0; i < reference.n_spikes; i++)
+        EXPECT_TRUE(same(under_test.spike_errors[i], reference.spike_errors[i]));
+
+    eventprop_free_backward_output(reference);
+    eventprop_free_backward_output(under_test);
+}

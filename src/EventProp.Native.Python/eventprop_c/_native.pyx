@@ -56,8 +56,6 @@ cdef extern from "eventprop.h":
         int n_spikes
         double* times
         int* sources
-        double* currents
-        double* errors
 
     ctypedef struct SumsOutput:
         int error_no
@@ -91,7 +89,8 @@ cdef extern from "eventprop.h":
     SpikeOutput     eventprop_compute_spikes(const EventPropInput input)
     SumsOutput      eventprop_compute_sums(const EventPropInput input)
     MaximaOutput    eventprop_compute_maxima(const EventPropInput input)
-    BackwardOutput  eventprop_backward_spikes(const EventPropInput input, const SpikeOutput spike)
+    BackwardOutput  eventprop_backward_spikes(const EventPropInput input, const SpikeOutput spike,
+                                              const double* post_spike_errors)
     # backward_maxima takes direct maxima_times + maxima_errors arrays (length n_post)
     BackwardOutput  eventprop_backward_maxima(
         const EventPropInput input,
@@ -178,7 +177,8 @@ cdef extern from "eventprop_batch.h":
     SpikesBatch  eventprop_compute_spikes_batch(const EventPropInput* inputs, int batch_size)
 
     BackwardsBatch eventprop_backward_spikes_batch(
-        const EventPropInput* inputs, const SpikesBatch spikes_batch)
+        const EventPropInput* inputs, const SpikesBatch spikes_batch,
+        const double* const* post_spike_errors)
 
     MaximaBatch eventprop_compute_maxima_batch(
         const EventPropInput* inputs, int batch_size)
@@ -192,7 +192,8 @@ cdef extern from "eventprop_batch.h":
 
     # Combined backward + accumulate result (primary FFI entry point)
     AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
-        const EventPropInput* inputs, const SpikesBatch spikes_batch)
+        const EventPropInput* inputs, const SpikesBatch spikes_batch,
+        const double* const* post_spike_errors)
 
     # backward_maxima_batch_accumulate takes inputs separately
     AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
@@ -313,24 +314,28 @@ cdef class _SpikesBatchOutput:
         return self._spikes.batch_size
 
     def __getitem__(self, int idx):
-        """Return (times, sources, currents) as zero-copy numpy views for sample idx."""
+        """Return (times, sources) as zero-copy numpy views for sample idx.
+
+        The synaptic current is not part of the spike output any more — the C
+        backward pass rebuilds it from the input spikes, so there is no third
+        array to hand back.
+        """
         cdef SpikeOutput* out = &self._spikes.spikes[idx]
         if out.n_spikes <= 0:
-            return np.array([], dtype=np.float64), np.array([], dtype=np.int32), np.array([], dtype=np.float64)
+            return np.array([], dtype=np.float64), np.array([], dtype=np.int32)
         return (
             _double_view(out.times, out.n_spikes),
             _int_view(out.sources, out.n_spikes),
-            _double_view(out.currents, out.n_spikes),
         )
 
-    def get_errors(self, int idx):
-        """Return zero-copy writable view into sample idx's error buffer.
+    def new_errors(self, int idx):
+        """Return a fresh Python-owned error array for sample idx.
 
-        Python writes target errors here before calling backward().
-        C reads them directly — no copying needed.
+        The C forward pass no longer carries a derivative buffer, so the array
+        is allocated here and handed back to backward_spikes_batch_accumulate.
         """
         cdef SpikeOutput* out = &self._spikes.spikes[idx]
-        return _double_view(out.errors, out.n_spikes)
+        return np.zeros(out.n_spikes, dtype=np.float64)
 
     def get_error_no(self, int idx):
         """Return the error code for sample idx (EVENTPROP_OK == 0 on success)."""
@@ -732,10 +737,12 @@ def compute_maxima_batch(
     return obj
 
 
-def backward_spikes_batch_accumulate(_SpikesBatchOutput batch_output):
+def backward_spikes_batch_accumulate(_SpikesBatchOutput batch_output, object post_spike_errors):
     """Backward pass (spike loss) + gradient accumulation.
 
-    Uses batch_output's internal .inputs and .spikes directly — no Python-side work.
+    Uses batch_output's internal .inputs and .spikes directly — no Python-side
+    work. post_spike_errors is one array per sample: the derivatives the C
+    forward pass no longer carries, so the caller owns them here.
     Returns _AccumulatedBackwardResult with summed gradients and per-sample spike errors.
     """
     cdef EventPropInput* inputs = batch_output._inputs
@@ -743,15 +750,38 @@ def backward_spikes_batch_accumulate(_SpikesBatchOutput batch_output):
     if inputs == NULL or spikes_ptr == NULL:
         raise RuntimeError("SpikesBatchOutput has been freed")
 
-    # Build a plain SpikesBatch view for the C API (shared with wrapper)
+    cdef int batch_size = spikes_ptr.batch_size
+    if post_spike_errors is None or len(post_spike_errors) != batch_size:
+        raise ValueError("post_spike_errors must hold one array per sample")
+
+    # One contiguous double* per sample, straight into the C batch call. The
+    # numpy arrays stay alive in `keep` until the call returns.
+    cdef size_t nbytes = <size_t>batch_size * sizeof(double *)
+    cdef double** ptrs = <double**>malloc(nbytes)
+    cdef list keep = []
+    cdef double[:] view
+    cdef int b
+    if ptrs == NULL:
+        raise MemoryError("Failed to allocate post-spike error pointers")
+    for b in range(batch_size):
+        arr = np.ascontiguousarray(post_spike_errors[b], dtype=np.float64)
+        if arr.shape[0] != spikes_ptr.spikes[b].n_spikes:
+            free(<void*>ptrs)
+            raise ValueError("post_spike_errors[%d] must have one entry per spike" % b)
+        keep.append(arr)
+        if arr.shape[0] > 0:
+            view = arr
+            ptrs[b] = &view[0]
+        else:
+            ptrs[b] = NULL
+
     cdef AccumulatedBackwardResult result = eventprop_backward_spikes_batch_accumulate(
-        inputs, spikes_ptr[0])  # copy struct by value onto C stack
+        inputs, spikes_ptr[0], <const double* const*>ptrs)  # copy struct by value onto C stack
+    free(<void*>ptrs)
     check_backward_result_error(result)
 
     # Build n_spikes_per_sample from inputs (needed for spike error sizing)
-    cdef int batch_size = spikes_ptr.batch_size
     cdef cnp.ndarray[cnp.int32_t, ndim=1] n_spikes_arr = np.empty(batch_size, dtype=np.int32)
-    cdef int b
     for b in range(batch_size):
         n_spikes_arr[b] = inputs[b].n_spikes
 

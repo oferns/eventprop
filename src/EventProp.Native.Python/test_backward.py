@@ -29,7 +29,10 @@ print('Errors set OK')
 
 # Call backward directly through the native binding
 from eventprop_c._native import backward_spikes_batch_accumulate
-result = backward_spikes_batch_accumulate(layer.post_batch._batch_output)
+result = backward_spikes_batch_accumulate(
+    layer.post_batch._batch_output,
+    SpikesVector._error_arrays(layer.post_batch),
+)
 print(f'Result grad shape: {result.grad.shape}')
 print(f'Rows: {result.rows}, Cols: {result.cols}')
 

@@ -72,6 +72,7 @@ class LIFLayer(Layer):
         # C owns inputs internally — no Python-side buffer extraction needed
         result = backward_spikes_batch_accumulate(
             self.post_batch._batch_output,
+            SpikesVector._error_arrays(self.post_batch),
         )
 
         self.gradient[:] = result.grad.reshape(self.w_in.shape)

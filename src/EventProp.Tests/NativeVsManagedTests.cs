@@ -22,13 +22,13 @@ public class NativeVsManagedTests
     // Helpers to extract native output data before await boundaries (ref structs can't cross awaits)
     // ========================================================================
 
-    private static (int nSpikes, double[] times, int[] sources, double[] currents) GetNativeComputeSpikes(
+    private static (int nSpikes, double[] times, int[] sources) GetNativeComputeSpikes(
         ReadOnlySpan<double> w, int nPre, int nPost,
         ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
         double vTh, double tauMem, double tauSyn)
     {
         using var output = Native.Api.ComputeSpikes(w, nPre, nPost, times, sources, vTh, tauMem, tauSyn);
-        return (output.NSpikes, output.Times.ToArray(), output.Sources.ToArray(), output.Currents.ToArray());
+        return (output.NSpikes, output.Times.ToArray(), output.Sources.ToArray());
     }
 
     private static (double[] sum0, double[] sum1) GetNativeComputeSums(
@@ -52,13 +52,13 @@ public class NativeVsManagedTests
     private static (double[] gradient, double[] spikeErrors) GetNativeBackwardSpikes(
         ReadOnlySpan<double> inputTimes, ReadOnlySpan<int> inputSources,
         ReadOnlySpan<double> postTimes, ReadOnlySpan<int> postSources,
-        ReadOnlySpan<double> postCurrents, ReadOnlySpan<double> postErrors,
+        ReadOnlySpan<double> postErrors,
         int nPostSpikes,
         ReadOnlySpan<double> w, int nPre, int nPost,
         double vTh, double tauMem, double tauSyn)
     {
         using var output = Native.Api.BackwardSpikes(inputTimes, inputSources,
-            postTimes, postSources, postCurrents, postErrors, nPostSpikes,
+            postTimes, postSources, postErrors, nPostSpikes,
             w, nPre, nPost, vTh, tauMem, tauSyn);
         return (output.Gradient.ToArray(), output.SpikeErrors.ToArray());
     }
@@ -312,7 +312,7 @@ public class NativeVsManagedTests
         var csResult = EventPropMath.ComputeSpikes(w, times, sources, nPost, 1.0, 0.02, 0.005, buffers);
 
         // C library via P/Invoke
-        (int nCSpikes, var cTimes, var cSources, var cCurrents) = GetNativeComputeSpikes(w, nPre, nPost, times, sources, 1.0, 0.02, 0.005);
+        (int nCSpikes, var cTimes, var cSources) = GetNativeComputeSpikes(w, nPre, nPost, times, sources, 1.0, 0.02, 0.005);
 
         // Assert: spike counts match
         await Assert.That(csResult.NSpikes).IsEqualTo(nCSpikes);
@@ -322,7 +322,8 @@ public class NativeVsManagedTests
         {
             AssertScaled(csResult.Times[i], cTimes[i], "times", i);
             await Assert.That(csResult.Sources[i]).IsEqualTo(cSources[i]);
-            AssertScaled(csResult.Currents[i], cCurrents[i], "currents", i);
+            // Currents are no longer part of the C spike output — the backward
+            // pass derives them, so gradient parity covers them instead.
         }
     }
 
@@ -475,7 +476,7 @@ public class NativeVsManagedTests
         // C library via P/Invoke
         (var cGradient, _) = GetNativeBackwardSpikes(times, sources,
             postSpikes.Times[..postSpikes.NSpikes], postSpikes.Sources[..postSpikes.NSpikes],
-            postSpikes.Currents[..postSpikes.NSpikes], postSpikes.Errors[..postSpikes.NSpikes],
+            postSpikes.Errors[..postSpikes.NSpikes],
             postSpikes.NSpikes, w, nPre, nPost, 1.0, 0.02, 0.005);
 
         // Assert: .NET matches C (scaled tolerance)

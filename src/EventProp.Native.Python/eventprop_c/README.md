@@ -50,7 +50,7 @@ Main library wrapper providing access to all alloc functions:
 
 All output classes provide zero-copy array views:
 
-- **SpikeOutput**: `n_spikes`, `times`, `sources`, `currents`
+- **SpikeOutput**: `n_spikes`, `times`, `sources` (the synaptic current at each spike is rebuilt inside the backward pass, not stored)
 - **SumsOutput**: `n_rows`, `n_post`, `sum0`, `sum1`
 - **MaximaOutput**: `n_post`, `times`, `values`
 - **BackwardSpikesOutput**: `n_pre`, `n_post`, `grad`, `spike_errors`
@@ -60,7 +60,7 @@ All output classes provide zero-copy array views:
 
 Zero-copy array access classes:
 
-- **DoubleArrayView**: For double arrays (times, currents, sums)
+- **DoubleArrayView**: For double arrays (times, sums, errors)
   - `__len__()`, `__getitem__(index)`, `__iter__()`
   - `to_list()` — Convert to Python list (copy)
   

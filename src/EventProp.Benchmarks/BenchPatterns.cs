@@ -53,14 +53,12 @@ public abstract class Bench_Pattern_Base : BenchBase
         int nPost = PostSpikes.NSpikes;
         PostTimesNative = new double[nPost];
         PostSourcesNative = new int[nPost];
-        PostCurrentsNative = new double[nPost];
         PostErrorsNative = new double[nPost];
         SpikeErrorsNative = new double[NSpikes];
         for (int idx = 0; idx < nPost; idx++)
         {
             PostTimesNative[idx] = PostSpikes.Times[idx];
             PostSourcesNative[idx] = PostSpikes.Sources[idx];
-            PostCurrentsNative[idx] = PostSpikes.Currents[idx];
             PostErrorsNative[idx] = 1.0;
         }
     }
@@ -105,8 +103,7 @@ public abstract class Bench_Pattern_Base : BenchBase
     public void BackwardSpikes_Native()
     {
         using var output = CApi.Api.BackwardSpikes(Times, Sources,
-            PostTimesNative, PostSourcesNative, PostCurrentsNative,
-            PostErrorsNative, PostSpikes!.NSpikes, W, NPre, NPost,
+            PostTimesNative, PostSourcesNative, PostErrorsNative, PostSpikes!.NSpikes, W, NPre, NPost,
             VTh, TauMem, TauSyn);
         // Access to prevent optimization
         var _ = output.Gradient[0];
@@ -122,26 +119,13 @@ public class Bench_Pattern_Poisson : Bench_Pattern_Base
 
     protected override void GeneratePattern(Random rng)
     {
-        // Poisson: exponential inter-spike intervals
-        double rate = 200.0; // Hz per neuron
-        double dt = 1.0 / (rate * NSpikes); // time step
-
-        for (int idx = 0; idx < NSpikes; idx++)
-        {
-            // Exponential distribution for inter-spike interval
-            double u = rng.NextDouble();
-            Times[idx] = -Math.Log(1.0 - u) / rate;
-            Sources[idx] = rng.Next(NPre);
-
-            // Ensure strictly increasing times
-            if (idx > 0 && Times[idx] <= Times[idx - 1])
-                Times[idx] = Times[idx - 1] + dt;
-        }
+        // Canonical Poisson @200 Hz — see SpikePatterns for the contract.
+        SpikePatterns.Poisson(NPre, NSpikes, Times, Sources, rng);
     }
 }
 
 // ============================================================
-// Burst spike pattern (clusters of 5 spikes with 10ms gaps)
+// Burst spike pattern — canonical definition, see SpikePatterns
 // ============================================================
 public class Bench_Pattern_Burst : Bench_Pattern_Base
 {
@@ -149,26 +133,6 @@ public class Bench_Pattern_Burst : Bench_Pattern_Base
 
     protected override void GeneratePattern(Random rng)
     {
-        int burstSize = 5;
-        int nBursts = NSpikes / burstSize; // 100 bursts
-        double gapMs = 10.0; // ms between bursts
-
-        for (int b = 0; b < nBursts; b++)
-        {
-            double burstStart = b * (burstSize + 1) * gapMs / 1000.0; // convert to seconds
-            for (int s = 0; s < burstSize; s++)
-            {
-                int idx = b * burstSize + s;
-                Times[idx] = burstStart + s * 0.5 / 1000.0; // 0.5ms within burst
-                Sources[idx] = rng.Next(NPre);
-            }
-        }
-
-        // Fill remaining spikes (if NSpikes not divisible by burstSize)
-        for (int idx = nBursts * burstSize; idx < NSpikes; idx++)
-        {
-            Times[idx] = (idx + 1) * 1.0 / NSpikes;
-            Sources[idx] = rng.Next(NPre);
-        }
+        SpikePatterns.Burst(NPre, NSpikes, Times, Sources, rng);
     }
 }

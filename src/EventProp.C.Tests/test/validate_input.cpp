@@ -1,6 +1,6 @@
 /**
  * @file validate_input.cpp
- * @brief Tests for eventprop_validate_input (the reusable validation function).
+ * @brief Tests for eventprop_validate_input and eventprop_validate_input_no_v_th
  */
 
 #include <gtest/gtest.h>
@@ -417,4 +417,48 @@ TEST(ValidateInput, EqualTimesAreAllowed) {
     EventPropInput input{w.data(), 1, 2, times.data(), sources.data(),
                          (int)times.size(), kTauMem, kTauSyn, kVTh};
     EXPECT_EQ(eventprop_validate_input(input), EVENTPROP_OK);
+}
+
+// ──────────────────────────────────────────────────────────────
+// Structural-only validator — for entry points that never read v_th
+// (ComputeSums, ComputeMaxima, backward_maxima)
+// ──────────────────────────────────────────────────────────────
+
+TEST(ValidateInputNoVth, ZeroVthAccepted) {
+    std::vector<double> w = {1.0};
+    EventPropInput input{w.data(), 1, 1, nullptr, nullptr, 0,
+                         kTauMem, kTauSyn, 0.0};
+    EXPECT_EQ(eventprop_validate_input_no_v_th(input), EVENTPROP_OK);
+}
+
+TEST(ValidateInputNoVth, NegativeVthAccepted) {
+    std::vector<double> w = {1.0};
+    EventPropInput input{w.data(), 1, 1, nullptr, nullptr, 0,
+                         kTauMem, kTauSyn, -1.0};
+    EXPECT_EQ(eventprop_validate_input_no_v_th(input), EVENTPROP_OK);
+}
+
+TEST(ValidateInputNoVth, NanVthAccepted) {
+    std::vector<double> w = {1.0};
+    EventPropInput input{w.data(), 1, 1, nullptr, nullptr, 0,
+                         kTauMem, kTauSyn, std::nan("")};
+    EXPECT_EQ(eventprop_validate_input_no_v_th(input), EVENTPROP_OK);
+}
+
+TEST(ValidateInputNoVth, StructuralErrorsStillCaught) {
+    // The relaxed validator skips the threshold check only — everything else
+    // the algorithms rely on must still be rejected.
+    std::vector<double> w = {1.0, 2.0};
+    std::vector<double> times = {0.2, 0.1};   // descending
+    std::vector<int> sources  = {0, 0};
+    EventPropInput input{w.data(), 1, 2, times.data(), sources.data(),
+                         (int)times.size(), kTauMem, kTauSyn, 0.0};
+    EXPECT_EQ(eventprop_validate_input_no_v_th(input), EVENTPROP_UNSORTED_SPIKE_TIMES);
+}
+
+TEST(ValidateInputNoVth, TauChecksSharedWithStrictValidator) {
+    std::vector<double> w = {1.0};
+    EventPropInput input{w.data(), 1, 1, nullptr, nullptr, 0,
+                         std::nan(""), kTauSyn, 0.0};
+    EXPECT_EQ(eventprop_validate_input_no_v_th(input), EVENTPROP_INVALID_TAU);
 }

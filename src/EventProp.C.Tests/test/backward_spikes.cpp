@@ -5,7 +5,13 @@
  * The backward sweep propagates post-synaptic errors back through the LIF
  * dynamics to compute weight gradients and input spike errors. We test
  * observable contracts: linearity in errors, source-row locality, and
- * algebraic scaling — not exact gradient values (which depend on solver tolerance).
+ * algebraic scaling — not exact gradient values (which depend on solver
+ * tolerance).
+ *
+ * Two arrays the pass used to carry inside SpikeOutput are caller-owned or
+ * derived now: the post-spike derivatives are passed in as an argument, and
+ * the synaptic current at a spike time is rebuilt inside the sweep from the
+ * input spikes. Both changes are covered here.
  */
 
 #include <gtest/gtest.h>
@@ -27,6 +33,12 @@ inline EventPropInput make_input(const std::vector<double>& w, int n_pre, int n_
     };
 }
 
+// The post-spike derivatives are caller-owned: the library no longer hands
+// back an array that only the caller writes. Tests fill one of these.
+static std::vector<double> make_post_errors(const SpikeOutput& fwd, double value) {
+    return std::vector<double>((size_t)fwd.n_spikes, value);
+}
+
 // ──────────────────────────────────────────────────────────────
 // Zero output spikes — early return path
 // ──────────────────────────────────────────────────────────────
@@ -42,10 +54,8 @@ TEST(BackwardSpikes, ZeroOutputSpikesReturnsZeroGradient) {
     spike.n_spikes = 0;
     spike.times = nullptr;
     spike.sources = nullptr;
-    spike.currents = nullptr;
-    spike.errors = nullptr;
 
-    BackwardOutput result = eventprop_backward_spikes(input, spike);
+    BackwardOutput result = eventprop_backward_spikes(input, spike, nullptr);
     EXPECT_EQ(result.error_no, EVENTPROP_OK);
     // grad should be all zeros (calloc'd)
     EXPECT_DOUBLE_EQ(result.grad[0], 0.0);
@@ -69,12 +79,10 @@ TEST(BackwardSpikes, SingleInputSingleOutputSpike) {
     EXPECT_EQ(fwd.error_no, EVENTPROP_OK);
     EXPECT_GT(fwd.n_spikes, 0);
 
-    // Set post-synaptic error to 1.0 (unit loss)
-    for (int i = 0; i < fwd.n_spikes; ++i) {
-        fwd.errors[i] = 1.0;
-    }
+    // Unit loss at every output spike
+    const auto errs = make_post_errors(fwd, 1.0);
 
-    BackwardOutput result = eventprop_backward_spikes(input, fwd);
+    BackwardOutput result = eventprop_backward_spikes(input, fwd, errs.data());
     EXPECT_EQ(result.error_no, EVENTPROP_OK);
 
     // Gradient should be finite and nonzero (strong weight + unit error)
@@ -106,14 +114,13 @@ TEST(BackwardSpikes, LinearInPostErrors) {
     EXPECT_EQ(fwd.error_no, EVENTPROP_OK);
     EXPECT_GT(fwd.n_spikes, 0);
 
-    // Run with errors = 1.0
-    for (int i = 0; i < fwd.n_spikes; ++i) fwd.errors[i] = 1.0;
-    BackwardOutput r1 = eventprop_backward_spikes(input, fwd);
+    const auto errs1 = make_post_errors(fwd, 1.0);
+    BackwardOutput r1 = eventprop_backward_spikes(input, fwd, errs1.data());
 
     // Run with errors = 3.0
-    double scale = 3.0;
-    for (int i = 0; i < fwd.n_spikes; ++i) fwd.errors[i] = scale;
-    BackwardOutput r2 = eventprop_backward_spikes(input, fwd);
+    const double scale = 3.0;
+    const auto errs2 = make_post_errors(fwd, scale);
+    BackwardOutput r2 = eventprop_backward_spikes(input, fwd, errs2.data());
 
     EXPECT_EQ(r1.error_no, EVENTPROP_OK);
     EXPECT_EQ(r2.error_no, EVENTPROP_OK);
@@ -146,9 +153,9 @@ TEST(BackwardSpikes, ZeroPostErrorsYieldsZeroGradient) {
     EXPECT_GT(fwd.n_spikes, 0);
 
     // All errors zero → no backward signal
-    for (int i = 0; i < fwd.n_spikes; ++i) fwd.errors[i] = 0.0;
+    const auto errs = make_post_errors(fwd, 0.0);
 
-    BackwardOutput result = eventprop_backward_spikes(input, fwd);
+    BackwardOutput result = eventprop_backward_spikes(input, fwd, errs.data());
     EXPECT_EQ(result.error_no, EVENTPROP_OK);
 
     // grad should be all zeros
@@ -177,9 +184,9 @@ TEST(BackwardSpikes, OnlySourceRowsTouched) {
     EXPECT_EQ(fwd.error_no, EVENTPROP_OK);
     EXPECT_GT(fwd.n_spikes, 0);
 
-    for (int i = 0; i < fwd.n_spikes; ++i) fwd.errors[i] = 1.0;
+    const auto errs = make_post_errors(fwd, 1.0);
 
-    BackwardOutput result = eventprop_backward_spikes(input, fwd);
+    BackwardOutput result = eventprop_backward_spikes(input, fwd, errs.data());
     EXPECT_EQ(result.error_no, EVENTPROP_OK);
 
     // Row 1 was never a source → its gradient should be zero
@@ -202,15 +209,15 @@ TEST(BackwardSpikes, SpikeErrorsDependOnWeights) {
 
     auto input1 = make_input(w1, 1, 1, times, sources);
     SpikeOutput fwd1 = eventprop_compute_spikes(input1);
-    for (int i = 0; i < fwd1.n_spikes; ++i) fwd1.errors[i] = 1.0;
+    const auto errs1 = make_post_errors(fwd1, 1.0);
 
     std::vector<double> w2 = {10.0};   // double the weight
     auto input2 = make_input(w2, 1, 1, times, sources);
     SpikeOutput fwd2 = eventprop_compute_spikes(input2);
-    for (int i = 0; i < fwd2.n_spikes; ++i) fwd2.errors[i] = 1.0;
+    const auto errs2 = make_post_errors(fwd2, 1.0);
 
-    BackwardOutput r1 = eventprop_backward_spikes(input1, fwd1);
-    BackwardOutput r2 = eventprop_backward_spikes(input2, fwd2);
+    BackwardOutput r1 = eventprop_backward_spikes(input1, fwd1, errs1.data());
+    BackwardOutput r2 = eventprop_backward_spikes(input2, fwd2, errs2.data());
 
     EXPECT_EQ(r1.error_no, EVENTPROP_OK);
     EXPECT_EQ(r2.error_no, EVENTPROP_OK);
@@ -242,12 +249,12 @@ TEST(BackwardSpikes, MultiplePostSpikesSameNeuron) {
     // With strong weight and multiple inputs, should fire at least twice.
     EXPECT_GT(fwd.n_spikes, 1);
 
+    const auto errs = make_post_errors(fwd, 1.0);
     for (int i = 0; i < fwd.n_spikes; ++i) {
         EXPECT_EQ(fwd.sources[i], 0);   // all from same post-neuron
-        fwd.errors[i] = 1.0;
     }
 
-    BackwardOutput result = eventprop_backward_spikes(input, fwd);
+    BackwardOutput result = eventprop_backward_spikes(input, fwd, errs.data());
     EXPECT_EQ(result.error_no, EVENTPROP_OK);
 
     // All outputs should be finite and nonzero
@@ -278,15 +285,50 @@ TEST(BackwardSpikes, MultiplePostNeuronsIndependent) {
     bool post0Fired = false;
     for (int i = 0; i < fwd.n_spikes; ++i) {
         if (fwd.sources[i] == 0) post0Fired = true;
-        fwd.errors[i] = 1.0;
     }
     EXPECT_TRUE(post0Fired);
 
-    BackwardOutput result = eventprop_backward_spikes(input, fwd);
+    const auto errs = make_post_errors(fwd, 1.0);
+
+    BackwardOutput result = eventprop_backward_spikes(input, fwd, errs.data());
     EXPECT_EQ(result.error_no, EVENTPROP_OK);
 
     // Gradient for the firing neuron should be nonzero
     EXPECT_NE(result.grad[0], 0.0);   // grad[source=0, post=0]
+
+    eventprop_free_spike_output(fwd);
+    eventprop_free_backward_output(result);
+}
+
+// ──────────────────────────────────────────────────────────────
+// The synaptic current is derived, not stored: the same spikes handed back
+// with different post-spike times must produce currents consistent with the
+// input spikes. This fixture pins the derived value against a hand copy of
+// the identity the sweep uses.
+// ──────────────────────────────────────────────────────────────
+
+TEST(BackwardSpikes, CurrentIsDerivedFromInputSpikes) {
+    std::vector<double> w = {10.0};
+    std::vector<double> times   = {0.01};
+    std::vector<int> sources    = {0};
+    auto input = make_input(w, 1, 1, times, sources);
+
+    SpikeOutput fwd = eventprop_compute_spikes(input);
+    EXPECT_EQ(fwd.error_no, EVENTPROP_OK);
+    EXPECT_GT(fwd.n_spikes, 0);
+
+    // Rebuild the current the sweep derives: the input spike at 0.01 is the
+    // only one at or before the post-spike time, so the current is
+    // w * exp(t_in / tau_syn) * exp(-t_post / tau_syn).
+    const double cur = (w[0] * std::exp(times[0] / kTauSyn)) *
+                       std::exp(-fwd.times[0] / kTauSyn);
+    EXPECT_GT(cur, kVTh);   // a fired spike is above threshold, so inv_ic is finite
+
+    const auto errs = make_post_errors(fwd, 1.0);
+    BackwardOutput result = eventprop_backward_spikes(input, fwd, errs.data());
+    EXPECT_EQ(result.error_no, EVENTPROP_OK);
+    EXPECT_FALSE(std::isnan(result.grad[0]));
+    EXPECT_FALSE(std::isinf(result.grad[0]));
 
     eventprop_free_spike_output(fwd);
     eventprop_free_backward_output(result);
@@ -303,7 +345,7 @@ TEST(BackwardSpikes, NegativeNpostReturnsError) {
     SpikeOutput spike{};
     spike.n_spikes = 0;
 
-    BackwardOutput result = eventprop_backward_spikes(input, spike);
+    BackwardOutput result = eventprop_backward_spikes(input, spike, nullptr);
     EXPECT_EQ(result.error_no, EVENTPROP_INVALID_DIMENSION);
 
     eventprop_free_backward_output(result);
@@ -316,7 +358,7 @@ TEST(BackwardSpikes, ZeroNpreReturnsError) {
     SpikeOutput spike{};
     spike.n_spikes = 0;
 
-    BackwardOutput result = eventprop_backward_spikes(input, spike);
+    BackwardOutput result = eventprop_backward_spikes(input, spike, nullptr);
     EXPECT_EQ(result.error_no, EVENTPROP_INVALID_DIMENSION);
 
     eventprop_free_backward_output(result);
@@ -329,7 +371,7 @@ TEST(BackwardSpikes, EqualTausReturnsError) {
     SpikeOutput spike{};
     spike.n_spikes = 0;
 
-    BackwardOutput result = eventprop_backward_spikes(input, spike);
+    BackwardOutput result = eventprop_backward_spikes(input, spike, nullptr);
     EXPECT_EQ(result.error_no, EVENTPROP_INVALID_TAU);
 
     eventprop_free_backward_output(result);
@@ -342,7 +384,7 @@ TEST(BackwardSpikes, NullTimesWithInputSpikesReturnsError) {
     SpikeOutput spike{};
     spike.n_spikes = 0;
 
-    BackwardOutput result = eventprop_backward_spikes(input, spike);
+    BackwardOutput result = eventprop_backward_spikes(input, spike, nullptr);
     EXPECT_EQ(result.error_no, EVENTPROP_NULL_POINTER);
 
     eventprop_free_backward_output(result);
@@ -358,7 +400,7 @@ TEST(BackwardSpikes, OutOfBoundsInputSourceReturnsError) {
     SpikeOutput spike{};
     spike.n_spikes = 0;
 
-    BackwardOutput result = eventprop_backward_spikes(input, spike);
+    BackwardOutput result = eventprop_backward_spikes(input, spike, nullptr);
     EXPECT_EQ(result.error_no, EVENTPROP_INVALID_SOURCE);
 
     eventprop_free_backward_output(result);
@@ -381,7 +423,8 @@ TEST(BackwardSpikes, OutOfBoundsOutputSourceReturnsError) {
     // Corrupt a source to be out of bounds (>= n_post)
     fwd.sources[0] = 5;   // n_post == 1
 
-    BackwardOutput result = eventprop_backward_spikes(input, fwd);
+    const auto errs = make_post_errors(fwd, 1.0);
+    BackwardOutput result = eventprop_backward_spikes(input, fwd, errs.data());
     EXPECT_EQ(result.error_no, EVENTPROP_INVALID_SOURCE);
 
     eventprop_free_spike_output(fwd);
@@ -389,34 +432,8 @@ TEST(BackwardSpikes, OutOfBoundsOutputSourceReturnsError) {
 }
 
 // ──────────────────────────────────────────────────────────────
-// Validation: current equals v_th → division by zero guard
-// ──────────────────────────────────────────────────────────────
-
-TEST(BackwardSpikes, CurrentEqualsVthReturnsError) {
-    std::vector<double> w = {10.0};
-    std::vector<double> times   = {0.01};
-    std::vector<int> sources    = {0};
-    auto input = make_input(w, 1, 1, times, sources);
-
-    SpikeOutput fwd = eventprop_compute_spikes(input);
-    EXPECT_EQ(fwd.error_no, EVENTPROP_OK);
-    EXPECT_GT(fwd.n_spikes, 0);
-
-    // Set current to exactly v_th → would cause div-by-zero in inv_ic
-    for (int i = 0; i < fwd.n_spikes; ++i) {
-        fwd.currents[i] = kVTh;   // == input.v_th
-        fwd.errors[i] = 1.0;
-    }
-
-    BackwardOutput result = eventprop_backward_spikes(input, fwd);
-    EXPECT_EQ(result.error_no, EVENTPROP_INVALID_CURRENT);
-
-    eventprop_free_spike_output(fwd);
-    eventprop_free_backward_output(result);
-}
-
-// ──────────────────────────────────────────────────────────────
-// Validation: NULL output spike arrays with n_spikes > 0
+// Validation: NULL output spike arrays with n_spikes > 0, including the
+// caller-owned derivative array
 // ──────────────────────────────────────────────────────────────
 
 TEST(BackwardSpikes, NullOutputSpikeArraysReturnError) {
@@ -429,33 +446,51 @@ TEST(BackwardSpikes, NullOutputSpikeArraysReturnError) {
     EXPECT_EQ(fwd.error_no, EVENTPROP_OK);
     EXPECT_GT(fwd.n_spikes, 0);
 
+    const auto errs = make_post_errors(fwd, 1.0);
+
     // Each array must be non-NULL when n_spikes > 0 — NULL → EVENTPROP_NULL_POINTER,
-    // not a segfault. (Regression: check was missing entirely.)
-    double* saved_times    = fwd.times;
-    int*    saved_sources  = fwd.sources;
-    double* saved_currents = fwd.currents;
-    double* saved_errors   = fwd.errors;
+    // not a segfault.
+    double* saved_times   = fwd.times;
+    int*    saved_sources = fwd.sources;
 
     fwd.times = nullptr;
-    EXPECT_EQ(eventprop_backward_spikes(input, fwd).error_no, EVENTPROP_NULL_POINTER);
+    EXPECT_EQ(eventprop_backward_spikes(input, fwd, errs.data()).error_no, EVENTPROP_NULL_POINTER);
     fwd.times = saved_times;
 
     fwd.sources = nullptr;
-    EXPECT_EQ(eventprop_backward_spikes(input, fwd).error_no, EVENTPROP_NULL_POINTER);
+    EXPECT_EQ(eventprop_backward_spikes(input, fwd, errs.data()).error_no, EVENTPROP_NULL_POINTER);
     fwd.sources = saved_sources;
 
-    fwd.currents = nullptr;
-    EXPECT_EQ(eventprop_backward_spikes(input, fwd).error_no, EVENTPROP_NULL_POINTER);
-    fwd.currents = saved_currents;
+    // The derivative array is the third thing that must not be NULL.
+    EXPECT_EQ(eventprop_backward_spikes(input, fwd, nullptr).error_no, EVENTPROP_NULL_POINTER);
 
-    fwd.errors = nullptr;
-    EXPECT_EQ(eventprop_backward_spikes(input, fwd).error_no, EVENTPROP_NULL_POINTER);
-    fwd.errors = saved_errors;
-
-    // Sanity: with all arrays restored the call succeeds again.
-    BackwardOutput ok = eventprop_backward_spikes(input, fwd);
+    // Sanity: with everything restored the call succeeds again.
+    BackwardOutput ok = eventprop_backward_spikes(input, fwd, errs.data());
     EXPECT_EQ(ok.error_no, EVENTPROP_OK);
     eventprop_free_backward_output(ok);
 
     eventprop_free_spike_output(fwd);
+}
+
+// ──────────────────────────────────────────────────────────────
+// Validation: post spike times must be non-decreasing too — the currents are
+// rebuilt with one forward cursor over the post spikes, so their order is part
+// of the contract now
+// ──────────────────────────────────────────────────────────────
+
+TEST(BackwardSpikes, UnsortedOutputSpikeTimesReturnsError) {
+    std::vector<double> w = {10.0};
+    std::vector<double> times   = {0.01};
+    std::vector<int> sources    = {0};
+    auto input = make_input(w, 1, 1, times, sources);
+
+    std::vector<double> post_times    = {0.02, 0.01};   // descending
+    std::vector<int> post_sources     = {0, 0};
+    std::vector<double> post_errors(2, 1.0);
+    SpikeOutput fwd{EVENTPROP_OK, 2, post_times.data(), post_sources.data()};
+
+    BackwardOutput result = eventprop_backward_spikes(input, fwd, post_errors.data());
+    EXPECT_EQ(result.error_no, EVENTPROP_UNSORTED_SPIKE_TIMES);
+    EXPECT_EQ(result.grad, nullptr);
+    EXPECT_EQ(result.spike_errors, nullptr);
 }

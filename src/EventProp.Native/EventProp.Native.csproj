@@ -9,6 +9,10 @@
     <AssemblyName>CW.EventProp.Native</AssemblyName>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="../EventProp.Abstractions/EventProp.Abstractions.csproj" />
+  </ItemGroup>
+
   <!-- Copy native library to output directory -->
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
     <None Include="..\EventProp.C\build\libeventprop_c_api.dylib">

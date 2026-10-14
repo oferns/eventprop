@@ -297,3 +297,38 @@ TEST(ComputeMaxima, OutOfBoundsSourceReturnsError) {
     EXPECT_EQ(maxima.values, nullptr);
     eventprop_free_maxima_output(maxima);
 }
+
+// ──────────────────────────────────────────────────────────────
+// v_th is not part of the maxima contract — the entry point must accept
+// any threshold, including the zero the language bindings pass when
+// their own API has no v_th parameter.
+// ──────────────────────────────────────────────────────────────
+
+TEST(ComputeMaxima, ZeroVthAcceptedAndIgnored) {
+    std::vector<double> w = {1.0, 2.0, 3.0, 4.0};
+    std::vector<double> times = {0.1, 0.2};
+    std::vector<int> sources  = {0, 1};
+
+    EventPropInput with_vth{w.data(), 2, 2, times.data(), sources.data(),
+                            (int)times.size(), kTauMem, kTauSyn, kVTh};
+    EventPropInput zero_vth{w.data(), 2, 2, times.data(), sources.data(),
+                            (int)times.size(), kTauMem, kTauSyn, 0.0};
+
+    MaximaOutput reference = eventprop_compute_maxima(with_vth);
+    MaximaOutput under_test = eventprop_compute_maxima(zero_vth);
+
+    EXPECT_EQ(reference.error_no, EVENTPROP_OK);
+    EXPECT_EQ(under_test.error_no, EVENTPROP_OK);
+
+    const auto same = [](double a, double b) {
+        if (std::isnan(a) && std::isnan(b)) return true;   // "no maximum found"
+        return a == b;
+    };
+    for (int i = 0; i < under_test.n_post; i++) {
+        EXPECT_TRUE(same(under_test.times[i], reference.times[i]));
+        EXPECT_TRUE(same(under_test.values[i], reference.values[i]));
+    }
+
+    eventprop_free_maxima_output(reference);
+    eventprop_free_maxima_output(under_test);
+}

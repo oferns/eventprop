@@ -21,7 +21,7 @@
 
 MaximaOutput eventprop_compute_maxima(const EventPropInput input)
 {
-    MaximaOutput result = (MaximaOutput){ .error_no = eventprop_validate_input(input) } ;
+    MaximaOutput result = (MaximaOutput){ .error_no = eventprop_validate_input_no_v_th(input) } ;
     SumsOutput sums     = {0};
 
     if (result.error_no != EVENTPROP_OK) {
@@ -131,7 +131,7 @@ BackwardOutput eventprop_backward_maxima(const EventPropInput input,
                                          const double* maxima_times,
                                          const double* maxima_errors) {
 
-    BackwardOutput result = (BackwardOutput) { .error_no = eventprop_validate_input(input) };
+    BackwardOutput result = (BackwardOutput) { .error_no = eventprop_validate_input_no_v_th(input) };
 
     if (result.error_no != EVENTPROP_OK) {
         goto cleanup_and_return;

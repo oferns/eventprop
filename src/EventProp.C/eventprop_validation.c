@@ -8,7 +8,17 @@
 #include <stddef.h>
 #include <stdlib.h>
 
-EventPropError eventprop_validate_input(const EventPropInput input)
+/**
+ * Structural validation — every field every entry point reads, except v_th.
+ *
+ * Use this for entry points that never read the threshold voltage: ComputeSums,
+ * ComputeMaxima and backward_maxima. Those algorithms are defined for any v_th,
+ * and the reference accepts v_th == 0 there, so demanding a positive one would
+ * reject a perfectly valid call. Entry points that do read v_th (the spike
+ * search, the adjoint sweep, the diagnostic traces) call eventprop_validate_input
+ * instead, which layers the threshold check on top of this one.
+ */
+EventPropError eventprop_validate_input_no_v_th(const EventPropInput input)
 {
     /* ── Dimension checks ─────────────────────────────────────── */
     if (input.n_pre <= 0 || input.n_post <= 0)
@@ -41,10 +51,6 @@ EventPropError eventprop_validate_input(const EventPropInput input)
         if (rel_diff < EVENTPROP_TAU_REL_DIFF_MIN)
             return EVENTPROP_TAU_TOO_CLOSE;
     }
-
-    /* ── Threshold voltage ────────────────────────────────────── */
-    if (!(input.v_th > 0.0))
-        return EVENTPROP_INVALID_VTH;
 
     /* ── Pointer checks ───────────────────────────────────────── */
     if (input.w == NULL)
@@ -85,6 +91,21 @@ EventPropError eventprop_validate_input(const EventPropInput input)
         if (max_time > 0.0 && max_time / min_tau >= EVENTPROP_EXP_OVERFLOW_THRESHOLD)
             return EVENTPROP_TIMES_TAU_MISMATCH;
     }
+
+    return EVENTPROP_OK;
+}
+
+/** ── Full validation ───────────────────────────────────────────────── */
+
+EventPropError eventprop_validate_input(const EventPropInput input)
+{
+    const EventPropError structural = eventprop_validate_input_no_v_th(input);
+    if (structural != EVENTPROP_OK)
+        return structural;
+
+    /* Negated so a NaN threshold is rejected (NaN <= 0 would pass). */
+    if (!(input.v_th > 0.0))
+        return EVENTPROP_INVALID_VTH;
 
     return EVENTPROP_OK;
 }
@@ -157,6 +178,8 @@ const char* eventprop_error_string(const int error_no)
         case EVENTPROP_BATCH_DIMENSION_MISMATCH: return "Sample gradient dimensions do not match requested n_pre/n_post";
         case EVENTPROP_UNSORTED_SPIKE_TIMES:    return "Spike times are not sorted in ascending order";
         case EVENTPROP_ALLOC_THREAD_SCRATCH:    return "Allocation failed: forward-pass thread scratch";
+        case EVENTPROP_ALLOC_BWD_CUR_SUM:       return "Allocation failed: backward-pass running current";
+        case EVENTPROP_ALLOC_BWD_CURRENTS:      return "Allocation failed: backward-pass post-spike currents";
         default:                                return "Unknown error";
     }
 }

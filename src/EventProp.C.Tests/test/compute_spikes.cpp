@@ -233,3 +233,38 @@ TEST(ComputeSpikes, OutOfBoundsSourcePropagatesError) {
     EXPECT_EQ(spikes.n_spikes, 0);
     eventprop_free_spike_output(spikes);
 }
+
+// ──────────────────────────────────────────────────────────────
+// Input spike times must be non-decreasing.
+//
+// The prefix sums are built in array order and then indexed by position as if
+// by time (sum0[k][nrn] = "all input spikes up to times[k]"), so an unsorted
+// array is not a different-but-valid input — it is a different network. The
+// Eigen reference has the same requirement and does not check, so it returns
+// plausible-looking garbage; the C library reports it instead.
+// ──────────────────────────────────────────────────────────────
+
+TEST(ComputeSpikes, UnsortedTimesRejected) {
+    std::vector<double> w = {1.0, 2.0, 3.0, 4.0};
+    std::vector<double> times = {0.05, 0.02};   // descending
+    std::vector<int> sources  = {0, 1};
+    EventPropInput input{w.data(), 2, 2, times.data(), sources.data(),
+                         (int)times.size(), kTauMem, kTauSyn, kVTh};
+
+    SpikeOutput spikes = eventprop_compute_spikes(input);
+    EXPECT_EQ(spikes.error_no, EVENTPROP_UNSORTED_SPIKE_TIMES);
+    EXPECT_EQ(spikes.n_spikes, 0);
+    eventprop_free_spike_output(spikes);
+}
+
+TEST(ComputeSpikes, EqualTimesAccepted) {
+    std::vector<double> w = {1.0, 2.0, 3.0, 4.0};
+    std::vector<double> times = {0.05, 0.05, 0.08};   // non-decreasing is valid
+    std::vector<int> sources  = {0, 1, 0};
+    EventPropInput input{w.data(), 2, 2, times.data(), sources.data(),
+                         (int)times.size(), kTauMem, kTauSyn, kVTh};
+
+    SpikeOutput spikes = eventprop_compute_spikes(input);
+    EXPECT_EQ(spikes.error_no, EVENTPROP_OK);
+    eventprop_free_spike_output(spikes);
+}

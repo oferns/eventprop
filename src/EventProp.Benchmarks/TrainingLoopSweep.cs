@@ -45,13 +45,11 @@ public abstract class Bench_TrainingLoopSweep_Base : BenchBase
         int nPost = PostSpikes.NSpikes;
         PostTimesNative = new double[nPost];
         PostSourcesNative = new int[nPost];
-        PostCurrentsNative = new double[nPost];
         PostErrorsNative = new double[nPost];
         for (int i = 0; i < nPost; i++)
         {
             PostTimesNative[i] = PostSpikes.Times[i];
             PostSourcesNative[i] = PostSpikes.Sources[i];
-            PostCurrentsNative[i] = PostSpikes.Currents[i];
             PostErrorsNative[i] = 1.0;
         }
     }
@@ -76,7 +74,7 @@ public abstract class Bench_TrainingLoopSweep_Base : BenchBase
         using var output = CApi.Api.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn);
         int nOut = output.NSpikes;
         using var backwardOutput = CApi.Api.BackwardSpikes(Times, Sources,
-            output.Times, output.Sources, output.Currents, PostErrorsNative, nOut, W, NPre, NPost, VTh, TauMem, TauSyn);
+            output.Times, output.Sources, PostErrorsNative, nOut, W, NPre, NPost, VTh, TauMem, TauSyn);
     }
 }
 

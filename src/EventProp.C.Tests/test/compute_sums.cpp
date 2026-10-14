@@ -238,3 +238,35 @@ TEST(ComputeSums, OutOfBoundsSourceReturnsError) {
     EXPECT_EQ(sums.sum1, nullptr);
     eventprop_free_sums_output(sums);
 }
+
+// ──────────────────────────────────────────────────────────────
+// v_th is not part of the sums contract — the entry point must accept
+// any threshold, including the zero the language bindings pass when
+// their own API has no v_th parameter.
+// ──────────────────────────────────────────────────────────────
+
+TEST(ComputeSums, ZeroVthAcceptedAndIgnored) {
+    std::vector<double> w = {1.0, 2.0, 3.0, 4.0};
+    std::vector<double> times = {0.1, 0.2};
+    std::vector<int> sources  = {0, 1};
+
+    EventPropInput with_vth{w.data(), 2, 2, times.data(), sources.data(),
+                            (int)times.size(), kTauMem, kTauSyn, kVTh};
+    EventPropInput zero_vth{w.data(), 2, 2, times.data(), sources.data(),
+                            (int)times.size(), kTauMem, kTauSyn, 0.0};
+
+    SumsOutput reference = eventprop_compute_sums(with_vth);
+    SumsOutput under_test = eventprop_compute_sums(zero_vth);
+
+    EXPECT_EQ(reference.error_no, EVENTPROP_OK);
+    EXPECT_EQ(under_test.error_no, EVENTPROP_OK);
+
+    const size_t n = (times.size() + 1) * 2;
+    for (size_t i = 0; i < n; i++) {
+        EXPECT_DOUBLE_EQ(under_test.sum0[i], reference.sum0[i]);
+        EXPECT_DOUBLE_EQ(under_test.sum1[i], reference.sum1[i]);
+    }
+
+    eventprop_free_sums_output(reference);
+    eventprop_free_sums_output(under_test);
+}

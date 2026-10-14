@@ -31,12 +31,12 @@ public sealed class ScratchBuffers : IDisposable
     double[] _outputSpikeCurrents = [];
     double[] _expInputMem = [];
     double[] _expInputSyn = [];
-    double[] _postSpikeTimes = [];
-    double[] _postSpikeCurrents = [];
-    double[] _postSpikeExpSt = []; // Precomputed exp(spikeTime * tauMemInv) for factorized ComputeV
+    // One growable row per post-synaptic neuron. A neuron can emit any number of
+    // spikes — there is no bound expressible in terms of the input spike count —
+    // so rows grow on demand instead of living at a fixed stride in one slab.
+    PostSpikeRow[] _postSpikeRows = [];
     int _maxSpikesPerNeuron;
     int[] _spikeCountPerNeuron = [];
-    int[] _spikeOffsetPerNeuron = [];
     bool _disposed;
 
     public double[] Sum0 => _sum0;
@@ -59,12 +59,11 @@ public sealed class ScratchBuffers : IDisposable
     public double[] OutputSpikeCurrents => _outputSpikeCurrents;
     public double[] ExpInputMem => _expInputMem;
     public double[] ExpInputSyn => _expInputSyn;
-    public double[] PostSpikeTimes => _postSpikeTimes;
-    public double[] PostSpikeCurrents => _postSpikeCurrents;
-    public double[] PostSpikeExpSt => _postSpikeExpSt;
+    /// <summary>Scratch row holding one post-synaptic neuron's spikes (times, currents, exp(st/tau_mem)).</summary>
+    public PostSpikeRow PostSpikeRowAt(int targetNrn) => _postSpikeRows[targetNrn];
+    /// <summary>Initial per-row capacity hint. Rows grow past this on demand; it is not a bound.</summary>
     public int MaxSpikesPerNeuron => _maxSpikesPerNeuron;
     public int[] SpikeCountPerNeuron => _spikeCountPerNeuron;
-    public int[] SpikeOffsetPerNeuron => _spikeOffsetPerNeuron;
 
     // ── ArrayPool helpers (operate on backing fields) ───────────
 
@@ -141,13 +140,22 @@ public sealed class ScratchBuffers : IDisposable
 
     internal void GrowPostSpikeBuffers(int nNeurons, int estimatedPerNeuron)
     {
-        int size = estimatedPerNeuron * nNeurons;
-        if (_postSpikeTimes.Length < size) ReplaceDouble(ref _postSpikeTimes, size);
-        if (_postSpikeCurrents.Length < size) ReplaceDouble(ref _postSpikeCurrents, size);
-        if (_postSpikeExpSt.Length < size) ReplaceDouble(ref _postSpikeExpSt, size);
+        int initialCap = Math.Max(estimatedPerNeuron, 1);
+
+        if (_postSpikeRows.Length < nNeurons)
+        {
+            var rows = new PostSpikeRow[nNeurons];
+            for (int i = 0; i < _postSpikeRows.Length; i++) rows[i] = _postSpikeRows[i];
+            for (int i = _postSpikeRows.Length; i < nNeurons; i++) rows[i] = new PostSpikeRow(initialCap);
+            _postSpikeRows = rows;
+        }
+        else
+        {
+            for (int i = 0; i < nNeurons; i++) _postSpikeRows[i].Grow(0, initialCap);
+        }
+
         if (_spikeCountPerNeuron.Length < nNeurons) ReplaceInt(ref _spikeCountPerNeuron, nNeurons);
-        if (_spikeOffsetPerNeuron.Length < nNeurons + 1) ReplaceInt(ref _spikeOffsetPerNeuron, nNeurons + 1);
-        _maxSpikesPerNeuron = estimatedPerNeuron;
+        _maxSpikesPerNeuron = initialCap;
     }
 
     /// <summary>
@@ -172,8 +180,6 @@ public sealed class ScratchBuffers : IDisposable
         _lambdaV.AsSpan().Clear();
         _lambdaI.AsSpan().Clear();
         _spikeErrors.AsSpan().Clear();
-        _postSpikeTimes.AsSpan().Clear();
-        _postSpikeCurrents.AsSpan().Clear();
         _voltageTrace.AsSpan().Clear();
         _lambdaITrace.AsSpan().Clear();
         _lambdaIJumpsMagnitude.AsSpan().Clear();
@@ -196,16 +202,12 @@ public sealed class ScratchBuffers : IDisposable
         ReturnDouble(ref _spikeErrors);
         ReturnDouble(ref _expInputMem);
         ReturnDouble(ref _expInputSyn);
-        ReturnDouble(ref _postSpikeTimes);
-        ReturnDouble(ref _postSpikeCurrents);
-        ReturnDouble(ref _postSpikeExpSt);
         ReturnDouble(ref _lambdaIJumpsMagnitude);
         ReturnDouble(ref _lambdaIJumpsTimeOffset);
         ReturnDouble(ref _outputSpikeTimes);
         ReturnDouble(ref _outputSpikeCurrents);
 
         ReturnInt(ref _spikeCountPerNeuron);
-        ReturnInt(ref _spikeOffsetPerNeuron);
         ReturnInt(ref _lambdaIJumpsStart);
         ReturnInt(ref _lambdaIJumpsEnd);
         ReturnInt(ref _lambdaIJumpsNeuronCap);
@@ -213,5 +215,80 @@ public sealed class ScratchBuffers : IDisposable
 
         _mergedSpikes = [];
         _spikeEntries = [];
+
+        foreach (var row in _postSpikeRows) row.Dispose();
+        _postSpikeRows = [];
+    }
+}
+
+/// <summary>
+/// Growable scratch row holding one post-synaptic neuron's output spikes.
+/// Backs ScratchBuffers.PostSpikeRowAt. The forward pass writes one spike per
+/// threshold crossing, and a neuron may cross the threshold any number of times,
+/// so the row grows (x3) instead of overflowing a fixed-size region.
+/// </summary>
+public sealed class PostSpikeRow : IDisposable
+{
+    static readonly ArrayPool<double> D = ArrayPool<double>.Shared;
+
+    double[] _times = [];
+    double[] _currents = [];
+    double[] _expSt = [];
+    bool _disposed;
+
+    public double[] Times => _times;
+    public double[] Currents => _currents;
+    /// <summary>exp(times[s] / tau_mem), recomputed per interval for the factorized voltage model.</summary>
+    public double[] ExpSt => _expSt;
+    public int Capacity => _times.Length;
+
+    public PostSpikeRow(int initialCapacity)
+    {
+        int cap = Math.Max(initialCapacity, 1);
+        _times = D.Rent(cap);
+        _currents = D.Rent(cap);
+        _expSt = D.Rent(cap);
+    }
+
+    /// <summary>
+    /// Grow every array so the row holds at least <paramref name="minCapacity"/> spikes,
+    /// carrying over the <paramref name="liveCount"/> spikes already written.
+    /// The superseded arrays are deliberately not returned to the pool: the sweep caches
+    /// them in locals until it re-reads the row, so handing them over here could give the
+    /// same memory to another thread. Growth is logarithmic, so the abandoned arrays are
+    /// a handful per row and the garbage collector reclaims them.
+    /// </summary>
+    public void Grow(int liveCount, int minCapacity)
+    {
+        if (_times.Length >= minCapacity) return;
+
+        int cap = Math.Max(_times.Length * 3, minCapacity);
+
+        var newTimes = D.Rent(cap);
+        var newCurrents = D.Rent(cap);
+        var newExpSt = D.Rent(cap);
+
+        for (int i = 0; i < liveCount; i++)
+        {
+            newTimes[i] = _times[i];
+            newCurrents[i] = _currents[i];
+            newExpSt[i] = _expSt[i];
+        }
+
+        _times = newTimes;
+        _currents = newCurrents;
+        _expSt = newExpSt;
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        if (_times.Length > 0) D.Return(_times);
+        if (_currents.Length > 0) D.Return(_currents);
+        if (_expSt.Length > 0) D.Return(_expSt);
+        _times = [];
+        _currents = [];
+        _expSt = [];
     }
 }

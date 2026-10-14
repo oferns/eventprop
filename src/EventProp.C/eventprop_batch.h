@@ -128,8 +128,13 @@ SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, int bat
 
 /**
  * Batch backward pass (spike loss) — returns per-sample gradients.
+ * `post_spike_errors` is a borrowed array of length batch_size; entry b holds
+ *  the caller-owned loss derivatives for sample b, of length
+ *  spikes_batch.spikes[b].n_spikes.
  */
-BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs, SpikesBatch spikes_batch);
+BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs,
+                                               SpikesBatch spikes_batch,
+                                               const double* const* post_spike_errors);
 
 /**
  * Batch forward pass — compute membrane potential maxima for each sample.
@@ -159,8 +164,12 @@ GradientOutput eventprop_accumulate_gradients(BackwardsBatch batch, int n_pre, i
  *
  * Parallel backward pass → sequential gradient sum → free per-sample .grad buffers.
  * Returns combined result with summed gradient and preserved spike errors.
+ * `post_spike_errors` is a borrowed array of per-sample derivative arrays (see
+ *  eventprop_backward_spikes_batch).
  */
-AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(const EventPropInput* inputs, SpikesBatch spikes_batch);
+AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(const EventPropInput* inputs,
+                                                                     SpikesBatch spikes_batch,
+                                                                     const double* const* post_spike_errors);
 
 /**
  * Batch backward (maxima loss) + accumulate gradients in one call.

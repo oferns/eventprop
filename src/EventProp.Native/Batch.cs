@@ -23,6 +23,9 @@ public static unsafe partial class Batch
         public bool HasErrors => hasErrors != 0;
         public IntPtr Spikes => spikes;
 
+        /// <summary>Borrow sample <paramref name="index"/>'s spike output (owned by the batch — do not Dispose).</summary>
+        public Api.SpikeOutput this[int index] => SpikeAt(this, index);
+
         public void Dispose() => eventprop_free_spikes_batch(this);
     }
 
@@ -138,10 +141,10 @@ public static unsafe partial class Batch
     public static partial SpikesBatch eventprop_compute_spikes_batch(IntPtr inputs, int batchSize);
 
     [LibraryImport(Lib)]
-    public static partial BackwardsBatch eventprop_backward_spikes_batch(IntPtr inputs, SpikesBatch spikesBatch);
+    public static partial BackwardsBatch eventprop_backward_spikes_batch(IntPtr inputs, SpikesBatch spikesBatch, IntPtr postSpikeErrors);
 
     [LibraryImport(Lib)]
-    public static partial AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(IntPtr inputs, SpikesBatch spikesBatch);
+    public static partial AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(IntPtr inputs, SpikesBatch spikesBatch, IntPtr postSpikeErrors);
 
     [LibraryImport(Lib)]
     public static partial MaximaBatch eventprop_compute_maxima_batch(IntPtr inputs, int batchSize);

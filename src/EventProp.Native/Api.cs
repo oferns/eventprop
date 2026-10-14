@@ -119,19 +119,14 @@ public static unsafe partial class Api
         internal readonly int nSpikes;
         internal readonly IntPtr times;       // double* (malloc'd)
         internal readonly IntPtr sources;     // int* (malloc'd)
-        internal readonly IntPtr currents;    // double* (malloc'd)
-        internal readonly IntPtr errors;      // double* (malloc'd, written by caller before backward)
 
         /// <summary>Construct from borrowed pointers (for wrapper methods). Caller must keep arrays alive during the call.</summary>
-        internal SpikeOutput(EventPropError errorNo, int nSpikes, IntPtr times, IntPtr sources,
-            IntPtr currents, IntPtr errors)
+        internal SpikeOutput(EventPropError errorNo, int nSpikes, IntPtr times, IntPtr sources)
         {
             this.errorNo = errorNo;
             this.nSpikes = nSpikes;
             this.times = times;
             this.sources = sources;
-            this.currents = currents;
-            this.errors = errors;
         }
 
         public EventPropError ErrorNo => errorNo;
@@ -141,10 +136,6 @@ public static unsafe partial class Api
         public Span<double> Times => NS<double>(times, nSpikes);
         /// <summary>Zero-copy span over spike sources.</summary>
         public Span<int> Sources => NS<int>(sources, nSpikes);
-        /// <summary>Zero-copy span over synaptic currents at spike times.</summary>
-        public Span<double> Currents => NS<double>(currents, nSpikes);
-        /// <summary>Zero-copy mutable span for writing error signals before backward pass.</summary>
-        public Span<double> Errors => NS<double>(errors, nSpikes);
 
         public void Dispose() => eventprop_free_spike_output(this);
     }
@@ -219,7 +210,7 @@ public static unsafe partial class Api
     public static partial MaximaOutput eventprop_compute_maxima(EventPropInput input);
 
     [LibraryImport(Lib)]
-    public static partial BackwardOutput eventprop_backward_spikes(EventPropInput input, SpikeOutput spike);
+    public static partial BackwardOutput eventprop_backward_spikes(EventPropInput input, SpikeOutput spike, IntPtr postSpikeErrors);
 
     [LibraryImport(Lib)]
     public static partial BackwardOutput eventprop_backward_maxima(EventPropInput input, IntPtr maximaTimes, IntPtr maximaErrors);
@@ -285,7 +276,7 @@ public static unsafe partial class Api
     public static BackwardOutput BackwardSpikes(
         ReadOnlySpan<double> inputTimes, ReadOnlySpan<int> inputSources,
         ReadOnlySpan<double> postTimes, ReadOnlySpan<int> postSources,
-        ReadOnlySpan<double> postCurrents, ReadOnlySpan<double> postErrors,
+        ReadOnlySpan<double> postErrors,
         int nPostSpikes,
         ReadOnlySpan<double> w, int nPre, int nPost,
         double vTh, double tauMem, double tauSyn)
@@ -295,12 +286,11 @@ public static unsafe partial class Api
         // Pin post-spike arrays and construct SpikeOutput with borrowed pointers
         fixed (double* pt = postTimes)
         fixed (int* ps = postSources)
-        fixed (double* pc = postCurrents)
         fixed (double* pe = postErrors)
         {
             var spike = new SpikeOutput(EventPropError.Ok, nPostSpikes,
-                (IntPtr)pt, (IntPtr)ps, (IntPtr)pc, (IntPtr)pe);
-            return eventprop_backward_spikes(input, spike);
+                (IntPtr)pt, (IntPtr)ps);
+            return eventprop_backward_spikes(input, spike, (IntPtr)pe);
         }
     }
 

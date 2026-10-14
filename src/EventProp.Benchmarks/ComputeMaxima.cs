@@ -170,22 +170,10 @@ public abstract class Bench_ComputeMaxima_Burst_Base : BenchBase
         Times = new double[NSpikes];
         Sources = new int[NSpikes];
 
-        // Burst pattern: clusters of 5 spikes with 10ms gaps
-        int spike_idx = 0;
-        for (int nrn = 0; nrn < NPre && spike_idx < NSpikes; nrn++)
-        {
-            double burst_start = 0.05 + nrn * 0.1;
-            for (int b = 0; burst_start < 1.0 && spike_idx < NSpikes; b++)
-            {
-                for (int s = 0; s < 5 && spike_idx < NSpikes; s++)
-                {
-                    Times[spike_idx] = burst_start + s * 0.002;
-                    Sources[spike_idx] = nrn;
-                    spike_idx++;
-                }
-                burst_start += 0.12;
-            }
-        }
+        // Canonical burst pattern — see SpikePatterns for the contract.
+        // The previous inline version used a fixed 0.1 s per-neuron offset, which
+        // saturates at ~10 bursting neurons and left the remaining slots at 0.0.
+        SpikePatterns.Burst(NPre, NSpikes, Times, Sources, rng);
 
         Buffers = new ScratchBuffers();
         Buffers.EnsureCapacity(NPost, NPre, NSpikes);

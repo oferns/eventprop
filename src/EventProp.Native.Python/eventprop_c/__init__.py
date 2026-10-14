@@ -11,7 +11,7 @@ Example:
     
     # Zero-copy access to spike times (returns numpy arrays referencing C memory)
     for i in range(batch_size):
-        times_i, sources_i, currents_i = output[i]
+        times_i, sources_i = output[i]
 """
 
 from ._native import (

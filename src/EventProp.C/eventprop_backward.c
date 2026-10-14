@@ -29,13 +29,18 @@ static void free_backward_spikes_ctx(const BackwardSpikesCtx* ctx) {
     free(ctx->all_errors);
     free(ctx->lambda_v);
     free(ctx->lambda_i);
+    free(ctx->cur_sum);
+    free(ctx->currents);
     free(ctx->jump_time);
     free(ctx->jump_mag);
     free(ctx->jump_count);
     free(ctx->jump_cap);
 }
 
-BackwardOutput eventprop_backward_spikes(const EventPropInput input, const SpikeOutput spike){
+BackwardOutput eventprop_backward_spikes(const EventPropInput input,
+                                         const SpikeOutput spike,
+                                         const double* post_spike_errors)
+{
 
     BackwardOutput result = (BackwardOutput){ 
         .error_no = eventprop_validate_input(input),
@@ -55,9 +60,9 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
         goto cleanup_and_return;
     }
 
-    /* Validate output spike arrays */
+    /* Validate output spike arrays plus the caller-owned error array */
     if (spike.n_spikes > 0 &&
-        (!spike.times || !spike.sources || !spike.currents || !spike.errors)) {
+        (!spike.times || !spike.sources || !post_spike_errors)) {
         result.error_no = EVENTPROP_NULL_POINTER;
         goto cleanup_and_return;
     }
@@ -70,18 +75,16 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
         goto cleanup_and_return;
     }
 
-    /* Validate output spike source bounds: post-sources index post-neurons */
+    /* Validate output spike sources (they index post-neurons) and their order:
+     *  the currents below are rebuilt with one forward cursor over the post
+     *  spikes, so they must be non-decreasing like every other spike list. */
     for (int i = 0; i < spike.n_spikes; ++i) {
         if (spike.sources[i] < 0 || spike.sources[i] >= input.n_post) {
             result.error_no     = EVENTPROP_INVALID_SOURCE;
             goto cleanup_and_return;
         }
-    }
-
-    /* Validate currents: must not equal v_th (division by zero in inv_ic) */
-    for (int i = 0; i < spike.n_spikes; ++i) {
-        if (spike.currents[i] == input.v_th) {
-            result.error_no     = EVENTPROP_INVALID_CURRENT;
+        if (i > 0 && spike.times[i] < spike.times[i - 1]) {
+            result.error_no     = EVENTPROP_UNSORTED_SPIKE_TIMES;
             goto cleanup_and_return;
         }
     }
@@ -132,7 +135,7 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
     }
 
     for (int i = 0; i < spike.n_spikes; i++) {
-        ctx.all_errors[input.n_spikes + i] = spike.errors[i];
+        ctx.all_errors[input.n_spikes + i] = post_spike_errors[i];
     }
 
     /* ── Allocate intermediate buffers (sequential checks) ─────────────── */
@@ -146,6 +149,21 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
     ctx.lambda_i = eventprop_try_malloc((size_t)input.n_post * sizeof(double));
     if (!ctx.lambda_i) {
         result.error_no     = EVENTPROP_ALLOC_BWD_LAMBDA_I;
+        goto cleanup_and_return;
+    }
+
+    /* Prefix row for the currents: one n_post row of running synaptic sums. */
+    ctx.cur_sum = eventprop_try_calloc((size_t)input.n_post, sizeof(double));
+    if (!ctx.cur_sum) {
+        result.error_no     = EVENTPROP_ALLOC_BWD_CUR_SUM;
+        goto cleanup_and_return;
+    }
+
+    /* The current at each post spike, rebuilt here rather than carried in
+     *  SpikeOutput — it is never independent of the input spikes and the time. */
+    ctx.currents = eventprop_try_calloc((size_t)spike.n_spikes, sizeof(double));
+    if (!ctx.currents) {
+        result.error_no     = EVENTPROP_ALLOC_BWD_CURRENTS;
         goto cleanup_and_return;
     }
 
@@ -195,6 +213,31 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
     MutableMatrixView grad = mv_mut(result.grad, input.n_pre, input.n_post);
     MatrixView w           = mv(input.w, input.n_pre, input.n_post);
 
+    /* ── Post-synaptic currents ──────────────────────────────────────────── */
+    /* The current at a post-spike is exactly sum0[k][nrn] * exp(-t / tau_syn), */
+    /* k the number of input spikes at or before t, so the array the forward */
+    /* pass used to hand over is redundant: one cursor over both spike lists */
+    /* rebuilds it for n_post bytes of scratch plus one double per output spike. */
+    /* Accumulated ascending and scaled once at the end, which is how the */
+    /* reference gets it. The sweep itself runs time-reversed, and a row kept */
+    /* rebased at the sweep time would look tempting — every term stays under */
+    /* its weight — but dropping a spike that dominates the row takes six of */
+    /* the row's digits away at the benchmark sizes, and the gradient then */
+    /* drifts 1e-5 relative. Ascending is the only stable direction. */
+    {
+        double* row = ctx.cur_sum;
+        double* currents = ctx.currents;
+        int k = 0;
+        for (int i = 0; i < spike.n_spikes; i++) {
+            while (k < input.n_spikes && input.times[k] <= spike.times[i]) {
+                fma_row_simd(row, row, mv_row(w, input.sources[k]),
+                             exp(input.times[k] / input.tau_syn), input.n_post);
+                k++;
+            }
+            currents[i] = row[spike.sources[i]] * exp(-spike.times[i] / input.tau_syn);
+        }
+    }
+
     const double largest_time = ctx.merged[0].time;
     double previous_t = largest_time;
     const double k_bwd = input.tau_mem / (input.tau_mem - input.tau_syn);
@@ -237,7 +280,13 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input, const Spike
             /* Write spike error to alloc buffer */
             result.spike_errors[spike_idx] = ctx.all_errors[spike_idx];
         } else {
-            double current = spike.currents[spike_idx];
+            /* The current was rebuilt above, so the only check left here is */
+            /* the one the old validation loop used to make up front. */
+            const double current = ctx.currents[spike_idx];
+            if (current == input.v_th) {   /* division by zero in inv_ic */
+                result.error_no = EVENTPROP_INVALID_CURRENT;
+                goto cleanup_and_return;
+            }
             double inv_ic = 1.0 / (current - input.v_th);
             int nrn = spike_source;  /* post-spike: spike_source is the post-synaptic neuron */
             double post_err = ctx.all_errors[input.n_spikes + spike_idx];

@@ -154,7 +154,7 @@ public class NativeVsManagedEdgeTests
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
         EventPropMath.BackwardSpikes(w, inputTimes, sources, new SpikesData(postTimes, postSourcesArr, postCurrents) { Errors = postErrors }, nPost, 1.0, 0.02, 0.005, csGradient, buffers);
 
-        using var nativeOutput = Native.Api.BackwardSpikes(inputTimes, sources, postTimes, postSourcesArr, postCurrents, postErrors, 1, w, nPre, nPost, 1.0, 0.02, 0.005);
+        using var nativeOutput = Native.Api.BackwardSpikes(inputTimes, sources, postTimes, postSourcesArr, postErrors, 1, w, nPre, nPost, 1.0, 0.02, 0.005);
 
         for (int i = 0; i < nPre * nPost; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeOutput.Gradient[i], Tolerance);
@@ -180,10 +180,49 @@ public class NativeVsManagedEdgeTests
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
         EventPropMath.BackwardSpikes(w, inputTimes, sources, csSpikes, nPost, 1.0, 0.02, 0.005, csGradient, buffers);
 
-        using var nativeOutput = Native.Api.BackwardSpikes(inputTimes, sources, csSpikes.Times[..csSpikes.NSpikes], csSpikes.Sources[..csSpikes.NSpikes], csSpikes.Currents[..csSpikes.NSpikes], csSpikes.Errors[..csSpikes.NSpikes], csSpikes.NSpikes, w, nPre, nPost, 1.0, 0.02, 0.005);
+        using var nativeOutput = Native.Api.BackwardSpikes(inputTimes, sources, csSpikes.Times[..csSpikes.NSpikes], csSpikes.Sources[..csSpikes.NSpikes], csSpikes.Errors[..csSpikes.NSpikes], csSpikes.NSpikes, w, nPre, nPost, 1.0, 0.02, 0.005);
 
         for (int i = 0; i < nPre * nPost; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeOutput.Gradient[i], Tolerance);
+    }
+
+    // ========================================================================
+    // Forward pass — per-neuron spike rows must grow, never spill
+    // ========================================================================
+
+    [Test]
+    public void ComputeSpikes_PerNeuronSpikeBurst_MatchesNativeSpikeSet()
+    {
+        // A post-synaptic neuron can cross the threshold more times than any bound
+        // derived from the input spike count. The old fixed per-neuron stride spilled
+        // the surplus into the neighbour's region, which made the spike count
+        // nondeterministic (21/26/27) against the C reference's 31.
+        int nPre = 2, nPost = 3;
+        double[] w = new double[nPre * nPost];
+        for (int i = 0; i < w.Length; i++) w[i] = 15.0 + i;
+
+        double[] times = [0.01, 0.02, 0.03];
+        int[] sources = [0, 1, 0];
+
+        using var buffers = new ScratchBuffers();
+        buffers.InitPostSpikeBuffers(nPost, 4);
+
+        var csResult = EventPropMath.ComputeSpikes(w, times, sources, nPost, 1.0, 0.02, 0.005, buffers);
+
+        using var nativeOutput = Native.Api.ComputeSpikes(w, nPre, nPost, times, sources, 1.0, 0.02, 0.005);
+
+        SyncAssert.That(csResult.NSpikes).IsEqualTo(31);
+        SyncAssert.That(csResult.NSpikes).IsEqualTo(nativeOutput.NSpikes);
+
+        // Every neuron emits more spikes than the initial row capacity, so each row grew.
+        for (int n = 0; n < nPost; n++)
+            SyncAssert.That(buffers.SpikeCountPerNeuron[n]).IsGreaterThan(4);
+
+        for (int i = 0; i < csResult.NSpikes; i++)
+        {
+            SyncAssert.That(csResult.Times[i]).IsCloseTo(nativeOutput.Times[i], Tolerance);
+            SyncAssert.That(csResult.Sources[i]).IsEqualTo(nativeOutput.Sources[i]);
+        }
     }
 
     [Test]
@@ -205,7 +244,7 @@ public class NativeVsManagedEdgeTests
         var csGradient = new double[nPre * nPost]; Array.Fill(csGradient, 0.0);
         EventPropMath.BackwardSpikes(w, inputTimes, sources, csSpikes, nPost, 1.0, 0.02, 0.005, csGradient, buffers);
 
-        using var nativeOutput = Native.Api.BackwardSpikes(inputTimes, sources, csSpikes.Times[..csSpikes.NSpikes], csSpikes.Sources[..csSpikes.NSpikes], csSpikes.Currents[..csSpikes.NSpikes], csSpikes.Errors[..csSpikes.NSpikes], csSpikes.NSpikes, w, nPre, nPost, 1.0, 0.02, 0.005);
+        using var nativeOutput = Native.Api.BackwardSpikes(inputTimes, sources, csSpikes.Times[..csSpikes.NSpikes], csSpikes.Sources[..csSpikes.NSpikes], csSpikes.Errors[..csSpikes.NSpikes], csSpikes.NSpikes, w, nPre, nPost, 1.0, 0.02, 0.005);
 
         for (int i = 0; i < nPre * nPost; i++)
             SyncAssert.That(csGradient[i]).IsCloseTo(nativeOutput.Gradient[i], Tolerance);

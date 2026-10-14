@@ -29,6 +29,21 @@ inline EventPropInput make_input(const std::vector<double>& w, int n_pre, int n_
     };
 }
 
+// Post-spike derivatives are caller-owned: one array per sample, each of
+// length spikes.spikes[b].n_spikes.
+static std::vector<std::vector<double>> make_post_errors(const SpikesBatch& spikes, int size, double value) {
+    std::vector<std::vector<double>> out((size_t)size);
+    for (int b = 0; b < size; ++b)
+        out[(size_t)b].assign((size_t)spikes.spikes[b].n_spikes, value);
+    return out;
+}
+
+static std::vector<const double*> error_ptrs(const std::vector<std::vector<double>>& errs) {
+    std::vector<const double*> p(errs.size());
+    for (size_t i = 0; i < errs.size(); ++i) p[i] = errs[i].data();
+    return p;
+}
+
 // Build a batch of identical valid inputs.
 typedef struct {
     EventPropInput* inputs;   // malloc'd, length = size
@@ -185,7 +200,9 @@ TEST(BatchBackwardSpikes, ValidBatchHasNoErrors) {
     SpikesBatch spikes = eventprop_compute_spikes_batch(data.inputs, 3);
     EXPECT_EQ(spikes.has_errors, 0);
 
-    BackwardsBatch batch = eventprop_backward_spikes_batch(data.inputs, spikes);
+    const auto errs = make_post_errors(spikes, 3, 1.0);
+    const auto ptrs = error_ptrs(errs);
+    BackwardsBatch batch = eventprop_backward_spikes_batch(data.inputs, spikes, ptrs.data());
 
     EXPECT_EQ(batch.has_errors, 0);
     for (int i = 0; i < 3; ++i) {
@@ -209,7 +226,9 @@ TEST(BatchBackwardSpikes, OneBadSampleSetsHasErrors) {
     SpikesBatch spikes = eventprop_compute_spikes_batch(inputs, 2);
     EXPECT_EQ(spikes.has_errors, 1);
 
-    BackwardsBatch batch = eventprop_backward_spikes_batch(inputs, spikes);
+    const auto errs = make_post_errors(spikes, 2, 1.0);
+    const auto ptrs = error_ptrs(errs);
+    BackwardsBatch batch = eventprop_backward_spikes_batch(inputs, spikes, ptrs.data());
 
     EXPECT_EQ(batch.has_errors, 1);
     EXPECT_EQ(batch.outputs[0].error_no, EVENTPROP_OK);
@@ -445,7 +464,9 @@ TEST(BatchAccumulateBackwardSpikes, ValidBatchHasNoErrors) {
     BatchData data = make_valid_batch(3);
     SpikesBatch spikes = eventprop_compute_spikes_batch(data.inputs, 3);
 
-    AccumulatedBackwardResult result = eventprop_backward_spikes_batch_accumulate(data.inputs, spikes);
+    const auto errs = make_post_errors(spikes, 3, 1.0);
+    const auto ptrs = error_ptrs(errs);
+    AccumulatedBackwardResult result = eventprop_backward_spikes_batch_accumulate(data.inputs, spikes, ptrs.data());
 
     EXPECT_EQ(result.has_errors, 0);
     EXPECT_EQ(result.summed_grads->error_no, EVENTPROP_OK);
@@ -473,7 +494,9 @@ TEST(BatchAccumulateBackwardSpikes, OneBadSampleSetsHasErrors) {
 
     SpikesBatch spikes = eventprop_compute_spikes_batch(inputs, 2);
 
-    AccumulatedBackwardResult result = eventprop_backward_spikes_batch_accumulate(inputs, spikes);
+    const auto errs = make_post_errors(spikes, 2, 1.0);
+    const auto ptrs = error_ptrs(errs);
+    AccumulatedBackwardResult result = eventprop_backward_spikes_batch_accumulate(inputs, spikes, ptrs.data());
 
     EXPECT_EQ(result.has_errors, 1);
     EXPECT_NE(result.summed_grads->data, nullptr); // still produces a gradient (partial)

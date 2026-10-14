@@ -67,8 +67,6 @@ void eventprop_free_spike_output(const SpikeOutput output)
 {
     free(output.times);
     free(output.sources);
-    free(output.currents);
-    free(output.errors);
 }
 
 void eventprop_free_sums_output(const SumsOutput output)

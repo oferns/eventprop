@@ -3,9 +3,13 @@ using System.Diagnostics;
 namespace CW.EventProp;
 
 /// <summary>
-/// Base interface for spiking neural network layers.
+/// Base class for spiking neural network layers.
+///
+/// Disposable because both backends hold native resources: the managed layers own
+/// ArrayPool-backed scratch buffers, the native layers own pinned handles and native
+/// batch allocations. Implementations free them in <see cref="Dispose"/>.
 /// </summary>
-public abstract class Layer
+public abstract class Layer : IDisposable
 {
     /// <summary>The input batch stored during forward pass.</summary>
     protected SpikesVector? _inputBatch;
@@ -34,12 +38,18 @@ public abstract class Layer
     public abstract void Forward(SpikesVector inputBatch);
 
     /// <summary>
-    /// Run backward pass. Computes gradients and propagates errors to ancestors.
+    /// Run backward pass: compute weight gradients via the adjoint method.
+    /// Gradients are **accumulated** into <see cref="Gradient"/>, never zeroed — matching
+    /// the Python reference, whose training loop calls <see cref="ZeroGrad"/> separately.
+    /// Call <see cref="ZeroGrad"/> first for a single-step gradient.
     /// </summary>
     public abstract void Backward();
 
     /// <summary>Zero the weight gradient.</summary>
     public abstract void ZeroGrad();
+
+    /// <summary>Release scratch buffers / native resources. Default: no-op.</summary>
+    public virtual void Dispose() { }
 
     /// <summary>
     /// Zero-allocation training step: forward + backward for a single sample.
@@ -160,6 +170,18 @@ public abstract class Layer
             _ranForward = true;
         }
 
+        /// <summary>
+        /// Backward through the chain: layerA (outer) then layerB (inner).
+        ///
+        /// This is the C# chaining model, an intentional divergence from the Python
+        /// reference. Python threads layers through an <c>ancestor_layer</c> field and a
+        /// <c>__call__(SpikesVector, Layer)</c> idiom, and its base <c>backward()</c>
+        /// recurses into the ancestor and raises "Run backward to create errors first."
+        /// when the child has not run. Here the chain is explicit (<see cref="Layer.Chain"/>
+        /// <c>&lt;TLayerA,TLayerB&gt;</c>) and calls both children directly, so the
+        /// ancestor-recursion and its guard have no C# counterpart. Gradients accumulate
+        /// in both layers (see <see cref="Layer.Backward"/>).
+        /// </summary>
         public override void Backward()
         {
             _layerA.Backward();
@@ -171,6 +193,12 @@ public abstract class Layer
         {
             _layerA.ZeroGrad();
             _layerB.ZeroGrad();
+        }
+
+        public override void Dispose()
+        {
+            _layerA.Dispose();
+            _layerB.Dispose();
         }
 
         public override (double[] times, double[] voltages) GetVoltageTrace(

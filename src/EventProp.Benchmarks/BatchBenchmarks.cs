@@ -55,7 +55,7 @@ public abstract class BenchBatchBase
 
         // Create layers with identical weights
         var managedParams = new LIFLayerParameters(NPost, NPre, TauMem, TauSyn, VTh);
-        var nativeParams = new CApi.LIFLayerParameters(NPost, NPre, TauMem, TauSyn, VTh);
+        var nativeParams = new CW.EventProp.LIFLayerParameters(NPost, NPre, TauMem, TauSyn, VTh);
         ManagedLayer = new CW.EventProp.LIFLayer(managedParams, W);
         NativeLayer = new CApi.LIFLayer(nativeParams, W);
     }
@@ -89,9 +89,9 @@ public class Bench_Batch_Forward_4 : BenchBatchBase
     [Benchmark]
     public void Native_BatchApi()
     {
-        var batch = new CApi.SpikesVector();
+        var batch = new CW.EventProp.SpikesVector();
         for (int b = 0; b < BatchSize; b++)
-            batch.Add(new CApi.SpikesData(BatchTimes[b], BatchSources[b]));
+            batch.Add(new CW.EventProp.SpikesData(BatchTimes[b], BatchSources[b]));
         NativeLayer!.Forward(batch);
     }
 }
@@ -113,9 +113,9 @@ public class Bench_Batch_Forward_8 : BenchBatchBase
     [Benchmark]
     public void Native_BatchApi()
     {
-        var batch = new CApi.SpikesVector();
+        var batch = new CW.EventProp.SpikesVector();
         for (int b = 0; b < BatchSize; b++)
-            batch.Add(new CApi.SpikesData(BatchTimes[b], BatchSources[b]));
+            batch.Add(new CW.EventProp.SpikesData(BatchTimes[b], BatchSources[b]));
         NativeLayer!.Forward(batch);
     }
 }
@@ -137,9 +137,9 @@ public class Bench_Batch_Forward_16 : BenchBatchBase
     [Benchmark]
     public void Native_BatchApi()
     {
-        var batch = new CApi.SpikesVector();
+        var batch = new CW.EventProp.SpikesVector();
         for (int b = 0; b < BatchSize; b++)
-            batch.Add(new CApi.SpikesData(BatchTimes[b], BatchSources[b]));
+            batch.Add(new CW.EventProp.SpikesData(BatchTimes[b], BatchSources[b]));
         NativeLayer!.Forward(batch);
     }
 }
@@ -164,19 +164,21 @@ public class Bench_Batch_TrainingStep_4 : BenchBatchBase
         for (int b = 0; b < BatchSize; b++)
             for (int i = 0; i < post[b].NSpikes; i++)
                 post[b].SetError(i, 1.0);
+        ManagedLayer.ZeroGrad();
         ManagedLayer.Backward();
     }
 
     [Benchmark]
     public void Native()
     {
-        var batch = new CApi.SpikesVector();
+        var batch = new CW.EventProp.SpikesVector();
         for (int b = 0; b < BatchSize; b++)
-            batch.Add(new CApi.SpikesData(BatchTimes[b], BatchSources[b]));
+            batch.Add(new CW.EventProp.SpikesData(BatchTimes[b], BatchSources[b]));
         NativeLayer!.Forward(batch);
         for (int b = 0; b < BatchSize; b++)
             for (int i = 0; i < NativeLayer[b].NSpikes; i++)
                 NativeLayer.SetError(b, i, 1.0);
+        NativeLayer.ZeroGrad();
         NativeLayer.Backward();
     }
 }
@@ -197,19 +199,21 @@ public class Bench_Batch_TrainingStep_8 : BenchBatchBase
         for (int b = 0; b < BatchSize; b++)
             for (int i = 0; i < post[b].NSpikes; i++)
                 post[b].SetError(i, 1.0);
+        ManagedLayer.ZeroGrad();
         ManagedLayer.Backward();
     }
 
     [Benchmark]
     public void Native()
     {
-        var batch = new CApi.SpikesVector();
+        var batch = new CW.EventProp.SpikesVector();
         for (int b = 0; b < BatchSize; b++)
-            batch.Add(new CApi.SpikesData(BatchTimes[b], BatchSources[b]));
+            batch.Add(new CW.EventProp.SpikesData(BatchTimes[b], BatchSources[b]));
         NativeLayer!.Forward(batch);
         for (int b = 0; b < BatchSize; b++)
             for (int i = 0; i < NativeLayer[b].NSpikes; i++)
                 NativeLayer.SetError(b, i, 1.0);
+        NativeLayer.ZeroGrad();
         NativeLayer.Backward();
     }
 }

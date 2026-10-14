@@ -131,9 +131,10 @@ static double compute_tmax(const int i, const int n_spikes, const double* times,
     return INFINITY;
 }
 
-/* The post-synaptic current at a spike time is not stored per entry: it is */
-/* recomputed while merging, which keeps SpikeEntry at 16 bytes instead of 24 */
-/* and drops one scratch row per thread. See collect_spikes_result. */
+/* The post-synaptic current at a spike time is not stored at all: it is */
+/* exactly sum0[k][nrn] * exp(-t / tau_syn), so the backward pass rebuilds it */
+/* while sweeping. That keeps SpikeEntry at 16 bytes instead of 24 and drops */
+/* one scratch row per thread. */
 
 static int cmp_spike_asc(const void* a, const void* b) {
     const double ta = ((const SpikeEntry*)a)->time;
@@ -307,9 +308,7 @@ static inline int try_find_root_spike(const RootContext* rctx_base,
 
 /* ── Collect per-neuron spikes into sorted SpikeOutput (shared by v1 and v2) ── */
 static inline EventPropError collect_spikes_result(ComputeSpikesCtx* ctx,
-                                                   const int total,
-                                                   const EventPropInput input,
-                                                   const double* sum0)
+                                                   const int total)
 {
     if (total == 0) return EVENTPROP_OK;  /* no spikes, nothing to do */
 
@@ -345,25 +344,14 @@ static inline EventPropError collect_spikes_result(ComputeSpikesCtx* ctx,
     int* sources     = eventprop_try_malloc((size_t)total * sizeof(int));
     if (!sources) { free(times); return EVENTPROP_ALLOC_RESULT_SOURCES; }
 
-    double* currents = eventprop_try_malloc((size_t)total * sizeof(double));
-    if (!currents) { free(sources); free(times);
-                     return EVENTPROP_ALLOC_RESULT_CURRENTS; }
-
-    double* errors   = eventprop_try_calloc((size_t)total, sizeof(double));
-    if (!errors) { free(currents); free(sources); free(times);
-                   return EVENTPROP_ALLOC_RESULT_ERRORS; }
-
-    /* One cursor + one input-spike index per run, in a single allocation. */
-    int* aux = eventprop_try_calloc((size_t)(2 * ctx->n_threads), sizeof(int));
-    if (!aux) { free(errors); free(currents); free(sources); free(times);
+    /* One cursor per run, in a single allocation. */
+    int* aux = eventprop_try_calloc((size_t)ctx->n_threads, sizeof(int));
+    if (!aux) { free(sources); free(times);
                 return EVENTPROP_ALLOC_THREAD_SCRATCH; }
-    int* cursor   = aux;
-    int* run_idx  = aux + ctx->n_threads;
+    int* cursor = aux;
 
     /* k-way merge over the sorted runs (k is the thread count, so a linear */
-    /* scan of the run heads is cheaper than a heap). The post-synaptic */
-    /* current is rebuilt here instead of stored per entry: each run is */
-    /* ascending, so its index into input.times only ever moves forward. */
+    /* scan of the run heads is cheaper than a heap). */
     for (int i = 0; i < total; i++) {
         int best = -1;
         for (int t = 0; t < ctx->n_threads; t++) {
@@ -376,12 +364,6 @@ static inline EventPropError collect_spikes_result(ComputeSpikesCtx* ctx,
         const SpikeEntry* e = &ctx->threads[best].entries[cursor[best]];
         times[i]   = e->time;
         sources[i] = e->source;
-
-        int k = run_idx[best];
-        while (k < input.n_spikes && input.times[k] <= e->time) k++;
-        run_idx[best] = k;
-        currents[i] = sum0[k * input.n_post + e->source] * exp(-e->time / input.tau_syn);
-
         cursor[best]++;
     }
     free(aux);
@@ -389,8 +371,6 @@ static inline EventPropError collect_spikes_result(ComputeSpikesCtx* ctx,
     /* Store in ctx so caller can assign to result */
     ctx->result_times   = times;
     ctx->result_sources = sources;
-    ctx->result_currents = currents;
-    ctx->result_errors  = errors;
     ctx->result_n_spikes = total;
 
     return EVENTPROP_OK;
@@ -655,7 +635,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
         total += ctx.threads[t].n_entries;
 
     /* Collect, sort, and copy output */
-    const EventPropError err = collect_spikes_result(&ctx, total, input, sum0);
+    const EventPropError err = collect_spikes_result(&ctx, total);
     if (err != EVENTPROP_OK) {
         result.error_no = err;
         goto cleanup_and_return;
@@ -664,16 +644,12 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
     result.n_spikes   = ctx.result_n_spikes;
     result.times      = ctx.result_times;
     result.sources    = ctx.result_sources;
-    result.currents   = ctx.result_currents;
-    result.errors     = ctx.result_errors;
 
 cleanup_and_return:
     if (result.error_no != EVENTPROP_OK) {
         eventprop_free_spike_output(result);
         result.times = NULL;      /* already freed — keep a caller-side free() safe */
         result.sources = NULL;
-        result.currents = NULL;
-        result.errors = NULL;
     }
     free_compute_spikes_ctx(&ctx);
     return result;

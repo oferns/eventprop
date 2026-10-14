@@ -53,6 +53,8 @@ typedef struct BackwardSpikesCtx {
     double* all_errors;
     double* lambda_v;
     double* lambda_i;
+    double* cur_sum;        // prefix row of synaptic sums, one n_post row
+    double* currents;       // rebuilt synaptic current at each post spike
     double** jump_time;   // array of pointers
     double** jump_mag;
     int* jump_count;
@@ -80,8 +82,6 @@ typedef struct ComputeSpikesCtx {
     /* Output fields (set by collect_spikes_result) */
     double* result_times;
     int*    result_sources;
-    double* result_currents;
-    double* result_errors;
     int     result_n_spikes;
 } ComputeSpikesCtx;
 

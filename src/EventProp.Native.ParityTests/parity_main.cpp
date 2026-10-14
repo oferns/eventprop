@@ -145,14 +145,12 @@ static void test_compute_spikes(const TestCase& tc) {
 
     if (spikes_c.n_spikes > 0) {
         double* out_times_e = (double*)malloc(spikes_c.n_spikes * sizeof(double));
-        double* out_currents_e = (double*)malloc(spikes_c.n_spikes * sizeof(double));
-        for (int i = 0; i < spikes_c.n_spikes; i++) { out_times_e[i] = result_eig.times(i); out_currents_e[i] = result_eig.currents(i); }
+        for (int i = 0; i < spikes_c.n_spikes; i++) out_times_e[i] = result_eig.times(i);
         ASSERT_ARRAY_NEAR(spikes_c.times, out_times_e, spikes_c.n_spikes, ABS_TOLERANCE, REL_TOLERANCE, "times");
-        ASSERT_ARRAY_NEAR(spikes_c.currents, out_currents_e, spikes_c.n_spikes, ABS_TOLERANCE, REL_TOLERANCE, "currents");
+        free(out_times_e);
         for (int i = 0; i < spikes_c.n_spikes; i++) {
             ASSERT_EQ(spikes_c.sources[i], (int)result_eig.sources(i), "sources");
         }
-        free(out_times_e); free(out_currents_e);
     }
 
     free(w); free(times); free(sources);
@@ -173,20 +171,31 @@ static void test_backward_spikes(const TestCase& tc) {
     SKIP_C_ERROR(fwd_c);
     if (fwd_c.n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
 
-    // Write errors into fwd_c.errors (allocated by forward pass)
-    for (int i = 0; i < fwd_c.n_spikes; i++) fwd_c.errors[i] = 1.0;
+    // The post-spike derivatives are caller-owned now.
+    double* errs = (double*)malloc(fwd_c.n_spikes * sizeof(double));
+    for (int i = 0; i < fwd_c.n_spikes; i++) errs[i] = 1.0;
 
     EventPropInput fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
-    BackwardOutput backward_c = eventprop_backward_spikes(fi_base, fwd_c);
-    if (backward_c.error_no != EVENTPROP_OK) { printf("SKIP (C validation: %s)\n", eventprop_error_string(backward_c.error_no)); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
+    BackwardOutput backward_c = eventprop_backward_spikes(fi_base, fwd_c, errs);
+    if (backward_c.error_no != EVENTPROP_OK) { printf("SKIP (C validation: %s)\n", eventprop_error_string(backward_c.error_no)); tests_passed++; free(errs); free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
 
     RowMatrixXd w_mat = make_w_mat(w, tc.n_pre, tc.n_post);
     Eigen::ArrayXd e_itimes = Eigen::Map<Eigen::ArrayXd const>(times, tc.n_spikes);
     Eigen::ArrayXi e_isources = Eigen::Map<Eigen::ArrayXi const>((int*)sources, tc.n_spikes);
     Spikes input_eig(std::move(e_itimes), std::move(e_isources));
+
+    // The C forward pass no longer returns synaptic currents, so the reference
+    // supplies its own forward pass's values: the backward pass derives them
+    // internally, and this is what pins that derivation against the reference.
+    auto fwd_eig = compute_spikes(make_w_mat(w, tc.n_pre, tc.n_post),
+                                  make_eigen_spikes(times, sources, tc.n_spikes),
+                                  tc.v_th, tc.tau_mem, tc.tau_syn);
+    ASSERT_EQ((int)fwd_eig.times.size(), fwd_c.n_spikes, "forward spike count mismatch");
+
     Eigen::ArrayXd e_ptimes = Eigen::Map<Eigen::ArrayXd const>(fwd_c.times, fwd_c.n_spikes);
     Eigen::ArrayXi e_psources = Eigen::Map<Eigen::ArrayXi const>((int*)fwd_c.sources, fwd_c.n_spikes);
-    Eigen::ArrayXd e_pcurrents = Eigen::Map<Eigen::ArrayXd const>(fwd_c.currents, fwd_c.n_spikes);
+    Eigen::ArrayXd e_pcurrents(fwd_c.n_spikes);
+    for (int i = 0; i < fwd_c.n_spikes; i++) e_pcurrents(i) = fwd_eig.currents(i);
     Spikes post_eig(std::move(e_ptimes), std::move(e_psources), std::move(e_pcurrents), std::vector<double>(), std::vector<int>());
     for (int i = 0; i < fwd_c.n_spikes; i++) post_eig.set_error(i, 1.0);
     auto [grad_eig_map, spike_errors_eig] = backward(input_eig, post_eig, w_mat, tc.v_th, tc.tau_mem, tc.tau_syn);
@@ -195,6 +204,7 @@ static void test_backward_spikes(const TestCase& tc) {
 
     ASSERT_ARRAY_NEAR(backward_c.grad, grad_eig, tc.n_pre * tc.n_post, ABS_TOLERANCE, REL_TOLERANCE, "gradient");
 
+    free(errs);
     free(w); free(times); free(sources);
     eventprop_free_spike_output(fwd_c);
     eventprop_free_backward_output(backward_c);

@@ -13,6 +13,7 @@ public static class SyncAssert
 
     public static ValueAssertions That(double value) => new(value);
     public static IntAssertions That(int value) => new(value);
+    public static BoolAssertions That(bool value) => new(value);
 
     // ── Ref struct entry points (direct static methods, no wrapper) ───
 
@@ -168,6 +169,22 @@ public static class SyncAssert
     // ── Object-based assertions (for IsInstanceOfType, IsNull) ────────
 
     public static ObjectAssertions That(object? value) => new(value);
+
+    public sealed class BoolAssertions
+    {
+        private readonly bool _value;
+        internal BoolAssertions(bool value) => _value = value;
+
+        public void IsTrue()
+        {
+            if (!_value) throw new EqualException(true, false);
+        }
+
+        public void IsFalse()
+        {
+            if (_value) throw new EqualException(false, true);
+        }
+    }
 
     public sealed class ObjectAssertions
     {

@@ -10,4 +10,8 @@
 
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="../EventProp.Abstractions/EventProp.Abstractions.csproj" />
+  </ItemGroup>
+
 </Project>
