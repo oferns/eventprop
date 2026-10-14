@@ -62,17 +62,29 @@ After removing per-call Python-side work from the Cython wrappers (see below):
 | dropout[4] | 3.66 | 1.91 | 0.52 |
 | dropout[8] | 6.12 | 2.20 | 0.36 |
 | dropout[16] | 11.69 | 2.85 | 0.24 |
-| ttfs_step[4] | 136.45 | 184.03 | 1.35 |
-| ttfs_step[8] | 194.38 | 267.89 | 1.38 |
-| vmax_step[4] | 119.56 | 146.55 | 1.23 |
-| vmax_step[8] | 177.70 | 194.12 | 1.09 |
-| **GEOMEAN** | | | **0.76x** |
+| ttfs_step[4] | 136.45 | 176.36 | 1.29 |
+| ttfs_step[8] | 194.38 | 255.86 | 1.32 |
+| vmax_step[4] | 119.56 | 134.18 | 1.12 |
+| vmax_step[8] | 177.70 | 177.46 | 1.00 |
+| **GEOMEAN** | | | **0.74x** |
 
-**Headline**: Cython is now **0.76x** of pybind11 — i.e. faster overall. The dropout path
-went from 2.71x slower to 0.24x (4x faster) by reusing `SpikesVector._extract_flat_buffers`
-instead of re-`np.concatenate`-ing + `.astype`-ing every call. The remaining gap is the
-loss-layer training steps (`ttfs_step`/`vmax_step`, 1.09–1.38x), which run through
-`vmax_training.py`/`ttfs_training.py` and still do per-call Python-side assembly.
+**Headline**: Cython is **0.74x** of pybind11 — faster overall. Wins came from removing
+per-call Python-side work:
+- dropout: reuse `SpikesVector._extract_flat_buffers` instead of re-`np.concatenate` +
+  `.astype` every call (7.05us -> 1.93us, 3.6x).
+- vmax loss forward/backward: vectorize (stack values, one exp/sum; one vector error write
+  per sample instead of a per-neuron `set_error` loop).
+- ttfs loss backward: one vector error write per sample instead of a per-neuron loop.
+
+**Correctness fix found along the way**: the Cython maxima loss wrote errors to a detached
+Python buffer that the C backward never read, so the vmax gradient was always **zero**. The
+`_CythonMaximaView.errors` property now returns the C-owned buffer (via `get_maxima_errors`),
+and the loss uses a numerically stable softmax. The vmax gradient is now correct (matches
+pybind11 to 5e-15 on the MNIST fixture).
+
+The remaining gap is the loss-layer training steps (`ttfs_step` 1.29-1.32x, `vmax_step[4]`
+1.12x), now dominated by the C kernel + result wrapping (the same work pybind11 does), not
+Python-side assembly.
 
 **Build note**: the Cython extension must be generated with Cython 3.0.x. Cython 3.2.5
 emits NumPy-2.x C-API (`PyDataType_TYPEOBJ`/`_KIND`/`_TYPE`) that does not compile against

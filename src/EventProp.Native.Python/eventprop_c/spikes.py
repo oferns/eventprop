@@ -380,8 +380,12 @@ class _CythonMaximaView:
 
     @property
     def errors(self) -> np.ndarray:
-        # MaximaOutput has no embedded errors — managed by Python layer
-        # Return a fresh zeros array; set_error() writes to it
+        # The C MaximaOutput owns the error buffer the backward pass reads.
+        # Return a zero-copy view into it (via the batch output) so set_error /
+        # vector writes land where C looks. The old code returned a detached
+        # Python buffer, so loss-layer errors never reached the C backward.
+        if self._batch_output is not None:
+            return self._batch_output.get_maxima_errors(self._sample_idx)
         if not hasattr(self, '_errors_buf') or self._errors_buf is None:
             object.__setattr__(self, '_errors_buf', np.zeros(len(self._times), dtype=np.float64))
         return self._errors_buf
