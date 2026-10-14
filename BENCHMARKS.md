@@ -1,0 +1,105 @@
+# Library Benchmark Comparison
+
+Generated 2026-10-14 on macOS (osx-arm64). Three suites, three **different** pairings —
+they are not one geomean. Each suite's ratio column names the winner.
+
+| Suite | Pairing | Tool | Ratio column |
+|---|---|---|---|
+| `EventProp.Native.Benchmarks` | C library vs Eigen C++ | Google Benchmark | `Eigen/C` (>1 = C wins) |
+| `EventProp.Benchmarks` | managed .NET vs native .NET P/Invoke | BenchmarkDotNet | `Native/Managed` (<1 = native wins) |
+| `EventProp.Python.Benchmarks` | pybind11 vs Cython | pytest-benchmark | `Cython/pybind11` (>1 = Cython slower) |
+
+The suites share the **data contract** (canonical burst, inverse-CDF poisson, sorted
+times, identical sizes/taus) so per-cell shapes are comparable, but the pairings differ:
+suites 1 and 2 share the kernel families; suite 3 benchmarks layer ops, not kernels.
+
+---
+
+## Suite 1 — C vs Eigen (Eigen/C, >1 = C wins)
+
+| Family | Geomean | Notes |
+|---|---:|---|
+| ComputeSums | **1.64x** | C wins; 1.9–2.0x at Medium/Large/XL (SIMD prefix sums) |
+| ComputeSpikes | 0.95x | parity; root-finding dominates. C wins XL burst 1.07x, loses Medium 0.69x |
+| BackwardSpikes | 1.52x* | *inflated by zero-spike noise (Tiny/Small uniform 16–20x = empty-loop regime); real ~1.02–1.08x |
+| BackwardMaxima | 1.05x | parity |
+| ComputeMaxima | 1.08x | parity |
+| FullTrainingStep | 1.00x | parity |
+| Dropout | 8.17x | C batch API vs C++ shim — API-shape artifact, not like-for-like |
+
+**Headline**: C wins where it vectorizes (ComputeSums 1.6–2.0x); parity on root-finding-dominated
+forward/backward; Dropout is not a fair comparison.
+
+## Suite 2 — managed .NET vs native P/Invoke (Native/Managed, <1 = native wins)
+
+| Family | Geomean | Notes |
+|---|---:|---|
+| Batch_Forward | **0.21x** | native batch API wins (4.8x) |
+| LI_Forward | **0.30x** | native wins (3.3x) |
+| Batch_TrainingStep | 0.35x | native wins |
+| LIF_Forward | 0.42x | native wins (3.8x at Small) |
+| LI_Backward | 0.52x | native wins |
+| LIF_Backward | 0.69x | native wins Medium/Small; parity Large (1.03x) |
+| BackwardSpikes | 0.74x | native wins Medium/Large/XL |
+| TrainingLoop | 0.74x | native wins Medium/Large/XL |
+| ComputeSpikes | 1.02x | parity (native XL 0.84x, managed Small 1.59x) |
+| ComputeSums | 1.09x | managed ahead (P/Invoke marshalling overhead) |
+| ComputeMaxima | 1.00x | parity |
+
+**Headline**: native P/Invoke wins the layer/batch paths (0.2–0.7x — the new native layers
+pay off); managed is competitive on single-kernel paths (parity, managed ahead at Tiny
+where P/Invoke marshalling dominates).
+
+## Suite 3 — pybind11 vs Cython (Cython/pybind11, >1 = Cython slower)
+
+| Cell | pybind11 (us) | Cython (us) | Cython/py |
+|---|---:|---:|---:|
+| batch[4] | 75.98 | 87.55 | 1.15 |
+| batch[8] | 93.25 | 104.05 | 1.12 |
+| batch[16] | 228.70 | 163.12 | 0.71 |
+| dropout[4] | 3.66 | 9.91 | 2.71 |
+| dropout[8] | 6.12 | 10.19 | 1.67 |
+| dropout[16] | 11.69 | 16.46 | 1.41 |
+| ttfs_step[4] | 136.45 | 203.00 | 1.49 |
+| ttfs_step[8] | 194.38 | 390.65 | 2.01 |
+| vmax_step[4] | 119.56 | 166.77 | 1.39 |
+| vmax_step[8] | 177.70 | 217.49 | 1.22 |
+| **GEOMEAN** | | | **1.40x** |
+
+**Headline**: the Cython wrappers are ~1.40x slower than the zero-copy pybind11
+`Eigen::Ref` path on batch/step calls. (Required rebuilding `_native.c` with Cython 3.0.x —
+Cython 3.2.5 emits NumPy-2.x C-API that does not compile against NumPy 1.26.4.)
+
+---
+
+## Cross-suite ratio table (suites 1 & 2, uniform pattern)
+
+Both suites run the kernel families on identical uniform data. `C/E` = Eigen/C (C wins
+if >1); `.NET` = Native/Managed (native wins if <1). Poisson cells exist only in suite 1
+(the .NET single-kernel benchmarks use uniform only).
+
+| cell | C/E | .NET |
+|---|---:|---:|
+| ComputeSums/Tiny/uniform | 1.23 | 1.26 |
+| ComputeSums/Small/uniform | 1.32 | 1.19 |
+| ComputeSums/Medium/uniform | 1.84 | 1.03 |
+| ComputeSums/Large/uniform | 1.97 | 1.01 |
+| ComputeSpikes/Small/uniform | 0.96 | 1.59 |
+| ComputeSpikes/Medium/uniform | 0.76 | 0.90 |
+| ComputeSpikes/Large/uniform | 0.96 | 0.89 |
+| BackwardSpikes/Small/uniform | 19.63* | 3.11* |
+| BackwardSpikes/Medium/uniform | 1.01 | 0.78 |
+| BackwardSpikes/Large/uniform | 1.07 | 0.73 |
+
+\* zero-spike / P/Invoke-overhead regime — excluded from geomeans.
+
+**Reading**: the C library's ComputeSums advantage (1.2–2.0x over Eigen) does **not**
+transfer to the .NET side (managed ≈ native, 1.0–1.3x) — the managed `ComputeSums` is
+already SIMD-optimized, so the C win over Eigen is a C-vs-Eigen effect, not a
+native-vs-managed one. On the root-finding paths both suites land near parity.
+
+## Caveats (per AGENTS.md)
+- Tiny/zero-spike rows measure P/Invoke overhead on an empty/short loop — excluded from geomeans.
+- XL rows cost seconds/iteration; excluded from quick runs.
+- Burst is the heaviest workload (XL ~770k output spikes); XL burst excluded from quick runs.
+- "Poisson @200 Hz" is a misnomer (effective 1.8–25.6 kHz), shared by all three suites.
