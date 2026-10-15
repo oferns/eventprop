@@ -1,0 +1,35 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release (C vs C++ benchmarks)",
+      "description": "Requires the release preset in ../EventProp.C and ../EventProp.Cpp.Wrapper. Fetches Google Benchmark v1.9.5. Prefer ./run_benchmarks.sh, which also saves JSON to baselines/ and runs compare.py.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release",
+      "displayName": "bench_c + bench_cpp",
+      "configurePreset": "release",
+      "configuration": "Release"
+    }
+  ]
+}
