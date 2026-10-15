@@ -12,15 +12,18 @@ index 9209c56..a7217c7 100644
          for batch_idx, spikes in enumerate(self.post_batch):
              self.first_spike_times[batch_idx, :] = self.post_batch[
 diff --git a/setup.py b/setup.py
-index a53268b..57eae6f 100644
+index a53268b..00bee54 100644
 --- a/setup.py
 +++ b/setup.py
-@@ -3,6 +3,7 @@ import setuptools
+@@ -3,7 +3,7 @@ import setuptools
  cpp_ext = setuptools.Extension(
      name="eventprop.eventprop_cpp",
      sources=["src/eventprop_cpp.cpp"],
 -    include_dirs=["src/pybind11/include", "src/eigen"],
 +    include_dirs=["src/pybind11/include", "src/eigen", "../../third_party/boost"],
+     language="c++",
+     # extra_compile_args=["-std=c++17", "-O0", "-g"]
+     extra_compile_args=[
 @@ -15,6 +15,7 @@ cpp_ext = setuptools.Extension(
          "-fno-signed-zeros",
          "-funroll-loops",

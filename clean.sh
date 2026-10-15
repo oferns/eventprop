@@ -23,7 +23,7 @@ echo "Cleaning EventProp build outputs (target: $TARGET, full: $FULL)..."
 # ── C Library (EventProp.C) ────────────────────────────────
 if [[ "$TARGET" == "all" || "$TARGET" == "c" ]]; then
   echo "[1/8] Cleaning EventProp.C..."
-  rm -rf "$SCRIPT_DIR/src/EventProp.C/build"
+  rm -rf "$SCRIPT_DIR/src/EventProp.C/build" "$SCRIPT_DIR/src/EventProp.C/build-werror"
 fi
 
 # ── C++ Wrapper (EventProp.Cpp.Wrapper) ────────────────────
