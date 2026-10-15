@@ -74,6 +74,8 @@ eventprop.net/
 
 ## Building
 
+`build.sh` drives the CMake projects through their presets, in the dependency order the hardcoded import paths require (C library → Eigen core → consumers), and calls `scripts/submodule-state.sh apply` for the read-only submodule.
+
 ```bash
 # Build everything — Release mode
 ./build.sh release
@@ -116,17 +118,42 @@ cd ../EventProp.Native.Benchmarks  && cmake --preset release && cmake --build --
 
 - `werror` (`EventProp.C` only) sets `CMAKE_COMPILE_WARNING_AS_ERROR=ON`, making the "code must compile with zero warnings" rule mechanical instead of advisory. It builds in `build-werror/` so it never clobbers the release build.
 - `asan` presets set `ENABLE_ASAN=ON` with `CMAKE_BUILD_TYPE=Debug` and `cleanFirst: true`, because the library switches SHARED→STATIC inside the same `build/` directory the test project hardcodes.
+- **Every non-ASan preset sets `ENABLE_ASAN=OFF` explicitly.** It is a cache variable, so running `--preset asan` and then `--preset release` leaves the cache at `ON` and the release build silently produces an ASan-instrumented **STATIC** library — which breaks the parity tests (they import a SHARED library) and poisons benchmark timings. The same rule applies to any option a preset toggles: state it in both directions, or the previous preset leaks through.
+- Switching `asan` → `release` leaves the ASan `libeventprop_c_api.a` behind in `build/`. Harmless (the test project picks `.a` vs `.dylib` from `ENABLE_ASAN`), just stale; `clean.sh c` removes it.
 - `CMakeUserPresets.json` is gitignored — use it for machine-local overrides.
 - The floor is 3.21 for presets schema v3 (`condition`, `installDir`, `${hostSystemName}`) while staying inside stock distro packages (Ubuntu 22.04 ships 3.22, Debian 12 ships 3.25). Schema v4's `include` (3.23) would allow one root file sharing base presets across projects, but it costs Ubuntu 22.04 support, so it is not used.
 
 ### Submodule Patches
 
-Platform-specific patches are applied automatically by `build.sh`. They live in the repo root:
+The reference submodule is **read-only**, and it needs local modifications to build on a current toolchain. `scripts/submodule-state.sh` is the single owner of that state:
+
+```bash
+./scripts/submodule-state.sh status          # what is applied, and what pybind11 is at
+./scripts/submodule-state.sh apply           # idempotent; build.sh calls this
+./scripts/submodule-state.sh verify          # non-zero exit if the submodule is not buildable
+./scripts/submodule-state.sh check-patches   # do the patches survive upstream drift?
+./scripts/submodule-state.sh revert          # pristine submodule (reference library will NOT build)
+```
 
 | Patch | Platform | Fixes |
 |-------|----------|-------|
 | `submodule-macos.patch` | macOS (AppleClang + Homebrew) | Homebrew include paths, `-Xpreprocessor -fopenmp`, link args, NumPy deprecation |
-| `submodule-linux.patch` | Linux (GCC/Clang) | OpenMP link flag, remove C++17 `<execution>` parallel policies, NumPy deprecation |
+| `submodule-linux.patch` | Linux (GCC/Clang) | Boost include path, `-fopenmp` link arg, remove C++17 `<execution>` parallel policies, NumPy deprecation, pybind11 bump |
+| `submodule-windows.patch` | Windows (MSVC) | `setup.py` link args, `eventprop_cpp.cpp` / `eventprop_cpp.h` adjustments |
+
+Patches are applied with `git apply`, never `patch -p1`, and never behind `|| true`.
+
+**pybind11 is a nested submodule, and its required version is platform-specific.** It belongs to the same local-modification contract as the patches — it is not accidental drift:
+
+| | pybind11 |
+|---|---|
+| recorded by the submodule | `54430436` — 2.6.3.dev1 (2021). **Does not build**: no NumPy 2 support, predates modern Clang/GCC and setuptools |
+| required on macOS | `6079989c` — 3.1.0a0. No patch touches the gitlink, so `PYBIND11_REQUIRED_MACOS` in the script is the only record of it |
+| required on Linux | `a2e59f0e` — 2.13.6. Carried inside `submodule-linux.patch` (it moves the gitlink), so the script reads it out of the patch |
+
+A plain `git submodule update --init --recursive` silently downgrades pybind11 to 2.6.x and breaks the reference build. `scripts/submodule-state.sh apply` restores it.
+
+**Drift test.** `check-patches` applies every patch to a detached worktree at pristine submodule HEAD. On the live tree a foreign-platform patch reads as "blocked" because the active patch owns the same hunks, so only the worktree test separates "not for this platform" from "upstream moved". Run it after any submodule update.
 
 The submodule is read-only — patches must be reapplied after pulling from upstream.
 
@@ -607,6 +634,18 @@ Regression tests: `ComputeSpikes_PerNeuronSpikeBurst_MatchesNativeSpikeSet` (`sr
 The strict wrapper calls the structural one first, so the two can never drift apart. `eventprop_diag.c` keeps its own `v_th <= 0` guard at line ~108 — that one guards the division in the λ_I jump computation, not the input.
 
 New C tests pinning the contract: `ValidateInputNoVth_*` (5 in `src/EventProp.C.Tests/test/validate_input.cpp` — zero/negative/NaN `v_th` accepted, structural errors still caught) and `ZeroVthAcceptedAndIgnored` in `compute_sums.cpp`, `compute_maxima.cpp`, `backward_maxima.cpp`, each running one input with `v_th = 1.0` and `v_th = 0.0` and asserting identical output.
+
+### Fixed — `submodule-linux.patch` was unparseable and `build.sh` swallowed the failure
+
+The patch was truncated mid-hunk. Its `setup.py` hunk header declared `@@ -3,6 +3,7 @@` (6 old lines, 7 new) while the body carried only 3 context + 1 removed + 1 added — the two trailing context lines had been deleted, leaving the counts stale. `git apply` cannot parse the file at all (`corrupt patch at ...:24`), so **no** part of it can be applied, and `--exclude` cannot rescue the good hunks because the failure is a parse error, not a match error.
+
+`build.sh` applied patches with `patch -p1 < "$PATCH_FILE" || true`. `patch` is more forgiving than `git apply`: it patched `eventprop/loss_layer.py`, then aborted at `malformed patch at line 24` — and `|| true` discarded that. Net effect on Linux: the submodule ends up with **only `loss_layer.py` patched**, while `setup.py` (Boost include path, `-fopenmp` link arg), `src/eventprop_cpp.cpp` (the C++17 `<execution>` parallel policies the patch removes for GCC), and the pybind11 2.13.6 bump are all silently absent. The build then fails with an opaque compiler error far from the cause.
+
+The patch is regenerated from its intent — apply the intended edits to a detached worktree at pristine submodule HEAD, then `git diff` — which yields correct hunk headers. The regenerated `src/eventprop_cpp.cpp` hashes to the same `c604ff4..45d9ce9` as the original, confirming those hunks were always correct and only `setup.py` was corrupt. The macOS and Windows patches were structurally sound.
+
+Guards: `build.sh` now calls `scripts/submodule-state.sh apply`, which uses `git apply` (atomic, parse-checked), classifies each patch as applied / applicable / blocked, and dies with instructions on `blocked` instead of continuing. `check-patches` applies all three patches to a pristine detached worktree — the only context in which a foreign-platform patch can be told apart from upstream drift.
+
+Diagnostic signature: a Linux reference-library build failing on `#include <execution>`, a missing `-fopenmp` link symbol, or a pybind11 2.6.x error against NumPy 2. Check `./scripts/submodule-state.sh status` before blaming the compiler.
 
 ## Platform Support
 
