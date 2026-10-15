@@ -353,6 +353,12 @@ So the C library is the stricter *diagnostic*, not the divergent *implementation
 
 Pinned by `ComputeSpikes.UnsortedTimesRejected` and `ComputeSpikes.EqualTimesAccepted` (`src/EventProp.C.Tests/test/compute_spikes.cpp`), alongside the existing validator and `BackwardSpikes` ordering tests. Non-decreasing (equal times) is valid and is the simultaneous-spike case the parity suite covers.
 
+**Non-negative times are the same kind of shared contract.** `eventprop_validate_input_no_v_th` rejects `times[i] < 0` with `EVENTPROP_NEGATIVE_SPIKE_TIME` (7); the Eigen reference does not check. It is not C-only strictness either — the forward pass floors the first interval at `t_before = 0.0`, so it cannot bracket a spike before t = 0, and a negative input time is outside the model the prefix sums describe.
+
+This bit two numerical-gradient tests in `src/EventProp.Native.Python/test/test_loss_layer.py`: both take a **central difference** of the loss with respect to a spike time, and the base spike train started at exactly `0.0`, so `spike_idx = 0` was perturbed to `-1e-8`. Only the Cython side failed, because only the C library validates. Fix: start the base trains at `0.001` (`(np.arange(n) + 1) * 0.001`) so the minus leg stays non-negative. The tests' intent — numerical vs analytical spike-time gradient — is unchanged.
+
+While fixing them, a second test-side issue surfaced: `t_eps = 1e-8` is below the conditioning limit for a central difference on O(1) losses. Its absolute noise floor is `~machine_eps / t_eps ≈ 2.2e-8`, which swamps the analytical gradient where that gradient is legitimately **exactly 0** (the last input spike, which no first-spike time depends on), and the assertion used `rtol` with no `atol`. `t_eps = 1e-7` measured the best worst-case agreement (1.0e-9, against 8.1e-9 at 1e-8). When a finite-difference test fails on an entry that is analytically zero, check the noise floor before assuming a gradient bug.
+
 ### Cross-Suite Benchmark Data Contract
 
 Three suites benchmark the same algorithms — native `bench_main.cpp` (C vs Eigen), .NET `EventProp.Benchmarks` (BenchmarkDotNet, managed vs P/Invoke), and `EventProp.Python.Benchmarks` (pytest-benchmark, pybind11 vs Cython). They share sizes (Tiny 10/5/20, Small 50/20/100, Medium 200/80/500, Large 500/200/1000; native and .NET add XL), taus (0.02 / 0.005), `v_th = 1.0`, and weights U(0.5, 2.0).
@@ -406,6 +412,19 @@ All wrappers use `__dealloc__` to call the appropriate C free function. Numpy vi
 2. All subsequent batch calls receive direct pointers to C-owned memory from previous returns
 3. No concatenation, no array rebuilding in Python after initial input
 4. Backward pass uses combined accumulate function — one FFI call per layer
+
+### Zero-Copy Output Lifetime
+
+`get_spike_errors(i)` and `get_maxima_errors(i)` return numpy views into C-owned memory. The owner is the wrapper, not the view, so anything that hands a view to a caller must keep the wrapper alive for as long as the view can be read. `LIFLayer.backward` / `LILayer.backward` therefore store the `AccumulatedBackwardResult` on `self._backward_result`: the consumer is the ancestor layer's `backward()`, which runs after the local `result` would otherwise go out of scope. See *Fixed — Cython layers: use-after-free in spike-error propagation*.
+
+### Paper Parity Suite
+
+`src/EventProp.Native.Python/tests/test_paper_parity.py` runs the pre-trained checkpoints in `EventProp.Python/paper/` (YinYang TTFS, MNIST VMax) through **both** backends and compares forwards, predictions and gradients. It is the only suite that exercises real trained weights, so it catches divergences that the synthetic fixtures miss.
+
+Two of its tests were themselves broken and are fixed here — when a parity test fails, check the test before blaming the library:
+
+- `test_forward_predictions` used `np.nanargmin` over `first_spike_times`. A sample where no output neuron fires is an all-NaN row, which the **reference** produces (1 of 64 YinYang samples), and `nanargmin` raises `ValueError` on it. Predictions now use a NaN-safe argmin with `-1` for all-NaN rows, on both sides.
+- `test_forward_vmax_values` read `py_loss.values_batch`, which does not exist on the pybind11 `VMaxCrossEntropyLoss`. The two backends expose the same numbers under different names: `py_loss.maxima_batch[i].values` vs `cy_loss.values_batch[i]`.
 
 ## Architecture Notes (.NET)
 
@@ -465,7 +484,42 @@ Row-major: `w[row * cols + col]` where rows = pre-synaptic neurons, cols = post-
 - **`Backward`**: Adjoint method — time-reversed sweep propagating λ_v (membrane) and λ_i (synaptic) adjoints
 - **`ComputeMaxima`**: Finds membrane potential maxima per neuron (for voltage-based loss)
 
-## Known Defects
+## Fixed Defects — Invariants and Failure Modes
+
+Every entry below is **fixed**; there are no open defects in this list. They are kept because each records a constraint that is not visible in the current code and is easy to re-introduce: an invariant a refactor must preserve, a parity contract shared by both backends, a diagnostic signature for recognising the failure class, and the regression test that pins it. Treat this as a post-mortem log and a checklist for touching the areas named, not as a bug tracker entry.
+
+### Fixed — C forward pass: spurious spikes in the final interval
+
+`eventprop_compute_spikes` (`src/EventProp.C/eventprop_spikes.c`) special-cased the bracket floor for the last interval as `t_before = count > 0 ? p_times[count - 1] : 0.0`, dropping the `times[i - 1]` term that every other interval applies. When the neuron had not fired yet, the floor collapsed to **0.0**, the `t_before <= tmax` guard in `generate_bracket_candidates` passed for an analytical peak sitting *behind* the interval, and the solver bracketed a region where `sum0[i]`/`sum1[i]` are an extrapolation of a spike train that has not arrived yet — reporting roots at times where the real membrane potential is far below `v_th`.
+
+The rule that was missing: `sum0[i]`/`sum1[i]` include every input spike up to `times[i - 1]`, so the voltage model of interval `i` is only valid for `t >= times[i - 1]`.
+
+Measured on the trained YinYang checkpoint (`paper/yinyang_0.pkl`, hidden layer 5x200, 64 test samples), the C library emitted **strictly more** spikes than the Eigen reference — a superset, never a subset — on 35 of 64 samples (1888 vs 1833 total). Neuron 177, sample 0: C reported a spike at `t = 0.013792378751` while the true voltage there is **0.701925314967** against `v_th = 1.0`; the interval's analytical peak is `tmax = 0.017081371`, behind `times[4] = 0.022977101`, and the true peak of the whole window is 0.960201051.
+
+**Fix**: the last-interval branch was deleted, not patched. One floor serves every interval — `max(times[i - 1], post spikes <= t_input)` — because `t_input` is `INFINITY` in the last interval, so the existing scan already takes the maximum over all post spikes, which is exactly what the Eigen reference does. After the fix the two backends agree exactly: 1833 vs 1833 spikes, zero differing samples, and the full `tests/test_paper_parity.py` suite goes from 6 failures to 0.
+
+This is the reverse of the framing in *Spike Time Ordering* above: there the C library is the stricter *diagnostic* of a contract both implementations share. Here the C library was the **divergent implementation** — the Eigen reference and the managed .NET side (`EventPropMath.cs`, which already floors every interval with `timesArr[i - 1]`) were both correct. When a parity gap is reported, check which side is the outlier before deciding which to change.
+
+Regression tests: `ComputeSpikes.LastIntervalPeakBehindLastInputTimeNoSpuriousSpike` (the neuron-177 fixture, asserts 0 spikes; fails pre-fix with the root at `t = 0.013792389158539134`) and `ComputeSpikes.LastIntervalGenuineSpikeStillFound` (a last interval that genuinely crosses `v_th` at 0.023057647, so the new floor cannot suppress real spikes) in `src/EventProp.C.Tests/test/compute_spikes.cpp`.
+
+### Fixed — Cython layers: use-after-free in spike-error propagation
+
+`LIFLayer.backward` and `LILayer.backward` (`eventprop_c/lif_layer.py`, `eventprop_c/li_layer.py`) propagated the loss signal to the previous layer with zero-copy views into the native `AccumulatedBackwardResult`:
+
+```python
+result = backward_spikes_batch_accumulate(...)
+for i in range(result.batch_size):
+    inp._errors = result.get_spike_errors(i)   # view into result's native buffer
+# result is a local — it dies here, __dealloc__ frees the buffer, views dangle
+```
+
+The consumer is the *ancestor* layer's `backward()`, invoked by `super().backward()` at the end of the same method, and the views stay live on the input spikes after that. Dropping the last reference to `result` frees the buffers they point at, so the ancestor's backward reads freed heap memory.
+
+Symptom on the YinYang fixture: the hidden layer's incoming spike errors were denormal garbage (~1e-158, 2 nonzero per sample) instead of 299.15 / 1.88 / 5.34 / 4.33, and the hidden gradient was ~1000x too small with 179 of 222 entries exactly zero (`max|g| = 9.4e-4` against the reference's `1.265454`). The *loss* layer's own gradient was correct to 8.5e-14 throughout, which is what localises this to propagation rather than to the adjoint sweep — the C `spike_errors` output is healthy (max 106.0) when read directly.
+
+**Fix**: pin the result on the layer (`self._backward_result = result`) so the native buffer outlives the views handed to the ancestor. `Layer.__init__` initialises the attribute. After the fix the hidden gradient matches the reference exactly (`max|g| = 1.265453817356891` vs `py[1,119] = -1.265454e+00`).
+
+Regression tests: `SpikeErrorPropagationLifetimeTest` in `src/EventProp.Native.Python/test/test_layer_chain.py`. The freed `spike_errors` blocks are ~11 KB, so the test recycles that size class with same-size numpy allocations immediately after `backward()` — that makes the dangling read deterministic (max|error| = 5.1e+77 pre-fix, ~8-11 post-fix) instead of leaving it to heap layout, which is not reliably detectable. A plain `gc.collect()` + `bytearray` churn passed against the unfixed code.
 
 ### Fixed — Managed .NET forward pass: per-neuron spike buffers overflow
 
