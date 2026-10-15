@@ -238,6 +238,13 @@ def make_input_batch(n_in: int, n_out: int, spikes_per_neuron: int,
 
 
 def make_weights(n_in: int, n_out: int) -> np.ndarray:
-    """Create weight matrix with same distribution as .NET benchmarks."""
+    """Create weight matrix with same distribution as .NET benchmarks.
+
+    U[0.5, 2.0): matches `w_dist(0.5, 2.0)` in bench_main.cpp and
+    `0.5 + rng.NextDouble() * 1.5` in SpikePatterns.cs. The previous form,
+    `0.5 + rng.random(...)`, was U[0.5, 1.5) — half the intended range, which
+    cut Medium output spikes from 10308 to 7768 (-24.6%) and made Python-vs-native
+    ratios compare different workloads.
+    """
     rng = np.random.default_rng(42)
-    return 0.5 + rng.random((n_in, n_out))
+    return 0.5 + 1.5 * rng.random((n_in, n_out))
