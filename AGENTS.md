@@ -70,6 +70,7 @@ eventprop.net/
 - **Implicit usings**: enabled
 - **Test framework**: TUnit 1.45+ (Microsoft Testing Platform) for .NET; Google Test v1.15.2 for C/C++ (`EventProp.C.Tests/`)
 - **Coverage**: TUnit `--coverage --coverage-output-format=cobertura` + ReportGenerator
+- **CMake**: floor is `3.21` in all five CMake projects; each ships a `CMakePresets.json` (see [CMake Presets](#cmake-presets))
 
 ## Building
 
@@ -87,6 +88,36 @@ clean.sh cpp          # only C++ wrapper
 clean.sh python       # only Python package
 clean.sh dotnet       # only .NET projects
 ```
+
+### CMake Presets
+
+All five CMake projects declare `cmake_minimum_required(VERSION 3.21)` and ship a `CMakePresets.json`. Presets are the supported way to configure and build; the hand-typed `mkdir build && cd build` sequences are kept only as a fallback.
+
+Presets live **one per project**, not at the repo root: a configure preset has no `sourceDir` field, so its source directory is always the directory containing its own `CMakePresets.json`. Run preset commands from the project directory, and `cmake --list-presets` there to see what is available.
+
+| Project | Configure / build presets |
+|---|---|
+| `EventProp.C` | `release`, `debug`, `asan`, `werror` |
+| `EventProp.Cpp.Wrapper` | `release`, `debug` |
+| `EventProp.C.Tests` | `release`, `asan` — plus matching `testPresets` for `ctest --preset` |
+| `EventProp.Native.ParityTests` | `release`, `debug` |
+| `EventProp.Native.Benchmarks` | `release` |
+
+Every preset writes to `${sourceDir}/build`, which is what the cross-project imports hardcode: `EventProp.C.Tests`, `EventProp.Native.ParityTests` and `EventProp.Native.Benchmarks` all consume a **pre-built** library out of `EventProp.C/build` and `EventProp.Cpp.Wrapper/build`. Build order therefore matters:
+
+```bash
+# 1. C library, 2. Eigen core, 3. consumers
+cd src/EventProp.C                 && cmake --preset release && cmake --build --preset release
+cd ../EventProp.Cpp.Wrapper        && cmake --preset release && cmake --build --preset release
+cd ../EventProp.C.Tests            && cmake --preset release && cmake --build --preset release && ctest --preset release
+cd ../EventProp.Native.ParityTests && cmake --preset release && cmake --build --preset release
+cd ../EventProp.Native.Benchmarks  && cmake --preset release && cmake --build --preset release
+```
+
+- `werror` (`EventProp.C` only) sets `CMAKE_COMPILE_WARNING_AS_ERROR=ON`, making the "code must compile with zero warnings" rule mechanical instead of advisory. It builds in `build-werror/` so it never clobbers the release build.
+- `asan` presets set `ENABLE_ASAN=ON` with `CMAKE_BUILD_TYPE=Debug` and `cleanFirst: true`, because the library switches SHARED→STATIC inside the same `build/` directory the test project hardcodes.
+- `CMakeUserPresets.json` is gitignored — use it for machine-local overrides.
+- The floor is 3.21 for presets schema v3 (`condition`, `installDir`, `${hostSystemName}`) while staying inside stock distro packages (Ubuntu 22.04 ships 3.22, Debian 12 ships 3.25). Schema v4's `include` (3.23) would allow one root file sharing base presets across projects, but it costs Ubuntu 22.04 support, so it is not used.
 
 ### Submodule Patches
 
@@ -116,6 +147,15 @@ cd src/EventProp.Tests && dotnet run -c Release -- --treenode-filter "/*/*/Backw
 ### C Library Unit Tests (Google Test)
 
 ```bash
+# Presets (preferred)
+cd src/EventProp.C.Tests
+cmake --preset release && cmake --build --preset release
+ctest --preset release            # 214 tests; gtest_discover_tests registers them with CTest
+./build/eventprop_tests           # or run the binary directly
+```
+
+```bash
+# Manual equivalent
 cd src/EventProp.C.Tests && rm -rf build && mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
 ./eventprop_tests
@@ -123,26 +163,33 @@ cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
 
 **With AddressSanitizer** (Debug builds only, detects use-after-free, buffer overflows):
 ```bash
-cd src/EventProp.C/build && rm -rf * && cmake .. -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=ON && cmake --build .
-cd ../EventProp.C.Tests/build && rm -rf * && cmake .. -DENABLE_ASAN=ON && cmake --build .
-./eventprop_tests
+cd src/EventProp.C        && cmake --preset asan && cmake --build --preset asan
+cd ../EventProp.C.Tests   && cmake --preset asan && cmake --build --preset asan
+ctest --preset asan
 ```
-> **Note**: On macOS, ASan automatically builds a static library (`.a`) instead of shared (`.dylib`) due to AppleClang linker limitations.
+> **Note**: On macOS, ASan automatically builds a static library (`.a`) instead of shared (`.dylib`) due to AppleClang linker limitations. The `asan` build presets use `cleanFirst` because the library flips SHARED→STATIC in the shared `build/` directory.
+
+> **Note**: `ASAN_OPTIONS=detect_leaks=1` is deliberately **not** in the presets. `gtest_discover_tests` runs the test executable at *build* time and inherits the configure preset's `environment`; macOS ASan aborts on `detect_leaks` ("not supported on this platform"), which fails discovery and takes the whole build down. On Linux, supply it at run time: `ASAN_OPTIONS=detect_leaks=1 ctest --preset asan`.
 
 ### C/C++ Parity Tests (C vs Eigen)
 
 ```bash
-cd src/EventProp.Native.ParityTests && rm -rf build && mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
-./parity_test /path/to/libeventprop_c_api.dylib
+cd src/EventProp.Native.ParityTests
+cmake --preset release && cmake --build --preset release
+./build/parity_test ../../EventProp.C/build/libeventprop_c_api.dylib
 ```
+> **Note**: requires the `release` presets of `EventProp.C` (SHARED library) and `EventProp.Cpp.Wrapper` (Eigen core) — both are imported from their `./build` directories at configure time, so configuring before them fails with a `FATAL_ERROR` naming the missing library.
 
 ### Native Benchmarks (C vs C++) — Standard Workflow
 
 **Use the benchmark scripts** (`run_benchmarks.bat` on Windows, `run_benchmarks.sh` on Linux/macOS). These handle building, running both benchmarks, saving JSON to `baselines/`, and invoking Google Benchmark's `compare.py` for human-readable comparison reports.
 
 ```bash
-# Build first (if not already built)
+# Build first (if not already built) — presets preferred
+# Requires the release presets of EventProp.C and EventProp.Cpp.Wrapper first
+cd src/EventProp.Native.Benchmarks && cmake --preset release && cmake --build --preset release
+
+# Manual equivalent
 cd src/EventProp.Native.Benchmarks && rm -rf build && mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
 
@@ -276,6 +323,14 @@ The CMake build enables strict warnings: `-Wall -Wextra -Wpedantic -Wshadow -Wim
 Both library and test CMakeLists support `-DENABLE_ASAN=ON` for memory error detection (use-after-free, buffer overflow). On macOS this builds a static library instead of shared (AppleClang limitation).
 
 ```bash
+# Presets (preferred) — library first, then tests, both with ENABLE_ASAN=ON
+cd src/EventProp.C        && cmake --preset asan && cmake --build --preset asan
+cd ../EventProp.C.Tests   && cmake --preset asan && cmake --build --preset asan
+ctest --preset asan
+```
+
+```bash
+# Manual equivalent
 cd src/EventProp.C/build && cmake .. -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=ON
 cmake --build .
 cd ../EventProp.C.Tests/build && cmake .. -DENABLE_ASAN=ON
