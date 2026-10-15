@@ -68,7 +68,8 @@ eventprop.net/
 - **Root namespace**: `CW.EventProp` (library), `CW.EventProp.Tests` (tests)
 - **Nullable**: enabled across all projects
 - **Implicit usings**: enabled
-- **Test framework**: TUnit 1.45+ (Microsoft Testing Platform) for .NET; Google Test v1.15.2 for C/C++ (`EventProp.C.Tests/`)
+- **Test framework**: TUnit 1.75+ (Microsoft Testing Platform) for .NET; Google Test v1.15.2 for C/C++ (`EventProp.C.Tests/`)
+- **No `Microsoft.NET.Test.Sdk`**: TUnit runs on Microsoft Testing Platform and the suite is invoked with `dotnet run`, not `dotnet test`. The VSTest adapter is unused, and carrying it pinned the transitive graph to `Microsoft.TestPlatform.ObjectModel` / `TestHost` and `Microsoft.CodeCoverage` 17.x. Removing it leaves one top-level package, lifts MTP to 2.5.1 and CodeCoverage to 18.12.0, and leaves both the 372 tests and the `--coverage --coverage-output-format=cobertura` run intact. Do not re-add it to "fix" test discovery.
 - **Coverage**: TUnit `--coverage --coverage-output-format=cobertura` + ReportGenerator
 - **CMake**: floor is `3.21` in all five CMake projects; each ships a `CMakePresets.json` (see [CMake Presets](#cmake-presets))
 
@@ -539,7 +540,7 @@ Covered per backend: gradient shape, forward/backward determinism, `ZeroGrad`, b
 
 `Layer` is `IDisposable` (managed layers own ArrayPool buffers, native layers own pinned handles + native batches); `LayerChain.Dispose()` disposes both children. `SyncAssert` gained a `bool` overload (`IsTrue`/`IsFalse`).
 
-> TUnit 1.45 has no `PropertySource`; `MethodDataSource` on a non-static test needs `[CombinedDataSources]` (TUnit0070). The suite sidesteps that by looping `AllBackends()` inside each `[Test]` body.
+> TUnit has no public `PropertySource` attribute — verified against both 1.45.29 and 1.75.0; the `PropertySource` strings in `TUnit.Core.dll` are internal (`PropertySourceRegistry`, `IPropertySource`). `MethodDataSource` on a non-static test needs `[CombinedDataSources]` (TUnit0070). The suite sidesteps both by looping `AllBackends()` inside each `[Test]` body.
 
 ### Zero-Allocation Hot Paths
 
