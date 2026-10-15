@@ -20,7 +20,8 @@
       "description": "Google Test suite against the SHARED library in ../EventProp.C/build. Run the release preset there first. Required for parity tests.",
       "inherits": "base",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Release",
+        "ENABLE_ASAN": "OFF"
       }
     },
     {

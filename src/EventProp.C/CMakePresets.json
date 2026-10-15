@@ -17,10 +17,11 @@
     {
       "name": "release",
       "displayName": "Release (shared library)",
-      "description": "SHARED libeventprop_c_api. Build this before EventProp.C.Tests, EventProp.Native.ParityTests and EventProp.Native.Benchmarks, which import it from ./build.",
+      "description": "SHARED libeventprop_c_api. Build this before EventProp.C.Tests, EventProp.Native.ParityTests and EventProp.Native.Benchmarks, which import it from ./build. Sets ENABLE_ASAN=OFF explicitly: it is a cache variable, so a prior asan run would otherwise leak into this build and silently produce an instrumented STATIC library.",
       "inherits": "base",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Release",
+        "ENABLE_ASAN": "OFF"
       }
     },
     {
@@ -29,7 +30,8 @@
       "description": "Unoptimised. ASan requires a Debug build.",
       "inherits": "base",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ENABLE_ASAN": "OFF"
       }
     },
     {
@@ -50,6 +52,7 @@
       "binaryDir": "${sourceDir}/build-werror",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
+        "ENABLE_ASAN": "OFF",
         "CMAKE_COMPILE_WARNING_AS_ERROR": "ON"
       }
     }
