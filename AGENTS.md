@@ -17,13 +17,16 @@ This repository implements the **EventProp** algorithm — an event-based backpr
 | **EventProp.Cpp.Wrapper/** | C++ (Eigen) | Convenience copy of the C++ core. Used for native benchmarks and parity tests |
 | **EventProp.Native.Python/** | Python + Cython | Python layer using C library via Cython bindings (`eventprop_c/_native.pyx`) |
 | **EventProp.Native/** | C# (.NET 10) | P/Invoke bindings wrapping EventProp.C via `LibraryImport` |
+| **EventProp.Abstractions/** | C# (.NET 10) | Shared `Layer` contract + data carriers, implemented by both backends (no package deps) |
 | **EventProp/** | C# (.NET 10) | Self-contained, fully managed .NET implementation of EventProp.Python |
-| **EventProp.C.Tests/** | C++ (Google Test v1.15.2) | Unit tests for EventProp.C library (201 tests, ASan-compatible) |
+| **EventProp.C.Tests/** | C++ (Google Test v1.15.2) | Unit tests for EventProp.C library (214 tests, ASan-compatible) |
 | **EventProp.Tests/** | C# (.NET 10) | TUnit test suite for .NET projects (correctness + parity) |
 | **EventProp.Benchmarks/** | C# (.NET 10) | BenchmarkDotNet project comparing native vs managed .NET libraries |
 | **EventProp.Native.Benchmarks/** | C++ (Google Benchmark) | Benchmarks comparing EventProp.C vs EventProp.Python C++ code |
 | **EventProp.Native.ParityTests/** | C++ (CMake) | Standalone parity tests comparing C vs Eigen implementations |
 | **EventProp.Python.Benchmarks/** | Python (pytest-benchmark) | Benchmarks comparing EventProp.Python vs EventProp.Native.Python |
+| **EventProp.Web/** | Python (Streamlit) | "EventProp Visualizer" — interactive forward/backward pass explorer |
+| **EventProp.Python.GoogleBenchmarks/** | Python | Two standalone `benchmark*.py` scripts; not wired into `build.sh` or the suites above |
 
 ## Solution Structure
 
@@ -31,6 +34,8 @@ This repository implements the **EventProp** algorithm — an event-based backpr
 eventprop.net/
 ├── build.sh                    # Build all targets (C, C++, Python, .NET)
 ├── clean.sh                    # Clean all or individual targets
+├── scripts/
+│   └── submodule-state.sh      # Owns the read-only submodule's local modifications
 ├── src/
 │   ├── EventProp.Python/       # Reference library (git submodule, read-only)
 │   ├── EventProp.C/            # Pure C implementation (libeventprop_c_api)
@@ -49,7 +54,7 @@ eventprop.net/
 │   ├── EventProp.Cpp.Wrapper/  # C++ Eigen core (convenience copy, no pybind11)
 │   ├── EventProp.Native/       # .NET P/Invoke bindings (C library) + native LIFLayer/LILayer
 │   ├── EventProp.Abstractions/ # Shared Layer contract (SpikesData, *Parameters, WeightInitializer)
-│   ├── EventProp.C.Tests/      # Google Test v1.15.2 suite for C library (201 tests)
+│   ├── EventProp.C.Tests/      # Google Test v1.15.2 suite for C library (214 tests)
 │   ├── EventProp/              # Managed .NET implementation
 │   ├── EventProp.Tests/        # TUnit test suite (correctness + parity)
 │   ├── EventProp.Benchmarks/   # BenchmarkDotNet (native vs managed .NET)
@@ -57,10 +62,14 @@ eventprop.net/
 │   │   └── eventprop_c/_native.pyx  # Thin Cython wrappers, zero-copy numpy views
 │   ├── EventProp.Native.Benchmarks/  # Google Benchmark (C vs C++)
 │   ├── EventProp.Native.ParityTests/ # Standalone parity tests (C vs Eigen)
-│   └── EventProp.Python.Benchmarks/  # pytest-benchmark (pybind11 vs Cython)
+│   ├── EventProp.Python.Benchmarks/  # pytest-benchmark (pybind11 vs Cython)
+│   ├── EventProp.Web/                # Streamlit visualizer
+│   └── EventProp.Python.GoogleBenchmarks/  # legacy standalone benchmark scripts
 ├── coverage-report/            # Generated HTML coverage reports (gitignored)
 └── AGENTS.md                   # This file
 ```
+
+Each of the five preset-driven CMake projects also carries a `CMakePresets.json` (see [CMake Presets](#cmake-presets)). `src/EventProp.Cpp.Native/` exists on disk as an **empty, untracked** directory — it is not a project, and `clean.sh` still references it.
 
 ## Conventions
 
@@ -71,7 +80,7 @@ eventprop.net/
 - **Test framework**: TUnit 1.75+ (Microsoft Testing Platform) for .NET; Google Test v1.15.2 for C/C++ (`EventProp.C.Tests/`)
 - **No `Microsoft.NET.Test.Sdk`**: TUnit runs on Microsoft Testing Platform and the suite is invoked with `dotnet run`, not `dotnet test`. The VSTest adapter is unused, and carrying it pinned the transitive graph to `Microsoft.TestPlatform.ObjectModel` / `TestHost` and `Microsoft.CodeCoverage` 17.x. Removing it leaves one top-level package, lifts MTP to 2.5.1 and CodeCoverage to 18.12.0, and leaves both the 372 tests and the `--coverage --coverage-output-format=cobertura` run intact. Do not re-add it to "fix" test discovery.
 - **Coverage**: TUnit `--coverage --coverage-output-format=cobertura` + ReportGenerator
-- **CMake**: floor is `3.21` in all five CMake projects; each ships a `CMakePresets.json` (see [CMake Presets](#cmake-presets))
+- **CMake**: floor is `3.21` in all six first-party CMake projects; five ship a `CMakePresets.json` (see [CMake Presets](#cmake-presets))
 
 ## Building
 
@@ -86,15 +95,18 @@ eventprop.net/
 
 # Clean all build outputs
 clean.sh              # removes everything (all targets)
-clean.sh c            # only C library
+clean.sh c            # only C library (build/ and build-werror/)
 clean.sh cpp          # only C++ wrapper
-clean.sh python       # only Python package
+clean.sh python       # Python package, Cython bindings and Python benchmarks
 clean.sh dotnet       # only .NET projects
+clean.sh parity       # only parity tests
+clean.sh benchmarks   # only native (C vs C++) benchmarks
+clean.sh -full        # also delete the reference binary, forcing a rebuild
 ```
 
 ### CMake Presets
 
-All five CMake projects declare `cmake_minimum_required(VERSION 3.21)` and ship a `CMakePresets.json`. Presets are the supported way to configure and build; the hand-typed `mkdir build && cd build` sequences are kept only as a fallback.
+All six first-party CMake projects declare `cmake_minimum_required(VERSION 3.21)`. **Five** ship a `CMakePresets.json` — `EventProp.C`, `EventProp.C.Tests`, `EventProp.Cpp.Wrapper`, `EventProp.Native.ParityTests`, `EventProp.Native.Benchmarks`. The sixth, `EventProp.Cpp.Wrapper/benchmarks/`, is a standalone project with no presets; configure it by hand. Presets are the supported way to drive the other five; the hand-typed `mkdir build && cd build` sequences are kept only as a fallback.
 
 Presets live **one per project**, not at the repo root: a configure preset has no `sourceDir` field, so its source directory is always the directory containing its own `CMakePresets.json`. Run preset commands from the project directory, and `cmake --list-presets` there to see what is available.
 
@@ -166,11 +178,13 @@ The submodule is read-only — patches must be reapplied after pulling from upst
 # All tests — Release mode (required for parity tests)
 cd src/EventProp.Tests && dotnet run -c Release --
 
-# Filtered
-cd src/EventProp.Tests && dotnet run -c Release -- --treenode-filter "/*/*/BackwardSpikes/*"
+# Filtered — the tree is /Namespace/ClassName/MethodName
+cd src/EventProp.Tests && dotnet run -c Release -- --treenode-filter "/*/*/BackwardSpikesTests/*"
 ```
 
 > **Note**: TUnit uses Microsoft Testing Platform (MTP), not VSTest. `dotnet test` does NOT work. The `-c` flag goes BEFORE `--`, TUnit flags go AFTER `--`. Use `--treenode-filter` instead of `--filter`.
+>
+> **Note**: a treenode pattern is exactly three segments — `/Namespace/ClassName/MethodName`. A four-segment pattern, or a method-name fragment in the class slot, is **accepted and matches nothing**, reporting `total: 0` as if the suite were empty. `"/*/*/BackwardSpikes/*"` is the classic instance and matches 0 tests; the working form is `"/*/*/BackwardSpikesTests/*"` (6 tests). A filter returning 0 is a pattern bug, not an empty suite. `--list-tests` shows the names.
 
 ### C Library Unit Tests (Google Test)
 
@@ -344,7 +358,7 @@ Extract hardcoded thresholds to named constants at the top of files (e.g., `TOMS
 
 ### Compiler Warnings
 
-The CMake build enables strict warnings: `-Wall -Wextra -Wpedantic -Wshadow -Wimplicit-fallthrough -Wformat=2 -Wnull-dereference` (GCC/Clang), `/W4` (MSVC). GCC additionally gets `-Wduplicated-cond`, `-Wmisleading-indentation`, `-Wlogical-op`. Code must compile with zero warnings.
+The CMake build enables strict warnings: `-Wall -Wextra -Wpedantic -Wshadow -Wimplicit-fallthrough -Wformat=2 -Wnull-dereference -Wsign-conversion` (GCC/Clang), `/W4` (MSVC). GCC additionally gets `-Wduplicated-cond`, `-Wmisleading-indentation`, `-Wlogical-op`. Code must compile with zero warnings — now enforced mechanically by the `werror` preset in `EventProp.C`.
 
 ### Memory Testing: AddressSanitizer
 

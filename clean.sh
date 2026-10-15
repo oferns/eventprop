@@ -68,7 +68,9 @@ fi
 if [[ "$TARGET" == "all" || "$TARGET" == "dotnet" ]]; then
   echo "[6/8] Cleaning .NET projects..."
   cd "$SCRIPT_DIR/src"
-  for proj in EventProp EventProp.Native EventProp.Cpp.Native EventProp.Tests EventProp.Benchmarks; do
+  # EventProp.Cpp.Native is not a project: src/EventProp.Cpp.Native is an empty,
+  # untracked directory. EventProp.Abstractions is a real project and must be here.
+  for proj in EventProp EventProp.Abstractions EventProp.Native EventProp.Tests EventProp.Benchmarks; do
     rm -rf "$proj/bin" "$proj/obj"
   done
 fi
