@@ -544,18 +544,24 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
                 /* ── Compute t_lower (bracket start) ── */
                 const double t_input = (i == input.n_spikes) ? INFINITY : input.times[i];
 
-                double t_before;
-                if (i == input.n_spikes) {
-                    /* Last interval: lower bound is last post-spike or 0 */
-                    t_before = count > 0 ? p_times[count - 1] : 0.0;
-                } else {
-                    /* Regular interval: latest of (prev input time, post spikes before current input) */
-                    t_before = (i > 0) ? input.times[i - 1] : 0.0;
-                    for (int s = 0; s < count; s++) {
-                        double st = p_times[s];
-                        if (st > t_input) break;
-                        if (st > t_before) t_before = st;
-                    }
+                /* Bracket floor: the latest of (previous input time, post spikes
+                 * at or before this interval's input time). The same rule applies
+                 * to the last interval — t_input is INFINITY there, so the scan
+                 * below simply takes the maximum over every post spike.
+                 *
+                 * The times[i - 1] floor is not cosmetic. sum0[i]/sum1[i] include
+                 * every input spike up to times[i - 1], so the voltage model that
+                 * interval describes is only valid for t >= times[i - 1]. Without
+                 * the floor, a last interval whose analytical peak lies behind it
+                 * (tmax < times[i - 1]) passes the `t_before <= tmax` guard, and the
+                 * solver brackets a region where the model is an extrapolation of a
+                 * train that has not arrived yet — reporting roots at times where the
+                 * real membrane potential is well under v_th. */
+                double t_before = (i > 0) ? input.times[i - 1] : 0.0;
+                for (int s = 0; s < count; s++) {
+                    double st = p_times[s];
+                    if (st > t_input) break;
+                    if (st > t_before) t_before = st;
                 }
 
                 /* ── Generate candidate upper bounds ── */
