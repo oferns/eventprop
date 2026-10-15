@@ -77,7 +77,15 @@ class LIFLayer(Layer):
 
         self.gradient[:] = result.grad.reshape(self.w_in.shape)
 
-        # Propagate spike errors back to input spikes (per-sample, zero-copy)
+        # Propagate spike errors back to input spikes (per-sample, zero-copy).
+        # get_spike_errors() is a view into the native AccumulatedBackwardResult,
+        # which __dealloc__ frees — so the result has to outlive this call. The
+        # consumer is the *ancestor* layer's backward, which runs below in
+        # super().backward(), and the views stay live on the input spikes after
+        # that. Dropping the last reference here frees the buffers those views
+        # point at, and the ancestor then reads freed heap memory (observed as
+        # identical 1.2e+79 garbage in every sample of the batch).
+        self._backward_result = result
         for i in range(result.batch_size):
             inp = self.input_batch[i]
             if len(inp.times) > 0:

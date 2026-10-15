@@ -249,3 +249,106 @@ class LIFLIFChainTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SpikeErrorPropagationLifetimeTest(unittest.TestCase):
+    """The ancestor layer must read spike errors from live memory.
+
+    LIFLayer.backward() hands the *previous* layer zero-copy numpy views into
+    the native AccumulatedBackwardResult returned by
+    backward_spikes_batch_accumulate. That object frees the native buffer in
+    __dealloc__, so if the local `result` is the only reference it dies at the
+    end of backward() and the views dangle: the ancestor then reads freed heap
+    memory. Observed as an identical 1.2e+79 in every sample of the batch, and
+    a hidden-layer gradient ~1000x too small with most entries exactly zero.
+    """
+
+    def _chain(self, seed):
+        np.random.seed(seed)
+        n_in, n_hidden, n_out, n_batch = 10, 12, 6, 6
+        isi, t_max = 5e-3, 0.2
+        hidden_pars = LIFLayerParameters(
+            n=n_hidden, n_in=n_in, tau_mem=20e-3, tau_syn=5e-3
+        )
+        loss_pars = TTFSCrossEntropyLossParameters(
+            lif_parameters=LIFLayerParameters(
+                n=n_out, n_in=n_hidden, tau_mem=20e-3, tau_syn=5e-3
+            )
+        )
+        norm = get_normalization_factor(20e-3, 5e-3)
+        w_hidden = np.random.normal(0.2, 0.1, size=(n_in, n_hidden)) * norm
+        w_loss = np.random.normal(0.2, 0.1, size=(n_hidden, n_out)) * norm
+        input_spikes = SpikesVector(
+            [get_poisson_spikes(isi, t_max, n_in) for _ in range(n_batch)]
+        )
+        hidden = LIFLayer(hidden_pars, w_hidden)
+        loss = TTFSCrossEntropyLoss(loss_pars)
+        loss.w_in = w_loss
+        loss(hidden(input_spikes))
+        return hidden, loss, np.arange(n_batch)
+
+    def test_propagated_errors_survive_the_backward_call(self):
+        """Reading the propagated errors after backward() must not touch freed memory.
+
+        The freed spike_errors blocks are ~11 KB, so allocating a batch of
+        same-size-class arrays right after backward() recycles them and makes
+        the dangling read deterministic. Measured with the result unheld:
+        max|error| = 5.1e+77 in every sample. With the result held on the layer:
+        max|error| ~ 8-11, stable across seeds.
+        """
+        hidden, loss, labels = self._chain(seed=1)
+        loss.backward(labels)
+
+        # Recycle the size class of the native spike_errors buffers.
+        poison = [np.full(1400, -7.0) for _ in range(4000)]
+        try:
+            incoming = [np.asarray(hidden.post_batch[i].errors)
+                        for i in range(len(hidden.post_batch))]
+            self.assertTrue(any(np.any(e != 0) for e in incoming),
+                            "chain produced no propagated spike errors")
+            for i, e in enumerate(incoming):
+                self.assertTrue(np.all(np.isfinite(e)),
+                                f"sample {i}: non-finite spike error (freed memory?)")
+                self.assertLess(np.abs(e).max(), 1e3,
+                                f"sample {i}: spike error magnitude {np.abs(e).max():.3e} "
+                                "is out of range — the native buffer was freed under it")
+        finally:
+            del poison
+
+    def test_hidden_gradient_matches_an_independently_held_result(self):
+        """The chain gradient must not depend on when the native result dies.
+
+        Runs the same chain twice: once normally, once with the native
+        AccumulatedBackwardResult pinned in a module-level list so its buffers
+        cannot be recycled. A dangling read shows up as a gradient that is
+        ~1000x too small with most entries exactly zero.
+        """
+        hidden_a, loss_a, labels = self._chain(seed=2)
+        loss_a.backward(labels)
+        grad_normal = np.array(hidden_a.gradient)
+
+        held = []
+        import eventprop_c.lif_layer as lif_mod
+        original = lif_mod.backward_spikes_batch_accumulate
+
+        def pinning(*args, **kwargs):
+            result = original(*args, **kwargs)
+            held.append(result)          # keep the native buffers alive
+            return result
+
+        lif_mod.backward_spikes_batch_accumulate = pinning
+        try:
+            hidden_b, loss_b, _ = self._chain(seed=2)
+            loss_b.backward(labels)
+            grad_pinned = np.array(hidden_b.gradient)
+        finally:
+            lif_mod.backward_spikes_batch_accumulate = original
+            del held
+
+        self.assertGreater(np.abs(grad_pinned).max(), 0.0,
+                           "chain gradient is identically zero — test is vacuous")
+        assert_allclose(grad_normal, grad_pinned, rtol=1e-7, atol=1e-12)
+
+
+if __name__ == "__main__":
+    unittest.main()

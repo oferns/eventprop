@@ -78,6 +78,10 @@ class Layer(ABC):
         self.ancestor_layer = None
         self._ran_forward = False
         self._ran_backward = False
+        # Keeps the native AccumulatedBackwardResult alive: backward() hands the
+        # ancestor layer zero-copy views into it, so it must not be freed while
+        # those views are still being read.
+        self._backward_result = None
 
     def __call__(
         self,

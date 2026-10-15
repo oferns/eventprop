@@ -73,7 +73,11 @@ class LILayer(Layer):
 
         self.gradient[:] = result.grad.reshape(self.w_in.shape)
 
-        # Propagate spike errors back to input spikes (per-sample, zero-copy)
+        # Propagate spike errors back to input spikes (per-sample, zero-copy).
+        # Same lifetime rule as LIFLayer.backward: get_spike_errors() views into
+        # the native result, which __dealloc__ frees, and the ancestor's backward
+        # below is the consumer. Keep the result alive on the layer.
+        self._backward_result = result
         for i in range(result.batch_size):
             inp = self.input_batch[i]
             if len(inp.times) > 0:
