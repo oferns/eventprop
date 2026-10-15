@@ -25,8 +25,8 @@ This repository implements the **EventProp** algorithm — an event-based backpr
 | **EventProp.Native.Benchmarks/** | C++ (Google Benchmark) | Benchmarks comparing EventProp.C vs EventProp.Python C++ code |
 | **EventProp.Native.ParityTests/** | C++ (CMake) | Standalone parity tests comparing C vs Eigen implementations |
 | **EventProp.Python.Benchmarks/** | Python (pytest-benchmark) | Benchmarks comparing EventProp.Python vs EventProp.Native.Python |
-| **EventProp.Web/** | Python (Streamlit) | "EventProp Visualizer" — interactive forward/backward pass explorer |
-| **EventProp.Python.GoogleBenchmarks/** | Python | Two standalone `benchmark*.py` scripts; not wired into `build.sh` or the suites above |
+| **EventProp.Web/** | Python (Streamlit) | "EventProp Visualizer" — interactive forward/backward pass explorer. **Active; further work planned.** Has its own `requirements.txt`; not wired into `build.sh` |
+| **EventProp.Python.GoogleBenchmarks/** | Python | **Superseded experiment.** Two standalone `benchmark*.py` scripts that ported `bench_main.cpp` cases to `google_benchmark` in Python to test cross-suite comparability. Not wired into `build.sh` or any suite; kept for reference. Its data is **incompatible** with the current contract (weights U[2.5, 10.0], bypasses `LIFLayer`) — see the data contract |
 
 ## Solution Structure
 
@@ -493,6 +493,9 @@ Every generator upholds, and the Python suite asserts it at generation time (`va
 - **times are non-decreasing** — the C library returns `EVENTPROP_UNSORTED_SPIKE_TIMES` (60) otherwise, and the Cython layer reports `error_no` without raising, so an unsorted array silently measures a validation short-circuit.
 - **every spike lands inside [0, 1)** — `max_time / tau_syn` must stay under `EVENTPROP_EXP_OVERFLOW_THRESHOLD` (700). The old .NET burst reached 5.94 s → ratio 1188 → `EVENTPROP_TIMES_TAU_MISMATCH`, so that pattern could not be fed to the native side at all.
 - **exactly `n_spikes` are produced, none left unwritten** — a fixed per-neuron burst offset saturates at a handful of bursting neurons, and the remaining slots keep their zero-initialised value: thousands of simultaneous spikes at t = 0. That inflated XL burst to 771k output spikes and made `BackwardSpikes/XL/burst` cost 15.6 s per iteration; the canonical generator uses a computed stagger and yields 757k spikes in 7.9 s.
+
+- **weights are U[0.5, 2.0) in all three suites** — `w_dist(0.5, 2.0)` in `bench_main.cpp`, `0.5 + rng.NextDouble() * 1.5` in `SpikePatterns.cs`, `0.5 + 1.5 * rng.random(...)` in `conftest.py`. The Python suite used to be `0.5 + rng.random(...)`, i.e. U[0.5, 1.5) — **half the intended range, under a docstring claiming .NET parity**. Measured at Medium/uniform: **7768 output spikes vs 10308 (−24.6%)**, so Python-vs-native ratios were comparing materially different workloads, not just different RNGs. Fixed; every Python benchmark number re-baselines.
+- **Tiny and Small/uniform produce 0 output spikes** for both the old and the corrected weight range, so those Python rows time an empty forward pass — the same regime already flagged for native `BackwardSpikes/Tiny|Small/uniform`. Exclude them from any geomean.
 
 Burst is deterministic (no RNG in times/sources), so Python and native produce **bit-identical** burst data. Uniform times are identical by construction (only `sources` differ, since `std::mt19937`, `System.Random` and PCG64 cannot agree). Poisson uses the same inverse-CDF form in all three (`-log(1-u)/rate` plus a strictly-increasing fix), so it is distributionally identical. Cross-suite numbers are therefore statistical, not exact — compare ratios, not absolute counts.
 
