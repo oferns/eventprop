@@ -58,7 +58,6 @@ coverage-report/
 *.coverage
 *.cobertura.xml
 *.trx
-*.html
 
 # CMake build output
 build/
