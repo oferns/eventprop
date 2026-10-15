@@ -95,7 +95,7 @@ Each of the five preset-driven CMake projects also carries a `CMakePresets.json`
 
 # Clean all build outputs
 clean.sh              # removes everything (all targets)
-clean.sh c            # only C library (build/ and build-werror/)
+clean.sh c            # only C library (build/ and build-werror/, plus EventProp.C.Tests/build/)
 clean.sh cpp          # only C++ wrapper
 clean.sh python       # Python package, Cython bindings and Python benchmarks
 clean.sh dotnet       # only .NET projects
@@ -103,6 +103,8 @@ clean.sh parity       # only parity tests
 clean.sh benchmarks   # only native (C vs C++) benchmarks
 clean.sh -full        # also delete the reference binary, forcing a rebuild
 ```
+
+Targets **compose** — `clean.sh c cpp parity` cleans all three, and an unrecognised argument is a hard error (exit 2), not a silent no-op. `-full` takes effect only when `python`/`all` is selected, since the reference binary lives in the Python target.
 
 ### CMake Presets
 
