@@ -142,8 +142,18 @@ class TestYinYangTTFS:
         py_hidden.forward(py_batch); py_loss.forward(py_hidden.post_batch)
         cy_hidden.forward(cy_batch); cy_loss.forward(cy_hidden.post_batch)
 
-        py_preds = np.nanargmin(py_loss.first_spike_times, axis=1)
-        cy_preds = np.nanargmin(cy_loss.first_spike_times, axis=1)
+        # np.nanargmin raises "All-NaN slice encountered" when no output neuron
+        # fires for a sample — which the reference itself produces (1 of 64 samples
+        # in this fixture). Predictions are only defined where a spike exists, so
+        # compare rows that both backends fired and require the same all-NaN mask.
+        def _preds(fst):
+            masked = np.where(np.isnan(fst), np.inf, fst)
+            out = np.argmin(masked, axis=1)
+            out[np.all(np.isnan(fst), axis=1)] = -1
+            return out
+
+        py_preds = _preds(py_loss.first_spike_times)
+        cy_preds = _preds(cy_loss.first_spike_times)
         assert np.array_equal(py_preds, cy_preds), "YinYang predictions mismatch"
 
     def test_backward_gradients(self, test_data, weights):
@@ -248,11 +258,13 @@ class TestMNISTVMax:
         py_hidden.forward(py_batch); py_loss.forward(py_hidden.post_batch)
         cy_hidden.forward(cy_batch); cy_loss.forward(cy_hidden.post_batch)
 
-        # Compare VMax values (batch × 10 neurons)
+        # Compare VMax values (batch × 10 neurons).
+        # The pybind11 loss exposes maxima per sample as maxima_batch[i].values;
+        # the Cython loss exposes the same numbers as values_batch[i].
         for i in range(n_samples):
             _assert_close(
                 np.asarray(cy_loss.values_batch[i]),
-                np.asarray(py_loss.values_batch[i]),
+                np.asarray(py_loss.maxima_batch[i].values),
                 f"MNIST VMax sample {i}",
             )
 
