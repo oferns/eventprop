@@ -69,7 +69,7 @@ eventprop.net/
 └── AGENTS.md                   # This file
 ```
 
-Each of the five preset-driven CMake projects also carries a `CMakePresets.json` (see [CMake Presets](#cmake-presets)). `src/EventProp.Cpp.Native/` exists on disk as an **empty, untracked** directory — it is not a project, and `clean.sh` still references it.
+Each of the five preset-driven CMake projects also carries a `CMakePresets.json` (see [CMake Presets](#cmake-presets)).
 
 ## Conventions
 
@@ -689,4 +689,4 @@ Diagnostic signature: a Linux reference-library build failing on `#include <exec
 
 - **macOS** — developed and tested
 - **Linux** — intended support
-- **Windows** — supported via MSVC + CMake (VS Code workspace configs provided)
+- **Windows** — supported via MSVC + CMake. `.vscode/` is **gitignored**, so `settings.json` / `tasks.json` are local to each machine, not shared; `tasks.json` on this machine still encodes the pre-presets manual `rm -rf build && mkdir build` sequence and needs modernising to `cmake --preset`
