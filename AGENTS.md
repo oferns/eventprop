@@ -336,45 +336,53 @@ incl. XL is 162 s per binary; the ~30 min full run is dominated by .NET's 75 ben
 
 ### TEMPORARY — cross-platform status of the benchmark pipeline
 
-**Everything below was built and validated on macOS/arm64 only.** Windows and Linux have
-not been run. The pipeline will not work unmodified on either; these are the known gaps.
+**Built and validated on macOS/arm64.** Windows and Linux have not been run. The
+platform-dependent paths in `run_all.py` are now resolved at runtime (see "fixed" below),
+so the Windows/Linux clone has a real chance of working first try — but "chance" is not
+"tested", and the last item in this section is the only thing that settles it.
 
-**Blocks Windows (MSVC):**
+**Fixed — platform-dependent paths now resolve at runtime:**
 
-- `run_all.py` hardcodes the native binaries at `EventProp.Native.Benchmarks/build/`. On
-  MSVC, CMake writes them to **`build/Release/`** — `run_benchmarks.sh` already branches on
-  this (`BUILD_DIR="$SCRIPT_DIR/build/Release"` for MINGW/CYGWIN/MSYS). The runner needs the
-  same branch. `bench_rootfind` lives in the same directory.
-- `run_all.py` hardcodes the .NET binary at `bin/Release/net10.0/EventProp.Benchmarks.dll`.
-  Verify the path for the MSVC/`dotnet build` layout before running.
-- `DYLD_LIBRARY_PATH` (macOS) is set for the Python suite; `LD_LIBRARY_PATH` (Linux) is set
-  too, but **neither is used on Windows** — there it is `PATH`, and the Cython extension
-  loads the C library via an **rpath embedded at build time** (`_native.pyx` line 21), so on
-  Windows the `.dll` must be findable by `PATH` or copied next to the extension.
+- **Native binaries.** `native_build_dir()` probes `build/`, `build/Release/`, and
+  `build/Debug/` for the actual binaries, preferring `build/Release` on Windows. MSVC's
+  multi-config generator writes `bench_c.exe` to `build/Release/`; Unix Makefiles writes
+  `bench_c` to `build/`. Detection is by which directory contains the exe, so a
+  single-config Windows build (MSYS2/MinGW) also resolves. `native_exe_name()` appends
+  `.exe` on Windows. Verified by simulating an MSVC tree.
+- **`PYTHONPATH` separator.** Was a hardcoded `:` — on Windows (`os.pathsep` is `;`) that
+  silently made the second entry unimportable, so the reference submodule import would fail
+  with a confusing `ModuleNotFoundError`. Now `os.pathsep.join(...)`.
+- **Library path.** Sets `DYLD_LIBRARY_PATH` (macOS), `LD_LIBRARY_PATH` (Linux), **and**
+  prepends the C build dir to `PATH` (Windows). Each is ignored on platforms that don't
+  read it. Note the Cython extension embeds an **rpath at build time** (`_native.pyx:21`),
+  so on Windows the `.dll` must be on `PATH` or next to the extension — `PATH` is the only
+  one of the three that does anything there.
+- **.NET binary path.** `bin/Release/net10.0/EventProp.Benchmarks.dll` is
+  framework-dependent and uses the **same layout on Windows and Linux** — no branch needed.
+  Stated here because it looks like the kind of path that would need one.
 
-**Blocks Linux:**
+**Remaining Linux gap (cosmetic):** `from_google_benchmark.py`'s `_cpu_label` uses
+`platform.mac_ver()` and a macOS-only `sysctl` helper. On Linux it falls through to
+`mhz_per_cpu`, so `meta.cpu` reads `"8 cpu @ N MHz"` rather than a brand string. That makes
+`meta.cpu` non-comparable across hosts for the same machine class; `host` and `vcs_rev` are
+unaffected.
 
-- The Python suite needs the reference submodule built first, which needs
-  `scripts/submodule-state.sh apply` (pybind11 `a2e59f0e` / 2.13.6 on Linux, carried inside
-  `submodule-linux.patch`). `./build.sh release` does this; a bare `pip install` does not.
-- `from_google_benchmark.py`'s `_cpu_label` uses `platform.mac_ver()` and a macOS-only
-  `sysctl` helper. On Linux it falls through to `mhz_per_cpu`, so `meta.cpu` will read
-  `"8 cpu @ N MHz"` rather than a brand string. Cosmetic, but it makes `meta.cpu` differ
-  across hosts for the same physical machine class.
+**Prerequisite on Linux:** the Python suite needs the reference submodule built, which needs
+`scripts/submodule-state.sh apply` (pybind11 `a2e59f0e` / 2.13.6 on Linux, carried inside
+`submodule-linux.patch`). `./build.sh release` does this; a bare `pip install` does not.
 
-**Blocks both, and it is the important one:**
+**Unchanged by design, and the important one:**
 
-- **`merge.py` refuses to merge records from different hosts** (by design — cross-machine
-  absolute times are not comparable). So a Windows run and a Linux run produce **two
-  separate reports**, never one merged table. `--allow-mixed-hosts` exists, and it yields
-  ratios only: absolute times across machines are meaningless. Expect to run the pipeline
-  once per machine and compare the per-pair geomeans, not the µs columns.
-- Provenance is what makes this safe: every record carries `host`, `cpu`, `tool_version`,
+- **`merge.py` refuses to merge records from different hosts** — cross-machine absolute
+  times are not comparable. A Windows run and a Linux run produce **two separate reports**,
+  never one merged table. `--allow-mixed-hosts` yields ratios only. Run the pipeline once
+  per machine and compare the **per-pair geomeans**, not the µs columns.
+- Provenance is what makes that safe: every record carries `host`, `cpu`, `tool_version`,
   `vcs_rev`, and `vcs_dirty`. Check them before comparing two reports.
 
 **Known-good on all three:** the CMake presets, `build.sh`, `scripts/submodule-state.sh`,
 and the .NET projects. The benchmark *suites* are portable; only the *runner's* path
-assumptions are not.
+assumptions were not.
 
 **To get benchmarks after cloning on Windows:**
 
@@ -384,7 +392,7 @@ bash build.sh release
 :: 2. native benchmark binaries
 cd src\EventProp.Native.Benchmarks
 cmake --preset release && cmake --build --preset release
-:: 3. runner — EXPECT the build/Release path gap above; fix run_all.py first
+:: 3. runner — native path resolves to build\Release automatically
 python ..\..\scripts\bench\run_all.py --quick
 ```
 
@@ -397,12 +405,9 @@ cd ../EventProp.Native.Python && pip install -e .     # Cython ext; needs the C 
 cd ../../ && python3 scripts/bench/run_all.py --quick
 ```
 
-**Not yet done, in priority order:** (1) branch the native exe path on platform in
-`run_all.py`; (2) confirm the .NET dll path on MSVC; (3) set `PATH` for the C library on
-Windows; (4) Linux `_cpu_label` fallback; (5) run `--quick` on each platform and record the
-per-pair geomeans side by side, which is the first real cross-platform claim this pipeline
-can make.
-
+**Not yet done:** (1) run `--quick` on Windows and on Linux, and record the per-pair
+geomeans side by side. That is the first real cross-platform claim this pipeline can make,
+and no amount of code reading substitutes for it. (2) Linux `_cpu_label` fallback.
 ### Coverage Report Generation
 
 ```bash

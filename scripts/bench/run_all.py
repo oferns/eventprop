@@ -37,6 +37,7 @@ import argparse
 import glob
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -49,6 +50,42 @@ NATIVE_BUILD = os.path.join(BENCH, "EventProp.Native.Benchmarks", "build")
 DOTNET_PROJ = os.path.join(BENCH, "EventProp.Benchmarks")
 DOTNET_ARTIFACTS = os.path.join(DOTNET_PROJ, "BenchmarkDotNet.Artifacts", "results")
 PY_BENCH = os.path.join(BENCH, "EventProp.Python.Benchmarks")
+
+
+def is_windows_msvc_build():
+    """True when the CMake generator puts outputs in build/Release, not build/.
+
+    run_benchmarks.sh already branches on this (MINGW/CYGWIN/MSYS -> build/Release);
+    the runner must match it or it looks for bench_c in the wrong directory on
+    Windows. Detection is by the EXE SUFFIX, not the OS: MSYS2 on Windows uses
+    Unix-Makefiles-style single-config builds, and the real discriminator is
+    whether CMake appended a config subdirectory.
+    """
+    return os.name == "nt"
+
+
+def native_build_dir():
+    """Resolve the directory holding bench_c / bench_cpp.
+
+    Prefers whichever directory actually contains the binaries, so a single-config
+    Linux/macOS build and a multi-config MSVC build both resolve without the caller
+    setting anything. Falls back to the platform default when neither has them
+    (the caller's `require` then prints the build hint).
+    """
+    suffix = ".exe" if os.name == "nt" else ""
+    candidates = [NATIVE_BUILD, os.path.join(NATIVE_BUILD, "Release"),
+                  os.path.join(NATIVE_BUILD, "Debug")]
+    if is_windows_msvc_build():
+        candidates = [os.path.join(NATIVE_BUILD, "Release"), NATIVE_BUILD,
+                      os.path.join(NATIVE_BUILD, "Debug")]
+    for d in candidates:
+        if os.path.exists(os.path.join(d, "bench_c" + suffix)):
+            return d
+    return candidates[0]
+
+
+def native_exe_name(base):
+    return base + (".exe" if os.name == "nt" else "")
 
 
 def run(cmd, cwd=None, env=None, timeout=7200, capture=False):
@@ -92,8 +129,10 @@ def bdn_version():
 
 def suite_native(out_dir, quick):
     print("\n=== suite: native (Google Benchmark) ===")
+    build_dir = native_build_dir()
+    print(f"  native build dir: {build_dir}")
     for name in ("bench_c", "bench_cpp"):
-        if not require(os.path.join(NATIVE_BUILD, name),
+        if not require(os.path.join(build_dir, native_exe_name(name)),
                        "Build it: cd src/EventProp.Native.Benchmarks && "
                        "cmake --preset release && cmake --build --preset release"):
             return False
@@ -102,12 +141,12 @@ def suite_native(out_dir, quick):
     results = {}
     for impl, exe in (("C", "bench_c"), ("Eigen", "bench_cpp")):
         json_path = os.path.join(out_dir, f"{exe}_{stamp}.json")
-        cmd = [os.path.join(NATIVE_BUILD, exe),
+        cmd = [os.path.join(build_dir, native_exe_name(exe)),
                "--benchmark_format=json", f"--benchmark_out={json_path}"]
         if quick:
             # Tiny/Small only; keeps XL (seconds-to-minutes per iteration) out.
             cmd.append("--benchmark_filter=/(Tiny|Small)/")
-        ok, _ = run(cmd, cwd=NATIVE_BUILD, timeout=7200)
+        ok, _ = run(cmd, cwd=build_dir, timeout=7200)
         if not ok:
             print(f"  {exe} run failed", file=sys.stderr)
             return False
@@ -149,6 +188,10 @@ def suite_dotnet(out_dir, quick):
     # path does not exist, so it dies with DirectoryNotFoundException after a
     # successful build. Verified: `dotnet run -c Release -- -a ... -f '*Tiny*'`
     # fails this way; running the dll directly does not.
+    #
+    # The path is framework-dependent (`bin/Release/net10.0/`), which is the same
+    # layout on Windows and Linux — no platform branch needed here, unlike the
+    # native CMake outputs.
     exe = os.path.join(DOTNET_PROJ, "bin", "Release", "net10.0",
                        "EventProp.Benchmarks.dll")
     if not require(exe, "run ./build.sh release"):
@@ -204,11 +247,23 @@ def suite_python(out_dir, quick):
                    "the kernel benchmarks live in the repo"):
         return False
 
+    # Path separator and library-path variable are platform-specific.
+    #   PYTHONPATH: os.pathsep is ';' on Windows, ':' on POSIX. A hardcoded ':'
+    #   silently makes the second entry unimportable on Windows — the reference
+    #   submodule import would fail with a confusing ModuleNotFoundError.
+    #   Library path: DYLD_LIBRARY_PATH (macOS), LD_LIBRARY_PATH (Linux), PATH
+    #   (Windows). The Cython extension embeds an rpath at build time
+    #   (_native.pyx:21), so on Windows the C library .dll must be findable via
+    #   PATH (or sit next to the extension). Setting all three is harmless: each
+    #   is ignored on the platforms that don't read it.
+    c_build = os.path.join(BENCH, "EventProp.C", "build")
+    py_paths = [os.path.join(BENCH, "EventProp.Python"),
+                os.path.join(BENCH, "EventProp.Native.Python")]
     env = {
-        "PYTHONPATH": f"{os.path.join(BENCH, 'EventProp.Python')}:"
-                      f"{os.path.join(BENCH, 'EventProp.Native.Python')}",
-        "DYLD_LIBRARY_PATH": os.path.join(BENCH, "EventProp.C", "build"),
-        "LD_LIBRARY_PATH": os.path.join(BENCH, "EventProp.C", "build"),
+        "PYTHONPATH": os.pathsep.join(py_paths),
+        "DYLD_LIBRARY_PATH": c_build,
+        "LD_LIBRARY_PATH": c_build,
+        "PATH": os.pathsep.join([c_build, os.environ.get("PATH", "")]),
     }
     json_path = os.path.join(out_dir, "kernels.json")
     cmd = [sys.executable, "-m", "pytest", "test_kernel_benchmarks.py",
