@@ -323,9 +323,9 @@ def suite_dotnet(out_dir, quick, tag, sweeps=False):
     # to ~3%, so the chain Eigen <-> C <-> PInvoke <-> Managed still closes, via two
     # adjacent pairs instead of one collapsed name.
     path = os.path.join(out_dir, f"records_{tag}_dotnet_c.json")
-    with open(rec) as f:
+    with open(rec, encoding="utf-8") as f:
         doc = json.load(f)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(doc, f, indent=2, sort_keys=True)
     print(f"  wrote {path} (impl=PInvoke, kept distinct from the native suite's C)")
     return True

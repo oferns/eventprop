@@ -71,7 +71,7 @@ MIN_WORK_NS = 10_000
 
 
 def load(path):
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         doc = json.load(f)
     if doc.get("schema_version") != SCHEMA_VERSION:
         raise ValueError(f"{path}: schema_version {doc.get('schema_version')!r}, "
@@ -259,7 +259,7 @@ def main():
         "cells": merged,
     }
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
-    with open(args.out, "w") as f:
+    with open(args.out, "w", encoding="utf-8") as f:
         json.dump(out, f, indent=2, sort_keys=True)
 
     valid = sum(1 for c in merged if c["valid"])

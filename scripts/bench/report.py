@@ -103,7 +103,7 @@ def main():
                     help="How the input was produced, e.g. the run_all.py command")
     args = ap.parse_args()
 
-    with open(args.merged_json) as f:
+    with open(args.merged_json, encoding="utf-8") as f:
         doc = json.load(f)
     if doc.get("schema_version") != SCHEMA_VERSION:
         print(f"schema_version {doc.get('schema_version')!r}, expected {SCHEMA_VERSION}",
@@ -280,7 +280,7 @@ def main():
                          f"{impl} | {fmt_us(row['mean_ns'])} |")
         L.append("")
 
-    with open(args.out, "w") as f:
+    with open(args.out, "w", encoding="utf-8") as f:
         f.write("\n".join(L) + "\n")
     print(f"{args.out}: {len(size_cells)} size cells, "
           f"{len(excluded)} excluded, {len(sweeps)} sweep cells")

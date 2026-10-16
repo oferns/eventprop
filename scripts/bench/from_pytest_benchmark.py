@@ -187,7 +187,7 @@ def main():
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
-    with open(args.json_file) as f:
+    with open(args.json_file, encoding="utf-8") as f:
         try:
             doc = json.load(f)
         except json.JSONDecodeError as e:
@@ -219,7 +219,7 @@ def main():
 
     out = {"schema_version": SCHEMA_VERSION, "meta": meta, "records": records}
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
-    with open(args.out, "w") as f:
+    with open(args.out, "w", encoding="utf-8") as f:
         json.dump(out, f, indent=2, sort_keys=True)
 
     print(f"{args.out}: {len(records)} records from {args.json_file}")

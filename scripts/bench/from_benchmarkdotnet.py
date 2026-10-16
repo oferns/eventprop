@@ -188,7 +188,18 @@ def parse_filename(path):
 
 
 def parse_csv(path):
-    with open(path, newline="") as f:
+    # encoding="utf-8" is load-bearing on Windows, not hygiene. BenchmarkDotNet writes
+    # the Mean column as UTF-8: "169.8 <CE BC>s", where CE BC is U+03BC GREEK SMALL
+    # LETTER MU. Without an explicit encoding, open() uses locale.getpreferredencoding()
+    # — cp1252 on a Western Windows — which decodes those two bytes as "Î¼", the unit
+    # regex misses, and the whole .NET suite dies after its 16-minute run with
+    #   ValueError: unparsable Mean: '169.8 ╬╝s'
+    # Measured on the first full Windows run: 95 benchmarks completed, then the
+    # adapter raised and no dotnet record file was written. macOS/Linux locales are
+    # UTF-8, so the same code is correct there and silently wrong here. UNIT_TO_NS
+    # already accepts both U+03BC and U+00B5; this is the same two-spelling problem
+    # one layer down.
+    with open(path, newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
 
 
@@ -405,7 +416,7 @@ def main():
 
     out = {"schema_version": SCHEMA_VERSION, "meta": meta, "records": records}
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
-    with open(args.out, "w") as f:
+    with open(args.out, "w", encoding="utf-8") as f:
         json.dump(out, f, indent=2, sort_keys=True)
 
     print(f"{args.out}: {len(records)} records from {len(files)} CSV(s)")
