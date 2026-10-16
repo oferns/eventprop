@@ -188,7 +188,7 @@ def host_tag():
     return f"{platform.system().lower()}-{platform.machine().lower()}"
 
 
-def suite_native(out_dir, quick, tag):
+def suite_native(out_dir, quick, tag, sweeps=False):
     print("\n=== suite: native (Google Benchmark) ===")
     build_dir = native_build_dir()
     print(f"  native build dir: {build_dir}")
@@ -220,7 +220,7 @@ def suite_native(out_dir, quick, tag):
     return all(results.values())
 
 
-def suite_dotnet(out_dir, quick, tag):
+def suite_dotnet(out_dir, quick, tag, sweeps=False):
     print("\n=== suite: dotnet (BenchmarkDotNet) ===")
     if not require(os.path.join(DOTNET_PROJ, "EventProp.Benchmarks.csproj"), "run ./build.sh release"):
         return False
@@ -273,7 +273,30 @@ def suite_dotnet(out_dir, quick, tag):
         # select all" on stdin. The runner is non-interactive, so the full run
         # produced no artifacts at all and the adapter then failed on a missing
         # results dir. `-f '*'` is the non-interactive form of that prompt.
-        cmd += ["-j", "Short", "-f", "*"]
+        #
+        # TrainingLoopSweep is EXCLUDED by default. It is 16 benchmarks costing
+        # ~2 min, and merge.py marks every sweep cell invalid (`sweep`, because
+        # `axis` is set) — verified: all 56 sweep cells are excluded, so they
+        # contribute to NO geomean and NO size table. They feed only the separate
+        # parameter-sweep table. Opt in with --sweeps.
+        #
+        # BDN 0.15.8 has NO --filterExclude (checked: `--help` lists only -f/--filter
+        # and --disasmFilter), and -f globs are ADDITIVE (a union). So exclusion must
+        # be done by naming patterns that do NOT match Sweep. `*TrainingLoop*` DOES
+        # match Bench_TrainingLoopSweep_* — verified by running the filter and seeing
+        # 127 benchmarks execute, Sweep included. The TrainingLoop entry is therefore
+        # anchored on the trailing underscore, which Sweep names do not have
+        # (Bench_TrainingLoop_Tiny vs Bench_TrainingLoopSweep_Tiny_10).
+        #
+        # Keep this list in sync with the benchmark classes: a new family must be
+        # added here or it silently stops running in the default pipeline.
+        if sweeps:
+            cmd += ["-j", "Short", "-f", "*"]
+        else:
+            cmd += ["-j", "Short", "-f",
+                    "*ComputeSums*", "*ComputeSpikes*", "*BackwardSpikes*",
+                    "*ComputeMaxima*", "*TrainingLoop_*",
+                    "*LIF_*", "*LI_*", "*Batch_*", "*Pattern_*"]
     ok, _ = run(cmd, cwd=DOTNET_PROJ, timeout=7200, label="dotnet suite (BenchmarkDotNet; the long one)")
     if not ok:
         print("  dotnet benchmark run failed", file=sys.stderr)
@@ -308,7 +331,7 @@ def suite_dotnet(out_dir, quick, tag):
     return True
 
 
-def suite_python(out_dir, quick, tag):
+def suite_python(out_dir, quick, tag, sweeps=False):
     print("\n=== suite: python (pytest-benchmark) ===")
     if not require(os.path.join(PY_BENCH, "test_kernel_benchmarks.py"),
                    "the kernel benchmarks live in the repo"):
@@ -369,6 +392,11 @@ def main():
                          "darwin-arm64). Records, merged.json and report.md all carry "
                          "it, so results from several machines can coexist in one "
                          "directory without overwriting each other.")
+    ap.add_argument("--sweeps", action="store_true",
+                    help="include the .NET TrainingLoopSweep benchmarks. Excluded by "
+                         "default: 16 benchmarks, ~2 min, and merge.py marks every "
+                         "sweep cell invalid, so they feed only the parameter-sweep "
+                         "table and no geomean.")
     ap.add_argument("--reports-dir", default=os.path.join(SRC, "bench-reports"),
                     help="directory for COMMITTED per-platform reports (report_<tag>.md); "
                          "tracked in git, unlike the raw records. Pass '' to skip.")
@@ -386,7 +414,7 @@ def main():
             print(f"\n[suite {i}/{len(args.suites)}: {name}] "
                   f"(running for {int(time.time() - t_all)}s so far)",
                   file=sys.stderr, flush=True)
-            if not runners[name](args.out, args.quick, tag):
+            if not runners[name](args.out, args.quick, tag, args.sweeps):
                 failures.append(name)
         mins, secs = divmod(int(time.time() - t_all), 60)
         print(f"\nall suites finished in {mins}m {secs:02d}s", file=sys.stderr, flush=True)
