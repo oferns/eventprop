@@ -148,6 +148,7 @@ def main():
                     PATTERN_ORDER.index(c["pattern"]) if c["pattern"] in PATTERN_ORDER else 99)
 
         ratios_valid = []
+        ratios_by_size = {}
         for c in sorted(pair_cells, key=sort_key):
             r = ratio(c, a, b)
             ta = fmt_us(c["impls"][a]["mean_ns"])
@@ -157,6 +158,7 @@ def main():
             L.append(f"| {c['benchmark']} | {c['size']} | {c['pattern']} | {ta} | {tb} | {rs} | {flag} |")
             if c["valid"] and r:
                 ratios_valid.append(r)
+                ratios_by_size.setdefault(c["size"], []).append(r)
 
         g = geomean(ratios_valid)
         L.append("")
@@ -166,6 +168,28 @@ def main():
         else:
             L.append("**Geomean: no valid cells for this pair**")
         L.append("")
+
+        # Per-size geomeans. A single geomean across sizes is misleading when one
+        # side has a fixed per-call cost: measured here, C-vs-Managed is 0.20x at
+        # Tiny and 0.62x at Small, so the pooled number (0.35x) describes neither
+        # size. P/Invoke marshalling is a fixed cost, so it dominates the small
+        # cells and amortizes away at the large ones — the same shape the Python
+        # kernel benchmarks show (Cython loses at Tiny, wins 4-6x at Medium/Large).
+        if len(ratios_by_size) > 1:
+            parts = []
+            for s in sorted(ratios_by_size, key=lambda s: SIZE_ORDER.index(s)
+                            if s in SIZE_ORDER else 99):
+                gs = geomean(ratios_by_size[s])
+                if gs:
+                    parts.append(f"{s} {gs:.2f}x ({len(ratios_by_size[s])})")
+            if parts:
+                L.append("Per-size geomean (ratio " + f"{b}/{a}"
+                         + ", pooled across families): " + ", ".join(parts))
+                L.append("")
+                L.append("> A fixed per-call cost (P/Invoke marshalling, binding overhead) "
+                         "dominates small cells and\n> amortizes at large ones, so the "
+                         "pooled geomean describes neither. Read the per-size row.")
+                L.append("")
 
     # ── Excluded rows ────────────────────────────────────────────────
     excluded = [c for c in size_cells if not c["valid"]]
@@ -189,12 +213,16 @@ def main():
         L.append("")
         L.append("Kept out of the size table; these vary a parameter, not a size cell.")
         L.append("")
-        L.append("| benchmark | axis | impl | time (us) |")
-        L.append("|---|---|---|---:|")
-        for c in sorted(sweeps, key=lambda c: (c["benchmark"], str(c["axis"]))):
+        L.append("| benchmark | size | axis | impl | time (us) |")
+        L.append("|---|---|---|---|---:|")
+        # `size` must be a column: TrainingLoopSweep registers Tiny AND Small at
+        # each batch_size, so without it the table shows two rows per batch_size
+        # that look like duplicates of one another.
+        for c in sorted(sweeps, key=lambda c: (c["benchmark"], str(c["size"]),
+                                               str(c["axis"]))):
             for impl, row in sorted(c["impls"].items()):
-                L.append(f"| {c['benchmark']} | {json.dumps(c['axis'])} | {impl} | "
-                         f"{fmt_us(row['mean_ns'])} |")
+                L.append(f"| {c['benchmark']} | {c['size']} | {json.dumps(c['axis'])} | "
+                         f"{impl} | {fmt_us(row['mean_ns'])} |")
         L.append("")
 
     with open(args.out, "w") as f:

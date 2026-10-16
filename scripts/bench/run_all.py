@@ -34,6 +34,7 @@ Notes:
 """
 
 import argparse
+import glob
 import json
 import os
 import shutil
@@ -130,6 +131,18 @@ def suite_dotnet(out_dir, quick):
         return False
     print(f"  BenchmarkDotNet version: {version}")
 
+    # BDN's `Artifacts cleanup` deletes the per-job build dir under bin/ when a
+    # run is interrupted, which leaves a stale artifacts dir that makes the NEXT
+    # run fail with DirectoryNotFoundException on `<Name>-DefaultJob-1/bin/...`
+    # after a successful build. Verified: an aborted run caused exactly that, twice.
+    # Wiping before the run is safe now that the adapter detects `--job Dry`
+    # placeholders (UnrollFactor=1), so leftovers cannot become fabricated records.
+    if os.path.isdir(DOTNET_ARTIFACTS):
+        shutil.rmtree(DOTNET_ARTIFACTS)
+    for d in glob.glob(os.path.join(DOTNET_PROJ, "bin", "Release", "net10.0",
+                                    "EventProp.Benchmarks-*Job-*")):
+        shutil.rmtree(d, ignore_errors=True)
+
     # Invoke the BUILT BINARY, not `dotnet run`. Under `dotnet run` the parent
     # process holds bin/, and BDN rebuilds the benchmark project into
     # bin/Release/net10.0/<Name>-DefaultJob-1/ and launches that copy — the launch
@@ -144,7 +157,10 @@ def suite_dotnet(out_dir, quick):
     cmd = ["dotnet", exe, "-a",
            os.path.join(DOTNET_PROJ, "BenchmarkDotNet.Artifacts")]
     if quick:
-        cmd += ["-f", "*Tiny*", "*Small*"]
+        # ShortRun, not DefaultJob. Measured: DefaultJob takes ~2 min for ONE
+        # benchmark, so the full Tiny+Small set is tens of minutes; ShortRun is
+        # the documented quick setting and keeps the pipeline usable.
+        cmd += ["-j", "Short", "-f", "*Tiny*", "*Small*"]
     ok, _ = run(cmd, cwd=DOTNET_PROJ, timeout=7200)
     if not ok:
         print("  dotnet benchmark run failed", file=sys.stderr)
