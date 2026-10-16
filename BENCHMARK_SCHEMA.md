@@ -131,11 +131,36 @@ hand-written in a source file.
 | `native_error` | `error_code != 0` | unsorted burst: C returns 0 spikes in ~0 ns, reported 36 ns vs Eigen's 83 µs |
 | `overhead_dominated` | FFI/marshalling cost exceeds kernel cost at this size | `ComputeSums_Tiny` P/Invoke; AGENTS.md: "managed ahead at Tiny where P/Invoke marshalling dominates" |
 | `not_like_for_like` | the two `impl`s are not the same operation | `Dropout` 8.17x — "C batch API vs C++ shim — API-shape artifact" |
-| `slow_excluded` | excluded from quick runs by policy | XL rows (~16 s/iteration for `BackwardSpikes`) |
+| `slow_excluded` | excluded from quick runs by policy | XL rows — see the measured XL cost below |
 
 A row with a non-empty `invalid_reasons` **must be excluded from every geomean** and
 **must appear in the report's excluded table**. Today it appears only if someone
 remembers the footnote.
+
+### XL cost, measured (so "is XL too slow?" is not re-answered by guesswork)
+
+Per-iteration cost, C library, `--benchmark_min_time=0.05s`:
+
+| Family | XL per iteration |
+|---|---|
+| `ComputeSums`, `ComputeMaxima`, `BackwardMaxima` | 1.5–26 ms |
+| `ComputeSpikes/XL` | 3.1–4.3 s |
+| `BackwardSpikes/XL` | 7.9–10.5 s |
+| `FullTrainingStep/XL` | 12.4–13.9 s |
+
+The number that matters is **not** per-iteration cost times an iteration count. Google
+Benchmark's `min_time` is **relative**, so for a 14 s iteration it takes the minimum of
+**one** iteration — XL does not multiply by iteration count. Measured wall clock:
+
+| Suite | XL | Full suite incl. XL |
+|---|---|---|
+| native C | 125 s | **162 s** |
+| native Eigen | ~1.18x slower | ~190 s |
+| dotnet | 6 XL benchmarks; 64 s for a `-j Dry` pass | ~15–20 min at `-j Short` |
+| python | **no XL registered** (P2 gap) | ~2 min |
+
+So a full run is ~25 minutes, dominated by .NET, not by XL. `--quick` exists to skip XL
+for fast validation, not because XL is unrunnable.
 
 ---
 
