@@ -25,12 +25,12 @@ Ratio column: time(Eigen) / time(C). >1 means **C is faster**, <1 means **Eigen 
 
 | benchmark | size | pattern | C (us) | Eigen (us) | ratio | valid |
 |---|---|---|---:|---:|---:|:--|
-| BackwardMaxima | Tiny | uniform | 0.46 | 0.51 | 1.12x | yes |
-| BackwardMaxima | Tiny | poisson | 0.55 | 0.60 | 1.10x | yes |
-| BackwardMaxima | Tiny | burst | 0.55 | 0.60 | 1.09x | yes |
-| BackwardMaxima | Small | uniform | 7.10 | 7.55 | 1.06x | yes |
-| BackwardMaxima | Small | poisson | 9.71 | 10.58 | 1.09x | yes |
-| BackwardMaxima | Small | burst | 9.01 | 9.10 | 1.01x | yes |
+| BackwardMaxima | Tiny | uniform | 0.46 | 0.51 | 1.12x | — |
+| BackwardMaxima | Tiny | poisson | 0.55 | 0.60 | 1.10x | — |
+| BackwardMaxima | Tiny | burst | 0.55 | 0.60 | 1.09x | — |
+| BackwardMaxima | Small | uniform | 7.10 | 7.55 | 1.06x | — |
+| BackwardMaxima | Small | poisson | 9.71 | 10.58 | 1.09x | — |
+| BackwardMaxima | Small | burst | 9.01 | 9.10 | 1.01x | — |
 | BackwardMaxima | Medium | uniform | 128.14 | 131.82 | 1.03x | yes |
 | BackwardMaxima | Medium | poisson | 187.64 | 229.27 | 1.22x | yes |
 | BackwardMaxima | Large | uniform | 620.98 | 690.97 | 1.11x | yes |
@@ -38,8 +38,8 @@ Ratio column: time(Eigen) / time(C). >1 means **C is faster**, <1 means **Eigen 
 | BackwardMaxima | XL | uniform | 8,190.21 | 8,387.73 | 1.02x | yes |
 | BackwardMaxima | XL | poisson | 11,539.61 | 12,377.53 | 1.07x | yes |
 | BackwardSpikes | Tiny | uniform | 0.09 | 1.34 | 15.28x | — |
-| BackwardSpikes | Tiny | poisson | 3.00 | 3.39 | 1.13x | yes |
-| BackwardSpikes | Tiny | burst | 2.13 | 2.37 | 1.11x | yes |
+| BackwardSpikes | Tiny | poisson | 3.00 | 3.39 | 1.13x | — |
+| BackwardSpikes | Tiny | burst | 2.13 | 2.37 | 1.11x | — |
 | BackwardSpikes | Small | uniform | 0.25 | 4.90 | 19.43x | — |
 | BackwardSpikes | Small | poisson | 210.61 | 205.99 | 0.98x | yes |
 | BackwardSpikes | Small | burst | 65.33 | 64.15 | 0.98x | yes |
@@ -52,9 +52,9 @@ Ratio column: time(Eigen) / time(C). >1 means **C is faster**, <1 means **Eigen 
 | BackwardSpikes | XL | uniform | 8,042,000.00 | 8,258,408.42 | 1.03x | yes |
 | BackwardSpikes | XL | poisson | 10,566,487.58 | 10,931,849.37 | 1.03x | yes |
 | BackwardSpikes | XL | burst | 7,921,489.96 | 8,244,191.75 | 1.04x | yes |
-| ComputeMaxima | Tiny | uniform | 17.78 | 22.07 | 1.24x | yes |
-| ComputeMaxima | Tiny | poisson | 17.79 | 18.81 | 1.06x | yes |
-| ComputeMaxima | Tiny | burst | 17.75 | 17.65 | 0.99x | yes |
+| ComputeMaxima | Tiny | uniform | 17.78 | 22.07 | 1.24x | — |
+| ComputeMaxima | Tiny | poisson | 17.79 | 18.81 | 1.06x | — |
+| ComputeMaxima | Tiny | burst | 17.75 | 17.65 | 0.99x | — |
 | ComputeMaxima | Small | uniform | 32.35 | 35.11 | 1.09x | yes |
 | ComputeMaxima | Small | poisson | 25.78 | 26.73 | 1.04x | yes |
 | ComputeMaxima | Small | burst | 28.56 | 28.53 | 1.00x | yes |
@@ -79,12 +79,12 @@ Ratio column: time(Eigen) / time(C). >1 means **C is faster**, <1 means **Eigen 
 | ComputeSpikes | XL | uniform | 5,038,000.00 | 4,977,721.00 | 0.99x | yes |
 | ComputeSpikes | XL | poisson | 3,171,774.17 | 3,940,278.08 | 1.24x | yes |
 | ComputeSpikes | XL | burst | 4,594,793.83 | 4,835,041.08 | 1.05x | yes |
-| ComputeSums | Tiny | uniform | 0.26 | 0.37 | 1.38x | yes |
-| ComputeSums | Tiny | poisson | 0.27 | 0.37 | 1.35x | yes |
-| ComputeSums | Tiny | burst | 0.26 | 0.37 | 1.40x | yes |
-| ComputeSums | Small | uniform | 1.77 | 2.50 | 1.41x | yes |
-| ComputeSums | Small | poisson | 1.76 | 2.32 | 1.31x | yes |
-| ComputeSums | Small | burst | 1.72 | 2.37 | 1.38x | yes |
+| ComputeSums | Tiny | uniform | 0.26 | 0.37 | 1.38x | — |
+| ComputeSums | Tiny | poisson | 0.27 | 0.37 | 1.35x | — |
+| ComputeSums | Tiny | burst | 0.26 | 0.37 | 1.40x | — |
+| ComputeSums | Small | uniform | 1.77 | 2.50 | 1.41x | — |
+| ComputeSums | Small | poisson | 1.76 | 2.32 | 1.31x | — |
+| ComputeSums | Small | burst | 1.72 | 2.37 | 1.38x | — |
 | ComputeSums | Medium | uniform | 23.61 | 43.10 | 1.83x | yes |
 | ComputeSums | Medium | poisson | 24.10 | 45.09 | 1.87x | yes |
 | ComputeSums | Medium | burst | 21.68 | 42.03 | 1.94x | yes |
@@ -118,9 +118,9 @@ Ratio column: time(Eigen) / time(C). >1 means **C is faster**, <1 means **Eigen 
 | FullTrainingStep | XL | poisson | 13,880,538.33 | 15,205,596.67 | 1.10x | yes |
 | FullTrainingStep | XL | burst | 12,573,073.88 | 13,076,257.21 | 1.04x | yes |
 
-**Geomean over 80 valid cells: C is 1.21x faster than Eigen**
+**Geomean over 63 valid cells: C is 1.21x faster than Eigen**
 
-Per-size geomean (ratio Eigen/C, pooled across families): Tiny 1.25x (16), Small 1.12x (16), Medium 1.22x (16), Large 1.24x (16), XL 1.21x (16)
+Per-size geomean (ratio Eigen/C, pooled across families): Tiny 1.43x (5), Small 1.08x (10), Medium 1.22x (16), Large 1.24x (16), XL 1.21x (16)
 
 > A fixed per-call cost (P/Invoke marshalling, binding overhead) dominates small cells and
 > amortizes at large ones, so the pooled geomean describes neither. Read the per-size row.
@@ -138,9 +138,9 @@ Ratio column: time(Managed) / time(C). >1 means **C is faster**, <1 means **Mana
 | BackwardSpikes | Medium | uniform | 11,540.00 | 15,040.00 | 1.30x | yes |
 | BackwardSpikes | Large | uniform | 125,000.00 | 168,900.00 | 1.35x | yes |
 | BackwardSpikes | XL | uniform | 8,042,000.00 | 10,695,000.00 | 1.33x | yes |
-| ComputeMaxima | Tiny | uniform | 17.78 | 4.78 | 0.27x | yes |
-| ComputeMaxima | Tiny | poisson | 17.79 | 3.57 | 0.20x | yes |
-| ComputeMaxima | Tiny | burst | 17.75 | 3.54 | 0.20x | yes |
+| ComputeMaxima | Tiny | uniform | 17.78 | 4.78 | 0.27x | — |
+| ComputeMaxima | Tiny | poisson | 17.79 | 3.57 | 0.20x | — |
+| ComputeMaxima | Tiny | burst | 17.75 | 3.54 | 0.20x | — |
 | ComputeMaxima | Small | uniform | 32.35 | 24.67 | 0.76x | yes |
 | ComputeMaxima | Small | poisson | 25.78 | 18.95 | 0.74x | yes |
 | ComputeMaxima | Small | burst | 28.56 | 20.63 | 0.72x | yes |
@@ -158,20 +158,20 @@ Ratio column: time(Managed) / time(C). >1 means **C is faster**, <1 means **Mana
 | ComputeSpikes | Medium | uniform | 7,740.00 | 8,892.00 | 1.15x | yes |
 | ComputeSpikes | Large | uniform | 75,650.00 | 81,880.00 | 1.08x | yes |
 | ComputeSpikes | XL | uniform | 5,038,000.00 | 5,988,000.00 | 1.19x | yes |
-| ComputeSums | Tiny | uniform | 0.26 | 0.23 | 0.88x | yes |
-| ComputeSums | Small | uniform | 1.77 | 1.59 | 0.90x | yes |
+| ComputeSums | Tiny | uniform | 0.26 | 0.23 | 0.88x | — |
+| ComputeSums | Small | uniform | 1.77 | 1.59 | 0.90x | — |
 | ComputeSums | Medium | uniform | 23.61 | 24.53 | 1.04x | yes |
 | ComputeSums | Large | uniform | 102.10 | 102.60 | 1.00x | yes |
 | ComputeSums | XL | uniform | 1,739.00 | 1,639.00 | 0.94x | yes |
-| TrainingLoop | Tiny | uniform | 35.37 | 4.99 | 0.14x | yes |
+| TrainingLoop | Tiny | uniform | 35.37 | 4.99 | 0.14x | — |
 | TrainingLoop | Small | uniform | 54.00 | 32.79 | 0.61x | yes |
 | TrainingLoop | Medium | uniform | 20,030.00 | 25,690.00 | 1.28x | yes |
 | TrainingLoop | Large | uniform | 209,400.00 | 252,000.00 | 1.20x | yes |
 | TrainingLoop | XL | uniform | 13,060,000.00 | 20,530,000.00 | 1.57x | yes |
 
-**Geomean over 31 valid cells: Managed is 1.20x faster than C**
+**Geomean over 25 valid cells: C is 1.05x faster than Managed**
 
-Per-size geomean (ratio Managed/C, pooled across families): Tiny 0.27x (5), Small 0.74x (5), Medium 1.17x (7), Large 1.10x (7), XL 1.12x (7)
+Per-size geomean (ratio Managed/C, pooled across families): Small 0.70x (4), Medium 1.17x (7), Large 1.10x (7), XL 1.12x (7)
 
 > A fixed per-call cost (P/Invoke marshalling, binding overhead) dominates small cells and
 > amortizes at large ones, so the pooled geomean describes neither. Read the per-size row.
@@ -182,9 +182,9 @@ Ratio column: time(pybind11) / time(Cython). >1 means **Cython is faster**, <1 m
 
 | benchmark | size | pattern | Cython (us) | pybind11 (us) | ratio | valid |
 |---|---|---|---:|---:|---:|:--|
-| ComputeMaxima | Tiny | uniform | 55.77 | 18.87 | 0.34x | yes |
-| ComputeMaxima | Tiny | poisson | 55.17 | 24.47 | 0.44x | yes |
-| ComputeMaxima | Tiny | burst | 54.19 | 22.50 | 0.42x | yes |
+| ComputeMaxima | Tiny | uniform | 55.77 | 18.87 | 0.34x | — |
+| ComputeMaxima | Tiny | poisson | 55.17 | 24.47 | 0.44x | — |
+| ComputeMaxima | Tiny | burst | 54.19 | 22.50 | 0.42x | — |
 | ComputeMaxima | Small | uniform | 84.53 | 63.08 | 0.75x | yes |
 | ComputeMaxima | Small | poisson | 75.36 | 32.94 | 0.44x | yes |
 | ComputeMaxima | Small | burst | 78.15 | 41.97 | 0.54x | yes |
@@ -203,9 +203,9 @@ Ratio column: time(pybind11) / time(Cython). >1 means **Cython is faster**, <1 m
 | ComputeSpikes | Large | uniform | 75,976.17 | 299,859.10 | 3.95x | yes |
 | ComputeSpikes | Large | poisson | 60,889.46 | 339,762.36 | 5.58x | yes |
 
-**Geomean over 18 valid cells: Cython is 1.26x faster than pybind11**
+**Geomean over 15 valid cells: Cython is 1.58x faster than pybind11**
 
-Per-size geomean (ratio pybind11/Cython, pooled across families): Tiny 0.43x (5), Small 0.99x (5), Medium 2.66x (4), Large 3.05x (4)
+Per-size geomean (ratio pybind11/Cython, pooled across families): Tiny 0.49x (2), Small 0.99x (5), Medium 2.66x (4), Large 3.05x (4)
 
 > A fixed per-call cost (P/Invoke marshalling, binding overhead) dominates small cells and
 > amortizes at large ones, so the pooled geomean describes neither. Read the per-size row.
@@ -216,18 +216,36 @@ Validity is computed by `merge.py` from `output_spikes`, `error_code`, iteration
 
 | benchmark | size | pattern | reason |
 |---|---|---|---|
-| BackwardSpikes | Small | uniform | peer_zero_output_spikes, zero_output_spikes |
-| BackwardSpikes | Tiny | uniform | peer_zero_output_spikes, zero_output_spikes |
+| BackwardMaxima | Small | burst | below_min_work |
+| BackwardMaxima | Small | poisson | below_min_work |
+| BackwardMaxima | Small | uniform | below_min_work |
+| BackwardMaxima | Tiny | burst | below_min_work |
+| BackwardMaxima | Tiny | poisson | below_min_work |
+| BackwardMaxima | Tiny | uniform | below_min_work |
+| BackwardSpikes | Small | uniform | below_min_work, peer_zero_output_spikes, zero_output_spikes |
+| BackwardSpikes | Tiny | burst | below_min_work |
+| BackwardSpikes | Tiny | poisson | below_min_work |
+| BackwardSpikes | Tiny | uniform | below_min_work, peer_zero_output_spikes, zero_output_spikes |
+| ComputeMaxima | Tiny | burst | below_min_work |
+| ComputeMaxima | Tiny | poisson | below_min_work |
+| ComputeMaxima | Tiny | uniform | below_min_work |
 | ComputeSpikes | Small | uniform | peer_zero_output_spikes, zero_output_spikes |
-| ComputeSpikes | Tiny | uniform | peer_zero_output_spikes, zero_output_spikes |
-| Dropout | Large | poisson | not_like_for_like |
-| Dropout | Large | uniform | not_like_for_like |
-| Dropout | Medium | poisson | not_like_for_like |
-| Dropout | Medium | uniform | not_like_for_like |
-| Dropout | Small | poisson | not_like_for_like |
-| Dropout | Small | uniform | not_like_for_like |
-| Dropout | Tiny | poisson | not_like_for_like |
-| Dropout | Tiny | uniform | not_like_for_like |
+| ComputeSpikes | Tiny | uniform | below_min_work, peer_zero_output_spikes, zero_output_spikes |
+| ComputeSums | Small | burst | below_min_work |
+| ComputeSums | Small | poisson | below_min_work |
+| ComputeSums | Small | uniform | below_min_work |
+| ComputeSums | Tiny | burst | below_min_work |
+| ComputeSums | Tiny | poisson | below_min_work |
+| ComputeSums | Tiny | uniform | below_min_work |
+| Dropout | Large | poisson | below_min_work, not_like_for_like |
+| Dropout | Large | uniform | below_min_work, not_like_for_like |
+| Dropout | Medium | poisson | below_min_work, not_like_for_like |
+| Dropout | Medium | uniform | below_min_work, not_like_for_like |
+| Dropout | Small | poisson | below_min_work, not_like_for_like |
+| Dropout | Small | uniform | below_min_work, not_like_for_like |
+| Dropout | Tiny | poisson | below_min_work, not_like_for_like |
+| Dropout | Tiny | uniform | below_min_work, not_like_for_like |
+| TrainingLoop | Tiny | uniform | below_min_work |
 
 ## Parameter sweeps
 
