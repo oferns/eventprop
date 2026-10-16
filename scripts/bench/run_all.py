@@ -274,13 +274,17 @@ def suite_python(out_dir, quick, tag):
     #   PATH (or sit next to the extension). Setting all three is harmless: each
     #   is ignored on the platforms that don't read it.
     c_build = os.path.join(BENCH, "EventProp.C", "build")
+    # On MSVC the C library .dll is in build\Release\ (multi-config generator),
+    # which the bare build\ on PATH does not cover. Include both; nonexistent
+    # entries are ignored by the loader.
+    lib_dirs = [c_build] + [os.path.join(c_build, c) for c in ("Release", "Debug")]
     py_paths = [os.path.join(BENCH, "EventProp.Python"),
                 os.path.join(BENCH, "EventProp.Native.Python")]
     env = {
         "PYTHONPATH": os.pathsep.join(py_paths),
-        "DYLD_LIBRARY_PATH": c_build,
+        "DYLD_LIBRARY_PATH": os.pathsep.join(lib_dirs),
         "LD_LIBRARY_PATH": c_build,
-        "PATH": os.pathsep.join([c_build, os.environ.get("PATH", "")]),
+        "PATH": os.pathsep.join(lib_dirs + [os.environ.get("PATH", "")]),
     }
     json_path = os.path.join(out_dir, "kernels.json")
     cmd = [sys.executable, "-m", "pytest", "test_kernel_benchmarks.py",
