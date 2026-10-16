@@ -245,16 +245,20 @@ def suite_dotnet(out_dir, quick, tag):
     if not ok:
         return False
 
-    # Schema rule: PInvoke IS the C library; alias so the chain closes.
+    # The .NET suite's "Native" method is the C library reached through P/Invoke.
+    # It is NOT aliased to "C": the two C measurements have different contexts, and
+    # collapsing them made a table titled "C vs Managed" silently mean "P/Invoke vs
+    # Managed" - P/Invoke marshalling overhead is on the C side of that ratio, which
+    # is a real and load-bearing difference (it is what makes the Tiny rows move
+    # 8-12% across BDN versions). The native suite's bare C column and this one agree
+    # to ~3%, so the chain Eigen <-> C <-> PInvoke <-> Managed still closes, via two
+    # adjacent pairs instead of one collapsed name.
     path = os.path.join(out_dir, f"records_{tag}_dotnet_c.json")
     with open(rec) as f:
         doc = json.load(f)
-    for r in doc["records"]:
-        if r["impl"] == "PInvoke":
-            r["impl"] = "C"
     with open(path, "w") as f:
         json.dump(doc, f, indent=2, sort_keys=True)
-    print(f"  aliased PInvoke -> C ({sum(1 for r in doc['records'] if r['impl']=='C')} records)")
+    print(f"  wrote {path} (impl=PInvoke, kept distinct from the native suite's C)")
     return True
 
 

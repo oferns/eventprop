@@ -36,12 +36,25 @@ SCHEMA_VERSION = 1
 # historically used three opposite conventions (Eigen/C >1 wins, Native/Managed <1
 # wins, Cython/pybind11 >1 slower); this table replaces all three.
 # Order is (reference, comparison): the ratio column is time(comparison)/time(reference).
+# Labels are explicit about measurement CONTEXT, because "C" alone is ambiguous: the
+# native suite measures the C library directly, while the .NET suite reaches the same
+# library through P/Invoke. Those are different measurements (marshalling cost is on the
+# C side of the .NET ratio), so they are separate impls and separate pairs. The chain
+# closes as Eigen <-> C <-> PInvoke <-> Managed, each adjacent pair measured.
 PAIRS = [
     ("C", "Eigen"),
-    ("C", "Managed"),
+    ("C", "PInvoke"),
     ("PInvoke", "Managed"),
     ("Cython", "pybind11"),
 ]
+
+# Human-readable section titles; the impl names stay terse for the table columns.
+PAIR_TITLES = {
+    ("C", "Eigen"): "C (native) vs Eigen (native)",
+    ("C", "PInvoke"): "C (native) vs C via P/Invoke (.NET)",
+    ("PInvoke", "Managed"): "C via P/Invoke (.NET) vs Managed (.NET)",
+    ("Cython", "pybind11"): "Cython vs pybind11",
+}
 
 SIZE_ORDER = ["Tiny", "Small", "Medium", "Large", "XL"]
 PATTERN_ORDER = ["uniform", "poisson", "burst"]
@@ -150,33 +163,36 @@ def main():
         pair_cells = [c for c in size_cells if a in c["impls"] and b in c["impls"]]
         if not pair_cells:
             continue
-        # A pair whose impls are the same underlying implementation aliased two ways
-        # (C and PInvoke are both the C library) is not a comparison — skip it.
-        if {a, b} == {"C", "PInvoke"}:
-            continue
-        L.append(f"## {a} vs {b}")
+        # No pair is skipped any more. C and PInvoke used to be aliased to one name,
+        # which made a C-vs-PInvoke pair vacuous and this guard correctly dropped it.
+        # They are now distinct impls measured in different contexts (direct call vs
+        # P/Invoke round-trip), so the pair is the measurement of interop cost itself.
+        L.append(f"## {PAIR_TITLES.get((a, b), f'{a} vs {b}')}")
         L.append("")
         L.append(f"Ratio column: time({b}) / time({a}). "
                  f">1 means **{a} is faster**, <1 means **{b} is faster**.")
         L.append("")
-        # Name what each side of the pair measures, and why the small cells are
-        # excluded. The .NET suite's "C" impl goes through P/Invoke, and its
-        # numbers MATCH the native suite's bare C column (XL 4,899,000 vs
-        # 4,761,962 us = 2.9%; Medium 7,828 vs 7,600), so the round-trip is NOT
-        # what makes Managed win the Tiny cells — those cells produce ZERO output
-        # spikes (the neuron never fires), so both sides time near-nothing and the
-        # row is not a kernel comparison at all. They are excluded by
-        # zero_output_spikes / peer_zero_output_spikes, not by interop cost.
-        # An earlier version of this note blamed P/Invoke marshalling; that was
-        # wrong, and the C-vs-C agreement across suites disproves it.
-        if {a, b} == {"C", "Managed"}:
-            L.append(f"`C` is the C library reached through P/Invoke from the .NET "
-                     f"suite (`via_pinvoke`); its numbers match the native suite's "
-                     f"bare `C` column within ~3%, so this is a kernel comparison. "
-                     f"The Tiny/Small rows are excluded because they produce **zero "
-                     f"output spikes** — the neuron never fires, so the row times "
-                     f"near-nothing on both sides. From Medium up, C wins every "
-                     f"valid cell (1.11x–1.67x).")
+        # Name what each side of the pair measures. The .NET suite reaches the C
+        # library through P/Invoke; the native suite calls it directly. Their numbers
+        # MATCH (XL 4,899,000 vs 4,761,962 us = 2.9%; Medium 7,828 vs 7,600), which is
+        # what licenses treating the .NET PInvoke column as a kernel comparison at all.
+        # An earlier version of this note blamed P/Invoke marshalling for the Tiny
+        # cells; that was wrong, and this cross-suite agreement disproves it - those
+        # cells produce ZERO output spikes, so both sides time near-nothing.
+        if (a, b) == ("C", "PInvoke"):
+            L.append("Both sides run the **same C library**. The left column is the native "
+                     "suite calling it directly; the right is the .NET suite reaching it "
+                     "through P/Invoke, so P/Invoke marshalling cost is on the right side. "
+                     "A ratio near 1.0 means the interop round-trip is not measurable at "
+                     "this size; a ratio well above 1 means it is.")
+            L.append("")
+        if (a, b) == ("PInvoke", "Managed"):
+            L.append("Both columns come from the **.NET suite**, so this is a same-process "
+                     "comparison: the C library reached through P/Invoke versus the fully "
+                     "managed .NET implementation. P/Invoke marshalling cost sits on the "
+                     "left side. The Tiny/Small kernel rows are absent from this pair "
+                     "because the .NET suite no longer defines them, and sub-10us rows are "
+                     "excluded by `below_min_work`. From Medium up, C wins every valid cell.")
             L.append("")
         L.append("| benchmark | size | pattern | " + a + " (us) | " + b + " (us) | ratio | valid |")
         L.append("|---|---|---|---:|---:|---:|:--|")

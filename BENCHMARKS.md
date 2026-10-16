@@ -19,79 +19,79 @@ Input: `records_darwin-arm64_native_c.json records_darwin-arm64_native_eigen.jso
 
 > A BenchmarkDotNet version change invalidates historical .NET comparisons (AGENTS.md: 8-12% on the headline Ratio, 0.6% noise floor). Check `tool_version` before comparing two runs.
 
-## C vs Eigen
+## C (native) vs Eigen (native)
 
 Ratio column: time(Eigen) / time(C). >1 means **C is faster**, <1 means **Eigen is faster**.
 
 | benchmark | size | pattern | C (us) | Eigen (us) | ratio | valid |
 |---|---|---|---:|---:|---:|:--|
-| BackwardMaxima | Tiny | uniform | 0.46 | 0.51 | 1.12x | yes |
-| BackwardMaxima | Tiny | poisson | 0.55 | 0.60 | 1.10x | yes |
-| BackwardMaxima | Tiny | burst | 0.55 | 0.60 | 1.09x | yes |
-| BackwardMaxima | Small | uniform | 7.10 | 7.55 | 1.06x | yes |
-| BackwardMaxima | Small | poisson | 9.71 | 10.58 | 1.09x | yes |
-| BackwardMaxima | Small | burst | 9.01 | 9.10 | 1.01x | yes |
+| BackwardMaxima | Tiny | uniform | 0.46 | 0.51 | 1.12x | — |
+| BackwardMaxima | Tiny | poisson | 0.55 | 0.60 | 1.10x | — |
+| BackwardMaxima | Tiny | burst | 0.55 | 0.60 | 1.09x | — |
+| BackwardMaxima | Small | uniform | 7.10 | 7.55 | 1.06x | — |
+| BackwardMaxima | Small | poisson | 9.71 | 10.58 | 1.09x | — |
+| BackwardMaxima | Small | burst | 9.01 | 9.10 | 1.01x | — |
 | BackwardMaxima | Medium | uniform | 128.14 | 131.82 | 1.03x | yes |
 | BackwardMaxima | Medium | poisson | 187.64 | 229.27 | 1.22x | yes |
 | BackwardMaxima | Large | uniform | 620.98 | 690.97 | 1.11x | yes |
 | BackwardMaxima | Large | poisson | 922.21 | 975.74 | 1.06x | yes |
 | BackwardMaxima | XL | uniform | 8,190.21 | 8,387.73 | 1.02x | yes |
 | BackwardMaxima | XL | poisson | 11,539.61 | 12,377.53 | 1.07x | yes |
-| BackwardSpikes | Tiny | uniform | 0.09 | 1.34 | 15.28x | — |
-| BackwardSpikes | Tiny | poisson | 3.00 | 3.39 | 1.13x | yes |
-| BackwardSpikes | Tiny | burst | 2.13 | 2.37 | 1.11x | yes |
-| BackwardSpikes | Small | uniform | 0.25 | 4.90 | 19.43x | — |
+| BackwardSpikes | Tiny | uniform | 0.08 | 1.34 | 16.09x | — |
+| BackwardSpikes | Tiny | poisson | 3.00 | 3.39 | 1.13x | — |
+| BackwardSpikes | Tiny | burst | 2.13 | 2.37 | 1.11x | — |
+| BackwardSpikes | Small | uniform | 0.24 | 4.90 | 20.39x | — |
 | BackwardSpikes | Small | poisson | 210.61 | 205.99 | 0.98x | yes |
 | BackwardSpikes | Small | burst | 65.33 | 64.15 | 0.98x | yes |
-| BackwardSpikes | Medium | uniform | 11,540.00 | 11,978.58 | 1.04x | yes |
+| BackwardSpikes | Medium | uniform | 11,586.61 | 11,978.58 | 1.03x | yes |
 | BackwardSpikes | Medium | poisson | 19,818.67 | 20,213.13 | 1.02x | yes |
 | BackwardSpikes | Medium | burst | 11,839.74 | 11,954.83 | 1.01x | yes |
-| BackwardSpikes | Large | uniform | 125,000.00 | 127,234.00 | 1.02x | yes |
+| BackwardSpikes | Large | uniform | 125,926.94 | 127,234.00 | 1.01x | yes |
 | BackwardSpikes | Large | poisson | 172,747.40 | 178,473.45 | 1.03x | yes |
 | BackwardSpikes | Large | burst | 123,855.57 | 127,455.73 | 1.03x | yes |
-| BackwardSpikes | XL | uniform | 8,042,000.00 | 8,258,408.42 | 1.03x | yes |
+| BackwardSpikes | XL | uniform | 7,970,421.17 | 8,258,408.42 | 1.04x | yes |
 | BackwardSpikes | XL | poisson | 10,566,487.58 | 10,931,849.37 | 1.03x | yes |
 | BackwardSpikes | XL | burst | 7,921,489.96 | 8,244,191.75 | 1.04x | yes |
-| ComputeMaxima | Tiny | uniform | 17.78 | 22.07 | 1.24x | yes |
-| ComputeMaxima | Tiny | poisson | 17.79 | 18.81 | 1.06x | yes |
-| ComputeMaxima | Tiny | burst | 17.75 | 17.65 | 0.99x | yes |
-| ComputeMaxima | Small | uniform | 32.35 | 35.11 | 1.09x | yes |
-| ComputeMaxima | Small | poisson | 25.78 | 26.73 | 1.04x | yes |
-| ComputeMaxima | Small | burst | 28.56 | 28.53 | 1.00x | yes |
-| ComputeMaxima | Medium | uniform | 308.40 | 344.39 | 1.12x | yes |
-| ComputeMaxima | Medium | poisson | 201.70 | 263.65 | 1.31x | yes |
-| ComputeMaxima | Large | uniform | 1,357.00 | 1,375.54 | 1.01x | yes |
-| ComputeMaxima | Large | poisson | 854.20 | 842.25 | 0.99x | yes |
-| ComputeMaxima | XL | uniform | 20,320.00 | 19,447.94 | 0.96x | yes |
-| ComputeMaxima | XL | poisson | 14,500.00 | 16,829.00 | 1.16x | yes |
-| ComputeSpikes | Tiny | uniform | 36.52 | 52.97 | 1.45x | — |
+| ComputeMaxima | Tiny | uniform | 17.90 | 22.07 | 1.23x | — |
+| ComputeMaxima | Tiny | poisson | 18.56 | 18.81 | 1.01x | — |
+| ComputeMaxima | Tiny | burst | 17.55 | 17.65 | 1.01x | — |
+| ComputeMaxima | Small | uniform | 32.93 | 35.11 | 1.07x | yes |
+| ComputeMaxima | Small | poisson | 27.18 | 26.73 | 0.98x | yes |
+| ComputeMaxima | Small | burst | 28.33 | 28.53 | 1.01x | yes |
+| ComputeMaxima | Medium | uniform | 290.96 | 344.39 | 1.18x | yes |
+| ComputeMaxima | Medium | poisson | 184.48 | 263.65 | 1.43x | yes |
+| ComputeMaxima | Large | uniform | 1,165.19 | 1,375.54 | 1.18x | yes |
+| ComputeMaxima | Large | poisson | 765.20 | 842.25 | 1.10x | yes |
+| ComputeMaxima | XL | uniform | 16,185.47 | 19,447.94 | 1.20x | yes |
+| ComputeMaxima | XL | poisson | 12,607.50 | 16,829.00 | 1.33x | yes |
+| ComputeSpikes | Tiny | uniform | 39.60 | 52.97 | 1.34x | — |
 | ComputeSpikes | Tiny | poisson | 38.96 | 57.03 | 1.46x | yes |
 | ComputeSpikes | Tiny | burst | 39.84 | 54.05 | 1.36x | yes |
-| ComputeSpikes | Small | uniform | 52.16 | 70.03 | 1.34x | — |
+| ComputeSpikes | Small | uniform | 51.42 | 70.03 | 1.36x | — |
 | ComputeSpikes | Small | poisson | 156.28 | 193.16 | 1.24x | yes |
 | ComputeSpikes | Small | burst | 114.11 | 123.71 | 1.08x | yes |
-| ComputeSpikes | Medium | uniform | 7,740.00 | 8,111.55 | 1.05x | yes |
+| ComputeSpikes | Medium | uniform | 7,066.60 | 8,111.55 | 1.15x | yes |
 | ComputeSpikes | Medium | poisson | 5,300.01 | 6,834.49 | 1.29x | yes |
 | ComputeSpikes | Medium | burst | 7,453.52 | 7,949.70 | 1.07x | yes |
-| ComputeSpikes | Large | uniform | 75,650.00 | 79,177.27 | 1.05x | yes |
+| ComputeSpikes | Large | uniform | 70,725.25 | 79,177.27 | 1.12x | yes |
 | ComputeSpikes | Large | poisson | 60,662.63 | 65,951.26 | 1.09x | yes |
 | ComputeSpikes | Large | burst | 67,516.89 | 102,374.30 | 1.52x | yes |
-| ComputeSpikes | XL | uniform | 5,038,000.00 | 4,977,721.00 | 0.99x | yes |
+| ComputeSpikes | XL | uniform | 4,586,783.21 | 4,977,721.00 | 1.09x | yes |
 | ComputeSpikes | XL | poisson | 3,171,774.17 | 3,940,278.08 | 1.24x | yes |
 | ComputeSpikes | XL | burst | 4,594,793.83 | 4,835,041.08 | 1.05x | yes |
-| ComputeSums | Tiny | uniform | 0.26 | 0.37 | 1.38x | yes |
-| ComputeSums | Tiny | poisson | 0.27 | 0.37 | 1.35x | yes |
-| ComputeSums | Tiny | burst | 0.26 | 0.37 | 1.40x | yes |
-| ComputeSums | Small | uniform | 1.77 | 2.50 | 1.41x | yes |
-| ComputeSums | Small | poisson | 1.76 | 2.32 | 1.31x | yes |
-| ComputeSums | Small | burst | 1.72 | 2.37 | 1.38x | yes |
-| ComputeSums | Medium | uniform | 23.61 | 43.10 | 1.83x | yes |
+| ComputeSums | Tiny | uniform | 0.26 | 0.37 | 1.41x | — |
+| ComputeSums | Tiny | poisson | 0.27 | 0.37 | 1.35x | — |
+| ComputeSums | Tiny | burst | 0.26 | 0.37 | 1.40x | — |
+| ComputeSums | Small | uniform | 1.77 | 2.50 | 1.41x | — |
+| ComputeSums | Small | poisson | 1.76 | 2.32 | 1.31x | — |
+| ComputeSums | Small | burst | 1.72 | 2.37 | 1.38x | — |
+| ComputeSums | Medium | uniform | 24.00 | 43.10 | 1.80x | yes |
 | ComputeSums | Medium | poisson | 24.10 | 45.09 | 1.87x | yes |
 | ComputeSums | Medium | burst | 21.68 | 42.03 | 1.94x | yes |
-| ComputeSums | Large | uniform | 102.10 | 198.91 | 1.95x | yes |
+| ComputeSums | Large | uniform | 100.13 | 198.91 | 1.99x | yes |
 | ComputeSums | Large | poisson | 97.14 | 228.97 | 2.36x | yes |
 | ComputeSums | Large | burst | 91.77 | 194.51 | 2.12x | yes |
-| ComputeSums | XL | uniform | 1,739.00 | 3,843.33 | 2.21x | yes |
+| ComputeSums | XL | uniform | 1,584.83 | 3,843.33 | 2.43x | yes |
 | ComputeSums | XL | poisson | 1,582.80 | 3,567.84 | 2.25x | yes |
 | ComputeSums | XL | burst | 1,455.88 | 3,050.30 | 2.10x | yes |
 | Dropout | Tiny | uniform | 0.53 | 5.19 | 9.71x | — |
@@ -118,29 +118,72 @@ Ratio column: time(Eigen) / time(C). >1 means **C is faster**, <1 means **Eigen 
 | FullTrainingStep | XL | poisson | 13,880,538.33 | 15,205,596.67 | 1.10x | yes |
 | FullTrainingStep | XL | burst | 12,573,073.88 | 13,076,257.21 | 1.04x | yes |
 
-**Geomean over 80 valid cells: C is 1.21x faster than Eigen**
+**Geomean over 63 valid cells: C is 1.24x faster than Eigen**
 
-Per-size geomean (ratio Eigen/C, pooled across families): Tiny 1.25x (16), Small 1.12x (16), Medium 1.22x (16), Large 1.24x (16), XL 1.21x (16)
+Per-size geomean (ratio Eigen/C, pooled across families): Tiny 1.43x (5), Small 1.07x (10), Medium 1.24x (16), Large 1.27x (16), XL 1.25x (16)
 
 > A fixed per-call cost (P/Invoke marshalling, binding overhead) dominates small cells and
 > amortizes at large ones, so the pooled geomean describes neither. Read the per-size row.
 
-## C vs Managed
+## C (native) vs C via P/Invoke (.NET)
 
-Ratio column: time(Managed) / time(C). >1 means **C is faster**, <1 means **Managed is faster**.
+Ratio column: time(PInvoke) / time(C). >1 means **C is faster**, <1 means **PInvoke is faster**.
 
-`C` is the C library reached through P/Invoke from the .NET suite (`via_pinvoke`); its numbers match the native suite's bare `C` column within ~3%, so this is a kernel comparison. The Tiny/Small rows are excluded because they produce **zero output spikes** — the neuron never fires, so the row times near-nothing on both sides. From Medium up, C wins every valid cell (1.11x–1.67x).
+Both sides run the **same C library**. The left column is the native suite calling it directly; the right is the .NET suite reaching it through P/Invoke, so P/Invoke marshalling cost is on the right side. A ratio near 1.0 means the interop round-trip is not measurable at this size; a ratio well above 1 means it is.
 
-| benchmark | size | pattern | C (us) | Managed (us) | ratio | valid |
+| benchmark | size | pattern | C (us) | PInvoke (us) | ratio | valid |
+|---|---|---|---:|---:|---:|:--|
+| BackwardSpikes | Tiny | uniform | 0.08 | 0.09 | 1.05x | — |
+| BackwardSpikes | Small | uniform | 0.24 | 0.25 | 1.05x | — |
+| BackwardSpikes | Medium | uniform | 11,586.61 | 11,540.00 | 1.00x | yes |
+| BackwardSpikes | Large | uniform | 125,926.94 | 125,000.00 | 0.99x | yes |
+| BackwardSpikes | XL | uniform | 7,970,421.17 | 8,042,000.00 | 1.01x | yes |
+| ComputeMaxima | Tiny | uniform | 17.90 | 17.78 | 0.99x | — |
+| ComputeMaxima | Tiny | poisson | 18.56 | 17.79 | 0.96x | — |
+| ComputeMaxima | Tiny | burst | 17.55 | 17.75 | 1.01x | — |
+| ComputeMaxima | Small | uniform | 32.93 | 32.35 | 0.98x | yes |
+| ComputeMaxima | Small | poisson | 27.18 | 25.78 | 0.95x | yes |
+| ComputeMaxima | Small | burst | 28.33 | 28.56 | 1.01x | yes |
+| ComputeMaxima | Medium | uniform | 290.96 | 308.40 | 1.06x | yes |
+| ComputeMaxima | Medium | poisson | 184.48 | 201.70 | 1.09x | yes |
+| ComputeMaxima | Large | uniform | 1,165.19 | 1,357.00 | 1.16x | yes |
+| ComputeMaxima | Large | poisson | 765.20 | 854.20 | 1.12x | yes |
+| ComputeMaxima | XL | uniform | 16,185.47 | 20,320.00 | 1.26x | yes |
+| ComputeMaxima | XL | poisson | 12,607.50 | 14,500.00 | 1.15x | yes |
+| ComputeSpikes | Tiny | uniform | 39.60 | 36.52 | 0.92x | — |
+| ComputeSpikes | Small | uniform | 51.42 | 52.16 | 1.01x | — |
+| ComputeSpikes | Medium | uniform | 7,066.60 | 7,740.00 | 1.10x | yes |
+| ComputeSpikes | Large | uniform | 70,725.25 | 75,650.00 | 1.07x | yes |
+| ComputeSpikes | XL | uniform | 4,586,783.21 | 5,038,000.00 | 1.10x | yes |
+| ComputeSums | Tiny | uniform | 0.26 | 0.26 | 1.02x | — |
+| ComputeSums | Small | uniform | 1.77 | 1.77 | 1.00x | — |
+| ComputeSums | Medium | uniform | 24.00 | 23.61 | 0.98x | yes |
+| ComputeSums | Large | uniform | 100.13 | 102.10 | 1.02x | yes |
+| ComputeSums | XL | uniform | 1,584.83 | 1,739.00 | 1.10x | yes |
+
+**Geomean over 18 valid cells: C is 1.06x faster than PInvoke**
+
+Per-size geomean (ratio PInvoke/C, pooled across families): Small 0.98x (3), Medium 1.04x (5), Large 1.07x (5), XL 1.12x (5)
+
+> A fixed per-call cost (P/Invoke marshalling, binding overhead) dominates small cells and
+> amortizes at large ones, so the pooled geomean describes neither. Read the per-size row.
+
+## C via P/Invoke (.NET) vs Managed (.NET)
+
+Ratio column: time(Managed) / time(PInvoke). >1 means **PInvoke is faster**, <1 means **Managed is faster**.
+
+Both columns come from the **.NET suite**, so this is a same-process comparison: the C library reached through P/Invoke versus the fully managed .NET implementation. P/Invoke marshalling cost sits on the left side. The Tiny/Small kernel rows are absent from this pair because the .NET suite no longer defines them, and sub-10us rows are excluded by `below_min_work`. From Medium up, C wins every valid cell.
+
+| benchmark | size | pattern | PInvoke (us) | Managed (us) | ratio | valid |
 |---|---|---|---:|---:|---:|:--|
 | BackwardSpikes | Tiny | uniform | 0.09 | 0.01 | 0.10x | — |
 | BackwardSpikes | Small | uniform | 0.25 | 0.09 | 0.34x | — |
 | BackwardSpikes | Medium | uniform | 11,540.00 | 15,040.00 | 1.30x | yes |
 | BackwardSpikes | Large | uniform | 125,000.00 | 168,900.00 | 1.35x | yes |
 | BackwardSpikes | XL | uniform | 8,042,000.00 | 10,695,000.00 | 1.33x | yes |
-| ComputeMaxima | Tiny | uniform | 17.78 | 4.78 | 0.27x | yes |
-| ComputeMaxima | Tiny | poisson | 17.79 | 3.57 | 0.20x | yes |
-| ComputeMaxima | Tiny | burst | 17.75 | 3.54 | 0.20x | yes |
+| ComputeMaxima | Tiny | uniform | 17.78 | 4.78 | 0.27x | — |
+| ComputeMaxima | Tiny | poisson | 17.79 | 3.57 | 0.20x | — |
+| ComputeMaxima | Tiny | burst | 17.75 | 3.54 | 0.20x | — |
 | ComputeMaxima | Small | uniform | 32.35 | 24.67 | 0.76x | yes |
 | ComputeMaxima | Small | poisson | 25.78 | 18.95 | 0.74x | yes |
 | ComputeMaxima | Small | burst | 28.56 | 20.63 | 0.72x | yes |
@@ -158,20 +201,20 @@ Ratio column: time(Managed) / time(C). >1 means **C is faster**, <1 means **Mana
 | ComputeSpikes | Medium | uniform | 7,740.00 | 8,892.00 | 1.15x | yes |
 | ComputeSpikes | Large | uniform | 75,650.00 | 81,880.00 | 1.08x | yes |
 | ComputeSpikes | XL | uniform | 5,038,000.00 | 5,988,000.00 | 1.19x | yes |
-| ComputeSums | Tiny | uniform | 0.26 | 0.23 | 0.88x | yes |
-| ComputeSums | Small | uniform | 1.77 | 1.59 | 0.90x | yes |
+| ComputeSums | Tiny | uniform | 0.26 | 0.23 | 0.88x | — |
+| ComputeSums | Small | uniform | 1.77 | 1.59 | 0.90x | — |
 | ComputeSums | Medium | uniform | 23.61 | 24.53 | 1.04x | yes |
 | ComputeSums | Large | uniform | 102.10 | 102.60 | 1.00x | yes |
 | ComputeSums | XL | uniform | 1,739.00 | 1,639.00 | 0.94x | yes |
-| TrainingLoop | Tiny | uniform | 35.37 | 4.99 | 0.14x | yes |
+| TrainingLoop | Tiny | uniform | 35.37 | 4.99 | 0.14x | — |
 | TrainingLoop | Small | uniform | 54.00 | 32.79 | 0.61x | yes |
 | TrainingLoop | Medium | uniform | 20,030.00 | 25,690.00 | 1.28x | yes |
 | TrainingLoop | Large | uniform | 209,400.00 | 252,000.00 | 1.20x | yes |
 | TrainingLoop | XL | uniform | 13,060,000.00 | 20,530,000.00 | 1.57x | yes |
 
-**Geomean over 31 valid cells: Managed is 1.20x faster than C**
+**Geomean over 25 valid cells: PInvoke is 1.05x faster than Managed**
 
-Per-size geomean (ratio Managed/C, pooled across families): Tiny 0.27x (5), Small 0.74x (5), Medium 1.17x (7), Large 1.10x (7), XL 1.12x (7)
+Per-size geomean (ratio Managed/PInvoke, pooled across families): Small 0.70x (4), Medium 1.17x (7), Large 1.10x (7), XL 1.12x (7)
 
 > A fixed per-call cost (P/Invoke marshalling, binding overhead) dominates small cells and
 > amortizes at large ones, so the pooled geomean describes neither. Read the per-size row.
@@ -182,9 +225,9 @@ Ratio column: time(pybind11) / time(Cython). >1 means **Cython is faster**, <1 m
 
 | benchmark | size | pattern | Cython (us) | pybind11 (us) | ratio | valid |
 |---|---|---|---:|---:|---:|:--|
-| ComputeMaxima | Tiny | uniform | 55.77 | 18.87 | 0.34x | yes |
-| ComputeMaxima | Tiny | poisson | 55.17 | 24.47 | 0.44x | yes |
-| ComputeMaxima | Tiny | burst | 54.19 | 22.50 | 0.42x | yes |
+| ComputeMaxima | Tiny | uniform | 55.77 | 18.87 | 0.34x | — |
+| ComputeMaxima | Tiny | poisson | 55.17 | 24.47 | 0.44x | — |
+| ComputeMaxima | Tiny | burst | 54.19 | 22.50 | 0.42x | — |
 | ComputeMaxima | Small | uniform | 84.53 | 63.08 | 0.75x | yes |
 | ComputeMaxima | Small | poisson | 75.36 | 32.94 | 0.44x | yes |
 | ComputeMaxima | Small | burst | 78.15 | 41.97 | 0.54x | yes |
@@ -203,9 +246,9 @@ Ratio column: time(pybind11) / time(Cython). >1 means **Cython is faster**, <1 m
 | ComputeSpikes | Large | uniform | 75,976.17 | 299,859.10 | 3.95x | yes |
 | ComputeSpikes | Large | poisson | 60,889.46 | 339,762.36 | 5.58x | yes |
 
-**Geomean over 18 valid cells: Cython is 1.26x faster than pybind11**
+**Geomean over 15 valid cells: Cython is 1.58x faster than pybind11**
 
-Per-size geomean (ratio pybind11/Cython, pooled across families): Tiny 0.43x (5), Small 0.99x (5), Medium 2.66x (4), Large 3.05x (4)
+Per-size geomean (ratio pybind11/Cython, pooled across families): Tiny 0.49x (2), Small 0.99x (5), Medium 2.66x (4), Large 3.05x (4)
 
 > A fixed per-call cost (P/Invoke marshalling, binding overhead) dominates small cells and
 > amortizes at large ones, so the pooled geomean describes neither. Read the per-size row.
@@ -216,18 +259,36 @@ Validity is computed by `merge.py` from `output_spikes`, `error_code`, iteration
 
 | benchmark | size | pattern | reason |
 |---|---|---|---|
-| BackwardSpikes | Small | uniform | peer_zero_output_spikes, zero_output_spikes |
-| BackwardSpikes | Tiny | uniform | peer_zero_output_spikes, zero_output_spikes |
+| BackwardMaxima | Small | burst | below_min_work |
+| BackwardMaxima | Small | poisson | below_min_work |
+| BackwardMaxima | Small | uniform | below_min_work |
+| BackwardMaxima | Tiny | burst | below_min_work |
+| BackwardMaxima | Tiny | poisson | below_min_work |
+| BackwardMaxima | Tiny | uniform | below_min_work |
+| BackwardSpikes | Small | uniform | below_min_work, peer_zero_output_spikes, zero_output_spikes |
+| BackwardSpikes | Tiny | burst | below_min_work |
+| BackwardSpikes | Tiny | poisson | below_min_work |
+| BackwardSpikes | Tiny | uniform | below_min_work, peer_zero_output_spikes, zero_output_spikes |
+| ComputeMaxima | Tiny | burst | below_min_work |
+| ComputeMaxima | Tiny | poisson | below_min_work |
+| ComputeMaxima | Tiny | uniform | below_min_work |
 | ComputeSpikes | Small | uniform | peer_zero_output_spikes, zero_output_spikes |
-| ComputeSpikes | Tiny | uniform | peer_zero_output_spikes, zero_output_spikes |
-| Dropout | Large | poisson | not_like_for_like |
-| Dropout | Large | uniform | not_like_for_like |
-| Dropout | Medium | poisson | not_like_for_like |
-| Dropout | Medium | uniform | not_like_for_like |
-| Dropout | Small | poisson | not_like_for_like |
-| Dropout | Small | uniform | not_like_for_like |
-| Dropout | Tiny | poisson | not_like_for_like |
-| Dropout | Tiny | uniform | not_like_for_like |
+| ComputeSpikes | Tiny | uniform | below_min_work, peer_zero_output_spikes, zero_output_spikes |
+| ComputeSums | Small | burst | below_min_work |
+| ComputeSums | Small | poisson | below_min_work |
+| ComputeSums | Small | uniform | below_min_work |
+| ComputeSums | Tiny | burst | below_min_work |
+| ComputeSums | Tiny | poisson | below_min_work |
+| ComputeSums | Tiny | uniform | below_min_work |
+| Dropout | Large | poisson | below_min_work, not_like_for_like |
+| Dropout | Large | uniform | below_min_work, not_like_for_like |
+| Dropout | Medium | poisson | below_min_work, not_like_for_like |
+| Dropout | Medium | uniform | below_min_work, not_like_for_like |
+| Dropout | Small | poisson | below_min_work, not_like_for_like |
+| Dropout | Small | uniform | below_min_work, not_like_for_like |
+| Dropout | Tiny | poisson | below_min_work, not_like_for_like |
+| Dropout | Tiny | uniform | below_min_work, not_like_for_like |
+| TrainingLoop | Tiny | uniform | below_min_work |
 
 ## Parameter sweeps
 
@@ -235,10 +296,10 @@ Kept out of the size table; these vary a parameter, not a size cell.
 
 | benchmark | size | axis | impl | time (us) |
 |---|---|---|---|---:|
-| BackwardSpikes | None | {"pattern": "burst"} | C | 11,677.89 |
 | BackwardSpikes | None | {"pattern": "burst"} | Managed | 15,198.26 |
-| BackwardSpikes | None | {"pattern": "poisson"} | C | 19,870.34 |
+| BackwardSpikes | None | {"pattern": "burst"} | PInvoke | 11,677.89 |
 | BackwardSpikes | None | {"pattern": "poisson"} | Managed | 25,836.57 |
+| BackwardSpikes | None | {"pattern": "poisson"} | PInvoke | 19,870.34 |
 | BackwardSpikes | None | {"v_th": 0.5} | C | 0.25 |
 | BackwardSpikes | None | {"v_th": 0.5} | Eigen | 5.05 |
 | BackwardSpikes | None | {"v_th": 1.0} | C | 0.25 |
@@ -247,13 +308,13 @@ Kept out of the size table; these vary a parameter, not a size cell.
 | BackwardSpikes | None | {"v_th": 1.5} | Eigen | 5.28 |
 | BackwardSpikes | None | {"v_th": 2.0} | C | 0.27 |
 | BackwardSpikes | None | {"v_th": 2.0} | Eigen | 4.97 |
-| Batch_RawApi | None | {"batch_size": 4, "variant": "batch_api"} | C | 67.45 |
-| Batch_RawApi | None | {"batch_size": 4, "variant": "per_sample_loop"} | C | 207.14 |
+| Batch_RawApi | None | {"batch_size": 4, "variant": "batch_api"} | PInvoke | 67.45 |
 | Batch_RawApi | None | {"batch_size": 4, "variant": "per_sample_loop"} | Managed | 123.53 |
-| ComputeSpikes | None | {"pattern": "burst"} | C | 7,615.63 |
+| Batch_RawApi | None | {"batch_size": 4, "variant": "per_sample_loop"} | PInvoke | 207.14 |
 | ComputeSpikes | None | {"pattern": "burst"} | Managed | 8,540.57 |
-| ComputeSpikes | None | {"pattern": "poisson"} | C | 5,753.23 |
+| ComputeSpikes | None | {"pattern": "burst"} | PInvoke | 7,615.63 |
 | ComputeSpikes | None | {"pattern": "poisson"} | Managed | 8,293.21 |
+| ComputeSpikes | None | {"pattern": "poisson"} | PInvoke | 5,753.23 |
 | ComputeSpikes | None | {"v_th": 0.5} | C | 266.87 |
 | ComputeSpikes | None | {"v_th": 0.5} | Eigen | 435.99 |
 | ComputeSpikes | None | {"v_th": 1.0} | C | 60.22 |
@@ -262,10 +323,10 @@ Kept out of the size table; these vary a parameter, not a size cell.
 | ComputeSpikes | None | {"v_th": 1.5} | Eigen | 73.10 |
 | ComputeSpikes | None | {"v_th": 2.0} | C | 51.36 |
 | ComputeSpikes | None | {"v_th": 2.0} | Eigen | 68.12 |
-| ComputeSums | None | {"pattern": "burst"} | C | 22.17 |
 | ComputeSums | None | {"pattern": "burst"} | Managed | 22.66 |
-| ComputeSums | None | {"pattern": "poisson"} | C | 23.57 |
+| ComputeSums | None | {"pattern": "burst"} | PInvoke | 22.17 |
 | ComputeSums | None | {"pattern": "poisson"} | Managed | 23.88 |
+| ComputeSums | None | {"pattern": "poisson"} | PInvoke | 23.57 |
 | FullTrainingStep | Large | {"batch_size": 12} | C | 1,369,197.50 |
 | FullTrainingStep | Large | {"batch_size": 12} | Eigen | 1,481,245.83 |
 | FullTrainingStep | Large | {"batch_size": 16} | C | 1,629,574.04 |
@@ -314,36 +375,36 @@ Kept out of the size table; these vary a parameter, not a size cell.
 | FullTrainingStep | Small | {"batch_size": 4} | Eigen | 97.44 |
 | FullTrainingStep | Small | {"batch_size": 8} | C | 135.91 |
 | FullTrainingStep | Small | {"batch_size": 8} | Eigen | 153.26 |
-| TrainingLoopSweep | Large | {"batch_size": 1000} | C | 204,900.00 |
 | TrainingLoopSweep | Large | {"batch_size": 1000} | Managed | 268,900.00 |
-| TrainingLoopSweep | Large | {"batch_size": 100} | C | 176.80 |
+| TrainingLoopSweep | Large | {"batch_size": 1000} | PInvoke | 204,900.00 |
 | TrainingLoopSweep | Large | {"batch_size": 100} | Managed | 188.40 |
-| TrainingLoopSweep | Large | {"batch_size": 10} | C | 60.13 |
+| TrainingLoopSweep | Large | {"batch_size": 100} | PInvoke | 176.80 |
 | TrainingLoopSweep | Large | {"batch_size": 10} | Managed | 38.94 |
-| TrainingLoopSweep | Large | {"batch_size": 500} | C | 54,270.00 |
+| TrainingLoopSweep | Large | {"batch_size": 10} | PInvoke | 60.13 |
 | TrainingLoopSweep | Large | {"batch_size": 500} | Managed | 65,840.00 |
-| TrainingLoopSweep | Medium | {"batch_size": 1000} | C | 81,520.00 |
+| TrainingLoopSweep | Large | {"batch_size": 500} | PInvoke | 54,270.00 |
 | TrainingLoopSweep | Medium | {"batch_size": 1000} | Managed | 104,420.00 |
-| TrainingLoopSweep | Medium | {"batch_size": 100} | C | 98.33 |
+| TrainingLoopSweep | Medium | {"batch_size": 1000} | PInvoke | 81,520.00 |
 | TrainingLoopSweep | Medium | {"batch_size": 100} | Managed | 102.77 |
-| TrainingLoopSweep | Medium | {"batch_size": 10} | C | 62.99 |
+| TrainingLoopSweep | Medium | {"batch_size": 100} | PInvoke | 98.33 |
 | TrainingLoopSweep | Medium | {"batch_size": 10} | Managed | 19.37 |
-| TrainingLoopSweep | Medium | {"batch_size": 500} | C | 21,180.00 |
+| TrainingLoopSweep | Medium | {"batch_size": 10} | PInvoke | 62.99 |
 | TrainingLoopSweep | Medium | {"batch_size": 500} | Managed | 26,720.00 |
-| TrainingLoopSweep | Small | {"batch_size": 1000} | C | 21,510.00 |
+| TrainingLoopSweep | Medium | {"batch_size": 500} | PInvoke | 21,180.00 |
 | TrainingLoopSweep | Small | {"batch_size": 1000} | Managed | 25,760.00 |
-| TrainingLoopSweep | Small | {"batch_size": 100} | C | 51.68 |
+| TrainingLoopSweep | Small | {"batch_size": 1000} | PInvoke | 21,510.00 |
 | TrainingLoopSweep | Small | {"batch_size": 100} | Managed | 32.47 |
-| TrainingLoopSweep | Small | {"batch_size": 10} | C | 37.82 |
+| TrainingLoopSweep | Small | {"batch_size": 100} | PInvoke | 51.68 |
 | TrainingLoopSweep | Small | {"batch_size": 10} | Managed | 7.45 |
-| TrainingLoopSweep | Small | {"batch_size": 500} | C | 5,088.00 |
+| TrainingLoopSweep | Small | {"batch_size": 10} | PInvoke | 37.82 |
 | TrainingLoopSweep | Small | {"batch_size": 500} | Managed | 6,529.00 |
-| TrainingLoopSweep | Tiny | {"batch_size": 1000} | C | 5,396.00 |
+| TrainingLoopSweep | Small | {"batch_size": 500} | PInvoke | 5,088.00 |
 | TrainingLoopSweep | Tiny | {"batch_size": 1000} | Managed | 6,218.00 |
-| TrainingLoopSweep | Tiny | {"batch_size": 100} | C | 40.19 |
+| TrainingLoopSweep | Tiny | {"batch_size": 1000} | PInvoke | 5,396.00 |
 | TrainingLoopSweep | Tiny | {"batch_size": 100} | Managed | 18.82 |
-| TrainingLoopSweep | Tiny | {"batch_size": 10} | C | 35.15 |
+| TrainingLoopSweep | Tiny | {"batch_size": 100} | PInvoke | 40.19 |
 | TrainingLoopSweep | Tiny | {"batch_size": 10} | Managed | 3.53 |
-| TrainingLoopSweep | Tiny | {"batch_size": 500} | C | 1,300.00 |
+| TrainingLoopSweep | Tiny | {"batch_size": 10} | PInvoke | 35.15 |
 | TrainingLoopSweep | Tiny | {"batch_size": 500} | Managed | 1,550.00 |
+| TrainingLoopSweep | Tiny | {"batch_size": 500} | PInvoke | 1,300.00 |
 
