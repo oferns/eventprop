@@ -316,26 +316,43 @@ scripts/bench/run_all.py                  # full run, includes XL
 ```
 
 Writes `bench-results/records_<tag>_*.json`, `merged_<tag>.json`, `report_<tag>.md`, and
-regenerates `BENCHMARKS.md`. `<tag>` is the platform — `darwin-arm64`, `linux-x86_64`,
-`windows-amd64` — taken from the same `platform.system()/machine()` fields the adapters put
-in `meta.host`, so a filename prefix and the host string that `merge.py`'s cross-host guard
-compares cannot disagree. Results from several machines therefore coexist in one directory
-without overwriting each other; `--tag <tag>` selects which set `--report-only` merges, and
-a tag with no records prints the expected filenames rather than a bare "no record files".
+regenerates `BENCHMARKS.md` plus `bench-reports/report_<tag>.md`. `<tag>` is the platform —
+`darwin-arm64`, `linux-x86_64`, `windows-amd64` — taken from the same
+`platform.system()/machine()` fields the adapters put in `meta.host`, so a filename prefix
+and the host string that `merge.py`'s cross-host guard compares cannot disagree. Results
+from several machines therefore coexist in one directory without overwriting each other;
+`--tag <tag>` selects which set `--report-only` merges, and a tag with no records prints the
+expected filenames rather than a bare "no record files".
 
-**The record JSONs are gitignored** (`bench-results/`), deliberately: they are
-machine-specific measurements and `merge.py` refuses to merge across hosts, so a committed
-record file is a measurement nobody on another machine can use. `BENCHMARKS.md` **is**
-committed — it is the generated report, and it names the host that produced it. The native
-suite's own `baselines/*.json` are likewise ignored (`EventProp.Native.Benchmarks/.gitignore`).
+**What is committed, and what is not:**
+
+| Path | Git | Why |
+|---|---|---|
+| `bench-results/` (records, `merged_<tag>.json`) | **ignored** | machine-specific, and `merge.py` refuses to merge across hosts — a committed record file is a measurement nobody on another machine can use |
+| `bench-reports/report_<tag>.md` | **committed** | the report is the artifact that survives being read on a different machine; deterministic (byte-identical across runs of the same records) and ~24K |
+| `BENCHMARKS.md` | **committed** | "latest run" convenience copy, written from the same `merged_<tag>.json` as the tagged report, so the two cannot drift |
+| `EventProp.Native.Benchmarks/baselines/*.json` | ignored | the native suite's own raw output |
+
+Tagged reports are what make the **cross-machine comparison a diffable artifact**: a Windows
+run and a macOS run coexist as `report_windows-amd64.md` and `report_darwin-arm64.md`
+instead of overwriting one file. Compare their per-pair geomeans; never the µs columns.
+
+**Committed reports go stale, so the report says what it describes.** `merge.py` aggregates
+`date`, `vcs_rev` and `vcs_dirty` from record meta into top-level provenance, and the report
+header prints them above a "this file is generated and goes stale" banner. `vcs_dirty`
+aggregates to a tri-state (`true` / `false` / `mixed`) across the input records. A committed
+report at an old `vcs_rev`, or with `vcs_dirty: true`, is not a measurement of the current
+committed state — re-run before quoting it. Multiple `vcs_rev` or `date` values render with
+a "records span multiple commits/dates" note, which means the record set was not one run.
 
 Prerequisites are **not** auto-built — a silent build here would hide a compile failure as a
 benchmark result. See `BENCHMARK_SCHEMA.md` for the record format,
 the validity rules, and the provenance each tool does and does not supply.
 
 Flags: `--quick` (Tiny/Small, skips XL), `--suites native dotnet python`, `--report-only`
-(re-merge existing records), `--out DIR`, `--tag TAG`, `--benchmarks-md PATH`. A suite that
-fails is reported and the run continues with the other suites' data, exiting non-zero.
+(re-merge existing records), `--out DIR`, `--tag TAG`, `--reports-dir DIR` (pass `''` to
+skip), `--benchmarks-md PATH` (pass `''` to skip). A suite that fails is reported and the
+run continues with the other suites' data, exiting non-zero.
 
 The pipeline is six Python scripts in `scripts/bench/` (stdlib only — no pip install):
 `run_all.py` (orchestrator), one adapter per tool (`from_google_benchmark.py`,
