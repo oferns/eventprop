@@ -99,7 +99,14 @@ public static unsafe partial class Api
             };
         }
 
-        /// <summary>Build from managed arrays (pins via fixed).</summary>
+        /// <summary>
+        /// Build from managed arrays. The pins taken here are released when this method
+        /// returns, so the returned struct's pointers are UNPINNED afterwards. Only safe
+        /// when the native call happens inside the same `fixed` scope — which this
+        /// overload cannot provide, because it returns the struct. Prefer the
+        /// pointer-based overload with an explicit `fixed` block that spans the native
+        /// call (see the convenience wrappers below).
+        /// </summary>
         public static EventPropInput Create(ReadOnlySpan<double> w, int nPre, int nPost,
             ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
             double vTh, double tauMem, double tauSyn)
@@ -250,8 +257,13 @@ public static unsafe partial class Api
         ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
         double tauMem, double tauSyn)
     {
-        var input = EventPropInput.Create(w, nPre, nPost, times, sources, 0.0, tauMem, tauSyn);
-        return eventprop_compute_sums(input);
+        fixed (double* pw = w)
+        fixed (double* pt = times)
+        fixed (int* ps = sources)
+        {
+            var input = EventPropInput.Create(pw, nPre, nPost, pt, ps, times.Length, 0.0, tauMem, tauSyn);
+            return eventprop_compute_sums(input);
+        }
     }
 
     /// <summary>Compute spikes from managed arrays.</summary>
@@ -259,8 +271,13 @@ public static unsafe partial class Api
         ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
         double vTh, double tauMem, double tauSyn)
     {
-        var input = EventPropInput.Create(w, nPre, nPost, times, sources, vTh, tauMem, tauSyn);
-        return eventprop_compute_spikes(input);
+        fixed (double* pw = w)
+        fixed (double* pt = times)
+        fixed (int* ps = sources)
+        {
+            var input = EventPropInput.Create(pw, nPre, nPost, pt, ps, times.Length, vTh, tauMem, tauSyn);
+            return eventprop_compute_spikes(input);
+        }
     }
 
     /// <summary>Compute maxima from managed arrays.</summary>
@@ -268,8 +285,13 @@ public static unsafe partial class Api
         ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
         double tauMem, double tauSyn)
     {
-        var input = EventPropInput.Create(w, nPre, nPost, times, sources, 0.0, tauMem, tauSyn);
-        return eventprop_compute_maxima(input);
+        fixed (double* pw = w)
+        fixed (double* pt = times)
+        fixed (int* ps = sources)
+        {
+            var input = EventPropInput.Create(pw, nPre, nPost, pt, ps, times.Length, 0.0, tauMem, tauSyn);
+            return eventprop_compute_maxima(input);
+        }
     }
 
     /// <summary>Backward pass (spike loss) from managed arrays.</summary>
@@ -281,16 +303,21 @@ public static unsafe partial class Api
         ReadOnlySpan<double> w, int nPre, int nPost,
         double vTh, double tauMem, double tauSyn)
     {
-        var input = EventPropInput.Create(w, nPre, nPost, inputTimes, inputSources, vTh, tauMem, tauSyn);
-
-        // Pin post-spike arrays and construct SpikeOutput with borrowed pointers
-        fixed (double* pt = postTimes)
-        fixed (int* ps = postSources)
-        fixed (double* pe = postErrors)
+        fixed (double* pw = w)
+        fixed (double* pt = inputTimes)
+        fixed (int* ps = inputSources)
         {
-            var spike = new SpikeOutput(EventPropError.Ok, nPostSpikes,
-                (IntPtr)pt, (IntPtr)ps);
-            return eventprop_backward_spikes(input, spike, (IntPtr)pe);
+            var input = EventPropInput.Create(pw, nPre, nPost, pt, ps, inputTimes.Length, vTh, tauMem, tauSyn);
+
+            // Pin post-spike arrays and construct SpikeOutput with borrowed pointers
+            fixed (double* ptPost = postTimes)
+            fixed (int* psPost = postSources)
+            fixed (double* pe = postErrors)
+            {
+                var spike = new SpikeOutput(EventPropError.Ok, nPostSpikes,
+                    (IntPtr)ptPost, (IntPtr)psPost);
+                return eventprop_backward_spikes(input, spike, (IntPtr)pe);
+            }
         }
     }
 
@@ -302,12 +329,17 @@ public static unsafe partial class Api
         ReadOnlySpan<double> w, int nPre, int nPost,
         double tauMem, double tauSyn)
     {
-        var input = EventPropInput.Create(w, nPre, nPost, inputTimes, inputSources, 0.0, tauMem, tauSyn);
-
-        fixed (double* mt = maximaTimes)
-        fixed (double* me = maximaErrors)
+        fixed (double* pw = w)
+        fixed (double* pt = inputTimes)
+        fixed (int* ps = inputSources)
         {
-            return eventprop_backward_maxima(input, (IntPtr)mt, (IntPtr)me);
+            var input = EventPropInput.Create(pw, nPre, nPost, pt, ps, inputTimes.Length, 0.0, tauMem, tauSyn);
+
+            fixed (double* mt = maximaTimes)
+            fixed (double* me = maximaErrors)
+            {
+                return eventprop_backward_maxima(input, (IntPtr)mt, (IntPtr)me);
+            }
         }
     }
 

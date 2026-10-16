@@ -687,6 +687,30 @@ Guards: `build.sh` now calls `scripts/submodule-state.sh apply`, which uses `git
 
 Diagnostic signature: a Linux reference-library build failing on `#include <execution>`, a missing `-fopenmp` link symbol, or a pybind11 2.6.x error against NumPy 2. Check `./scripts/submodule-state.sh status` before blaming the compiler.
 
+### Fixed — .NET: pointers taken from managed memory outlived their `fixed` pin (SIMD + P/Invoke)
+
+Two families of hot path handed raw pointers to code that runs for a long time, and in both the pin was released **before** the pointer was consumed.
+
+**1. `SimdAlgorithms` (`src/EventProp/`).** Every method derived its base address with `Unsafe.AsPointer(ref MemoryMarshal.GetReference(span))` — a raw address into **unpinned** managed memory. A concurrent GC relocating the array mid-loop makes the loads read a dead copy and the stores land at the stale address. The live array keeps its zero initialisation, and the stale region — already recycled to another live object — is silently overwritten. All 17 sites now use `fixed (double* p = span)`.
+
+**2. The P/Invoke wrappers (`src/EventProp.Native/Api.cs`, `BatchFriendly.cs`).** This was the one causing the test flakiness. `EventPropInput` carries raw `W`/`Times`/`Sources` pointers, and the span overload `EventPropInput.Create(w, nPre, nPost, times, sources, …)` took its `fixed` pins **inside itself** and returned the struct — so the pins were gone by the time the caller invoked the native function. Same shape in `BatchFriendly.BuildInputs`, which self-pinned and returned, leaving all six batch entry points calling native on unpinned pointers. Every wrapper now holds a `fixed` block that spans the native call; the span overload is documented as returning UNPINNED pointers, and `BuildInputs` became `FillInputs(pw, pt, ps, pn, …)` — pointer-based, so the caller is forced to own the pin.
+
+**Why this was so hard to find.** It is a ~30%-of-runs flake under TUnit's parallel scheduler, and it does **not** reproduce in isolation: a 34-million-iteration single-test probe and a 646k-iteration standalone SIMD probe both showed **0 lost writes**. Fixing only the SIMD side changed the failure rate from 5/12 full-suite runs to 4/12 — the pinning was necessary, and not the cause.
+
+**The tool that made it deterministic: `DOTNET_GCStress=0x4`** (compacting GC — forces relocations on nearly every allocation). With the native side unpinned it fails immediately and legibly:
+
+```
+failed Li_Forward_ExposesMaximaPerNeuron
+  InvalidOperationException: Forward pass failed for sample 0:
+  Invalid source neuron index (out of [0, n_pre) range)
+```
+
+C is reading a relocated array — the `sources` values no longer index `[0, n_pre)`. With the pins in place: **5/5 GCStress runs at 374/374**, and **12/12 normal runs at 374/374** (previously 4–5 of 12 runs failed). GCStress runs the suite in ~15s against ~2s normal, so it is cheap enough to run ad hoc, not in CI.
+
+**The non-obvious symptom class.** A stale pointer here does not crash — it returns *plausible* numbers. The observed failures were `MANAGED=0 NATIVE_C=2.6559…` (the all-zeros live array), `ComputeMaxima` mismatches on `max_times[...]`, and `ComputeSpikes` spike counts off by 1 (8 vs 90). Two of these look like numerical/parity bugs in the algorithm, which is where the search went first. When a managed-vs-native parity test fails **intermittently**, suspect the marshalling boundary before the math.
+
+Regression guards: `src/EventProp.Tests/PinningStressTests.cs` — `FmaRow_WritesLandUnderConcurrentGcPressure` and `NativeForward_IsBitIdenticalUnderConcurrentGcPressure`, each running a bounded window of concurrent allocation against the operation. **These are probabilistic tripwires, not proofs** — they do not reliably fail if the pinning regresses (see the reproduction rates above). The AGENTS.md post-mortem and `DOTNET_GCStress=0x4` are the real record; the tests are the cheap net.
+
 ## Platform Support
 
 - **macOS** — developed and tested

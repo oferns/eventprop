@@ -95,8 +95,14 @@ public static unsafe partial class Batch
         ValidateFlat(batchSize, nSpikesPerSample, times.Length, sources.Length);
 
         var inputs = stackalloc Api.EventPropInput[batchSize];
-        BuildInputs(w, nPre, nPost, times, sources, nSpikesPerSample, vTh, tauMem, tauSyn, inputs);
-        return eventprop_compute_spikes_batch((IntPtr)inputs, batchSize);
+        fixed (double* pw = w)
+        fixed (double* pt = times)
+        fixed (int* ps = sources)
+        fixed (int* pn = nSpikesPerSample)
+        {
+            FillInputs(pw, nPre, nPost, pt, ps, pn, batchSize, vTh, tauMem, tauSyn, inputs);
+            return eventprop_compute_spikes_batch((IntPtr)inputs, batchSize);
+        }
     }
 
     /// <summary>Batch maxima (voltage) forward pass over concatenated samples.</summary>
@@ -110,9 +116,15 @@ public static unsafe partial class Batch
         ValidateFlat(batchSize, nSpikesPerSample, times.Length, sources.Length);
 
         var inputs = stackalloc Api.EventPropInput[batchSize];
-        // Maxima never reads v_th; the C validator has a matching no-v_th path.
-        BuildInputs(w, nPre, nPost, times, sources, nSpikesPerSample, 0.0, tauMem, tauSyn, inputs);
-        return eventprop_compute_maxima_batch((IntPtr)inputs, batchSize);
+        fixed (double* pw = w)
+        fixed (double* pt = times)
+        fixed (int* ps = sources)
+        fixed (int* pn = nSpikesPerSample)
+        {
+            FillInputs(pw, nPre, nPost, pt, ps, pn, batchSize, 0.0, tauMem, tauSyn, inputs);
+            // Maxima never reads v_th; the C validator has a matching no-v_th path.
+            return eventprop_compute_maxima_batch((IntPtr)inputs, batchSize);
+        }
     }
 
     // ── Flat-array backward ──────────────────────────────────────────
@@ -134,10 +146,16 @@ public static unsafe partial class Batch
         ValidateErrorPointers(batchSize, spikes, postSpikeErrors);
 
         var inputs = stackalloc Api.EventPropInput[batchSize];
-        BuildInputs(w, nPre, nPost, times, sources, nSpikesPerSample, vTh, tauMem, tauSyn, inputs);
+        fixed (double* pw = w)
+        fixed (double* pt = times)
+        fixed (int* ps = sources)
+        fixed (int* pn = nSpikesPerSample)
+        {
+            FillInputs(pw, nPre, nPost, pt, ps, pn, batchSize, vTh, tauMem, tauSyn, inputs);
 
-        fixed (IntPtr* pErr = postSpikeErrors)
-            return eventprop_backward_spikes_batch((IntPtr)inputs, spikes, (IntPtr)pErr);
+            fixed (IntPtr* pErr = postSpikeErrors)
+                return eventprop_backward_spikes_batch((IntPtr)inputs, spikes, (IntPtr)pErr);
+        }
     }
 
     /// <summary>
@@ -158,10 +176,16 @@ public static unsafe partial class Batch
         ValidateErrorPointers(batchSize, spikes, postSpikeErrors);
 
         var inputs = stackalloc Api.EventPropInput[batchSize];
-        BuildInputs(w, nPre, nPost, times, sources, nSpikesPerSample, vTh, tauMem, tauSyn, inputs);
+        fixed (double* pw = w)
+        fixed (double* pt = times)
+        fixed (int* ps = sources)
+        fixed (int* pn = nSpikesPerSample)
+        {
+            FillInputs(pw, nPre, nPost, pt, ps, pn, batchSize, vTh, tauMem, tauSyn, inputs);
 
-        fixed (IntPtr* pErr = postSpikeErrors)
-            return eventprop_backward_spikes_batch_accumulate((IntPtr)inputs, spikes, (IntPtr)pErr);
+            fixed (IntPtr* pErr = postSpikeErrors)
+                return eventprop_backward_spikes_batch_accumulate((IntPtr)inputs, spikes, (IntPtr)pErr);
+        }
     }
 
     /// <summary>Batch backward pass (maxima loss) over a maxima batch.</summary>
@@ -176,8 +200,14 @@ public static unsafe partial class Batch
         ValidateFlat(batchSize, nSpikesPerSample, times.Length, sources.Length);
 
         var inputs = stackalloc Api.EventPropInput[batchSize];
-        BuildInputs(w, nPre, nPost, times, sources, nSpikesPerSample, 0.0, tauMem, tauSyn, inputs);
-        return eventprop_backward_maxima_batch((IntPtr)inputs, maxima);
+        fixed (double* pw = w)
+        fixed (double* pt = times)
+        fixed (int* ps = sources)
+        fixed (int* pn = nSpikesPerSample)
+        {
+            FillInputs(pw, nPre, nPost, pt, ps, pn, batchSize, 0.0, tauMem, tauSyn, inputs);
+            return eventprop_backward_maxima_batch((IntPtr)inputs, maxima);
+        }
     }
 
     /// <summary>Batch backward pass (maxima loss) with gradients summed into one matrix.</summary>
@@ -192,32 +222,42 @@ public static unsafe partial class Batch
         ValidateFlat(batchSize, nSpikesPerSample, times.Length, sources.Length);
 
         var inputs = stackalloc Api.EventPropInput[batchSize];
-        BuildInputs(w, nPre, nPost, times, sources, nSpikesPerSample, 0.0, tauMem, tauSyn, inputs);
-        return eventprop_backward_maxima_batch_accumulate((IntPtr)inputs, maxima);
-    }
-
-    // ── Shared marshalling ───────────────────────────────────────────
-
-    private static void BuildInputs(
-        ReadOnlySpan<double> w, int nPre, int nPost,
-        ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
-        ReadOnlySpan<int> nSpikesPerSample,
-        double vTh, double tauMem, double tauSyn,
-        Api.EventPropInput* inputs)
-    {
         fixed (double* pw = w)
         fixed (double* pt = times)
         fixed (int* ps = sources)
         fixed (int* pn = nSpikesPerSample)
         {
-            int offset = 0;
-            for (int b = 0; b < nSpikesPerSample.Length; b++)
-            {
-                int n = pn[b];
-                inputs[b] = Api.EventPropInput.Create(
-                    pw, nPre, nPost, pt + offset, ps + offset, n, vTh, tauMem, tauSyn);
-                offset += n;
-            }
+            FillInputs(pw, nPre, nPost, pt, ps, pn, batchSize, 0.0, tauMem, tauSyn, inputs);
+            return eventprop_backward_maxima_batch_accumulate((IntPtr)inputs, maxima);
+        }
+    }
+
+    // ── Shared marshalling ───────────────────────────────────────────
+
+    /// <summary>
+    /// Fill a stack-allocated EventPropInput array from raw pointers.
+    ///
+    /// The CALLER owns the pins. EventPropInput stores raw pointers into
+    /// w/times/sources/nSpikesPerSample, and `fixed` releases when its statement
+    /// ends, so the pins must span the native call that consumes `inputs`. Taking
+    /// them inside this helper would release them the moment it returns, leaving
+    /// the native batch call reading arrays a concurrent GC is free to relocate —
+    /// which shows up as intermittent EVENTPROP_UNSORTED_SPIKE_TIMES, invalid
+    /// source indices, zeroed maxima and short output arrays, all of them
+    /// intermittent and load-dependent.
+    /// </summary>
+    private static void FillInputs(
+        double* pw, int nPre, int nPost, double* pt, int* ps, int* pn, int batchSize,
+        double vTh, double tauMem, double tauSyn,
+        Api.EventPropInput* inputs)
+    {
+        int offset = 0;
+        for (int b = 0; b < batchSize; b++)
+        {
+            int n = pn[b];
+            inputs[b] = Api.EventPropInput.Create(
+                pw, nPre, nPost, pt + offset, ps + offset, n, vTh, tauMem, tauSyn);
+            offset += n;
         }
     }
 
