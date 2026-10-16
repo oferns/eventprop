@@ -102,3 +102,12 @@ __pycache__/
 # clangd cache
 src/EventProp.C/.cache/
 src/EventProp.C/.clangd
+
+# Benchmark pipeline output (scripts/bench/run_all.py).
+# Ignored, not committed: these are machine-specific measurements, and merge.py
+# refuses to merge records from different hosts, so a committed record file is a
+# measurement nobody on another machine can use. Filenames carry the platform tag
+# (records_darwin-arm64_native_c.json, merged_linux-x86_64.json, ...) so results
+# from several machines coexist in one directory. BENCHMARKS.md IS committed - it
+# is the generated report, and the committed copy states which host produced it.
+bench-results/

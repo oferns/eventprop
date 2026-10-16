@@ -315,14 +315,27 @@ scripts/bench/run_all.py --quick          # Tiny/Small only
 scripts/bench/run_all.py                  # full run, includes XL
 ```
 
-Writes `bench-results/records_*.json`, `merged.json`, `report.md`, and regenerates
-`BENCHMARKS.md`. Prerequisites are **not** auto-built — a silent build here would hide a
-compile failure as a benchmark result. See `BENCHMARK_SCHEMA.md` for the record format,
+Writes `bench-results/records_<tag>_*.json`, `merged_<tag>.json`, `report_<tag>.md`, and
+regenerates `BENCHMARKS.md`. `<tag>` is the platform — `darwin-arm64`, `linux-x86_64`,
+`windows-amd64` — taken from the same `platform.system()/machine()` fields the adapters put
+in `meta.host`, so a filename prefix and the host string that `merge.py`'s cross-host guard
+compares cannot disagree. Results from several machines therefore coexist in one directory
+without overwriting each other; `--tag <tag>` selects which set `--report-only` merges, and
+a tag with no records prints the expected filenames rather than a bare "no record files".
+
+**The record JSONs are gitignored** (`bench-results/`), deliberately: they are
+machine-specific measurements and `merge.py` refuses to merge across hosts, so a committed
+record file is a measurement nobody on another machine can use. `BENCHMARKS.md` **is**
+committed — it is the generated report, and it names the host that produced it. The native
+suite's own `baselines/*.json` are likewise ignored (`EventProp.Native.Benchmarks/.gitignore`).
+
+Prerequisites are **not** auto-built — a silent build here would hide a compile failure as a
+benchmark result. See `BENCHMARK_SCHEMA.md` for the record format,
 the validity rules, and the provenance each tool does and does not supply.
 
 Flags: `--quick` (Tiny/Small, skips XL), `--suites native dotnet python`, `--report-only`
-(re-merge existing records), `--out DIR`, `--benchmarks-md PATH`. A suite that fails is
-reported and the run continues with the other suites' data, exiting non-zero.
+(re-merge existing records), `--out DIR`, `--tag TAG`, `--benchmarks-md PATH`. A suite that
+fails is reported and the run continues with the other suites' data, exiting non-zero.
 
 The pipeline is six Python scripts in `scripts/bench/` (stdlib only — no pip install):
 `run_all.py` (orchestrator), one adapter per tool (`from_google_benchmark.py`,

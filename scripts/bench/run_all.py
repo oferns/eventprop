@@ -127,7 +127,22 @@ def bdn_version():
     return None
 
 
-def suite_native(out_dir, quick):
+def host_tag():
+    """Platform tag for output filenames: `darwin-arm64`, `win32-x64`, `linux-x86_64`.
+
+    Built from the SAME fields the adapters put in `meta.host` (platform.system /
+    platform.machine, lowercased), so a filename prefix and the host string that
+    merge.py's cross-host guard compares can never disagree. If they drifted, a
+    directory listing would imply a provenance the records do not carry.
+
+    Windows note: platform.system() is "Windows" -> "windows", and machine() is
+    "AMD64" -> "amd64". That is the honest string; it is not normalised to
+    "win32"/"x64" because the point of the prefix is to identify the machine.
+    """
+    return f"{platform.system().lower()}-{platform.machine().lower()}"
+
+
+def suite_native(out_dir, quick, tag):
     print("\n=== suite: native (Google Benchmark) ===")
     build_dir = native_build_dir()
     print(f"  native build dir: {build_dir}")
@@ -150,14 +165,16 @@ def suite_native(out_dir, quick):
         if not ok:
             print(f"  {exe} run failed", file=sys.stderr)
             return False
-        rec = os.path.join(out_dir, f"records_native_{impl.lower()}.json")
+        # Filename must match record_files in main() exactly — "native_" prefix on
+        # all four, so a --report-only with the same --tag finds them.
+        rec = os.path.join(out_dir, f"records_{tag}_native_{impl.lower()}.json")
         ok, _ = run([sys.executable, os.path.join(HERE, "from_google_benchmark.py"),
                      json_path, "--impl", impl, "--out", rec], timeout=300)
         results[impl] = ok
     return all(results.values())
 
 
-def suite_dotnet(out_dir, quick):
+def suite_dotnet(out_dir, quick, tag):
     print("\n=== suite: dotnet (BenchmarkDotNet) ===")
     if not require(os.path.join(DOTNET_PROJ, "EventProp.Benchmarks.csproj"), "run ./build.sh release"):
         return False
@@ -221,7 +238,7 @@ def suite_dotnet(out_dir, quick):
     # means a failed run leaves the artifacts dir holding `--job Dry` placeholders
     # (placeholder Mean, no OutputSpikes) that would adapt into fabricated records.
 
-    rec = os.path.join(out_dir, "records_dotnet.json")
+    rec = os.path.join(out_dir, f"records_{tag}_dotnet.json")
     ok, _ = run([sys.executable, os.path.join(HERE, "from_benchmarkdotnet.py"),
                  DOTNET_ARTIFACTS, "--out", rec, "--bdn-version", version],
                 timeout=600)
@@ -229,7 +246,7 @@ def suite_dotnet(out_dir, quick):
         return False
 
     # Schema rule: PInvoke IS the C library; alias so the chain closes.
-    path = os.path.join(out_dir, "records_dotnet_c.json")
+    path = os.path.join(out_dir, f"records_{tag}_dotnet_c.json")
     with open(rec) as f:
         doc = json.load(f)
     for r in doc["records"]:
@@ -241,7 +258,7 @@ def suite_dotnet(out_dir, quick):
     return True
 
 
-def suite_python(out_dir, quick):
+def suite_python(out_dir, quick, tag):
     print("\n=== suite: python (pytest-benchmark) ===")
     if not require(os.path.join(PY_BENCH, "test_kernel_benchmarks.py"),
                    "the kernel benchmarks live in the repo"):
@@ -275,7 +292,7 @@ def suite_python(out_dir, quick):
         print("  python benchmark run failed", file=sys.stderr)
         return False
 
-    rec = os.path.join(out_dir, "records_python.json")
+    rec = os.path.join(out_dir, f"records_{tag}_python.json")
     ok, _ = run([sys.executable, os.path.join(HERE, "from_pytest_benchmark.py"),
                  json_path, "--out", rec], timeout=300)
     return ok
@@ -293,37 +310,49 @@ def main():
     ap.add_argument("--benchmarks-md", default=os.path.join(SRC, "BENCHMARKS.md"),
                     help="generated report is also written here (schema criterion 3); "
                          "pass '' to skip")
+    ap.add_argument("--tag", default=None,
+                    help="platform prefix for output filenames (default: auto, e.g. "
+                         "darwin-arm64). Records, merged.json and report.md all carry "
+                         "it, so results from several machines can coexist in one "
+                         "directory without overwriting each other.")
     args = ap.parse_args()
 
+    tag = args.tag or host_tag()
+    print(f"platform tag: {tag}")
     os.makedirs(args.out, exist_ok=True)
     failures = []
 
     if not args.report_only:
         runners = {"native": suite_native, "dotnet": suite_dotnet, "python": suite_python}
         for name in args.suites:
-            if not runners[name](args.out, args.quick):
+            if not runners[name](args.out, args.quick, tag):
                 failures.append(name)
 
     record_files = {
-        "native": [os.path.join(args.out, "records_native_c.json"),
-                   os.path.join(args.out, "records_native_eigen.json")],
-        "dotnet": [os.path.join(args.out, "records_dotnet_c.json")],
-        "python": [os.path.join(args.out, "records_python.json")],
+        "native": [os.path.join(args.out, f"records_{tag}_native_c.json"),
+                   os.path.join(args.out, f"records_{tag}_native_eigen.json")],
+        "dotnet": [os.path.join(args.out, f"records_{tag}_dotnet_c.json")],
+        "python": [os.path.join(args.out, f"records_{tag}_python.json")],
     }
     inputs = [p for s in args.suites for p in record_files[s] if os.path.exists(p)]
     if not inputs:
-        print("ERROR: no record files to merge", file=sys.stderr)
+        # Name the tag: the usual cause of this is a --tag mismatch between a run
+        # and a --report-only, not missing data.
+        print(f"ERROR: no record files to merge in {args.out} for tag '{tag}'\n"
+              f"  Expected: {' '.join(os.path.basename(p) for s in args.suites for p in record_files[s])}\n"
+              f"  If the records were produced on another machine, pass --tag <that-tag>.",
+              file=sys.stderr)
         return 1
 
     print("\n=== merge ===")
-    merged = os.path.join(args.out, "merged.json")
+    merged = os.path.join(args.out, f"merged_{tag}.json")
     ok, _ = run([sys.executable, os.path.join(HERE, "merge.py")] + inputs
                 + ["--out", merged], timeout=600)
     if not ok:
         return 1
 
     print("\n=== report ===")
-    report = os.path.join(args.out, "report.md")
+    report = os.path.join(args.out, f"report_{tag}.md")
     cmd = [sys.executable, os.path.join(HERE, "report.py"), merged, "--out", report,
            "--title", "Library Benchmark Comparison",
            "--source", " ".join(os.path.basename(p) for p in inputs)]
