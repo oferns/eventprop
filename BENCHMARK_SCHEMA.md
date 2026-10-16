@@ -226,12 +226,16 @@ implemented and running**; the mapping work listed here is what each one actuall
 | `report.py` | merged JSON | Emits the side-by-side tables, per-pair geomeans, exclusion table, sweep table |
 | `run_all.py` | — | One command: runs all suites, adapts, merges, reports. `--quick` restricts to Tiny/Small |
 
-They replace the five ad-hoc scripts in `EventProp.Python.Benchmarks/`
-(`generate_report.py`, `parse_benchmarks.py`, `print_full_matrix.py`,
-`print_native_comparison.py`, `print_poisson_comparison.py`), which each re-parse one
-format with bespoke regexes — `print_native_comparison.py` parses Google Benchmark
-**text** output with a regex, discarding the JSON that already has `output_spikes`
-and provenance.
+They replace four ad-hoc scripts in `EventProp.Python.Benchmarks/`
+(`parse_benchmarks.py`, `print_full_matrix.py`, `print_native_comparison.py`,
+`print_poisson_comparison.py`), which each re-parsed one format with bespoke regexes
+— `print_native_comparison.py` parsed Google Benchmark **text** output with a regex,
+discarding the JSON that already has `output_spikes` and provenance. Those four are
+**deleted**, along with the committed result JSONs that fed them (`results_sweep.json`,
+`lif_results.json`, `sweep_results.json`, `results_training_step.json`).
+
+`generate_report.py` is **kept**: `run_benchmarks.sh` and the suite README use it, so it
+is the suite's own documented workflow, not a superseded one-off.
 
 ### Provenance: what each tool supplies
 

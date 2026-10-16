@@ -26,7 +26,7 @@ This repository implements the **EventProp** algorithm — an event-based backpr
 | **EventProp.Native.ParityTests/** | C++ (CMake) | Standalone parity tests comparing C vs Eigen implementations |
 | **EventProp.Python.Benchmarks/** | Python (pytest-benchmark) | Benchmarks comparing EventProp.Python vs EventProp.Native.Python |
 | **EventProp.Web/** | Python (Streamlit) | "EventProp Visualizer" — interactive forward/backward pass explorer. **Active; further work planned.** Has its own `requirements.txt`; not wired into `build.sh` |
-| **EventProp.Python.GoogleBenchmarks/** | Python | **Superseded experiment.** Two standalone `benchmark*.py` scripts that ported `bench_main.cpp` cases to `google_benchmark` in Python to test cross-suite comparability. Not wired into `build.sh` or any suite; kept for reference. Its data is **incompatible** with the current contract (weights U[2.5, 10.0], bypasses `LIFLayer`) — see the data contract |
+| **EventProp.Python.GoogleBenchmarks/** | Python | **Deleted.** Was two standalone `benchmark*.py` scripts porting `bench_main.cpp` cases to `google_benchmark` in Python. Its data was **incompatible** with the shared contract (weights U[2.5, 10.0] vs U[0.5, 2.0], bypassed `LIFLayer`), so its numbers were not comparable to any other suite — see the data contract |
 
 ## Solution Structure
 
@@ -63,8 +63,8 @@ eventprop.net/
 │   ├── EventProp.Native.Benchmarks/  # Google Benchmark (C vs C++)
 │   ├── EventProp.Native.ParityTests/ # Standalone parity tests (C vs Eigen)
 │   ├── EventProp.Python.Benchmarks/  # pytest-benchmark (pybind11 vs Cython)
-│   ├── EventProp.Web/                # Streamlit visualizer
-│   └── EventProp.Python.GoogleBenchmarks/  # legacy standalone benchmark scripts
+│   └── EventProp.Web/                # Streamlit visualizer
+├── scripts/bench/              # cross-suite benchmark pipeline (see below)
 ├── coverage-report/            # Generated HTML coverage reports (gitignored)
 └── AGENTS.md                   # This file
 ```
