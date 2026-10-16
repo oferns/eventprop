@@ -25,6 +25,12 @@ that AGENTS.md currently keeps as prose footnotes:
                          NOT applied to Google Benchmark, which budgets by wall-clock
                          time: 1 iteration of a 16 s/iteration XL BackwardSpikes is a
                          sound measurement, not a thin one. See LOW_ITERATION_TOOLS.
+  below_min_work       mean_ns < MIN_WORK_NS (10 us). Catches rows the zero-spike rule
+                         cannot see: ComputeMaxima has no threshold check, so it runs at
+                         Tiny (n_out=5) and does near-zero work, and BenchmarkDotNet's
+                         overhead evaluation is the same order as the workload, so the
+                         ratio measures the harness. Applied on ABSOLUTE TIME because the
+                         failure mode is harness overhead swamping the workload.
   sweep                axis is set         -> parameter sweep, not a size cell; kept
                          out of the size table, reported separately
   missing_counterpart  no peer impl for this cell -> no ratio can be computed
@@ -60,6 +66,8 @@ SLOW_FAMILIES = {"BackwardSpikes", "FullTrainingStep"}
 # heavy rows and is NOT a validity signal. Keyed by meta.suite.
 LOW_ITERATION_TOOLS = {"dotnet"}
 LOW_ITERATION_FLOOR = 30
+# See derive_reasons / below_min_work.
+MIN_WORK_NS = 10_000
 
 
 def load(path):
@@ -109,6 +117,23 @@ def derive_reasons(rec, peers, suite=None):
     if (suite in LOW_ITERATION_TOOLS and it is not None
             and it < LOW_ITERATION_FLOOR):
         reasons.append("low_iteration_count")
+
+    # Minimum-work floor. The zero-spike rule catches rows that produce no output
+    # spikes, but it cannot see rows that produce SOME spikes and still measure
+    # nothing: ComputeMaxima has no threshold check, so it runs at Tiny (n_out=5)
+    # and does near-zero work. BenchmarkDotNet's own overhead evaluation is the
+    # same order of magnitude as such a workload, so the ratio measures the
+    # harness - ComputeMaxima/Tiny/poisson reported 0.20x ("Managed 5x faster"),
+    # and a handful of sub-microsecond rows dominated the C-vs-Managed geomean.
+    #
+    # The floor is on ABSOLUTE TIME, not spike count, because the failure mode is
+    # harness overhead swamping the workload. 10 us is ~1000x BDN's ~10 ns/op
+    # overhead, comfortably above it, and every Medium+ row in this suite is
+    # 20 us or more. Applied per-record: a cell where one side is below the floor
+    # is not a valid ratio.
+    mean_ns = rec.get("mean_ns")
+    if mean_ns is not None and mean_ns < MIN_WORK_NS:
+        reasons.append("below_min_work")
     if rec.get("axis"):
         reasons.append("sweep")
     policy = EXCLUSION_POLICY.get(rec["benchmark"])
