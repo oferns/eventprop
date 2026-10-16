@@ -16,11 +16,16 @@ if sys.platform == 'win32':
     libraries = ['eventprop_c_api'] if os.path.exists(c_lib_dir) else []
     extra_link_args = []
     # _native.c includes eventprop_batch.h, which includes <stdatomic.h> in C mode.
-    # MSVC defines __STDC_NO_ATOMICS__ (so the header #errors "C atomic support is
-    # not enabled") even with /std:c11, on every toolset tested up to 14.52 / VS 2026;
-    # the switch that enables them is /experimental:c11atomics. EventProp.C applies the
-    # same switch to the library itself.
-    extra_compile_args = ['/experimental:c11atomics']
+    # MSVC needs TWO switches for that header, and distutils supplies neither:
+    #   /std:c11                — vcruntime_c11_stdatomic.h(16) #errors "C atomics
+    #                             require C11 or later"; distutils passes /TC only, and
+    #                             MSVC's default C mode leaves __STDC_VERSION__ unset.
+    #   /experimental:c11atomics — MSVC defines __STDC_NO_ATOMICS__ (so the header
+    #                             #errors "C atomic support is not enabled") on every
+    #                             toolset tested up to 14.52 / VS 2026, even with
+    #                             /std:c11. EventProp.C applies the same pair to the
+    #                             library itself.
+    extra_compile_args = ['/std:c11', '/experimental:c11atomics']
 elif sys.platform == 'darwin':
     c_lib_dir = c_build_base
     libraries = ['eventprop_c_api']
