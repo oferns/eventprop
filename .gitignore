@@ -108,6 +108,10 @@ src/EventProp.C/.clangd
 # refuses to merge records from different hosts, so a committed record file is a
 # measurement nobody on another machine can use. Filenames carry the platform tag
 # (records_darwin-arm64_native_c.json, merged_linux-x86_64.json, ...) so results
-# from several machines coexist in one directory. BENCHMARKS.md IS committed - it
-# is the generated report, and the committed copy states which host produced it.
+# from several machines coexist in one directory.
+#
+# The COMMITTED counterpart is bench-reports/ (report_<tag>.md): the report is the
+# artifact that survives being read on a different machine, it is deterministic
+# (byte-identical across runs of the same records) and it is small (~24K). It
+# carries vcs_rev, vcs_dirty and date in its header so staleness is visible.
 bench-results/

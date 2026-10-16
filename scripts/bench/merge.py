@@ -145,6 +145,31 @@ def main():
         m = d["meta"]
         tools.setdefault(m["suite"], set()).add(f"{m['tool']} {m['tool_version']}")
 
+    # Commit + date + dirty flag, aggregated across the input records. Surfaced in
+    # the report header because a COMMITTED report is a durable artifact that
+    # outlives the code it describes: without the revision, a reader cannot tell
+    # whether a committed report predates a change they care about, and stale
+    # benchmark numbers read exactly like fresh ones. Multiple values mean the
+    # records were produced at different commits - the report says so rather than
+    # picking one.
+    def meta_set(field):
+        return sorted({d["meta"][field] for d in docs if d["meta"].get(field)})
+
+    vcs_revs = meta_set("vcs_rev")
+    dates = meta_set("date")
+    # "dirty" is per-record; aggregate as a single tri-state so the report has one
+    # answer: all clean, all dirty, or mixed.
+    dirty_flags = [bool(d["meta"].get("vcs_dirty")) for d in docs
+                   if d["meta"].get("vcs_dirty") is not None]
+    if not dirty_flags:
+        vcs_dirty = None
+    elif all(dirty_flags):
+        vcs_dirty = True
+    elif not any(dirty_flags):
+        vcs_dirty = False
+    else:
+        vcs_dirty = "mixed"
+
     # Join on the cell key; collect every impl that measured it.
     # The suite is recorded PER IMPL, not just per document: `low_iteration_count`
     # is tool-specific (it applies to BenchmarkDotNet, not Google Benchmark), and
@@ -202,6 +227,9 @@ def main():
             "hosts": hosts,
             "tools": {s: sorted(t) for s, t in tools.items()},
             "sources": [os.path.basename(f) for f in args.files],
+            "vcs_rev": vcs_revs,
+            "vcs_dirty": vcs_dirty,
+            "date": dates,
         },
         "cells": merged,
     }

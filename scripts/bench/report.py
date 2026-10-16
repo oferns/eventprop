@@ -116,9 +116,29 @@ def main():
     L.append("")
     prov = doc.get("provenance", {})
     L.append(f"- hosts: {', '.join(prov.get('hosts', []))}")
+    # Commit + date + dirty flag. A committed report is a durable artifact that
+    # outlives the code it describes; without these, a reader cannot tell whether
+    # it predates a change they care about, and stale numbers read like fresh ones.
+    revs = prov.get("vcs_rev") or []
+    if revs:
+        L.append(f"- vcs_rev: {', '.join(revs)}"
+                 + ("  _(records span multiple commits)_" if len(revs) > 1 else ""))
+    dirty = prov.get("vcs_dirty")
+    if dirty is not None:
+        L.append(f"- vcs_dirty: {dirty}")
+    dates = prov.get("date") or []
+    if dates:
+        L.append(f"- date: {', '.join(dates)}"
+                 + ("  _(records span multiple dates)_" if len(dates) > 1 else ""))
     for suite, tools in sorted((prov.get("tools") or {}).items()):
         L.append(f"- suite `{suite}`: {'; '.join(tools)}")
     L.append(f"- sources: {', '.join(prov.get('sources', []))}")
+    L.append("")
+    L.append("> **This file is generated and goes stale.** It reports measurements for the "
+             "`vcs_rev` above; if your checkout is at a later commit, re-run "
+             "`scripts/bench/run_all.py` before quoting these numbers. "
+             "`vcs_dirty: true` means the working tree was modified when measured, so the "
+             "numbers do not correspond to any committed state.")
     L.append("")
     L.append("> A BenchmarkDotNet version change invalidates historical .NET "
              "comparisons (AGENTS.md: 8-12% on the headline Ratio, 0.6% noise "

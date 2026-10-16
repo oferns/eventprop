@@ -315,6 +315,9 @@ def main():
                          "darwin-arm64). Records, merged.json and report.md all carry "
                          "it, so results from several machines can coexist in one "
                          "directory without overwriting each other.")
+    ap.add_argument("--reports-dir", default=os.path.join(SRC, "bench-reports"),
+                    help="directory for COMMITTED per-platform reports (report_<tag>.md); "
+                         "tracked in git, unlike the raw records. Pass '' to skip.")
     args = ap.parse_args()
 
     tag = args.tag or host_tag()
@@ -360,8 +363,33 @@ def main():
     if not ok:
         return 1
 
+    # Committed, per-platform reports (bench-reports/).
+    #
+    # Why commit reports and not records: the records are machine-specific and
+    # merge.py refuses to merge across hosts, so a committed record file is a
+    # measurement nobody on another machine can use. The report is the artifact
+    # that survives being read on a different machine, and it is deterministic
+    # (byte-identical across runs of the same records) and small (~24K).
+    #
+    # Tagged filenames mean a Windows run and a macOS run COEXIST instead of
+    # overwriting each other, which is what makes the per-pair geomean comparison
+    # across machines a diffable artifact rather than a /tmp eyeball.
+    if args.reports_dir:
+        os.makedirs(args.reports_dir, exist_ok=True)
+        tagged = os.path.join(args.reports_dir, f"report_{tag}.md")
+        ok, _ = run([sys.executable, os.path.join(HERE, "report.py"), merged,
+                     "--out", tagged,
+                     "--title", "Library Benchmark Comparison",
+                     "--source", " ".join(os.path.basename(p) for p in inputs)],
+                    timeout=300)
+        if not ok:
+            return 1
+        print(f"committed report: {tagged}")
+
     # Schema criterion 3: BENCHMARKS.md is generated, not hand-written. Written
-    # from the same merged.json as report.md, so the two cannot drift.
+    # from the same merged.json as report.md, so the two cannot drift. This is the
+    # "latest run" convenience copy; the tagged files in --reports-dir are the
+    # durable per-platform record.
     if args.benchmarks_md:
         ok, _ = run([sys.executable, os.path.join(HERE, "report.py"), merged,
                      "--out", args.benchmarks_md,
