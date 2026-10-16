@@ -212,6 +212,9 @@ def main():
                     choices=["native", "dotnet", "python"])
     ap.add_argument("--report-only", action="store_true",
                     help="skip running; merge+report the records already in --out")
+    ap.add_argument("--benchmarks-md", default=os.path.join(SRC, "BENCHMARKS.md"),
+                    help="generated report is also written here (schema criterion 3); "
+                         "pass '' to skip")
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
@@ -243,10 +246,24 @@ def main():
 
     print("\n=== report ===")
     report = os.path.join(args.out, "report.md")
-    ok, _ = run([sys.executable, os.path.join(HERE, "report.py"), merged,
-                 "--out", report], timeout=300)
+    cmd = [sys.executable, os.path.join(HERE, "report.py"), merged, "--out", report,
+           "--title", "Library Benchmark Comparison",
+           "--source", " ".join(os.path.basename(p) for p in inputs)]
+    ok, _ = run(cmd, timeout=300)
     if not ok:
         return 1
+
+    # Schema criterion 3: BENCHMARKS.md is generated, not hand-written. Written
+    # from the same merged.json as report.md, so the two cannot drift.
+    if args.benchmarks_md:
+        ok, _ = run([sys.executable, os.path.join(HERE, "report.py"), merged,
+                     "--out", args.benchmarks_md,
+                     "--title", "Library Benchmark Comparison",
+                     "--source", " ".join(os.path.basename(p) for p in inputs)],
+                    timeout=300)
+        if not ok:
+            return 1
+        print(f"benchmarks md: {args.benchmarks_md}")
 
     print(f"\nreport: {report}")
     if failures:
