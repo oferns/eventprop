@@ -495,7 +495,7 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
     /* Shared error flags for the parallel region — atomic: multiple threads */
     /* may write them. Relaxed is sufficient: only the constant 1 is ever */
     /* stored, and the implicit barrier at the region exit publishes it. */
-    atomic_int fwd_alloc_error = ATOMIC_VAR_INIT(0);
+    atomic_int fwd_alloc_error = 0;
 
 #ifdef _OPENMP
 #pragma omp parallel num_threads(n_slots)
@@ -519,10 +519,17 @@ SpikeOutput eventprop_compute_spikes(const EventPropInput input)
         double* p_times    = th->scratch_times;
         int cap              = row_cap;
 
+        /* Declared outside the for-init because MSVC's /openmp implements OpenMP 2.0, */
+        /* which rejects a loop control variable declared in the for statement */
+        /* (error C3015 "initialization in OpenMP 'for' statement has improper form"). */
+        /* The iteration variable of an omp for is private to the thread by the spec, */
+        /* so hoisting the declaration does not make it shared. */
+        int target_nrn = 0;
+
 #ifdef _OPENMP
 #pragma omp for schedule(dynamic)
 #endif
-        for (int target_nrn = 0; target_nrn < input.n_post; target_nrn++) {
+        for (target_nrn = 0; target_nrn < input.n_post; target_nrn++) {
             if (!ok) continue;
 
             int count = 0;

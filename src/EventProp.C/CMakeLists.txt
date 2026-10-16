@@ -4,6 +4,53 @@ project(eventprop_c LANGUAGES C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+# C11 atomics — eventprop_batch.h includes <stdatomic.h> and the batch implementation
+# sets has_errors with atomic_store_explicit from the OpenMP loops.
+#
+# MSVC defines __STDC_NO_ATOMICS__ (so vcruntime_c11_stdatomic.h hits its #error
+# "C atomic support is not enabled") on every toolset tested up to 14.52 / VS 2026,
+# INCLUDING with /std:c11 and /std:c17. The switch that enables them is
+# /experimental:c11atomics. Probed by compiling, not by a compiler-version test:
+# the probe is the record of what this toolset actually does, so a toolset that
+# supports atomics unconditionally gets no flag and a future MSVC that drops the
+# switch does not silently keep passing it.
+include(CheckCSourceCompiles)
+set(EVENTPROP_ATOMICS_PROBE "
+#include <stdatomic.h>
+atomic_int flag;
+int main(void) {
+    atomic_store_explicit(&flag, 1, memory_order_relaxed);
+    return atomic_load_explicit(&flag, memory_order_relaxed) - 1;
+}
+")
+# Compile-only probe: the flag question is a front-end question, and a link step
+# would let an unrelated missing system library answer it.
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+# The probe must use the library's own language standard, or MSVC rejects the
+# header for a second, unrelated reason (__STDC_VERSION__ < 201112L) and reports
+# "no atomics" about a toolset that has them.
+if(MSVC)
+    set(CMAKE_REQUIRED_FLAGS "/std:c11")
+endif()
+check_c_source_compiles("${EVENTPROP_ATOMICS_PROBE}" EVENTPROP_C11_ATOMICS_ENABLED)
+if(MSVC AND NOT EVENTPROP_C11_ATOMICS_ENABLED)
+    set(CMAKE_REQUIRED_FLAGS "/std:c11 /experimental:c11atomics")
+    check_c_source_compiles("${EVENTPROP_ATOMICS_PROBE}" EVENTPROP_C11_ATOMICS_EXPERIMENTAL)
+    if(EVENTPROP_C11_ATOMICS_EXPERIMENTAL)
+        set(EVENTPROP_ATOMICS_COMPILE_OPTIONS "/experimental:c11atomics")
+        message(STATUS "C11 atomics: this MSVC toolset needs /experimental:c11atomics — enabling for eventprop_c_api")
+    endif()
+endif()
+unset(CMAKE_REQUIRED_FLAGS)
+unset(CMAKE_TRY_COMPILE_TARGET_TYPE)
+if(NOT EVENTPROP_C11_ATOMICS_ENABLED AND NOT EVENTPROP_C11_ATOMICS_EXPERIMENTAL)
+    message(FATAL_ERROR
+        "The C compiler cannot compile <stdatomic.h> in C11 mode, and "
+        "eventprop_batch.h requires C11 atomics for the batch has_errors flag. "
+        "Compiler: ${CMAKE_C_COMPILER_ID} ${CMAKE_C_COMPILER_VERSION} "
+        "(${CMAKE_C_COMPILER})")
+endif()
+
 # AddressSanitizer — enables memory leak detection, use-after-free, buffer overflow checks.
 # Usage: cmake .. -DENABLE_ASAN=ON (Debug builds only)
 # Note: on macOS this must be applied to both library and tests together. See Tests/CMakeLists.txt.
@@ -37,6 +84,14 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 elseif(CMAKE_C_COMPILER_ID MATCHES "MSVC")
     # MSVC equivalents (enabled by default: /W3, /W4 for extra warnings)
     add_compile_options(/W4)
+    # UCRT's <math.h> defines INFINITY as ((float)(_HUGE_ENUF * _HUGE_ENUF)), so every
+    # use of it folds to a constant expression that overflows and MSVC reports C4756
+    # "overflow in constant arithmetic" at the statement that used it. The library's
+    # INFINITY uses are the forward pass's "no root in this interval" sentinel, not
+    # arithmetic on a huge value; the diagnostic is about the header's own expansion
+    # and cannot be avoided from source. Suppressed explicitly so the werror preset's
+    # zero-warning rule stays meaningful for everything else.
+    add_compile_options(/wd4756)
 endif()
 
 
@@ -84,6 +139,19 @@ else()
     set(LIB_TYPE SHARED)
 endif()
 
+# The validator's NaN guard is `!(v_th > 0.0)`, which is NaN-correct only under
+# strict FP semantics. MSVC's /fp:fast assumes no NaN and rewrites it to
+# `v_th <= 0.0` — false for NaN — so a NaN spike threshold would be accepted
+# (observed: ValidateInput.NanVthRejectedAsInvalidVth fails, validate returns OK).
+# Validation is comparisons only, with no FP arithmetic worth optimising, so this
+# one translation unit is compiled /fp:precise. GCC/Clang need no equivalent: the
+# fast-math set there deliberately omits -ffinite-math-only, so NaN comparisons
+# survive. Pinned by ValidateInput.NanVthRejectedAsInvalidVth.
+if(MSVC)
+    set_source_files_properties(eventprop_validation.c PROPERTIES
+        COMPILE_OPTIONS "/fp:precise")
+endif()
+
 find_package(OpenMP QUIET)
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 add_library(eventprop_c_api ${LIB_TYPE}
@@ -97,6 +165,10 @@ add_library(eventprop_c_api ${LIB_TYPE}
     eventprop_diag.c
     eventprop_batch.c
 )
+
+if(EVENTPROP_ATOMICS_COMPILE_OPTIONS)
+    target_compile_options(eventprop_c_api PRIVATE ${EVENTPROP_ATOMICS_COMPILE_OPTIONS})
+endif()
 
 # CPU-specific optimization and aggressive FP math optimizations
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")

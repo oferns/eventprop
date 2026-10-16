@@ -197,8 +197,14 @@ double dot_product_simd(const double* a, const double* b, const int n)
         return sum;
     }
 
+    /* Used only by the SIMD branches below, so guarded: when no SIMD path is */
+    /* compiled for the target (e.g. MSVC x64, where the CMake CPU probe sets no */
+    /* HAVE_* macro) simd_available() is already false and the call leaves through */
+    /* the scalar tail, which makes unguarded declarations unused-variable warnings. */
+#if defined(HAVE_AVX512F) || defined(HAVE_AVX2) || defined(HAVE_NEON)
     const int vec = simd_vec_width();
     const int vec_count = n / vec;
+#endif
 
 #if defined(HAVE_AVX512F) || defined(HAVE_AVX2)
     {

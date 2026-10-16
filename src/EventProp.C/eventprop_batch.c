@@ -317,7 +317,7 @@ AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
 
     BackwardsBatch batch = {
         .batch_size = batch_size,
-        .has_errors = ATOMIC_VAR_INIT(0),   /* not used here */
+        .has_errors = 0,                    /* not used here */
         .outputs = outputs
     };
 
@@ -390,7 +390,7 @@ AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
 
     BackwardsBatch batch = {
         .batch_size = batch_size,
-        .has_errors = ATOMIC_VAR_INIT(0),   /* not used here */
+        .has_errors = 0,                    /* not used here */
         .outputs = outputs
     };
 

@@ -11,7 +11,30 @@
 #define EVENTPROP_BATCH_H
 
 #include "eventprop.h"
+
+/*
+ * <stdatomic.h> is a C header. MSVC ships a C++ <stdatomic.h> as well, but it is
+ * C++23-only (warning STL4038) and does not provide the C `atomic_int`, so every
+ * C++ consumer of this header — bench_main.cpp (bench_c) and the Google Test
+ * suite — fails to compile with "'has_errors': unknown override specifier".
+ *
+ * In C++ the field is therefore a plain int, which is what the C++ consumers
+ * actually use it as: the atomic store happens inside the C library's OpenMP
+ * loops, and C++ only reads the flag (`if (batch.has_errors)`,
+ * `EXPECT_EQ(batch.has_errors, 0)`) and copies the struct by value into the
+ * `eventprop_free_*_batch` functions. Same size and alignment as atomic_int, so
+ * the struct layout is identical on both sides of the boundary.
+ *
+ * std::atomic<int> is NOT a drop-in here: its copy constructor is deleted, which
+ * makes every batch struct containing it non-copyable and breaks the by-value
+ * free functions that are the whole point of the API.
+ */
+#ifdef __cplusplus
+#define EVENTPROP_ATOMIC_INT int
+#else
 #include <stdatomic.h>
+#define EVENTPROP_ATOMIC_INT atomic_int
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,7 +46,7 @@ extern "C" {
 typedef struct SpikesBatch {
     EventPropError error_no;           /* Batch Errors */
     int batch_size;                    /* Number of samples in the batch */
-    atomic_int has_errors;             /* 1 if any sample returned an error — atomically settable from parallel loop */
+    EVENTPROP_ATOMIC_INT has_errors;   /* 1 if any sample returned an error — atomically settable from parallel loop */
     SpikeOutput* spikes;               /* Per-sample outputs (malloc'd, length = batch_size) */
 } SpikesBatch;
 
@@ -35,7 +58,7 @@ void eventprop_free_spikes_batch(SpikesBatch batch);
 typedef struct BackwardsBatch {
     EventPropError error_no;           /* Batch Errors */
     int batch_size;                    /* Number of samples in the batch */
-    atomic_int has_errors;             /* 1 if any sample returned an error — atomically settable from parallel loop */
+    EVENTPROP_ATOMIC_INT has_errors;   /* 1 if any sample returned an error — atomically settable from parallel loop */
     BackwardOutput* outputs;           /* Per-sample outputs (malloc'd, length = batch_size) */
 } BackwardsBatch;
 
@@ -47,7 +70,7 @@ void eventprop_free_backwards_batch(BackwardsBatch batch);
 typedef struct MaximaBatch {
     EventPropError error_no;           /* Batch Errors */    
     int batch_size;                    /* Number of samples in the batch */
-    atomic_int has_errors;             /* 1 if any sample returned an error — atomically settable from parallel loop */
+    EVENTPROP_ATOMIC_INT has_errors;   /* 1 if any sample returned an error — atomically settable from parallel loop */
     MaximaOutput* outputs;             /* Per-sample outputs (malloc'd, length = batch_size) */
 } MaximaBatch;
 
@@ -82,7 +105,7 @@ void eventprop_free_dropout_output(DropoutOutput output);
 typedef struct DropoutBatch {
     EventPropError error_no;           /* Batch Errors */
     int batch_size;
-    atomic_int has_errors;             /* 1 if any sample returned an error — atomically settable from parallel loop */
+    EVENTPROP_ATOMIC_INT has_errors;   /* 1 if any sample returned an error — atomically settable from parallel loop */
     DropoutOutput* outputs;            /* Per-sample surviving spikes (malloc'd, length = batch_size) */
 } DropoutBatch;
 
@@ -100,7 +123,7 @@ void eventprop_free_dropout_batch(DropoutBatch batch);
 typedef struct AccumulatedBackwardResult {
     EventPropError error_no;           /* Batch Errors */   
     GradientOutput* summed_grads;  /* malloc'd — freed by caller via eventprop_free_accumulated_backward_result */
-    atomic_int has_errors;             /* 1 if any sample returned an error — atomically settable from parallel loop */
+    EVENTPROP_ATOMIC_INT has_errors;   /* 1 if any sample returned an error — atomically settable from parallel loop */
     BackwardOutput* outputs;       /* Per-sample outputs (.grad freed, .spike_errors kept) */
     int batch_size;
 } AccumulatedBackwardResult;
