@@ -104,7 +104,10 @@ public abstract class Bench_TrainingLoop_Base : BenchBase
     {
         Array.Clear(GradNative);
 
-        // Forward pass via native (allocation in C++ Eigen)
+        // Forward pass via P/Invoke into the C library (libeventprop_c_api).
+        // NOT the Eigen reference — CApi.Api is the C binding. The C library
+        // allocates the spike output on the native heap; SpikeOutput owns it and
+        // frees it on Dispose (the `using` above).
         using var output = CApi.Api.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn);
         int nOut = output.NSpikes;
 
