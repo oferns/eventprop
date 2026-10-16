@@ -68,9 +68,17 @@ def load(path):
 
 
 def cell_key(rec):
-    """The join key. axis is serialized so sweeps never collide with size cells."""
-    return (rec["benchmark"], rec["size"], rec["pattern"],
-             json.dumps(rec["axis"], sort_keys=True))
+    """The join key. axis is serialized so sweeps never collide with size cells.
+
+    An empty axis dict and a null axis are the same cell. The native adapter emits
+    axis=null; the .NET adapter emits axis={} when a row has no batch_size/variant.
+    Serializing them verbatim split one logical cell into two (verified:
+    ComputeSums/Medium/uniform appeared twice, one with C+Eigen and one with
+    C+Managed, so no C-vs-Managed ratio could be computed at all).
+    """
+    axis = rec["axis"]
+    axis_json = json.dumps(axis, sort_keys=True) if axis else "null"
+    return (rec["benchmark"], rec["size"], rec["pattern"], axis_json)
 
 
 def derive_reasons(rec, peers, suite=None):
@@ -137,7 +145,7 @@ def main():
 
     for (benchmark, size, pattern, axis_json), cell in sorted(cells.items(), key=sort_key):
         impls = cell["impls"]
-        axis = json.loads(axis_json)
+        axis = json.loads(axis_json) if axis_json != "null" else None
         rows = {}
         all_reasons = set()
         for impl, rec in impls.items():

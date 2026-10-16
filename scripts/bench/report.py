@@ -38,6 +38,7 @@ SCHEMA_VERSION = 1
 # Order is (reference, comparison): the ratio column is time(comparison)/time(reference).
 PAIRS = [
     ("C", "Eigen"),
+    ("C", "Managed"),
     ("PInvoke", "Managed"),
     ("Cython", "pybind11"),
 ]
@@ -120,6 +121,10 @@ def main():
     for a, b in PAIRS:
         pair_cells = [c for c in size_cells if a in c["impls"] and b in c["impls"]]
         if not pair_cells:
+            continue
+        # A pair whose impls are the same underlying implementation aliased two ways
+        # (C and PInvoke are both the C library) is not a comparison — skip it.
+        if {a, b} == {"C", "PInvoke"}:
             continue
         L.append(f"## {a} vs {b}")
         L.append("")
