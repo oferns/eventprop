@@ -315,14 +315,93 @@ scripts/bench/run_all.py --quick          # Tiny/Small only
 scripts/bench/run_all.py                  # full run, includes XL
 ```
 
-Writes `bench-results/records_*.json`, `merged.json`, `report.md`. Prerequisites are
-**not** auto-built — a silent build here would hide a compile failure as a benchmark
-result. See `BENCHMARK_SCHEMA.md` for the record format, the validity rules, and the
-provenance each tool does and does not supply.
+Writes `bench-results/records_*.json`, `merged.json`, `report.md`, and regenerates
+`BENCHMARKS.md`. Prerequisites are **not** auto-built — a silent build here would hide a
+compile failure as a benchmark result. See `BENCHMARK_SCHEMA.md` for the record format,
+the validity rules, and the provenance each tool does and does not supply.
 
 Flags: `--quick` (Tiny/Small, skips XL), `--suites native dotnet python`, `--report-only`
-(re-merge existing records), `--out DIR`. A suite that fails is reported and the run
-continues with the other suites' data, exiting non-zero.
+(re-merge existing records), `--out DIR`, `--benchmarks-md PATH`. A suite that fails is
+reported and the run continues with the other suites' data, exiting non-zero.
+
+The pipeline is six Python scripts in `scripts/bench/` (stdlib only — no pip install):
+`run_all.py` (orchestrator), one adapter per tool (`from_google_benchmark.py`,
+`from_benchmarkdotnet.py`, `from_pytest_benchmark.py`), `merge.py` (join + validity),
+`report.py` (tables). They replace the five ad-hoc `print_*.py` scripts in
+`EventProp.Python.Benchmarks/`.
+
+**XL is not the slow part.** Google Benchmark's `min_time` is relative, so a 14 s
+iteration takes the minimum of ONE iteration. Measured on macOS/arm64: native full suite
+incl. XL is 162 s per binary; the ~30 min full run is dominated by .NET's 75 benchmarks.
+
+### TEMPORARY — cross-platform status of the benchmark pipeline
+
+**Everything below was built and validated on macOS/arm64 only.** Windows and Linux have
+not been run. The pipeline will not work unmodified on either; these are the known gaps.
+
+**Blocks Windows (MSVC):**
+
+- `run_all.py` hardcodes the native binaries at `EventProp.Native.Benchmarks/build/`. On
+  MSVC, CMake writes them to **`build/Release/`** — `run_benchmarks.sh` already branches on
+  this (`BUILD_DIR="$SCRIPT_DIR/build/Release"` for MINGW/CYGWIN/MSYS). The runner needs the
+  same branch. `bench_rootfind` lives in the same directory.
+- `run_all.py` hardcodes the .NET binary at `bin/Release/net10.0/EventProp.Benchmarks.dll`.
+  Verify the path for the MSVC/`dotnet build` layout before running.
+- `DYLD_LIBRARY_PATH` (macOS) is set for the Python suite; `LD_LIBRARY_PATH` (Linux) is set
+  too, but **neither is used on Windows** — there it is `PATH`, and the Cython extension
+  loads the C library via an **rpath embedded at build time** (`_native.pyx` line 21), so on
+  Windows the `.dll` must be findable by `PATH` or copied next to the extension.
+
+**Blocks Linux:**
+
+- The Python suite needs the reference submodule built first, which needs
+  `scripts/submodule-state.sh apply` (pybind11 `a2e59f0e` / 2.13.6 on Linux, carried inside
+  `submodule-linux.patch`). `./build.sh release` does this; a bare `pip install` does not.
+- `from_google_benchmark.py`'s `_cpu_label` uses `platform.mac_ver()` and a macOS-only
+  `sysctl` helper. On Linux it falls through to `mhz_per_cpu`, so `meta.cpu` will read
+  `"8 cpu @ N MHz"` rather than a brand string. Cosmetic, but it makes `meta.cpu` differ
+  across hosts for the same physical machine class.
+
+**Blocks both, and it is the important one:**
+
+- **`merge.py` refuses to merge records from different hosts** (by design — cross-machine
+  absolute times are not comparable). So a Windows run and a Linux run produce **two
+  separate reports**, never one merged table. `--allow-mixed-hosts` exists, and it yields
+  ratios only: absolute times across machines are meaningless. Expect to run the pipeline
+  once per machine and compare the per-pair geomeans, not the µs columns.
+- Provenance is what makes this safe: every record carries `host`, `cpu`, `tool_version`,
+  `vcs_rev`, and `vcs_dirty`. Check them before comparing two reports.
+
+**Known-good on all three:** the CMake presets, `build.sh`, `scripts/submodule-state.sh`,
+and the .NET projects. The benchmark *suites* are portable; only the *runner's* path
+assumptions are not.
+
+**To get benchmarks after cloning on Windows:**
+
+```bat
+:: 1. build everything (C -> Eigen -> consumers, in that order)
+bash build.sh release
+:: 2. native benchmark binaries
+cd src\EventProp.Native.Benchmarks
+cmake --preset release && cmake --build --preset release
+:: 3. runner — EXPECT the build/Release path gap above; fix run_all.py first
+python ..\..\scripts\bench\run_all.py --quick
+```
+
+**To get benchmarks after cloning on Linux:**
+
+```bash
+./build.sh release                                    # applies submodule patches
+cd src/EventProp.Native.Benchmarks && cmake --preset release && cmake --build --preset release
+cd ../EventProp.Native.Python && pip install -e .     # Cython ext; needs the C lib built
+cd ../../ && python3 scripts/bench/run_all.py --quick
+```
+
+**Not yet done, in priority order:** (1) branch the native exe path on platform in
+`run_all.py`; (2) confirm the .NET dll path on MSVC; (3) set `PATH` for the C library on
+Windows; (4) Linux `_cpu_label` fallback; (5) run `--quick` on each platform and record the
+per-pair geomeans side by side, which is the first real cross-platform claim this pipeline
+can make.
 
 ### Coverage Report Generation
 
