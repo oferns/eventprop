@@ -103,8 +103,26 @@ EventPropError eventprop_validate_input(const EventPropInput input)
     if (structural != EVENTPROP_OK)
         return structural;
 
-    /* Negated so a NaN threshold is rejected (NaN <= 0 would pass). */
-    if (!(input.v_th > 0.0))
+    /* Reject a NaN threshold explicitly. The negated comparison below is
+     * NaN-correct only under strict FP semantics: MSVC's /fp:fast assumes no NaN
+     * and rewrites `v_th > 0.0` to `v_th >= 0.0`, so the negation becomes
+     * `v_th <= 0.0` — false for NaN — and a NaN threshold is accepted (observed:
+     * ValidateInput.NanVthRejectedAsInvalidVth fails, validate returns OK).
+     *
+     * isnan() is a bit-pattern classification (significand nonzero, exponent
+     * all-ones), not an ordering relation, so the finite-math assumptions in
+     * /fp:fast have nothing to rewrite. The fast-math set MSVC documents
+     * (-ffp-contract=fast, -freciprocal-math, -fno-signed-zeros) does not touch
+     * classification intrinsics.
+     *
+     * This is a no-op on GCC/Clang, whose fast-math set here deliberately omits
+     * -ffinite-math-only, so the negated comparison already survives NaN. Keeping
+     * the explicit test means correctness travels with the source: it does not
+     * depend on a compile flag set in a CMakeLists.txt that a reader of this file
+     * cannot see. Pinned by ValidateInput.NanVthRejectedAsInvalidVth — note that
+     * test can only FAIL on MSVC, since no other compiler here applies the flag
+     * that breaks the guard. */
+    if (isnan(input.v_th) || !(input.v_th > 0.0))
         return EVENTPROP_INVALID_VTH;
 
     return EVENTPROP_OK;

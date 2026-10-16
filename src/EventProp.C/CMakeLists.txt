@@ -139,18 +139,15 @@ else()
     set(LIB_TYPE SHARED)
 endif()
 
-# The validator's NaN guard is `!(v_th > 0.0)`, which is NaN-correct only under
-# strict FP semantics. MSVC's /fp:fast assumes no NaN and rewrites it to
-# `v_th <= 0.0` — false for NaN — so a NaN spike threshold would be accepted
-# (observed: ValidateInput.NanVthRejectedAsInvalidVth fails, validate returns OK).
-# Validation is comparisons only, with no FP arithmetic worth optimising, so this
-# one translation unit is compiled /fp:precise. GCC/Clang need no equivalent: the
-# fast-math set there deliberately omits -ffinite-math-only, so NaN comparisons
-# survive. Pinned by ValidateInput.NanVthRejectedAsInvalidVth.
-if(MSVC)
-    set_source_files_properties(eventprop_validation.c PROPERTIES
-        COMPILE_OPTIONS "/fp:precise")
-endif()
+# The validator's NaN guard is written with an explicit isnan() so it is
+# NaN-correct under /fp:fast, and no per-file /fp:precise override is needed.
+# History: it used to be `!(v_th > 0.0)` alone, which is NaN-correct only under
+# strict FP semantics; MSVC's /fp:fast rewrote it to `v_th <= 0.0` (false for NaN)
+# and accepted a NaN spike threshold. The first fix compiled this one translation
+# unit /fp:precise. That worked, but the fix lived in CMake — a reader of this file
+# saw a guard whose stated NaN-correctness was false on MSVC unless they knew about
+# a flag 40 files away. The isnan() form is correct wherever it is compiled, so the
+# whole library keeps /fp:fast. See the comment in eventprop_validation.c.
 
 find_package(OpenMP QUIET)
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
