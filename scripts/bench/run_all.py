@@ -410,6 +410,19 @@ def main():
                          "tracked in git, unlike the raw records. Pass '' to skip.")
     args = ap.parse_args()
 
+    # Resolve the output paths against the INVOCATION directory, not the suite's.
+    # Every suite runs with its own cwd (native: the build dir, dotnet: the project,
+    # python: EventProp.Python.Benchmarks) and --out is handed to those processes
+    # verbatim, so a relative --out is opened relative to the suite. Measured with
+    # --out ../bench-test: pytest tried to open ../bench-test\kernels.json under
+    # src/EventProp.Python.Benchmarks and the python suite failed in 0s. The defaults
+    # are absolute (built from SRC), which is why this never showed up. '' means "skip
+    # this output" for --reports-dir / --benchmarks-md, so resolve only when non-empty.
+    for _path_arg in ("out", "reports_dir", "benchmarks_md"):
+        _v = getattr(args, _path_arg)
+        if _v:
+            setattr(args, _path_arg, os.path.abspath(_v))
+
     tag = args.tag or host_tag()
     print(f"platform tag: {tag}")
     os.makedirs(args.out, exist_ok=True)

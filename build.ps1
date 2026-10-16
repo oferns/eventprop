@@ -1,139 +1,296 @@
-# build.ps1 - Build all EventProp projects (C, C++, .NET, Python).
-# Usage: .\build.ps1 [debug|release]
+# build.ps1 - Build all EventProp projects (C, C++, .NET, Python) on Windows.
+#
+# Usage:
+#   .\build.ps1                # release
+#   .\build.ps1 debug
+#   .\build.ps1 -SkipPython    # skip the two Python layers (reference + Cython)
+#   .\build.ps1 -Clean         # delete each build dir first (flag changes, cache leaks)
+#
+# Why presets, not `mkdir build && cmake ..`
+#   The five CMake projects ship CMakePresets.json, and AGENTS.md names presets as
+#   the supported path. The hand-typed form skipped them, which loses:
+#     - ENABLE_ASAN=OFF stated explicitly. It is a cache variable, so a previous
+#       `--preset asan` leaks and the release build silently produces an
+#       ASan-instrumented STATIC library, which breaks the parity tests (they import
+#       a SHARED library) and poisons benchmark timings.
+#     - the per-project settings the presets own (warning flags, /experimental:c11atomics
+#       probing, the SIMD level).
+#   Every preset writes to ${sourceDir}/build, which is what the cross-project
+#   imports hardcode (C.Tests, ParityTests and Native.Benchmarks each consume a
+#   PRE-BUILT library out of EventProp.C/build and EventProp.Cpp.Wrapper/build), so
+#   the order below is load-bearing, not cosmetic.
+#
+# Why every step's exit code is checked
+#   The previous version checked none of them, so a failed step printed nothing and
+#   the script ended with "Build complete". A build script whose final line is a
+#   claim rather than a measurement is how a compile failure reaches a benchmark
+#   number.
+#
+# What it builds that the previous version did not
+#   - EventProp.C.Tests (the 214-test Google Test suite)
+#   - EventProp.Benchmarks (the .NET benchmark dll)
+#   The second is a prerequisite run_benchmarks.ps1 checks for, so `-Build` could
+#   never satisfy the check its own script performs.
 
 param(
-    [string]$BuildType = "release"
+    [string]$BuildType = "release",
+    [string]$PythonExe = "python",
+    [switch]$SkipSubmodule,
+    [switch]$SkipPython,
+    [switch]$Clean
 )
 
+# Native tools (cmake, dotnet, pip, MSBuild) write progress to stderr. With
+# $ErrorActionPreference = "Stop", Windows PowerShell 5.1 turns that into a
+# terminating NativeCommandError at the first warning, so the build dies in the
+# middle and the friendly per-step reporting never runs. PS 7.3+ has an explicit
+# switch for this; setting it is a no-op on 5.1 (unknown variable).
+$PSNativeCommandUseErrorActionPreference = $false
+$ErrorActionPreference = "Continue"
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+Set-Location $ScriptDir
 
 if ($BuildType -ieq "debug") {
-    $CMakeBuildType = "Debug"
-    $DotNetConfig = "Debug"
+    $Preset = "debug"; $DotNetConfig = "Debug"
 } elseif ($BuildType -ieq "release") {
-    $CMakeBuildType = "Release"
-    $DotNetConfig = "Release"
+    $Preset = "release"; $DotNetConfig = "Release"
 } else {
-    Write-Host "Usage: .\build.ps1 [debug|release]"
+    Write-Host "Usage: .\build.ps1 [debug|release]   (or -BuildType debug)"
     exit 1
 }
 
-Write-Host "============================================"
-Write-Host " EventProp Build - $BuildType mode"
-Write-Host "============================================"
+$Failures = New-Object System.Collections.Generic.List[string]
+$Skips = New-Object System.Collections.Generic.List[string]
 
-# Helper: run cmake configure + build in a subdirectory
-function Invoke-CMakeBuild($projectPath, $outputName) {
-    Push-Location $projectPath
-    if (Test-Path "build") { Remove-Item -Recurse -Force "build" }
-    New-Item -ItemType Directory -Name "build" | Out-Null
-    Set-Location "build"
-    cmake .. "-DCMAKE_BUILD_TYPE=$CMakeBuildType"
-    cmake --build . --config $CMakeBuildType --parallel
-    Write-Host "  -> $outputName"
-    Pop-Location
+function Write-Step($n, $msg) {
+    Write-Host ""
+    Write-Host "[$n] $msg" -ForegroundColor Cyan
 }
 
-# Helper: activate venv and run pip install
-function Invoke-VenvInstall($projectPath) {
-    Push-Location $projectPath
-    if (Test-Path ".venv\Scripts\Activate.ps1") {
-        & ".venv\Scripts\Activate.ps1"
-        pip install -e . --quiet > $null 2>&1
-    } elseif (Test-Path ".venv\Scripts\python.exe") {
-        # Use venv's Python directly - no activation needed
-        & ".venv\Scripts\python.exe" -m pip install -e . --quiet > $null 2>&1
+# Run a block, record the failure, keep going. Returns $true on success.
+function Invoke-Step($name, [scriptblock]$body) {
+    try {
+        & $body
+    } catch {
+        Write-Host "  EXCEPTION: $_" -ForegroundColor Red
+        $script:Failures.Add("$name (exception)")
+        return $false
     }
-    Pop-Location
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  FAILED (exit $LASTEXITCODE): $name" -ForegroundColor Red
+        $script:Failures.Add("$name (exit $LASTEXITCODE)")
+        return $false
+    }
+    return $true
 }
 
-# - 1. C Library (EventProp.C)
-Write-Host ""
-Write-Host "[1/9] Building C library (EventProp.C)..."
-Invoke-CMakeBuild (Join-Path $ScriptDir "src\EventProp.C") "eventprop_c_api.dll"
-
-# - 2. C++ Wrapper Library (EventProp.Cpp.Wrapper)
-Write-Host ""
-Write-Host "[2/9] Building C++ wrapper library (EventProp.Cpp.Wrapper)..."
-Invoke-CMakeBuild (Join-Path $ScriptDir "src\EventProp.Cpp.Wrapper") "eventprop_cpp_wrapper.dll"
-
-# - 3. Python Package (EventProp.Python) pybind11 bindings - reference library only
-Write-Host ""
-Write-Host "[3/9] Building Python package (EventProp.Python)..."
-Push-Location (Join-Path $ScriptDir "src\EventProp.Python")
-
-# Check if the compiled extension already exists (one-time build)
-$foundExt = Get-ChildItem "eventprop\eventprop_cpp.*.pyd", "eventprop\eventprop_cpp.*.dll" -ErrorAction SilentlyContinue
-if ($foundExt.Count -eq 0) {
-    # Reset patched files to upstream state, apply platform patch, then build
-    git checkout -- eventprop/loss_layer.py setup.py 2>$null
-    $patchFile = Join-Path $ScriptDir "submodule-windows.patch"
-    if (Test-Path $patchFile) {
-        Get-Content $patchFile | patch -p1 > $null 2>&1
-        Write-Host "  -> Applied submodule-windows.patch"
-    } else {
-        Write-Host "WARNING: No Windows patch found - skipping submodule patch"
+function Invoke-CMakePreset($dir, $preset, $label) {
+    $full = Join-Path $ScriptDir $dir
+    if (-not (Test-Path (Join-Path $full "CMakePresets.json"))) {
+        Write-Host "  no CMakePresets.json in $dir" -ForegroundColor Yellow
+        $script:Skips.Add("$dir (no presets)")
+        return $false
     }
+    Push-Location $full
+    if ($Clean -and (Test-Path "build")) {
+        Write-Host "  -Clean: removing build\" -ForegroundColor DarkGray
+        Remove-Item -Recurse -Force "build"
+    }
+    $ok = Invoke-Step "cmake --preset $preset ($dir)" { cmake --preset $preset }
+    if ($ok) {
+        $ok = Invoke-Step "cmake --build --preset $preset ($dir)" { cmake --build --preset $preset }
+    }
+    Pop-Location
+    if ($ok) { Write-Host "  -> $label" -ForegroundColor Green }
+    return $ok
+}
 
-    # Install required Python dependencies and build
-    python -m pip install setuptools numpy pytest > $null 2>&1
-    python -m pip install -e . > $null 2>&1
-    Write-Host "  -> eventprop.eventprop_cpp (editable install)"
+function Invoke-DotNet($proj, $config) {
+    return Invoke-Step "dotnet build $proj" {
+        dotnet build $proj -c $config --nologo
+    }
+}
+
+Write-Host "============================================"
+Write-Host " EventProp Build - $BuildType (preset '$Preset')"
+Write-Host "============================================"
+
+# Resolve the bash that ships with Git for Windows. Do NOT take `bash` from PATH:
+# `where bash` on this machine returns C:\WINDOWS\System32\bash.exe (WSL) first, and
+# WSL bash is a Linux userland that cannot see G:\ as a Windows working tree, so
+# "bash exists" is not evidence the script can run. That is exactly how this showed
+# up: the same call succeeded from Git Bash and failed with exit 1 from a PATH where
+# System32 precedes Git's usr\bin.
+function Get-GitBash {
+    $git = Get-Command git.exe -ErrorAction SilentlyContinue
+    if (-not $git) { return $null }
+    $root = Split-Path (Split-Path $git.Source -Parent) -Parent
+    foreach ($c in @((Join-Path $root "usr\bin\bash.exe"), (Join-Path $root "bin\bash.exe"))) {
+        if (Test-Path $c) { return $c }
+    }
+    return $null
+}
+
+# --- 1. Submodule state -------------------------------------------------------
+# The reference submodule is read-only and needs local modifications to build.
+# scripts/submodule-state.sh is the single owner of that state, so call it rather
+# than re-implementing it here. The previous version piped the patch through
+# `patch -p1` and discarded the result: `patch` is more forgiving than `git apply`
+# (it applies the good hunks and aborts at a malformed one), and the output went to
+# $null, so a truncated patch left the submodule half-patched and the build failed
+# far from the cause.
+Write-Step "1/9" "submodule state (scripts/submodule-state.sh apply)"
+if ($SkipSubmodule) {
+    Write-Host "  -SkipSubmodule" -ForegroundColor DarkGray
+    $Skips.Add("submodule state (-SkipSubmodule)")
 } else {
-    Write-Host "  -> eventprop.eventprop_cpp already built (skipping)"
+    $sh = Join-Path $ScriptDir "scripts\submodule-state.sh"
+    if (-not (Test-Path $sh)) {
+        Write-Host "  scripts\submodule-state.sh not found" -ForegroundColor Red
+        $Failures.Add("submodule-state.sh missing")
+    } else {
+        $bash = Get-GitBash
+        if (-not $bash) {
+            Write-Host "  Git for Windows bash not found (not using System32\bash.exe - that is WSL)" -ForegroundColor Yellow
+            Write-Host "  applying submodule-windows.patch with git apply instead" -ForegroundColor Yellow
+            Push-Location (Join-Path $ScriptDir "src\EventProp.Python")
+            $patch = Join-Path $ScriptDir "submodule-windows.patch"
+            git apply --check $patch 2>&1 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+            if ($LASTEXITCODE -eq 0) {
+                git apply $patch
+                Write-Host "  -> submodule-windows.patch applied" -ForegroundColor Green
+            } else {
+                Write-Host "  patch does not apply cleanly: already applied, or upstream moved." -ForegroundColor Yellow
+                Write-Host "  Check: bash scripts/submodule-state.sh status" -ForegroundColor Yellow
+            }
+            Pop-Location
+        } else {
+            # Git bash needs its own usr\bin on PATH for coreutils (the script uses
+            # dirname). Invoking bash.exe directly from a Windows process inherits the
+            # Windows PATH, which does not contain it, so the script dies with
+            # "dirname: command not found" and a null directory. Opening "Git Bash"
+            # hides this because the launcher adds those directories.
+            $prevPath = $env:PATH
+            $env:PATH = (Split-Path $bash) + ";" + $prevPath
+            try {
+                Invoke-Step "submodule-state.sh apply" { & $bash "scripts/submodule-state.sh" apply } | Out-Null
+            } finally {
+                $env:PATH = $prevPath
+            }
+        }
+    }
 }
-Pop-Location
 
-# - 4. Python Benchmarks
-Write-Host ""
-Write-Host "[4/9] Building Python benchmarks (EventProp.Python.Benchmarks)..."
-Invoke-VenvInstall (Join-Path $ScriptDir "src\EventProp.Python.Benchmarks")
-Write-Host "  -> eventprop-python-benchmarks (editable install)"
+# --- 2-3. C library, then the Eigen core --------------------------------------
+# Order matters: the consumers import pre-built artifacts from these two.
+Write-Step "2/9" "C library (EventProp.C)"
+Invoke-CMakePreset "src\EventProp.C" $Preset "eventprop_c_api.dll (build\$Preset on MSVC)" | Out-Null
 
-# - 5. Python Cython bindings
-Write-Host ""
-Write-Host "[5/9] Building Python cython bindings (EventProp.Native.Python)..."
-Invoke-VenvInstall (Join-Path $ScriptDir "src\EventProp.Native.Python")
-Write-Host "  -> eventprop_c (editable install)"
+Write-Step "3/9" "Eigen core (EventProp.Cpp.Wrapper)"
+Invoke-CMakePreset "src\EventProp.Cpp.Wrapper" $Preset "eventprop_eigen_core + eventprop_cpp_wrapper" | Out-Null
 
-# - 6. .NET Libraries (EventProp + EventProp.Native)
-Write-Host ""
-Write-Host "[6/9] Building .NET libraries..."
+# --- 4. C unit tests ----------------------------------------------------------
+# EventProp.C.Tests ships `release` and `asan` presets only, so there is nothing to
+# do in debug. Say so: the previous version did not build this project at all, and a
+# silent omission reads as "tests passed".
+Write-Step "4/9" "C unit tests (EventProp.C.Tests, 214 tests)"
+if ($Preset -eq "release") {
+    Invoke-CMakePreset "src\EventProp.C.Tests" "release" "eventprop_tests.exe  (ctest --preset release)" | Out-Null
+} else {
+    Write-Host "  no 'debug' preset (presets are release + asan) - skipped" -ForegroundColor Yellow
+    $Skips.Add("EventProp.C.Tests (no debug preset)")
+}
+
+# --- 5-6. Parity tests, native benchmarks -------------------------------------
+Write-Step "5/9" "parity tests (C vs Eigen)"
+Invoke-CMakePreset "src\EventProp.Native.ParityTests" $Preset "parity_test.exe" | Out-Null
+
+Write-Step "6/9" "native benchmarks (C vs C++)"
+Invoke-CMakePreset "src\EventProp.Native.Benchmarks" $Preset "bench_c.exe + bench_cpp.exe" | Out-Null
+
+# --- 7. Reference Python library (pybind11 submodule) -------------------------
+# Which interpreter? The one that will RUN the suite. scripts/bench/run_all.py invokes
+# every tool with sys.executable, i.e. the interpreter that launched it, and
+# run_benchmarks.ps1 defaults to `python`. Installing into a .venv that nobody runs
+# produces a tree where the extension is built, the import works under the venv, and
+# the benchmark suite still cannot import it. So: same interpreter as the runner,
+# stated out loud, with a note when a venv exists and is not being used.
+function Get-PyFor($projectPath) {
+    $venvPy = Join-Path $projectPath ".venv\Scripts\python.exe"
+    if (Test-Path $venvPy) {
+        Write-Host "  note: a .venv exists here ($venvPy)" -ForegroundColor DarkGray
+        Write-Host "        the benchmark runner uses '$PythonExe', so the install targets that." -ForegroundColor DarkGray
+        Write-Host "        To build for the venv: .\build.ps1 -PythonExe `"$venvPy`"" -ForegroundColor DarkGray
+    }
+    return $PythonExe
+}
+
+Write-Step "7/9" "reference Python library (EventProp.Python)"
+if ($SkipPython) {
+    Write-Host "  -SkipPython" -ForegroundColor DarkGray
+    $Skips.Add("EventProp.Python (-SkipPython)")
+} else {
+    Push-Location (Join-Path $ScriptDir "src\EventProp.Python")
+    $built = Get-ChildItem "eventprop\eventprop_cpp*.pyd", "eventprop\eventprop_cpp*.dll", "eventprop\eventprop_cpp*.so" -ErrorAction SilentlyContinue
+    if ($built) {
+        Write-Host "  -> already built ($($built[0].Name)); rebuild by deleting it" -ForegroundColor Green
+    } else {
+        Invoke-Step "pip install -e . (EventProp.Python)" {
+            & $PythonExe -m pip install -e . --no-build-isolation
+        } | Out-Null
+    }
+    Pop-Location
+}
+
+# --- 8. Cython bindings -------------------------------------------------------
+Write-Step "8/9" "Cython bindings (EventProp.Native.Python)"
+if ($SkipPython) {
+    Write-Host "  -SkipPython" -ForegroundColor DarkGray
+    $Skips.Add("EventProp.Native.Python (-SkipPython)")
+} else {
+    Push-Location (Join-Path $ScriptDir "src\EventProp.Native.Python")
+    $py = Get-PyFor (Get-Location)
+    Write-Host "  interpreter: $py  $(& $py --version 2>&1)" -ForegroundColor DarkGray
+    Invoke-Step "pip install -e . (EventProp.Native.Python)" {
+        & $py -m pip install -e . --no-build-isolation
+    } | Out-Null
+    Pop-Location
+}
+
+# --- 9. .NET ------------------------------------------------------------------
+Write-Step "9/9" ".NET (libraries, tests, benchmarks)"
 Push-Location (Join-Path $ScriptDir "src")
-foreach ($dir in @("bin", "obj")) {
-    if (Test-Path "EventProp\$dir") { Remove-Item -Recurse -Force "EventProp\$dir" }
-    if (Test-Path "EventProp.Native\$dir") { Remove-Item -Recurse -Force "EventProp.Native\$dir" }
+foreach ($p in @("EventProp", "EventProp.Native", "EventProp.Tests", "EventProp.Benchmarks")) {
+    Invoke-DotNet "$p\$p.csproj" $DotNetConfig | Out-Null
 }
-
-dotnet build EventProp\EventProp.csproj -c $DotNetConfig --nologo
-dotnet build EventProp.Native\EventProp.Native.csproj -c $DotNetConfig --nologo
-Write-Host "  -> CW.EventProp.dll + EventProp.Native.dll"
 Pop-Location
 
-# - 7. .NET Tests (EventProp.Tests)
-Write-Host ""
-Write-Host "[7/9] Building .NET tests..."
-Push-Location (Join-Path $ScriptDir "src")
-foreach ($dir in @("bin", "obj")) {
-    if (Test-Path "EventProp.Tests\$dir") { Remove-Item -Recurse -Force "EventProp.Tests\$dir" }
+# EventProp.Native/EventProp.Native.csproj:24 copies
+# ..\EventProp.C\build\Release\eventprop_c_api.dll into its output, so a debug build
+# of the C library is not the one the .NET native tests load. Not a defect to fix
+# here - it is a trap to name, because the failure shows up as a P/Invoke load error
+# in a debug run that looks unrelated to the build.
+if ($DotNetConfig -eq "Debug") {
+    Write-Host "  note: EventProp.Native.csproj hardcodes ..\EventProp.C\build\Release\eventprop_c_api.dll" -ForegroundColor Yellow
+    Write-Host "        a debug run loads the RELEASE C library unless that file is a debug build." -ForegroundColor Yellow
 }
 
-dotnet build EventProp.Tests\EventProp.Tests.csproj -c $DotNetConfig --nologo
-Write-Host "  -> CW.EventProp.Tests.dll"
-Pop-Location
-
-# - 8. Parity Tests (C vs Eigen)
-Write-Host ""
-Write-Host "[8/9] Building parity tests (C vs Eigen)..."
-Invoke-CMakeBuild (Join-Path $ScriptDir "src\EventProp.Native.ParityTests") "parity_test.exe"
-
-# - 9. Native Benchmarks (C vs C++)
-Write-Host ""
-Write-Host "[9/9] Building native benchmarks (C vs C++)..."
-Invoke-CMakeBuild (Join-Path $ScriptDir "src\EventProp.Native.Benchmarks") "bench_c.exe + bench_cpp.exe"
-
-# - Done
+# --- Summary ------------------------------------------------------------------
 Write-Host ""
 Write-Host "============================================"
-Write-Host " Build complete - $BuildType mode"
+if ($Failures.Count -eq 0) {
+    Write-Host " Build complete - $BuildType mode" -ForegroundColor Green
+} else {
+    Write-Host " Build INCOMPLETE - $($Failures.Count) step(s) failed:" -ForegroundColor Red
+    foreach ($f in $Failures) { Write-Host "   - $f" -ForegroundColor Red }
+}
+if ($Skips.Count -gt 0) {
+    Write-Host " skipped:" -ForegroundColor Yellow
+    foreach ($s in $Skips) { Write-Host "   - $s" -ForegroundColor Yellow }
+}
 Write-Host "============================================"
+Write-Host "MSVC is multi-config: artifacts land in build\$Preset\, not build\." -ForegroundColor DarkGray
+Write-Host "The parity test exe lands in src\EventProp.C\build\$Preset\$Preset\ (its" -ForegroundColor DarkGray
+Write-Host "RUNTIME_OUTPUT_DIRECTORY plus the generator's config dir)." -ForegroundColor DarkGray
+exit $(if ($Failures.Count -eq 0) { 0 } else { 1 })
