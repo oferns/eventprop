@@ -76,6 +76,19 @@ class TTFSCrossEntropyLossTest(unittest.TestCase):
                         loss.input_batch[batch_idx].errors[spike_idx],
                         batch_numerical_grads[batch_idx][spike_idx],
                         rtol=1e-6,
+                        # atol, because 5 of the 100 entries are analytically EXACTLY
+                        # 0.0 (the last input spike, which no first-spike time depends
+                        # on) and rtol alone compares 0.0 against the central
+                        # difference's rounding noise. Measured on Windows/x64 at
+                        # t_eps=1e-7: max |numerical| over the analytically-zero
+                        # entries = 5.551e-10 — that is the entry that fails, with
+                        # "DESIRED: array(5.551115e-10)" — while the worst
+                        # discrepancy on a NON-zero entry is 6.957e-10 against a
+                        # signal of 0.173 (relative 4e-9, passes on rtol alone).
+                        # 1e-7 is 180x above that noise and 6 orders below the
+                        # signal, and matches the rtol/atol pair test_layer_chain.py:171
+                        # already uses for finite differences.
+                        atol=1e-7,
                     )
 
 
