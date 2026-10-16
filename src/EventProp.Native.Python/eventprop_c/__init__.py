@@ -14,6 +14,17 @@ Example:
         times_i, sources_i = output[i]
 """
 
+# Windows: register the directory holding eventprop_c_api.dll BEFORE the extension
+# is imported. Python 3.8+ does not search PATH for a pyd's dependencies, so
+# os.add_dll_directory is the only mechanism that works from Python; see
+# _library_path.py for the measured failure this fixes. No-op on POSIX, where the
+# extension carries an rpath (see _native.pyx).
+from ._library_path import register_c_library_dirs as _register_c_library_dirs
+
+_register_c_library_dirs()
+
+del _register_c_library_dirs  # keep the package namespace to the public API
+
 from ._native import (
     compute_spikes_batch,
     backward_spikes_batch_accumulate as backward_spikes_batch,

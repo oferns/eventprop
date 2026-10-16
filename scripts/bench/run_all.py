@@ -341,11 +341,19 @@ def suite_python(out_dir, quick, tag, sweeps=False):
     #   PYTHONPATH: os.pathsep is ';' on Windows, ':' on POSIX. A hardcoded ':'
     #   silently makes the second entry unimportable on Windows — the reference
     #   submodule import would fail with a confusing ModuleNotFoundError.
-    #   Library path: DYLD_LIBRARY_PATH (macOS), LD_LIBRARY_PATH (Linux), PATH
-    #   (Windows). The Cython extension embeds an rpath at build time
-    #   (_native.pyx:21), so on Windows the C library .dll must be findable via
-    #   PATH (or sit next to the extension). Setting all three is harmless: each
-    #   is ignored on the platforms that don't read it.
+    #   Library path: DYLD_LIBRARY_PATH (macOS) and LD_LIBRARY_PATH (Linux) do work,
+    #   and the Cython extension also embeds an rpath at build time (_native.pyx:21).
+    #   PATH does NOT work on Windows: since Python 3.8, CPython loads extension
+    #   modules with LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, whose search set is the
+    #   extension's own directory, the process directory, the system directories, and
+    #   directories registered with os.add_dll_directory — PATH is excluded. Measured:
+    #   PATH pointing at the directory holding eventprop_c_api.dll gives
+    #   "ImportError: DLL load failed while importing _native"; os.add_dll_directory on
+    #   that same directory imports. The registration lives in
+    #   eventprop_c/_library_path.py and runs at package import. The PATH entry below
+    #   is kept for non-Python consumers of that directory; it is not what makes the
+    #   import work. Setting all three is harmless: each is ignored on the platforms
+    #   that don't read it.
     c_build = os.path.join(BENCH, "EventProp.C", "build")
     # On MSVC the C library .dll is in build\Release\ (multi-config generator),
     # which the bare build\ on PATH does not cover. Include both; nonexistent
