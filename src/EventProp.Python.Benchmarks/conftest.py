@@ -36,6 +36,14 @@ SIZES = {
     "Small":  {"n_in": 50,   "n_out": 20,  "spikes_per_neuron": 100},
     "Medium": {"n_in": 200,  "n_out": 80,  "spikes_per_neuron": 500},
     "Large":  {"n_in": 500,  "n_out": 200, "spikes_per_neuron": 1000},
+    # XL matches the native and .NET suites (2000, 500, 5000). It was ABSENT here,
+    # which made every XL row in the cross-suite report a native-vs-.NET comparison
+    # with no Python peer - and XL is exactly where the harnesses agree best (the
+    # native C and .NET P/Invoke columns match to ~1% on BackwardSpikes/XL, because
+    # a 4-8 s iteration dwarfs any per-call harness cost). Small sizes are where
+    # harness overhead is a real fraction of the measurement; XL is the trustworthy
+    # regime, so omitting it removed the most comparable rows.
+    "XL":     {"n_in": 2000, "n_out": 500, "spikes_per_neuron": 5000},
 }
 
 # Biophysical parameters (same across all tests)
