@@ -63,6 +63,8 @@ import re
 import subprocess
 import sys
 
+from provenance import vcs_state
+
 SCHEMA_VERSION = 1
 
 SIZES = {"Tiny", "Small", "Medium", "Large", "XL"}
@@ -401,8 +403,6 @@ def main():
             unmapped_files.append(name)
         records.extend(recs)
 
-    rev = _git("rev-parse", "--short", "HEAD")
-    status = _git("status", "--porcelain")
     meta = {
         "suite": "dotnet",
         "tool": "benchmarkdotnet",
@@ -410,9 +410,11 @@ def main():
         "host": f"{platform.system().lower()}-{platform.machine().lower()}",
         "cpu": "unknown",
         "date": None,                                  # BDN CSV has no timestamp
-        "vcs_rev": rev,
-        "vcs_dirty": bool(status),
     }
+    # Shared vcs provenance (see provenance.py). The old bool(git status --porcelain)
+    # counted the reference submodule's required local patches, so it read dirty on
+    # every machine, on every run.
+    meta.update(vcs_state())
 
     out = {"schema_version": SCHEMA_VERSION, "meta": meta, "records": records}
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)

@@ -351,12 +351,29 @@ run and a macOS run coexist as `report_windows-amd64.md` and `report_darwin-arm6
 instead of overwriting one file. Compare their per-pair geomeans; never the µs columns.
 
 **Committed reports go stale, so the report says what it describes.** `merge.py` aggregates
-`date`, `vcs_rev` and `vcs_dirty` from record meta into top-level provenance, and the report
-header prints them above a "this file is generated and goes stale" banner. `vcs_dirty`
-aggregates to a tri-state (`true` / `false` / `mixed`) across the input records. A committed
-report at an old `vcs_rev`, or with `vcs_dirty: true`, is not a measurement of the current
-committed state — re-run before quoting it. Multiple `vcs_rev` or `date` values render with
-a "records span multiple commits/dates" note, which means the record set was not one run.
+`date`, `vcs_rev` and the vcs flags from record meta into top-level provenance, and the report
+header prints them above a "this file is generated and goes stale" banner. A committed report
+at an old `vcs_rev` is not a measurement of the current committed state — re-run before
+quoting it. Multiple `vcs_rev` or `date` values render with a "records span multiple
+commits/dates" note, which means the record set was not one run.
+
+**`vcs_dirty` means tracked modifications, and that is a recent change.** It used to be
+`bool(git status --porcelain)`, which is true on every machine that can run the python suite:
+the read-only reference submodule must carry local patches to compile at all
+(`scripts/submodule-state.sh` owns them), and untracked tool output counts too. A flag that is
+true on every run cannot gate the "not a committed state" claim the banner makes — the
+committed darwin report says `vcs_dirty: True` for exactly this reason, not because anyone was
+editing source. The three signals are now separate fields, aggregated to a tri-state
+(`true` / `false` / `mixed`) where applicable: `vcs_dirty` (tracked only), `submodule_dirty`
+(expected `true`; stated as a fact, not a warning) and `untracked` (a count). All three come
+from `scripts/bench/provenance.py`, shared by every adapter, and are `null` when no git
+repository is reachable — the absence of a repository is not a clean tree. `provenance.py`
+pins its git calls to the superproject top level: measured, run from `scripts/bench`,
+`git status` reports the submodule as `../../src/EventProp.Python` while `git submodule status`
+reports `src/EventProp.Python`, so the path comparison missed and `submodule_dirty` read
+`false` from a subdirectory and `true` from the root — same repository, same state, two
+answers. Records written before the split carry the old definition and lack the two new
+fields; `merge.py` omits those lines rather than inventing them.
 
 Prerequisites are **not** auto-built — a silent build here would hide a compile failure as a
 benchmark result. See `BENCHMARK_SCHEMA.md` for the record format,
@@ -438,7 +455,8 @@ unaffected.
   never one merged table. `--allow-mixed-hosts` yields ratios only. Run the pipeline once
   per machine and compare the **per-pair geomeans**, not the µs columns.
 - Provenance is what makes that safe: every record carries `host`, `cpu`, `tool_version`,
-  `vcs_rev`, and `vcs_dirty`. Check them before comparing two reports.
+  `vcs_rev`, `vcs_dirty`, `submodule_dirty` and `untracked`. Check them before comparing
+  two reports.
 
 **Known-good on macOS and Windows:** the CMake presets, `build.sh` (macOS/Linux),
 `build.ps1` + `run_benchmarks.ps1` (Windows), `scripts/submodule-state.sh` (runs under

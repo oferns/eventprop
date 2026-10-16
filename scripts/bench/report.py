@@ -138,7 +138,22 @@ def main():
                  + ("  _(records span multiple commits)_" if len(revs) > 1 else ""))
     dirty = prov.get("vcs_dirty")
     if dirty is not None:
-        L.append(f"- vcs_dirty: {dirty}")
+        L.append(f"- vcs_dirty: {dirty}"
+                 + ("  _(tracked source tree was modified when measured)_" if dirty else ""))
+    # The reference submodule carries required local patches (scripts/submodule-state.sh),
+    # so true here is the repo's normal state. It used to be folded into vcs_dirty, which
+    # made that flag true on every run on every machine that can build the reference
+    # library — and a flag that is always true cannot gate a claim. Stated on its own.
+    sub = prov.get("submodule_dirty")
+    if sub is not None:
+        L.append(f"- submodule_dirty: {sub}"
+                 + ("  _(expected: the read-only reference submodule must carry local patches to build)_"
+                    if sub else ""))
+    untracked = prov.get("untracked") or []
+    if untracked:
+        L.append(f"- untracked files: {', '.join(str(n) for n in untracked)}"
+                 "  _(tool output, not a defect)_"
+                 + ("  _(count changed mid-run)_" if len(untracked) > 1 else ""))
     dates = prov.get("date") or []
     if dates:
         L.append(f"- date: {', '.join(dates)}"
@@ -150,8 +165,11 @@ def main():
     L.append("> **This file is generated and goes stale.** It reports measurements for the "
              "`vcs_rev` above; if your checkout is at a later commit, re-run "
              "`scripts/bench/run_all.py` before quoting these numbers. "
-             "`vcs_dirty: true` means the working tree was modified when measured, so the "
-             "numbers do not correspond to any committed state.")
+             "`vcs_dirty: true` means the **tracked** source tree was modified when measured, "
+             "so the numbers do not correspond to any committed state. "
+             "`submodule_dirty: true` is NOT that warning — the read-only reference submodule "
+             "must carry local patches to compile (see `scripts/submodule-state.sh`), so it is "
+             "true on every machine that can run the python suite.")
     L.append("")
     L.append("> A BenchmarkDotNet version change invalidates historical .NET "
              "comparisons (AGENTS.md: 8-12% on the headline Ratio, 0.6% noise "

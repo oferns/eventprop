@@ -54,7 +54,9 @@ One JSON document per suite run: a `meta` object plus a list of `records`.
     "cpu": "Apple M3 Pro",
     "date": "2026-10-14T20:11:02+01:00",
     "vcs_rev": "9059512",
-    "vcs_dirty": false
+    "vcs_dirty": false,
+    "submodule_dirty": true,
+    "untracked": 3
   },
   "records": [
     {
@@ -87,7 +89,22 @@ One JSON document per suite run: a `meta` object plus a list of `records`.
 | `tool`, `tool_version` | AGENTS.md: BDN 0.15.8 → 0.16.0-preview.2 moved `ComputeSpikes_Tiny` Managed +9.8% and the Ratio −10%. **A version change invalidates historical .NET comparisons.** Without `tool_version` in the record, that is undetectable after the fact. |
 | `host`, `cpu` | Cross-suite absolute times are only comparable on the same machine. |
 | `date` | ISO-8601, from the tool where available (Google Benchmark emits `context.date`). |
-| `vcs_rev`, `vcs_dirty` | A number from a dirty tree is not reproducible. |
+| `vcs_rev`, `vcs_dirty` | A number from a modified tracked tree is not reproducible. `vcs_dirty` is **tracked modifications only** — see the two fields below for what it deliberately excludes. |
+| `submodule_dirty` | The read-only reference submodule carries local patches that are **required to build it** (`scripts/submodule-state.sh`), so this is `true` on every machine that can run the python suite. It used to be folded into `vcs_dirty`, which made that flag `true` on every run on every machine — and a flag that is always true cannot gate the "these numbers are not a committed state" claim the report makes. |
+| `untracked` | Count of untracked files (generated reports, session logs). Counts as dirtiness under the old flag; now reported, not warned about. |
+
+All three vcs fields are `null` when no git repository is reachable — the absence of a
+repository is neither a clean tree nor a dirty one, and `false` would assert a check that
+never ran. `scripts/bench/provenance.py` computes them for all three adapters, from the
+superproject top level: `git status` prints paths relative to cwd while `git submodule
+status` prints them relative to the root, so an adapter run from a subdirectory used to
+report the submodule as clean.
+
+**Records written before this split carry the old `vcs_dirty` definition**, in which
+submodule dirt and untracked files also counted. So `vcs_dirty: true` in an older record
+may describe nothing more than the submodule's required patches, and `submodule_dirty`
+/ `untracked` are absent from it. Re-running a suite is the only way to get the split
+provenance; `merge.py` omits the two new lines rather than inventing them.
 
 ### `records[]` — one row per benchmark case
 

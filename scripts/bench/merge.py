@@ -184,16 +184,27 @@ def main():
     dates = meta_set("date")
     # "dirty" is per-record; aggregate as a single tri-state so the report has one
     # answer: all clean, all dirty, or mixed.
-    dirty_flags = [bool(d["meta"].get("vcs_dirty")) for d in docs
-                   if d["meta"].get("vcs_dirty") is not None]
-    if not dirty_flags:
-        vcs_dirty = None
-    elif all(dirty_flags):
-        vcs_dirty = True
-    elif not any(dirty_flags):
-        vcs_dirty = False
-    else:
-        vcs_dirty = "mixed"
+    def tri_state(flags):
+        if not flags:
+            return None
+        if all(flags):
+            return True
+        if not any(flags):
+            return False
+        return "mixed"
+
+    vcs_dirty = tri_state([bool(d["meta"].get("vcs_dirty")) for d in docs
+                           if d["meta"].get("vcs_dirty") is not None])
+    # The reference submodule's patched working tree is the repo's REQUIRED state —
+    # scripts/submodule-state.sh applies the patches the reference library needs to
+    # compile. It used to be folded into vcs_dirty, which made that flag true on every
+    # run on every machine. Aggregated separately so the report can state it as a fact.
+    submodule_dirty = tri_state([bool(d["meta"].get("submodule_dirty")) for d in docs
+                                 if d["meta"].get("submodule_dirty") is not None])
+    # Untracked files are tool output (generated reports, session logs). A set, so a
+    # run that produced extra files mid-flight is visible rather than averaged away.
+    untracked_vals = sorted({d["meta"].get("untracked") for d in docs
+                             if isinstance(d["meta"].get("untracked"), int)})
 
     # Join on the cell key; collect every impl that measured it.
     # The suite is recorded PER IMPL, not just per document: `low_iteration_count`
@@ -254,6 +265,8 @@ def main():
             "sources": [os.path.basename(f) for f in args.files],
             "vcs_rev": vcs_revs,
             "vcs_dirty": vcs_dirty,
+            "submodule_dirty": submodule_dirty,
+            "untracked": untracked_vals,
             "date": dates,
         },
         "cells": merged,

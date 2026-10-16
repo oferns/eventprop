@@ -40,6 +40,8 @@ import re
 import subprocess
 import sys
 
+from provenance import vcs_state
+
 SCHEMA_VERSION = 1
 
 # Google Benchmark time_unit -> nanoseconds
@@ -207,9 +209,12 @@ def _mac_cpu_brand():
 
 def build_meta(doc, suite, impl):
     ctx = doc.get("context", {})
-    rev = _git("rev-parse", "--short", "HEAD")
-    status = _git("status", "--porcelain")
-    return {
+    # vcs fields come from provenance.py, shared by all three adapters. The old
+    # bool(git status --porcelain) was true on every machine that can build the
+    # reference library, because the read-only submodule must carry local patches to
+    # compile at all — so the flag could never mean "these numbers are not a committed
+    # state", which is what report.py's staleness banner uses it for.
+    meta = {
         "suite": suite,
         "tool": "google-benchmark",
         # context.library_version is emitted as "v1.9.5" — strip the leading v.
@@ -217,10 +222,10 @@ def build_meta(doc, suite, impl):
         "host": f"{platform.system().lower()}-{platform.machine().lower()}",
         "cpu": _cpu_label(ctx),
         "date": ctx.get("date"),
-        "vcs_rev": rev,
-        "vcs_dirty": bool(status),
         "impl": impl,
     }
+    meta.update(vcs_state())
+    return meta
 
 
 def _cpu_label(ctx):

@@ -38,6 +38,8 @@ import os
 import re
 import sys
 
+from provenance import vcs_state
+
 SCHEMA_VERSION = 1
 
 SIZES = {"Tiny", "Small", "Medium", "Large", "XL"}
@@ -213,9 +215,18 @@ def main():
         "host": f"{host}-{machine}",
         "cpu": cpu,
         "date": doc.get("datetime"),
-        "vcs_rev": (ci.get("id") or "")[:7] or None,
-        "vcs_dirty": ci.get("dirty"),
     }
+    # Shared vcs provenance (see provenance.py). pytest-benchmark's own commit_info
+    # is used for the vcs fields, and its `dirty` is a `git status --porcelain` check
+    # with the same defect the other two adapters had: the reference submodule's
+    # required local patches make it true on every machine that can run this suite.
+    vcs = vcs_state()
+    if vcs["vcs_rev"] is None and ci.get("id"):
+        # No git reachable from the adapter (an exported tree): fall back to what
+        # pytest-benchmark recorded at collection time, and leave vcs_dirty None
+        # rather than asserting a cleanliness that was not observed.
+        vcs["vcs_rev"] = (ci.get("id") or "")[:7]
+    meta.update(vcs)
 
     out = {"schema_version": SCHEMA_VERSION, "meta": meta, "records": records}
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
