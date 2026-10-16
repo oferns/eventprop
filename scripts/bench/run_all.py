@@ -41,8 +41,14 @@ import platform
 import shutil
 import subprocess
 import sys
+import threading
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+# Heartbeat interval for long suite runs. 60s is frequent enough that a stalled
+# run is visible as "no new heartbeat", and rare enough to be noise-free.
+HEARTBEAT_SECONDS = 60
 SRC = os.path.dirname(os.path.dirname(HERE))          # repo root
 BENCH = os.path.join(SRC, "src")
 
@@ -88,24 +94,64 @@ def native_exe_name(base):
     return base + (".exe" if os.name == "nt" else "")
 
 
-def run(cmd, cwd=None, env=None, timeout=7200, capture=False):
-    """Run a command, printing it. Returns (ok, stdout)."""
+def run(cmd, cwd=None, env=None, timeout=7200, capture=False, label=None):
+    """Run a command, printing it, a heartbeat, and elapsed time. Returns (ok, stdout).
+
+    Feedback matters here: the full run is 30+ minutes on an M3 Air and the .NET
+    suite alone is most of it. With no progress signal, a healthy run is
+    indistinguishable from a hang - which is exactly what made a 20-minute
+    healthy run look stalled.
+
+    Heartbeat and elapsed go to STDERR so they never interleave with a suite's own
+    stdout (BDN's tables, pytest's dots). The heartbeat is a daemon thread so it
+    cannot keep the process alive.
+    """
     print(f"  $ {' '.join(cmd)}", flush=True)
     e = dict(os.environ)
     if env:
         e.update(env)
-    try:
-        p = subprocess.run(cmd, cwd=cwd, env=e, timeout=timeout,
-                           capture_output=capture, text=True)
-        if capture:
+    t0 = time.time()
+
+    stop = threading.Event()
+
+    def heartbeat():
+        while not stop.wait(HEARTBEAT_SECONDS):
+            el = time.time() - t0
+            print(f"    ... {label or os.path.basename(cmd[0])} running, "
+                  f"{int(el // 60)}m {int(el % 60):02d}s elapsed",
+                  file=sys.stderr, flush=True)
+
+    if capture:
+        # No heartbeat for captured runs: their stdout is parsed, and a quiet
+        # adapter call is short by construction.
+        try:
+            p = subprocess.run(cmd, cwd=cwd, env=e, timeout=timeout,
+                               capture_output=True, text=True)
             return p.returncode == 0, p.stdout
-        return p.returncode == 0, ""
+        except subprocess.TimeoutExpired:
+            print(f"    TIMEOUT after {timeout}s", file=sys.stderr, flush=True)
+            return False, ""
+        except FileNotFoundError as ex:
+            print(f"    cannot run: {ex}", file=sys.stderr, flush=True)
+            return False, ""
+
+    t = threading.Thread(target=heartbeat, daemon=True)
+    t.start()
+    try:
+        p = subprocess.run(cmd, cwd=cwd, env=e, timeout=timeout, text=True)
+        ok = p.returncode == 0
+        return ok, ""
     except subprocess.TimeoutExpired:
-        print(f"    TIMEOUT after {timeout}s", file=sys.stderr)
+        print(f"    TIMEOUT after {timeout}s", file=sys.stderr, flush=True)
         return False, ""
     except FileNotFoundError as ex:
-        print(f"    cannot run: {ex}", file=sys.stderr)
+        print(f"    cannot run: {ex}", file=sys.stderr, flush=True)
         return False, ""
+    finally:
+        stop.set()
+        el = time.time() - t0
+        mins, secs = divmod(int(el), 60)
+        print(f"    done in {mins}m {secs:02d}s", file=sys.stderr, flush=True)
 
 
 def require(path, hint):
@@ -161,7 +207,7 @@ def suite_native(out_dir, quick, tag):
         if quick:
             # Tiny/Small only; keeps XL (seconds-to-minutes per iteration) out.
             cmd.append("--benchmark_filter=/(Tiny|Small)/")
-        ok, _ = run(cmd, cwd=build_dir, timeout=7200)
+        ok, _ = run(cmd, cwd=build_dir, timeout=7200, label=f"{exe} (native {impl})")
         if not ok:
             print(f"  {exe} run failed", file=sys.stderr)
             return False
@@ -228,7 +274,7 @@ def suite_dotnet(out_dir, quick, tag):
         # produced no artifacts at all and the adapter then failed on a missing
         # results dir. `-f '*'` is the non-interactive form of that prompt.
         cmd += ["-j", "Short", "-f", "*"]
-    ok, _ = run(cmd, cwd=DOTNET_PROJ, timeout=7200)
+    ok, _ = run(cmd, cwd=DOTNET_PROJ, timeout=7200, label="dotnet suite (BenchmarkDotNet; the long one)")
     if not ok:
         print("  dotnet benchmark run failed", file=sys.stderr)
         return False
@@ -295,7 +341,7 @@ def suite_python(out_dir, quick, tag):
            "--benchmark-only", f"--benchmark-json={json_path}", "-q"]
     if quick:
         cmd += ["-k", "Tiny or Small"]
-    ok, _ = run(cmd, cwd=PY_BENCH, env=env, timeout=7200)
+    ok, _ = run(cmd, cwd=PY_BENCH, env=env, timeout=7200, label="python suite (pytest-benchmark)")
     if not ok:
         print("  python benchmark run failed", file=sys.stderr)
         return False
@@ -335,9 +381,15 @@ def main():
 
     if not args.report_only:
         runners = {"native": suite_native, "dotnet": suite_dotnet, "python": suite_python}
-        for name in args.suites:
+        t_all = time.time()
+        for i, name in enumerate(args.suites, 1):
+            print(f"\n[suite {i}/{len(args.suites)}: {name}] "
+                  f"(running for {int(time.time() - t_all)}s so far)",
+                  file=sys.stderr, flush=True)
             if not runners[name](args.out, args.quick, tag):
                 failures.append(name)
+        mins, secs = divmod(int(time.time() - t_all), 60)
+        print(f"\nall suites finished in {mins}m {secs:02d}s", file=sys.stderr, flush=True)
 
     record_files = {
         "native": [os.path.join(args.out, f"records_{tag}_native_c.json"),

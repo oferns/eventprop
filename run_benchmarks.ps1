@@ -131,6 +131,19 @@ if (-not (Test-Path $runner)) {
 # BENCHMARKS.md is the committed "latest run" copy. The per-platform report
 # (bench-reports\report_<tag>.md) is written by the runner itself and is the
 # durable artifact; it coexists with report_darwin-arm64.md by design.
+
+# Expectation setting: the runner streams each suite's own output (BenchmarkDotNet
+# prints a live table per benchmark, pytest prints dots) AND emits a heartbeat to
+# stderr every 60s plus "done in Nm SSs" per command and "[suite i/N]" markers.
+# So a healthy run is visibly progressing. Silence between heartbeats is normal;
+# NO heartbeat for several minutes means that command is genuinely stuck.
+# Measured wall clock on an M3 MacBook Air, full suite: native ~9 min, .NET ~21 min,
+# python ~2 min - about 32 min total. Quick mode is far shorter (XL is the cost).
+Write-Host "" 
+Write-Host "Progress: each suite streams its own output, plus a 60s heartbeat and"
+Write-Host "'done in Nm SSs' per command on stderr. Full run is ~30 min on an M3 Air"
+Write-Host "(native ~9, .NET ~21, python ~2); -Full includes XL, the default does not."
+Write-Host ""
 # NOTE: do NOT name this $args - that is a PowerShell automatic variable (the
 # call-site argument array). Shadowing it works in a script but is fragile and
 # reads as a bug.
