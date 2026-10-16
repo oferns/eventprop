@@ -139,6 +139,21 @@ def main():
         L.append(f"Ratio column: time({b}) / time({a}). "
                  f">1 means **{a} is faster**, <1 means **{b} is faster**.")
         L.append("")
+        # Name what each side of the pair actually measures. The .NET suite's
+        # "C" impl is the C library reached through P/Invoke, so its timing
+        # INCLUDES native allocation and result marshalling — not the C kernel
+        # alone. Without this, a table where Managed wins at Tiny reads as "the
+        # managed kernel beats the C kernel", which is not what was measured:
+        # BDN's own Ratio column reports Native 3.95x slower at ComputeMaxima/Tiny
+        # because the round-trip dominates a 20-spike workload.
+        if {a, b} == {"C", "Managed"}:
+            L.append(f"`C` here is the C library **reached through P/Invoke from the "
+                     f".NET suite** (`via_pinvoke`), so its time includes native "
+                     f"allocation and result marshalling — it is **not** the bare C "
+                     f"kernel. The bare C kernel is the `C` column of the C vs Eigen "
+                     f"table above. Managed wins the small cells because the "
+                     f"round-trip dominates them; from Medium up C wins.")
+            L.append("")
         L.append("| benchmark | size | pattern | " + a + " (us) | " + b + " (us) | ratio | valid |")
         L.append("|---|---|---|---:|---:|---:|:--|")
 

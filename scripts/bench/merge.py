@@ -13,6 +13,10 @@ that AGENTS.md currently keeps as prose footnotes:
 
   zero_output_spikes   output_spikes == 0  -> the row times an empty loop
                          (BackwardSpikes/Tiny|Small/uniform; ComputeSpikes/Tiny/uniform)
+  peer_zero_output_spikes  this record cannot measure output_spikes (the BDN CSV has no
+                         such column, so .NET records are null) but a peer in the same
+                         cell measured 0. The zero-spike regime is a property of the
+                         CELL, not the tool, so it condemns every impl in it.
   native_error         error_code != 0     -> the row measures an error path, not the
                          algorithm (the unsorted-burst 36 ns vs 83 us case)
   low_iteration_count  a FIXED-iteration tool config measured this row with too few
@@ -87,6 +91,20 @@ def derive_reasons(rec, peers, suite=None):
         reasons.append("zero_output_spikes")
     if rec.get("error_code") not in (None, 0):
         reasons.append("native_error")
+
+    # Propagate a peer's zero_output_spikes to a record that CANNOT measure it.
+    # The BenchmarkDotNet report CSV has no OutputSpikes column, so every .NET
+    # record carries output_spikes: null and passes the check above clean. The
+    # zero-spike regime is a property of the CELL (the workload produces no
+    # output spikes at this size), not of the tool, so a peer that can observe it
+    # condemns the whole cell. Without this, BackwardSpikes/Tiny/uniform — which
+    # AGENTS.md explicitly says to exclude — entered the C-vs-Managed geomean and
+    # made the headline say "Managed is 1.18x faster" on a cell where Managed
+    # times an empty loop while C does real work.
+    if rec.get("output_spikes") is None and any(
+            p.get("output_spikes") == 0 for p in peers):
+        reasons.append("peer_zero_output_spikes")
+
     it = rec.get("iterations")
     if (suite in LOW_ITERATION_TOOLS and it is not None
             and it < LOW_ITERATION_FLOOR):
@@ -128,13 +146,18 @@ def main():
         tools.setdefault(m["suite"], set()).add(f"{m['tool']} {m['tool_version']}")
 
     # Join on the cell key; collect every impl that measured it.
+    # The suite is recorded PER IMPL, not just per document: `low_iteration_count`
+    # is tool-specific (it applies to BenchmarkDotNet, not Google Benchmark), and
+    # looking it up from a list of document metas — which carry `suite` but no
+    # `impl` — never matched, so the rule silently never fired for any .NET record.
     cells = {}
     for d in docs:
         for rec in d["records"]:
             k = cell_key(rec)
-            cells.setdefault(k, {"impls": {}, "meta": []})
+            cells.setdefault(k, {"impls": {}, "meta": [], "suites": {}})
             cells[k]["impls"][rec["impl"]] = rec
             cells[k]["meta"].append(d["meta"])
+            cells[k]["suites"][rec["impl"]] = d["meta"]["suite"]
 
     merged = []
     # size/pattern are None for sweep rows, and None does not order against str.
@@ -149,9 +172,8 @@ def main():
         rows = {}
         all_reasons = set()
         for impl, rec in impls.items():
-            peers = [i for i in impls if i != impl]
-            suite = next((m["suite"] for m in cell["meta"]
-                          if m.get("impl") == impl), None)
+            peers = [r for i, r in impls.items() if i != impl]
+            suite = cell["suites"].get(impl)
             reasons = derive_reasons(rec, peers, suite)
             all_reasons |= set(reasons)
             rows[impl] = {

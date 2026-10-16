@@ -124,6 +124,8 @@ Per-size geomean (ratio Eigen/C, pooled across families): Tiny 1.17x (16), Small
 
 Ratio column: time(Managed) / time(C). >1 means **C is faster**, <1 means **Managed is faster**.
 
+`C` here is the C library **reached through P/Invoke from the .NET suite** (`via_pinvoke`), so its time includes native allocation and result marshalling — it is **not** the bare C kernel. The bare C kernel is the `C` column of the C vs Eigen table above. Managed wins the small cells because the round-trip dominates them; from Medium up C wins.
+
 | benchmark | size | pattern | C (us) | Managed (us) | ratio | valid |
 |---|---|---|---:|---:|---:|:--|
 | BackwardSpikes | Tiny | uniform | 0.09 | 0.01 | 0.10x | — |
@@ -209,10 +211,10 @@ Validity is computed by `merge.py` from `output_spikes`, `error_code`, iteration
 
 | benchmark | size | pattern | reason |
 |---|---|---|---|
-| BackwardSpikes | Small | uniform | zero_output_spikes |
-| BackwardSpikes | Tiny | uniform | zero_output_spikes |
-| ComputeSpikes | Small | uniform | zero_output_spikes |
-| ComputeSpikes | Tiny | uniform | zero_output_spikes |
+| BackwardSpikes | Small | uniform | peer_zero_output_spikes, zero_output_spikes |
+| BackwardSpikes | Tiny | uniform | peer_zero_output_spikes, zero_output_spikes |
+| ComputeSpikes | Small | uniform | peer_zero_output_spikes, zero_output_spikes |
+| ComputeSpikes | Tiny | uniform | peer_zero_output_spikes, zero_output_spikes |
 | Dropout | Large | poisson | not_like_for_like |
 | Dropout | Large | uniform | not_like_for_like |
 | Dropout | Medium | poisson | not_like_for_like |

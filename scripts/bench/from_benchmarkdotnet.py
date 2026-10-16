@@ -254,9 +254,13 @@ def to_records(path, rows):
         stddev = row.get("StdDev")
         stddev_ns = parse_mean(stddev) if stddev and stddev.strip() not in ("", "NA") else None
 
-        it_raw = row.get("IterationCount") or row.get("InvocationCount") or ""
-        it_raw = it_raw.strip()
-        iterations = int(it_raw) if it_raw.isdigit() else None
+        # BDN's `IterationCount` column carries the JOB SETTING, not a measured
+        # count: every row of a `-j Short` run reports "3", and a `-j Dry` run
+        # reports "Default". Treating it as `iterations` made merge.py's
+        # low_iteration_count rule fire on every .NET row (floor 30 > 3), which
+        # excluded all 31 C-vs-Managed cells and left the pair with no geomean.
+        # The real iteration count is not in the report CSV, so report None.
+        iterations = None
 
         notes = []
         variant = None
