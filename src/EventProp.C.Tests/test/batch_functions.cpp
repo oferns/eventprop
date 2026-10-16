@@ -571,7 +571,7 @@ TEST(BatchAccumulateBackwardMaxima, OneBadSampleSetsHasErrors) {
 }
 
 TEST(BatchAccumulateBackwardMaxima, ZeroBatchSizeSetsHasErrors) {
-    MaximaBatch maxima = (MaximaBatch){};
+    MaximaBatch maxima = MaximaBatch{};
 
     AccumulatedBackwardResult result = eventprop_backward_maxima_batch_accumulate(nullptr, maxima);
     EXPECT_EQ(result.error_no, EVENTPROP_BATCHSIZE_ZERO_OR_NEG);
@@ -706,7 +706,7 @@ TEST(BatchDropout, NegativeSampleCountReturnsError) {
 
 TEST(BatchAccumulate, DimensionMismatchSkippedAsPartial) {
     // Sample 1 has smaller dims than requested — must be excluded, not read OOB
-    BackwardsBatch batch = (BackwardsBatch){};
+    BackwardsBatch batch = BackwardsBatch{};
     batch.batch_size = 2;
     batch.error_no = EVENTPROP_OK;
     batch.outputs = (BackwardOutput*)calloc(2, sizeof(BackwardOutput));
@@ -738,30 +738,30 @@ TEST(BatchAccumulate, DimensionMismatchSkippedAsPartial) {
 TEST(BatchAccumulate, ErrorStructWithNullOutputsFreesSafely) {
     // Error paths return batch_size > 0 with outputs == NULL — the free
     // functions must not dereference the NULL array.
-    AccumulatedBackwardResult r = (AccumulatedBackwardResult){};
+    AccumulatedBackwardResult r = AccumulatedBackwardResult{};
     r.batch_size = 3;
     r.error_no = EVENTPROP_ALLOC_BATCH_OUTPUTS;
     r.summed_grads = nullptr;
     r.outputs = nullptr;
     eventprop_free_accumulated_backward_result(r);
 
-    SpikesBatch sb = (SpikesBatch){};
+    SpikesBatch sb = SpikesBatch{};
     sb.batch_size = 3;
     sb.error_no = EVENTPROP_ALLOC_BATCH_OUTPUTS;
     sb.spikes = nullptr;
     eventprop_free_spikes_batch(sb);
 
-    BackwardsBatch wb = (BackwardsBatch){};
+    BackwardsBatch wb = BackwardsBatch{};
     wb.batch_size = 3;
     wb.outputs = nullptr;
     eventprop_free_backwards_batch(wb);
 
-    MaximaBatch mb = (MaximaBatch){};
+    MaximaBatch mb = MaximaBatch{};
     mb.batch_size = 3;
     mb.outputs = nullptr;
     eventprop_free_maxima_batch(mb);
 
-    DropoutBatch db = (DropoutBatch){};
+    DropoutBatch db = DropoutBatch{};
     db.batch_size = 3;
     db.outputs = nullptr;
     eventprop_free_dropout_batch(db);
@@ -773,12 +773,12 @@ TEST(BatchAccumulate, ErrorStructWithNullOutputsFreesSafely) {
 
 TEST(BatchFree, NullPointerSafety) {
     // Free functions take values by value — zero-init structs are safe to free
-    eventprop_free_spikes_batch((SpikesBatch){});
-    eventprop_free_maxima_batch((MaximaBatch){});
-    eventprop_free_backwards_batch((BackwardsBatch){});
-    eventprop_free_gradient_output((GradientOutput){});
-    eventprop_free_dropout_batch((DropoutBatch){});
-    eventprop_free_accumulated_backward_result((AccumulatedBackwardResult){});
+    eventprop_free_spikes_batch(SpikesBatch{});
+    eventprop_free_maxima_batch(MaximaBatch{});
+    eventprop_free_backwards_batch(BackwardsBatch{});
+    eventprop_free_gradient_output(GradientOutput{});
+    eventprop_free_dropout_batch(DropoutBatch{});
+    eventprop_free_accumulated_backward_result(AccumulatedBackwardResult{});
 }
 
 

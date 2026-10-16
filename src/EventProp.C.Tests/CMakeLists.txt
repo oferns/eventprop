@@ -1,7 +1,11 @@
 cmake_minimum_required(VERSION 3.21)
 project(EventPropCTests LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+# C++20, not 17: the C-API fixtures use designated initializers
+# (BackwardsBatch{ .error_no = ..., .batch_size = ... }), which are standard only from
+# C++20. Clang and GCC accepted them as an extension at 17; MSVC makes it a hard error
+# (C7555 "use of designated initializers requires at least '/std:c++20'").
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 
@@ -29,6 +33,26 @@ endif()
 set_target_properties(eventprop_c_api PROPERTIES
     IMPORTED_LOCATION "${C_LIBRARY}"
 )
+# Windows: a SHARED IMPORTED target needs the import library, not just the DLL, and
+# the Visual Studio generator is multi-config, so it resolves imported paths per
+# configuration. Setting only IMPORTED_LOCATION fails generation with
+#   IMPORTED_IMPLIB not set for imported target "eventprop_c_api" configuration "MinSizeRel"
+# All four configuration names point at the same Release artifacts, which is what the
+# hardcoded build/Release paths above already mean; naming them explicitly is what
+# CMake's per-config lookup requires.
+if(WIN32)
+    set_target_properties(eventprop_c_api PROPERTIES
+        IMPORTED_CONFIGURATIONS "RELEASE;DEBUG;RELWITHDEBINFO;MINSIZEREL"
+        IMPORTED_IMPLIB_RELEASE "${C_IMPLIB}"
+        IMPORTED_LOCATION_RELEASE "${C_LIBRARY}"
+        IMPORTED_IMPLIB_DEBUG "${C_IMPLIB}"
+        IMPORTED_LOCATION_DEBUG "${C_LIBRARY}"
+        IMPORTED_IMPLIB_RELWITHDEBINFO "${C_IMPLIB}"
+        IMPORTED_LOCATION_RELWITHDEBINFO "${C_LIBRARY}"
+        IMPORTED_IMPLIB_MINSIZEREL "${C_IMPLIB}"
+        IMPORTED_LOCATION_MINSIZEREL "${C_LIBRARY}"
+    )
+endif()
 target_include_directories(eventprop_c_api SYSTEM INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.C"
 )

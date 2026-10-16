@@ -16,19 +16,19 @@
 // ──────────────────────────────────────────────────────────────
 
 TEST(FreeSpikeOutput, NullPointerIsSafe) {
-    eventprop_free_spike_output((SpikeOutput){});
+    eventprop_free_spike_output(SpikeOutput{});
 }
 
 TEST(FreeSumsOutput, NullPointerIsSafe) {
-    eventprop_free_sums_output((SumsOutput){});
+    eventprop_free_sums_output(SumsOutput{});
 }
 
 TEST(FreeMaximaOutput, NullPointerIsSafe) {
-    eventprop_free_maxima_output((MaximaOutput){});
+    eventprop_free_maxima_output(MaximaOutput{});
 }
 
 TEST(FreeBackwardOutput, NullPointerIsSafe) {
-    eventprop_free_backward_output((BackwardOutput){});
+    eventprop_free_backward_output(BackwardOutput{});
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -36,31 +36,31 @@ TEST(FreeBackwardOutput, NullPointerIsSafe) {
 // ──────────────────────────────────────────────────────────────
 
 TEST(FreeSpikesBatch, NullPointerIsSafe) {
-    eventprop_free_spikes_batch((SpikesBatch){});
+    eventprop_free_spikes_batch(SpikesBatch{});
 }
 
 TEST(FreeMaximaBatch, NullPointerIsSafe) {
-    eventprop_free_maxima_batch((MaximaBatch){});
+    eventprop_free_maxima_batch(MaximaBatch{});
 }
 
 TEST(FreeBackwardsBatch, NullPointerIsSafe) {
-    eventprop_free_backwards_batch((BackwardsBatch){});
+    eventprop_free_backwards_batch(BackwardsBatch{});
 }
 
 TEST(FreeGradientOutput, NullPointerIsSafe) {
-    eventprop_free_gradient_output((GradientOutput){});
+    eventprop_free_gradient_output(GradientOutput{});
 }
 
 TEST(FreeDropoutOutput, NullPointerIsSafe) {
-    eventprop_free_dropout_output((DropoutOutput){});
+    eventprop_free_dropout_output(DropoutOutput{});
 }
 
 TEST(FreeDropoutBatch, NullPointerIsSafe) {
-    eventprop_free_dropout_batch((DropoutBatch){});
+    eventprop_free_dropout_batch(DropoutBatch{});
 }
 
 TEST(FreeAccumulatedBackwardResult, NullPointerIsSafe) {
-    eventprop_free_accumulated_backward_result((AccumulatedBackwardResult){});
+    eventprop_free_accumulated_backward_result(AccumulatedBackwardResult{});
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -68,9 +68,9 @@ TEST(FreeAccumulatedBackwardResult, NullPointerIsSafe) {
 // ──────────────────────────────────────────────────────────────
 
 TEST(FreeLambdaITraceOutput, NullPointerIsSafe) {
-    eventprop_free_lambda_i_trace_output((LambdaITraceOutput){});
+    eventprop_free_lambda_i_trace_output(LambdaITraceOutput{});
 }
 
 TEST(FreeVoltageTraceOutput, NullPointerIsSafe) {
-    eventprop_free_voltage_trace_output((VoltageTraceOutput){});
+    eventprop_free_voltage_trace_output(VoltageTraceOutput{});
 }
