@@ -188,27 +188,41 @@ Today the suites share no implementation, so no cross-suite ratio is sound:
 
 ```
 native:   C  ↔  Eigen
-dotnet:   Managed  ↔  PInvoke(→C)
-python:   pybind11  ↔  Cython(→C)
+dotnet:   Managed  ↔  PInvoke  (P/Invoke into the C library)
+python:   pybind11  ↔  Cython  (both into the C library)
 ```
 
-`C` is the only implementation reachable from two suites, but it is never measured in
-the same vocabulary as the others. The Python suite has **no core-kernel benchmarks at
-all** — all 28 tests are layer/loss level — so binding overhead is unmeasurable there.
+`C` is the only implementation reachable from more than one suite, but it is reached by
+different mechanisms, and those mechanisms are part of the measurement. The Python suite
+has **no core-kernel benchmarks at all** — all 28 tests are layer/loss level — so binding
+overhead is unmeasurable there.
 
-**Requirement:** every suite must emit a record with `impl: "C"` for each kernel family,
-at the shared sizes, via the same C entry point.
+**Requirement:** every suite must emit a record for each kernel family, at the shared
+sizes, via the same C entry point.
 
 | Suite | How |
 |---|---|
-| `native` | already has `impl: "C"` |
-| `dotnet` | `PInvoke` **is** C — label it `impl: "C"` for kernel families (alias, recorded in `notes: ["via_pinvoke"]`) |
-| `python` | add raw `compute_spikes` / `backward_spikes` benchmarks for pybind11 and Cython, no layer. Emits `impl: "C"` twice (once per binding). |
+| `native` | `impl: "C"` — calls the C library directly |
+| `dotnet` | `impl: "PInvoke"` — the C library reached through P/Invoke. **Not aliased to `C`** (see below) |
+| `python` | add raw `compute_spikes` / `backward_spikes` benchmarks for pybind11 and Cython, no layer. Emits `impl: "Cython"` / `"pybind11"` |
 
-With `impl: "C"` present in all three, the chain closes:
-`Eigen ↔ C ↔ Managed` and `pybind11 ↔ C ↔ Cython` are both computable from one merged
-table, and binding overhead becomes a first-class number:
-`Cython(C) − C(native)` = the Python binding cost, isolated from the layer.
+**Do not alias `PInvoke` to `C`.** An earlier revision of this schema prescribed that
+alias (`notes: ["via_pinvoke"]`) so the chain would close on one shared name. It made the
+cross-suite join work and it made the report lie: the table titled **"C vs Managed"**
+silently meant **"P/Invoke vs Managed"**, with P/Invoke marshalling cost sitting on the C
+side of the ratio. One impl name carried two measurement contexts.
+
+The chain closes as **measured adjacent pairs** instead, which is strictly more informative:
+
+```
+Eigen  ↔  C  ↔  PInvoke  ↔  Managed
+         (1.24x)  (1.06x)     (1.05x)
+```
+
+The middle pair — same C library, called directly vs through the P/Invoke round-trip — is
+the interop-cost measurement the alias hid. It is computable because the suites share
+benchmark names for four kernel families (`ComputeSums`, `ComputeSpikes`, `ComputeMaxima`,
+`BackwardSpikes`).
 
 ---
 
@@ -314,6 +328,9 @@ misleading when one side has a fixed per-call cost. Measured on one machine:
 | C vs Managed | **0.25x** | **0.72x** | 2.34x |
 | Cython vs pybind11 | **0.40x** | **0.99x** | 1.59x |
 
+(The "C vs Managed" row predates the pair split in `18e6e86`; that pair is now
+**C via P/Invoke vs Managed**, and the Tiny/Small kernel cells no longer exist in the .NET
+suite at all. The row is kept because it is the measurement that motivated per-size geomeans.)
 P/Invoke marshalling and Cython binding overhead are fixed costs: they dominate the small
 cells and amortize at the large ones, so the pooled figure describes neither size — and for
 the two interop pairs the pooled direction is **opposite** to the Tiny direction. C vs Eigen
