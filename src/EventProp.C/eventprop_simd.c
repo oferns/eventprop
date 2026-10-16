@@ -253,10 +253,18 @@ double dot_product_simd(const double* a, const double* b, const int n)
     }
 #endif
 
+#if !defined(HAVE_AVX512F) && !defined(HAVE_AVX2) && !defined(HAVE_NEON)
+    /* Scalar-only build: this is the whole function. In a SIMD build it is dead —
+     * every SIMD branch above folds the remainder loop into itself and returns, and
+     * simd_available() is a compile-time constant (simd_vec_width() > 0), so MSVC
+     * proves the tail unreachable and /W4 reports C4702 on all four lines. Guarded
+     * for the same reason the vec/vec_count declarations are: the shape of this
+     * function depends on which branch the target compiles. */
     double sum = 0.0;
     for (int j = 0; j < n; j++)
         sum += a[j] * b[j];
     return sum;
+#endif
 }
 
 /* Vector subtraction: dest[j] = a[j] - b[j] */

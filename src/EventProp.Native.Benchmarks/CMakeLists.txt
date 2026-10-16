@@ -137,6 +137,18 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     )
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     target_compile_options(bench_cpp PRIVATE /O2 /Ob2 /Oi /Ot /fp:fast)
+    # ISA level must match the pre-built Eigen core: Eigen's aligned allocator is
+    # header-inlined and EIGEN_MAX_ALIGN_BYTES is 32 with AVX/AVX2 and 16 without, so a
+    # bench_cpp TU at the baseline freeing blocks the AVX2 core allocated corrupts the
+    # heap (measured: STATUS_HEAP_CORRUPTION 0xC0000374 in RtlFreeHeap, first benchmark).
+    # The GCC/Clang branch above already gets -march=native, which is why this only
+    # bites on MSVC. bench_c includes no Eigen headers, so it needs no matching flag.
+    include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/EventPropSimd.cmake")
+    eventprop_simd_level(EVENTPROP_SIMD_LEVEL)
+    eventprop_simd_compile_options(EVENTPROP_SIMD_COMPILE_OPTIONS LEVEL "${EVENTPROP_SIMD_LEVEL}")
+    if(EVENTPROP_SIMD_COMPILE_OPTIONS)
+        target_compile_options(bench_cpp PRIVATE ${EVENTPROP_SIMD_COMPILE_OPTIONS})
+    endif()
 endif()
 
 # OpenMP headers for the Eigen library (it uses #pragma omp)

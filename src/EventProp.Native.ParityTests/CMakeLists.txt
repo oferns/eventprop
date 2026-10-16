@@ -66,6 +66,23 @@ set_target_properties(eventprop_eigen_core PROPERTIES
 find_package(OpenMP QUIET)
 add_executable(parity_test parity_main.cpp)
 
+# ISA level must match the pre-built Eigen core, because the imported target carries
+# no usage requirements. Eigen's EIGEN_MAX_ALIGN_BYTES is 32 with AVX/AVX2 and 16
+# without, and the aligned allocator is header-inlined; parity_main.cpp includes the
+# Eigen headers and destroys matrices the core (a STATIC library) allocated. Built at
+# different levels, the two sides use different aligned-free conventions on the same
+# block: STATUS_HEAP_CORRUPTION (0xC0000374) in RtlFreeHeap. Measured on Windows/x64
+# when /arch:AVX2 was applied to the core but not to the consumer TU. On Linux the
+# core is built -march=native and parity_test was not, which is the same mismatch.
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/EventPropSimd.cmake")
+eventprop_simd_level(EVENTPROP_SIMD_LEVEL)
+eventprop_simd_compile_options(EVENTPROP_SIMD_COMPILE_OPTIONS LEVEL "${EVENTPROP_SIMD_LEVEL}")
+if(EVENTPROP_SIMD_COMPILE_OPTIONS)
+    target_compile_options(parity_test PRIVATE ${EVENTPROP_SIMD_COMPILE_OPTIONS})
+    message(STATUS "parity_test: ${EVENTPROP_SIMD_LEVEL} (${EVENTPROP_SIMD_COMPILE_OPTIONS}) — "
+                   "matched to the pre-built Eigen core")
+endif()
+
 target_include_directories(parity_test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.C"
     "${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.Cpp.Wrapper"

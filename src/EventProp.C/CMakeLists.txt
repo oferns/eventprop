@@ -96,37 +96,20 @@ endif()
 
 
 
-# Detect SIMD support at compile time (priority: AVX-512 > AVX2 > NEON)
-# Use runtime CPU feature detection, not just compiler flag acceptance
-set(_HAS_AVX512 -1)
-set(_HAS_AVX2 -1)
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
-    # Check actual CPU support via /proc/cpuinfo (Linux) or sysctl (macOS)
-    if(EXISTS "/proc/cpuinfo")
-        file(READ "/proc/cpuinfo" _CPUINFO)
-        string(FIND "${_CPUINFO}" "avx512f" _HAS_AVX512)
-        string(FIND "${_CPUINFO}" "avx2" _HAS_AVX2)
-    else()
-        # macOS fallback: check via sysctl
-        execute_process(COMMAND sysctl -n machdep.cpu.features machdep.cpu.leaf7_features
-                        OUTPUT_VARIABLE _CPU_FEATURES RESULT_VARIABLE _SYSCTL_FAIL)
-        string(FIND "${_CPU_FEATURES}" "AVX512F" _HAS_AVX512)
-        string(FIND "${_CPU_FEATURES}" "AVX2" _HAS_AVX2)
-    endif()
+# SIMD level — shared with EventProp.Cpp.Wrapper so the C library and the Eigen
+# reference core the parity suite compares against move together. See
+# cmake/EventPropSimd.cmake for why the decision is shared, why it is a CPUID+XCR0
+# probe, and why the flag spelling is per-compiler.
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/EventPropSimd.cmake")
+eventprop_simd_level(EVENTPROP_SIMD_LEVEL)
+eventprop_simd_definitions(EVENTPROP_SIMD_DEFINITIONS LEVEL "${EVENTPROP_SIMD_LEVEL}")
+eventprop_simd_compile_options(EVENTPROP_SIMD_COMPILE_OPTIONS LEVEL "${EVENTPROP_SIMD_LEVEL}")
+if(EVENTPROP_SIMD_DEFINITIONS)
+    add_compile_definitions(${EVENTPROP_SIMD_DEFINITIONS})
 endif()
-
-if(NOT _HAS_AVX512 EQUAL -1)
-    message(STATUS "AVX-512 detected — building with AVX-512 support")
-    add_compile_definitions(HAVE_AVX512F)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mavx512f")
-elseif(NOT _HAS_AVX2 EQUAL -1)
-    message(STATUS "AVX2 detected — building with AVX2 support")
-    add_compile_definitions(HAVE_AVX2)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mavx2")
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
-    message(STATUS "ARM64 detected — NEON enabled by default")
-    add_compile_definitions(__ARM_NEON)
-endif()
+message(STATUS "SIMD level: ${EVENTPROP_SIMD_LEVEL} (definitions: ${EVENTPROP_SIMD_DEFINITIONS}; "
+               "arch flag applied only where the project does not already set a "
+               "superset — see the target flags below)")
 
 # Pure C shared library (no external dependencies)
 # Optional OpenMP for parallel neuron processing in ComputeSpikes
@@ -190,6 +173,17 @@ elseif(CMAKE_C_COMPILER_ID MATCHES "MSVC")
     # /Ot = Favor fast code
     # /fp:fast = Fast floating-point math (equivalent to -ffp-contract=fast, -freciprocal-math, -fno-signed-zeros)
     target_compile_options(eventprop_c_api PRIVATE /O2 /Ob2 /Oi /Ot /fp:fast)
+    # The GCC/Clang branch above already gets the ISA from -march=native, so the
+    # probe's arch flag is only needed on MSVC, which has no -march=native. Without
+    # it MSVC compiles the x86 baseline: no __AVX2__ (x64 MSVC predefines neither
+    # __SSE2__ nor __AVX2__), so eventprop_simd.c selects its scalar fallback and
+    # fma_row_simd — the ComputeSums prefix-sum inner loop and the backward pass's
+    # lambda_I jump — runs unvectorised. Passing -mavx2 to cl instead is ignored with
+    # only "D9002: ignoring unknown option", which is why the flag is mapped here
+    # rather than spelled once.
+    if(EVENTPROP_SIMD_COMPILE_OPTIONS)
+        target_compile_options(eventprop_c_api PRIVATE ${EVENTPROP_SIMD_COMPILE_OPTIONS})
+    endif()
 endif()
 # libm is separate on Unix, built-in on Windows
 if(NOT WIN32)
