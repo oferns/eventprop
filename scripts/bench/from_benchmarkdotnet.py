@@ -166,8 +166,16 @@ def parse_filename(path):
     # "Pattern" is not a family: Bench_Pattern_Burst carries the family in the METHOD
     # column (ComputeSums_Managed). Return it as a placeholder; to_records() overrides
     # benchmark per row via METHOD_FAMILY_RE, and drops rows that don't supply one.
+    #
+    # These benchmarks have NO size token — they vary PATTERN at one fixed size, so
+    # `pattern` is the varying dimension and belongs in `axis`. Leaving size=None with
+    # pattern in the cell key put them in the size table as `size: None` rows, which
+    # showed up as a `None 1.19x (6)` per-size geomean entry.
     if benchmark == "Pattern":
-        return (None, size, pattern, axis), stale
+        axis = dict(axis or {})
+        if pattern:
+            axis["pattern"] = pattern
+        return (None, size, None, axis), stale
 
     if benchmark not in FAMILIES and benchmark != "TrainingLoopSweep":
         return None, stale
