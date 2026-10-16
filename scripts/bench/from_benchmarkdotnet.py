@@ -321,11 +321,28 @@ def main():
         return 2
 
     if os.path.isdir(args.src):
+        if not os.path.isdir(os.path.join(args.src, "results")) and not any(
+                n.endswith("-report.csv") for n in os.listdir(args.src)):
+            # The usual cause is that the benchmark run never produced artifacts:
+            # BDN prompts on stdin for a selection when no filter is given, so a
+            # non-interactive run exits having written nothing. Say that, rather
+            # than raising Errno 2 from the CSV reader.
+            print(f"ERROR: no -report.csv under {args.src}\n"
+                  f"  The benchmark run produced no artifacts. Most likely it was "
+                  f"invoked without\n  a filter: with many registered benchmarks BDN "
+                  f"prints the list and\n  prompts 'Enter the asterisk `*` to select "
+                  f"all' on stdin, which a\n  non-interactive runner cannot answer. "
+                  f"Pass `-f '*'`.", file=sys.stderr)
+            return 2
         files = sorted(f for f in
                        (os.path.join(args.src, n) for n in os.listdir(args.src))
                        if f.endswith("-report.csv"))
-    else:
+    elif os.path.exists(args.src):
         files = [args.src]
+    else:
+        print(f"ERROR: {args.src} does not exist — the benchmark run produced no "
+              f"artifacts (see the -f '*' note above)", file=sys.stderr)
+        return 2
     if not files:
         print(f"ERROR: no -report.csv under {args.src}", file=sys.stderr)
         return 2

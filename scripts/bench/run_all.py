@@ -161,6 +161,13 @@ def suite_dotnet(out_dir, quick):
         # benchmark, so the full Tiny+Small set is tens of minutes; ShortRun is
         # the documented quick setting and keeps the pipeline usable.
         cmd += ["-j", "Short", "-f", "*Tiny*", "*Small*"]
+    else:
+        # A filter is MANDATORY, not optional. With 75 registered benchmarks and
+        # no filter, BDN prints the list and prompts "Enter the asterisk `*` to
+        # select all" on stdin. The runner is non-interactive, so the full run
+        # produced no artifacts at all and the adapter then failed on a missing
+        # results dir. `-f '*'` is the non-interactive form of that prompt.
+        cmd += ["-j", "Short", "-f", "*"]
     ok, _ = run(cmd, cwd=DOTNET_PROJ, timeout=7200)
     if not ok:
         print("  dotnet benchmark run failed", file=sys.stderr)
