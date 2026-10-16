@@ -257,8 +257,8 @@ is `-a`/`--artifacts`. Likewise `-f` takes glob patterns as **separate** argumen
 
 ## Acceptance criteria for v1
 
-Status as built. Criteria 1–5 are met; 6 is met by `merge.py` and needs a cross-host run
-to exercise.
+Status as built. **All six are met.** Criterion 6 is implemented in `merge.py` and needs
+a cross-host run to exercise.
 
 1. **One command runs all three suites and writes three schema files.** — ✅
 `scripts/bench/run_all.py`; `--quick` for Tiny/Small, `--suites` to select, `--report-only`
@@ -266,10 +266,27 @@ to re-merge. Suites that fail are reported and the run continues with a non-zero
 one broken suite does not lose the others' data.
 2. **`merge.py` produces a table where every row has a `valid` flag and a reason.** — ✅
 3. **`BENCHMARKS.md` is generated, not hand-written, and contains no `*` footnotes.** —
-⚠ `report.py` generates `report.md`; the hand-written `BENCHMARKS.md` is still in the repo
-and is now the remaining piece of this criterion.
-4. **Every ratio in the report names both implementations in words.** — ✅ ("C is 1.18x
+✅ `run_all.py` writes it from the same `merged.json` as `report.md`, so the two cannot
+drift. Every exclusion is a computed `invalid_reasons` value.
+4. **Every ratio in the report names both implementations in words.** — ✅ ("C is 1.35x
 faster than Eigen")
 5. **Every record carries `tool_version`.** — ✅ all three suites.
 6. **Re-running on a different machine cannot silently mix.** — ✅ `merge.py` refuses
 differing `host` unless `--allow-mixed-hosts`; not yet exercised across two hosts.
+
+### Per-size geomeans are not optional
+
+The report emits a pooled geomean **and** a per-size geomean per pair. The pooled number is
+misleading when one side has a fixed per-call cost. Measured on one machine:
+
+| Pair | Tiny | Small | Pooled |
+|---|---:|---:|---:|
+| C vs Eigen | 1.39x | 1.31x | 1.35x |
+| C vs Managed | **0.25x** | **0.72x** | 2.34x |
+| Cython vs pybind11 | **0.40x** | **0.99x** | 1.59x |
+
+P/Invoke marshalling and Cython binding overhead are fixed costs: they dominate the small
+cells and amortize at the large ones, so the pooled figure describes neither size — and for
+the two interop pairs the pooled direction is **opposite** to the Tiny direction. C vs Eigen
+shows no split, which is the expected control: no interop layer involved. Any future change
+to the report must keep the per-size row.
