@@ -289,6 +289,41 @@ MIN_TIME=0.05s FILTER=ComputeSpikes/Tiny ./run_benchmarks.sh
 cd src/EventProp.Python.Benchmarks && pytest test_benchmarks.py -v
 ```
 
+`test_kernel_benchmarks.py` is the separate suite that measures pybind11 vs Cython on the
+raw C kernels with **no layer** — it isolates binding overhead, which the layer suite
+fuses into the layer number and cannot separate. It also emits `impl: "C"` kernel records,
+which is what closes the cross-suite chain (Eigen ↔ C ↔ Managed ↔ pybind11/Cython).
+
+```bash
+cd src/EventProp.Python.Benchmarks
+PYTHONPATH=../EventProp.Python:../EventProp.Native.Python \
+  pytest test_kernel_benchmarks.py --benchmark-only --benchmark-json=results_kernels.json
+```
+
+The two bindings take structurally different arguments **on purpose** — pybind11 wants a
+`SpikesVector` of 2D arrays, Cython wants flat arrays plus `n_per_sample`. That difference
+is the measurement; equalizing it would destroy the benchmark. `compute_maxima_batch`
+requires `v_th` as a 9th positional argument even though the maxima path never reads it;
+`LILayer` passes `float('inf')` and the kernel benchmarks match that.
+
+### Cross-Suite Report (one command)
+
+```bash
+./build.sh release
+cd src/EventProp.Native.Benchmarks && cmake --preset release && cmake --build --preset release && cd ../..
+scripts/bench/run_all.py --quick          # Tiny/Small only
+scripts/bench/run_all.py                  # full run, includes XL
+```
+
+Writes `bench-results/records_*.json`, `merged.json`, `report.md`. Prerequisites are
+**not** auto-built — a silent build here would hide a compile failure as a benchmark
+result. See `BENCHMARK_SCHEMA.md` for the record format, the validity rules, and the
+provenance each tool does and does not supply.
+
+Flags: `--quick` (Tiny/Small, skips XL), `--suites native dotnet python`, `--report-only`
+(re-merge existing records), `--out DIR`. A suite that fails is reported and the run
+continues with the other suites' data, exiting non-zero.
+
 ### Coverage Report Generation
 
 ```bash

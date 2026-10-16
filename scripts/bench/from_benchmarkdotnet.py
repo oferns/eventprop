@@ -184,10 +184,42 @@ def parse_csv(path):
         return list(csv.DictReader(f))
 
 
+def is_dry_run_placeholder(rows):
+    """True if this CSV looks like `--job Dry` output rather than a measurement.
+
+    A Dry run writes a full report CSV with a placeholder Mean (it executes the
+    benchmark once, so Mean == that single iteration). Adapted blindly, those
+    become plausible records with real numbers and no validity signal — the worst
+    kind of bad benchmark data.
+
+    Signals, taken from a measured comparison of `-j Dry` output against a real
+    run of the same benchmarks (NOT guessed):
+      * `UnrollFactor` is 16 in a real run, 1 in Dry. This is the discriminator.
+
+    Deliberately NOT used, each for a measured reason:
+      * `IterationCount` — carries the job setting ("Default"), not a count.
+      * `OutputSpikes` — not a column in these reports at all (which is why the
+        .NET records carry output_spikes: null).
+      * The MemoryDiagnoser columns — `Alloc Ratio` is populated in Dry output
+        (1.00 / 0.00), so "diagnoser columns are empty" is NOT a Dry signature.
+
+    This is why the runner must not wipe the artifacts dir before a run that can
+    fail: a wipe plus a failed run leaves placeholders that would adapt into
+    fabricated records.
+    """
+    if not rows:
+        return False
+    return (rows[0].get("UnrollFactor") or "").strip() == "1"
+
+
 def to_records(path, rows):
     parsed, stale = parse_filename(path)
     if parsed is None:
         return [], (stale, os.path.basename(path))
+
+    if is_dry_run_placeholder(rows):
+        return [], ("dry-run placeholder (UnrollFactor=1; a real run uses 16)",
+                    os.path.basename(path))
     benchmark, size, pattern, axis = parsed
 
     records = []
@@ -301,6 +333,7 @@ def main():
     records = []
     stale_files = []
     unmapped_files = []
+    placeholder_files = []
     for path in files:
         try:
             rows = parse_csv(path)
@@ -315,7 +348,14 @@ def main():
             # live Bench_* files on the same cell key (verified: Cross_ComputeSums_
             # Medium_Uniform contributed a 4708 us PInvoke row against the live
             # 23.26 us one — a 200x outlier in the same cell).
-            stale_files.append(name)
+            #
+            # `stale` is a reason STRING for every non-None case, not a boolean:
+            # the dry-run guard returns one too, and labelling those "stale
+            # Cross_*" sends the reader to look for deleted benchmarks.
+            if stale is True:
+                stale_files.append(name)
+            else:
+                placeholder_files.append(f"{name} — {stale}")
             continue
         if not recs:
             unmapped_files.append(name)
@@ -346,6 +386,12 @@ def main():
               f"Emitting them would add an Eigen impl\n  from a benchmark that no "
               f"longer exists:", file=sys.stderr)
         for n in stale_files[:5]:
+            print(f"    {n}", file=sys.stderr)
+    if placeholder_files:
+        print(f"  SKIPPED {len(placeholder_files)} `--job Dry` placeholder file(s) — "
+              f"a Dry run writes a\n  full report CSV whose Mean is one invocation, "
+              f"not a measurement:", file=sys.stderr)
+        for n in placeholder_files[:5]:
             print(f"    {n}", file=sys.stderr)
     if unmapped_files:
         print(f"  WARNING {len(unmapped_files)} file(s) produced no records "

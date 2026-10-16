@@ -189,32 +189,87 @@ table, and binding overhead becomes a first-class number:
 
 ## Adapters
 
-`scripts/bench/` (to be added), one per tool, each emitting the record format above:
+`scripts/bench/`, one per tool, each emitting the record format above. **All four are
+implemented and running**; the mapping work listed here is what each one actually does.
 
-| Adapter | Input | Notable mapping work |
+| Adapter | Input | Mapping work as built |
 |---|---|---|
-| `from_google_benchmark.py` | `--benchmark_format=json` | `run_name` `ComputeSpikes/Small/burst/real_time` → `benchmark`/`size`/`pattern`; strip `/real_time`; `real_time` × `time_unit` → `mean_ns`; carry `output_spikes`; `context.library_version` → `tool_version` (verified present: emits `v1.9.5`, matching the `GIT_TAG` in `CMakeLists.txt`) |
-| `from_benchmarkdotnet.py` | `-report.csv` | `Method` `Bench_ComputeSpikes_Small` → strip `Bench_`, split family/size; `Mean` `"18.63 ms"` → ns; `Native`/`Managed` → `impl`; `Job` → `notes` when `IterationCount` is low. **`tool_version` is NOT in the CSV** — verified: the report CSV has no version column. The BDN version appears only in the console log (`// BenchmarkDotNet v0.15.8`). So this adapter must take the version from `dotnet list package` / the console log, and the runner must capture it. Given that a BDN version change is the single largest known source of .NET measurement drift (8–12% on the headline Ratio), this is the most important provenance field in the whole schema and the one the tool does not supply. |
-| `from_pytest_benchmark.py` | `--benchmark-json` | `test_lif_forward_cython[Small-burst]` → `benchmark`/`impl`/`size`/`pattern`; `stats.mean` (s) → ns; `machine_info` → `meta` |
+| `from_google_benchmark.py` | `--benchmark_format=json` | `run_name` `ComputeSpikes/Small/burst/real_time` → `benchmark`/`size`/`pattern`; strip `/real_time`; `real_time` × `time_unit` → `mean_ns`; carry `output_spikes` and `c_error` → `error_code`; `context.library_version` → `tool_version` (emits `v1.9.5`, matching the `GIT_TAG` in `CMakeLists.txt`) |
+| `from_benchmarkdotnet.py` | `-report.csv` | Filename `Bench_ComputeSpikes_Small` → strip `Bench_`/`EventProp.Benchmarks.` prefix, split family/size/pattern (case-insensitively — a case-sensitive match silently dropped 32 of 93 CSVs); `Mean` `"18.63 ms"` → ns; `Native`/`Managed` → `impl`; `--bdn-version` is **required**, see below |
+| `from_pytest_benchmark.py` | `--benchmark-json` | `fullname` `test_kernel_benchmarks.py::Test_Kernel_ComputeSpikes::test_pybind11[Tiny-uniform]` → family from the **class** name, impl from the method, size/pattern from the parametrize bracket; `stats.mean` (seconds) → ns; `machine_info` + `commit_info` + `datetime` + `version` → `meta` |
+| `merge.py` | N record files | Joins on `benchmark`/`size`/`pattern`(+`axis`), computes `valid` and `invalid_reasons` from `output_spikes`/`error_code`/coverage — never authored |
+| `report.py` | merged JSON | Emits the side-by-side tables, per-pair geomeans, exclusion table, sweep table |
+| `run_all.py` | — | One command: runs all suites, adapts, merges, reports. `--quick` restricts to Tiny/Small |
 
-Then `merge.py` (join on `benchmark`/`size`/`pattern`, compute `valid`) and
-`report.py` (emit the side-by-side table). These replace the five ad-hoc scripts in
-`EventProp.Python.Benchmarks/` (`generate_report.py`, `parse_benchmarks.py`,
-`print_full_matrix.py`, `print_native_comparison.py`, `print_poisson_comparison.py`),
-which each re-parse one format with bespoke regexes — `print_native_comparison.py`
-parses Google Benchmark **text** output with a regex, discarding the JSON that already
-has `output_spikes` and provenance.
+They replace the five ad-hoc scripts in `EventProp.Python.Benchmarks/`
+(`generate_report.py`, `parse_benchmarks.py`, `print_full_matrix.py`,
+`print_native_comparison.py`, `print_poisson_comparison.py`), which each re-parse one
+format with bespoke regexes — `print_native_comparison.py` parses Google Benchmark
+**text** output with a regex, discarding the JSON that already has `output_spikes`
+and provenance.
+
+### Provenance: what each tool supplies
+
+| Suite | `tool_version` | `date` | `host`/`cpu` | `vcs_rev` |
+|---|---|---|---|---|
+| native | ✅ `context.library_version` | ❌ | ✅ `context` | adapter via `git` |
+| python | ✅ `version` | ✅ `datetime` | ✅ `machine_info` | ✅ `commit_info` (id, **dirty**, branch) |
+| dotnet | ❌ **not in the CSV** | ❌ | partial (`platform` module) | adapter via `git` |
+
+pytest-benchmark is the only tool with complete provenance. The gaps are filled
+explicitly, never guessed:
+
+- **BenchmarkDotNet version** — the report CSV has no version column; BDN prints it only
+to the console. `run_all.py` reads it from `dotnet list package` and passes it as the
+adapter's required `--bdn-version`. This is the most important provenance field in the
+schema, because a BDN version change moves the headline .NET Ratio 8–12% against a 0.6%
+noise floor (AGENTS.md), and 0.15.x ships no `net10.0` asset — a net10 project silently
+consumes `lib/net8.0/BenchmarkDotNet.dll`.
+- **`date`** — BDN CSVs have no timestamp, so `meta.date` is `null` for that suite rather
+than backfilled with the local clock, which would misreport when a measurement was taken.
+
+### Two traps the .NET adapter had to solve
+
+Both were found by running the tools, not by reading their documentation.
+
+**`--job Dry` output is indistinguishable from a measurement by shape.** A Dry run writes
+a full report CSV with a plausible `Mean` (it executes the benchmark once, so `Mean` is
+that single invocation) and no validity signal, so it adapts into fabricated records that
+look real. Detected by `UnrollFactor`: **16 in a real run, 1 in Dry**. Three signals that
+look right and are **not** — each checked against real output:
+
+| Candidate signal | Why it fails |
+|---|---|
+| `IterationCount <= 1` | The column carries the **job setting** (`"Default"`), not a measured count |
+| `OutputSpikes` absent | Not a column in these reports at all — real runs lack it too |
+| MemoryDiagnoser columns empty | `Alloc Ratio` is populated in Dry output (`1.00` / `0.00`) |
+
+This is also why `run_all.py` does **not** wipe `BenchmarkDotNet.Artifacts` before the
+run: a wipe plus a failed run leaves the directory holding placeholders that adapt into
+fabricated records. Stale CSVs are skipped by name instead.
+
+**BDN's CLI flags are not what they look like.** `--artifactsPath` is an unknown option;
+`BenchmarkSwitcher` exits with a usage dump that looks like a benchmark failure. The flag
+is `-a`/`--artifacts`. Likewise `-f` takes glob patterns as **separate** arguments —
+`-f "*Tiny* *Small*"` as one argument matches nothing.
 
 ---
 
 ## Acceptance criteria for v1
 
-1. One command runs all three suites and writes three schema files.
-2. `merge.py` produces a table where every row has a `valid` flag and a reason.
-3. `BENCHMARKS.md` is **generated**, not hand-written, and contains no `*` footnotes —
-   every exclusion is a computed `invalid_reasons` value.
-4. Every ratio in the report names both implementations in words.
-5. Every record carries `tool_version`, so a BenchmarkDotNet bump is visible as a
-   discontinuity in the merged history rather than a silent 10% shift.
-6. Re-running on a different machine cannot silently mix: the merge refuses records whose
-   `host` differs, unless `--allow-mixed-hosts`.
+Status as built. Criteria 1–5 are met; 6 is met by `merge.py` and needs a cross-host run
+to exercise.
+
+1. **One command runs all three suites and writes three schema files.** — ✅
+`scripts/bench/run_all.py`; `--quick` for Tiny/Small, `--suites` to select, `--report-only`
+to re-merge. Suites that fail are reported and the run continues with a non-zero exit, so
+one broken suite does not lose the others' data.
+2. **`merge.py` produces a table where every row has a `valid` flag and a reason.** — ✅
+3. **`BENCHMARKS.md` is generated, not hand-written, and contains no `*` footnotes.** —
+⚠ `report.py` generates `report.md`; the hand-written `BENCHMARKS.md` is still in the repo
+and is now the remaining piece of this criterion.
+4. **Every ratio in the report names both implementations in words.** — ✅ ("C is 1.18x
+faster than Eigen")
+5. **Every record carries `tool_version`.** — ✅ all three suites.
+6. **Re-running on a different machine cannot silently mix.** — ✅ `merge.py` refuses
+differing `host` unless `--allow-mixed-hosts`; not yet exercised across two hosts.

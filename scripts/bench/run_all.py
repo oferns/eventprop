@@ -1,0 +1,259 @@
+#!/usr/bin/env python3
+"""
+run_all.py — one command: run every suite, adapt, merge, report.
+
+Implements acceptance criterion 1 of BENCHMARK_SCHEMA.md.
+
+Usage:
+    scripts/bench/run_all.py                      # full run (slow: XL rows)
+    scripts/bench/run_all.py --quick              # Tiny/Small only, skips XL
+    scripts/bench/run_all.py --suites native dotnet
+    scripts/bench/run_all.py --report-only        # merge+report existing records
+    scripts/bench/run_all.py --out /tmp/bench     # choose the output directory
+
+Outputs, under --out (default bench-results/):
+    records_native_c.json      records_native_eigen.json
+    records_dotnet.json        records_python.json
+    merged.json
+    report.md
+
+Prerequisites (NOT auto-built — building is build.sh's job, and a silent build
+here would hide a compile failure as a benchmark result):
+    ./build.sh release
+    cd src/EventProp.Native.Benchmarks && cmake --preset release \\
+        && cmake --build --preset release
+
+Notes:
+  * The BenchmarkDotNet version is read from `dotnet list package`, because the
+    report CSV has no version column and a BDN version change moves the headline
+    .NET Ratio 8-12% against a 0.6% noise floor.
+  * The .NET P/Invoke impl is aliased to "C" so the cross-suite chain closes
+    (Eigen <-> C <-> Managed). The alias is recorded in notes: ["via_pinvoke"].
+  * Suites that fail are reported and the run continues, so one broken suite
+    does not lose the others' data; the exit code is non-zero.
+"""
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SRC = os.path.dirname(os.path.dirname(HERE))          # repo root
+BENCH = os.path.join(SRC, "src")
+
+NATIVE_BUILD = os.path.join(BENCH, "EventProp.Native.Benchmarks", "build")
+DOTNET_PROJ = os.path.join(BENCH, "EventProp.Benchmarks")
+DOTNET_ARTIFACTS = os.path.join(DOTNET_PROJ, "BenchmarkDotNet.Artifacts", "results")
+PY_BENCH = os.path.join(BENCH, "EventProp.Python.Benchmarks")
+
+
+def run(cmd, cwd=None, env=None, timeout=7200, capture=False):
+    """Run a command, printing it. Returns (ok, stdout)."""
+    print(f"  $ {' '.join(cmd)}", flush=True)
+    e = dict(os.environ)
+    if env:
+        e.update(env)
+    try:
+        p = subprocess.run(cmd, cwd=cwd, env=e, timeout=timeout,
+                           capture_output=capture, text=True)
+        if capture:
+            return p.returncode == 0, p.stdout
+        return p.returncode == 0, ""
+    except subprocess.TimeoutExpired:
+        print(f"    TIMEOUT after {timeout}s", file=sys.stderr)
+        return False, ""
+    except FileNotFoundError as ex:
+        print(f"    cannot run: {ex}", file=sys.stderr)
+        return False, ""
+
+
+def require(path, hint):
+    if not os.path.exists(path):
+        print(f"ERROR: missing {path}\n  {hint}", file=sys.stderr)
+        return False
+    return True
+
+
+def bdn_version():
+    ok, out = run(["dotnet", "list", "package"], cwd=DOTNET_PROJ, capture=True, timeout=300)
+    if not ok:
+        return None
+    for line in out.splitlines():
+        if "BenchmarkDotNet" in line:
+            parts = line.split()
+            if parts:
+                return parts[-1]
+    return None
+
+
+def suite_native(out_dir, quick):
+    print("\n=== suite: native (Google Benchmark) ===")
+    for name in ("bench_c", "bench_cpp"):
+        if not require(os.path.join(NATIVE_BUILD, name),
+                       "Build it: cd src/EventProp.Native.Benchmarks && "
+                       "cmake --preset release && cmake --build --preset release"):
+            return False
+
+    stamp = "quick" if quick else "full"
+    results = {}
+    for impl, exe in (("C", "bench_c"), ("Eigen", "bench_cpp")):
+        json_path = os.path.join(out_dir, f"{exe}_{stamp}.json")
+        cmd = [os.path.join(NATIVE_BUILD, exe),
+               "--benchmark_format=json", f"--benchmark_out={json_path}"]
+        if quick:
+            # Tiny/Small only; keeps XL (seconds-to-minutes per iteration) out.
+            cmd.append("--benchmark_filter=/(Tiny|Small)/")
+        ok, _ = run(cmd, cwd=NATIVE_BUILD, timeout=7200)
+        if not ok:
+            print(f"  {exe} run failed", file=sys.stderr)
+            return False
+        rec = os.path.join(out_dir, f"records_native_{impl.lower()}.json")
+        ok, _ = run([sys.executable, os.path.join(HERE, "from_google_benchmark.py"),
+                     json_path, "--impl", impl, "--out", rec], timeout=300)
+        results[impl] = ok
+    return all(results.values())
+
+
+def suite_dotnet(out_dir, quick):
+    print("\n=== suite: dotnet (BenchmarkDotNet) ===")
+    if not require(os.path.join(DOTNET_PROJ, "EventProp.Benchmarks.csproj"), "run ./build.sh release"):
+        return False
+
+    version = bdn_version()
+    if not version:
+        print("ERROR: cannot determine the BenchmarkDotNet version from "
+              "`dotnet list package`.\n  It is required provenance: a BDN version "
+              "change moves the headline Ratio 8-12%.", file=sys.stderr)
+        return False
+    print(f"  BenchmarkDotNet version: {version}")
+
+    # Invoke the BUILT BINARY, not `dotnet run`. Under `dotnet run` the parent
+    # process holds bin/, and BDN rebuilds the benchmark project into
+    # bin/Release/net10.0/<Name>-DefaultJob-1/ and launches that copy — the launch
+    # path does not exist, so it dies with DirectoryNotFoundException after a
+    # successful build. Verified: `dotnet run -c Release -- -a ... -f '*Tiny*'`
+    # fails this way; running the dll directly does not.
+    exe = os.path.join(DOTNET_PROJ, "bin", "Release", "net10.0",
+                       "EventProp.Benchmarks.dll")
+    if not require(exe, "run ./build.sh release"):
+        return False
+
+    cmd = ["dotnet", exe, "-a",
+           os.path.join(DOTNET_PROJ, "BenchmarkDotNet.Artifacts")]
+    if quick:
+        cmd += ["-f", "*Tiny*", "*Small*"]
+    ok, _ = run(cmd, cwd=DOTNET_PROJ, timeout=7200)
+    if not ok:
+        print("  dotnet benchmark run failed", file=sys.stderr)
+        return False
+
+    # Stale CSVs from deleted benchmarks (the Cross_* set) are skipped by the
+    # adapter's --skip list, not by wiping the directory: a wipe before the run
+    # means a failed run leaves the artifacts dir holding `--job Dry` placeholders
+    # (placeholder Mean, no OutputSpikes) that would adapt into fabricated records.
+
+    rec = os.path.join(out_dir, "records_dotnet.json")
+    ok, _ = run([sys.executable, os.path.join(HERE, "from_benchmarkdotnet.py"),
+                 DOTNET_ARTIFACTS, "--out", rec, "--bdn-version", version],
+                timeout=600)
+    if not ok:
+        return False
+
+    # Schema rule: PInvoke IS the C library; alias so the chain closes.
+    path = os.path.join(out_dir, "records_dotnet_c.json")
+    with open(rec) as f:
+        doc = json.load(f)
+    for r in doc["records"]:
+        if r["impl"] == "PInvoke":
+            r["impl"] = "C"
+    with open(path, "w") as f:
+        json.dump(doc, f, indent=2, sort_keys=True)
+    print(f"  aliased PInvoke -> C ({sum(1 for r in doc['records'] if r['impl']=='C')} records)")
+    return True
+
+
+def suite_python(out_dir, quick):
+    print("\n=== suite: python (pytest-benchmark) ===")
+    if not require(os.path.join(PY_BENCH, "test_kernel_benchmarks.py"),
+                   "the kernel benchmarks live in the repo"):
+        return False
+
+    env = {
+        "PYTHONPATH": f"{os.path.join(BENCH, 'EventProp.Python')}:"
+                      f"{os.path.join(BENCH, 'EventProp.Native.Python')}",
+        "DYLD_LIBRARY_PATH": os.path.join(BENCH, "EventProp.C", "build"),
+        "LD_LIBRARY_PATH": os.path.join(BENCH, "EventProp.C", "build"),
+    }
+    json_path = os.path.join(out_dir, "kernels.json")
+    cmd = [sys.executable, "-m", "pytest", "test_kernel_benchmarks.py",
+           "--benchmark-only", f"--benchmark-json={json_path}", "-q"]
+    if quick:
+        cmd += ["-k", "Tiny or Small"]
+    ok, _ = run(cmd, cwd=PY_BENCH, env=env, timeout=7200)
+    if not ok:
+        print("  python benchmark run failed", file=sys.stderr)
+        return False
+
+    rec = os.path.join(out_dir, "records_python.json")
+    ok, _ = run([sys.executable, os.path.join(HERE, "from_pytest_benchmark.py"),
+                 json_path, "--out", rec], timeout=300)
+    return ok
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
+    ap.add_argument("--out", default=os.path.join(SRC, "bench-results"))
+    ap.add_argument("--quick", action="store_true",
+                    help="Tiny/Small only; skips XL and Medium/Large burst")
+    ap.add_argument("--suites", nargs="+", default=["native", "dotnet", "python"],
+                    choices=["native", "dotnet", "python"])
+    ap.add_argument("--report-only", action="store_true",
+                    help="skip running; merge+report the records already in --out")
+    args = ap.parse_args()
+
+    os.makedirs(args.out, exist_ok=True)
+    failures = []
+
+    if not args.report_only:
+        runners = {"native": suite_native, "dotnet": suite_dotnet, "python": suite_python}
+        for name in args.suites:
+            if not runners[name](args.out, args.quick):
+                failures.append(name)
+
+    record_files = {
+        "native": [os.path.join(args.out, "records_native_c.json"),
+                   os.path.join(args.out, "records_native_eigen.json")],
+        "dotnet": [os.path.join(args.out, "records_dotnet_c.json")],
+        "python": [os.path.join(args.out, "records_python.json")],
+    }
+    inputs = [p for s in args.suites for p in record_files[s] if os.path.exists(p)]
+    if not inputs:
+        print("ERROR: no record files to merge", file=sys.stderr)
+        return 1
+
+    print("\n=== merge ===")
+    merged = os.path.join(args.out, "merged.json")
+    ok, _ = run([sys.executable, os.path.join(HERE, "merge.py")] + inputs
+                + ["--out", merged], timeout=600)
+    if not ok:
+        return 1
+
+    print("\n=== report ===")
+    report = os.path.join(args.out, "report.md")
+    ok, _ = run([sys.executable, os.path.join(HERE, "report.py"), merged,
+                 "--out", report], timeout=300)
+    if not ok:
+        return 1
+
+    print(f"\nreport: {report}")
+    if failures:
+        print(f"completed with failures in: {', '.join(failures)}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
