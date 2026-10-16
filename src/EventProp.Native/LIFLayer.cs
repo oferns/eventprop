@@ -34,6 +34,10 @@ public sealed unsafe class LIFLayer : Layer, IDisposable
 
     public LIFLayer(LIFLayerParameters parameters, double[]? weights)
     {
+        // The P/Invoke structs are hand-declared, so a header/library offset mismatch
+        // is invisible here and shows up as wrong numbers. Check once per process.
+        Api.EnsureAbiMatches();
+
         _params = parameters;
 
         if (weights is not null)

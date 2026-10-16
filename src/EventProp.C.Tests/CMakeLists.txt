@@ -79,6 +79,7 @@ add_executable(eventprop_tests
     test/batch_functions.cpp
     test/validate_input.cpp
     test/error_strings.cpp
+    test/abi_version.cpp
     test/free_functions.cpp
     test/alloc_fault_injection.cpp
     test/diag_functions.cpp

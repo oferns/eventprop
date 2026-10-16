@@ -19,7 +19,7 @@ This repository implements the **EventProp** algorithm — an event-based backpr
 | **EventProp.Native/** | C# (.NET 10) | P/Invoke bindings wrapping EventProp.C via `LibraryImport` |
 | **EventProp.Abstractions/** | C# (.NET 10) | Shared `Layer` contract + data carriers, implemented by both backends (no package deps) |
 | **EventProp/** | C# (.NET 10) | Self-contained, fully managed .NET implementation of EventProp.Python |
-| **EventProp.C.Tests/** | C++ (Google Test v1.15.2) | Unit tests for EventProp.C library (214 tests, ASan-compatible) |
+| **EventProp.C.Tests/** | C++ (Google Test v1.15.2) | Unit tests for EventProp.C library (220 tests, ASan-compatible) |
 | **EventProp.Tests/** | C# (.NET 10) | TUnit test suite for .NET projects (correctness + parity) |
 | **EventProp.Benchmarks/** | C# (.NET 10) | BenchmarkDotNet project comparing native vs managed .NET libraries |
 | **EventProp.Native.Benchmarks/** | C++ (Google Benchmark) | Benchmarks comparing EventProp.C vs EventProp.Python C++ code |
@@ -54,7 +54,7 @@ eventprop.net/
 │   ├── EventProp.Cpp.Wrapper/  # C++ Eigen core (convenience copy, no pybind11)
 │   ├── EventProp.Native/       # .NET P/Invoke bindings (C library) + native LIFLayer/LILayer
 │   ├── EventProp.Abstractions/ # Shared Layer contract (SpikesData, *Parameters, WeightInitializer)
-│   ├── EventProp.C.Tests/      # Google Test v1.15.2 suite for C library (214 tests)
+│   ├── EventProp.C.Tests/      # Google Test v1.15.2 suite for C library (220 tests)
 │   ├── EventProp/              # Managed .NET implementation
 │   ├── EventProp.Tests/        # TUnit test suite (correctness + parity)
 │   ├── EventProp.Benchmarks/   # BenchmarkDotNet (native vs managed .NET)
@@ -116,6 +116,11 @@ Targets **compose** — `clean.sh c cpp parity` cleans all three, and an unrecog
 ```
 
 It builds `EventProp.C.Tests` and `EventProp.Benchmarks` as well; the .NET benchmark dll is a prerequisite `run_benchmarks.ps1` checks for, so a build script that omits it can never satisfy its own check. The Python layers install into the interpreter that will **run** the suite (`run_all.py` invokes every tool with `sys.executable`), not into a `.venv` nobody uses — which is why the interpreter is a parameter and is printed.
+
+Two things the script has to do for the Python extension, both measured:
+
+- **It imports the vcvars environment.** CMake finds MSVC by itself (the generator probes the registry), so steps 2–6 work in a plain shell; setuptools' own MSVC probe does not, so step 8 died with `DistutilsPlatformError: Microsoft Visual C++ 14.0 or greater is required` while the same `pip install -e .` succeeded in a shell where `vcvarsall` had been called. `Enter-VisualStudioEnvironment` locates `vcvarsall.bat` with **vswhere** (the path contains the product year and the Insider channel, so hardcoding it is a portability bug), runs it through a **temp .bat** (`cmd /c "call \"…\" && set"` as one quoted string is the classic quoting trap — exit 255), and imports the whole environment. It also **re-reads `PATH` from the registry** first: the process `PATH` is a snapshot from shell start, and a machine-PATH defect fixed in the registry is invisible to every shell opened before the sign-in that applies it — that is how vcvars died with `\NVIDIA was unexpected at this time` on a machine whose PATH had already been repaired.
+- **It regenerates `_native.c` when `_native.pyx` is newer.** The extension compiles `_native.c`, Cython generates it from `_native.pyx`, and `_native.c` is **not tracked**. So a fresh clone has no `_native.c` at all, and an edited `.pyx` silently does not rebuild — the second is the stale-extension class the ABI check now refuses to import on (see *ABI: One Version Stamp, Checked by Every Consumer*).
 
 ### CMake Presets
 
@@ -205,7 +210,7 @@ cd src/EventProp.Tests && dotnet run -c Release -- --treenode-filter "/*/*/Backw
 # Presets (preferred)
 cd src/EventProp.C.Tests
 cmake --preset release && cmake --build --preset release
-ctest --preset release            # 214 tests; gtest_discover_tests registers them with CTest
+ctest --preset release            # 220 tests; gtest_discover_tests registers them with CTest
 ./build/eventprop_tests           # or run the binary directly
 ```
 
@@ -639,6 +644,57 @@ Post-spike times must be non-decreasing; the backward pass validates this and re
 - Free functions exist for every heap-backed type: `eventprop_free_spike_output`, `eventprop_free_sums_output`, `eventprop_free_maxima_output`, `eventprop_free_backward_output`, `eventprop_free_dropout_output`, `eventprop_free_gradient_output`
 - Dimension fields are removed from output structs — dimensions are inferred from input parameters
 
+### ABI: One Version Stamp, Checked by Every Consumer
+
+Every consumer of the C library **compiles its struct layouts into its own binary**: the
+Cython extension (`cdef extern struct` in `_native.pyx`), the .NET P/Invoke layer
+(`[StructLayout]` in `Api.cs` and `Batch.cs`), and the C++ consumers (the headers). A
+header change that moves a field offset is invisible at compile time **and** invisible at
+link time: the consumer keeps reading the offsets it compiled, against a library whose
+fields moved, and returns plausible-looking garbage. It does not fail to load.
+
+The measured instance is in *Python bindings on Windows*: a `_native.cp311-win_amd64.pyd`
+built against July headers, loaded against a library rebuilt from October headers, died
+with `Windows fatal exception: access violation` inside `spikes.py __getitem__` via
+`loss_layer._find_first_spikes` — 40 minutes into a benchmark run, in a frame with no hint
+that a header/binary offset mismatch was the cause. Nothing in the build checked that the
+extension was newer than the headers it was compiled from.
+
+**The surface** (`eventprop_abi.c`, declared in `eventprop.h`):
+
+| Symbol | Role |
+|---|---|
+| `EVENTPROP_ABI_VERSION` (macro) | the layout version. **Bump on any change to a public struct's layout** — field order, type, width, or the width of a field's type. Appending a field changes nothing a consumer reads, but it changes `sizeof`, which the size check reports, so bump for that too. |
+| `int eventprop_abi_version(void)` | the version this build was compiled with. A consumer compares it against the macro **as compiled from its own copy of the header**. |
+| `size_t eventprop_abi_struct_size(const char* name)` | `sizeof` of a public struct as compiled in the library; **0 for an unknown name**, so a consumer asking about a struct the library does not know fails its own check instead of reading 0 as a match. |
+
+**Where it is checked:** `_native.pyx` runs `abi_check()` at module import and raises
+`ImportError` naming both values — the extension refuses to import on a mismatch, so the
+failure is at import, not 40 minutes later. `EventProp.Native` runs
+`Api.EnsureAbiMatches()` (once per process) from the `LIFLayer`/`LILayer` constructors and
+from `Batch.ValidateFlat`, which is the shared choke point for all six friendly batch entry
+points, so direct non-layer callers are gated too. The C suite pins the library side:
+symbol exported, table **complete**, keys unique, unknown name → 0.
+
+**Why `sizeof` and not just a version int:** the version needs a human to remember to bump
+it; the size check is mechanical and fails on exactly the thing that broke (offsets). Both
+exist for that reason.
+
+**The 12-struct name list is deliberately duplicated** in `eventprop_abi.c`, `_native.pyx`,
+`Api.cs` and the three test suites (`test/abi_version.cpp`, `test/test_abi.py`,
+`AbiParityTests.cs`). Adding a struct to the headers must fail a test in **every** consumer,
+which is what forces the check to be extended — a single shared list would let one consumer
+stop covering the surface in silence.
+
+`.NET` detail worth knowing: `sizeof` works on the `Batch.cs` **ref structs** in an `unsafe`
+context (they are unmanaged), which is what makes a single size table possible across plain
+and ref structs; `Marshal.SizeOf<T>()` and `Unsafe.SizeOf<T>()` cannot take a ref struct as
+a generic argument.
+
+Tests: `AbiParityTests` (8), `test_abi.py` (7, including a **ctypes** load of the DLL, which
+reads the library's `sizeof` without consulting the extension's compiled offsets — so the
+comparison is genuinely cross-binary, not a tautology), `abi_version.cpp` (6).
+
 ### Spike Time Ordering: A Shared Contract, Not a Parity Gap
 
 Every spike list the library consumes must be **non-decreasing**. `eventprop_validate_input_no_v_th` enforces it on input times (`EVENTPROP_UNSORTED_SPIKE_TIMES`, 60) and `eventprop_backward_spikes` enforces it on post-spike times, because the currents there are rebuilt with one forward cursor over the post spikes.
@@ -773,7 +829,7 @@ Four Windows-specific facts, all measured:
 
 - **`os.add_dll_directory`, not `PATH`.** `_native.pyd` links `eventprop_c_api.dll`. Since Python 3.8, extension modules are loaded with `LOAD_LIBRARY_SEARCH_DEFAULT_DIRS`, whose search set is the extension's own directory, the process directory, the system directories, and directories registered with `os.add_dll_directory` — **`PATH` is excluded**. Measured on the same directory both times: `PATH` gives `ImportError: DLL load failed while importing _native`; `os.add_dll_directory` imports. `eventprop_c/_library_path.py` registers `EVENTPROP_C_LIB_DIR` (os.pathsep-split) and then the repo layout — `build/`, `build/Release`, `build/Debug` (Release because MSVC is multi-config) — and `__init__.py` calls it **before** `from ._native import`. The handles are kept in a module global, because `os.add_dll_directory`'s handle *removes* the directory when it is finalised. No-op on POSIX, where the extension carries an rpath. Pinned by `test/test_library_path.py`.
 - **The extension needs `/std:c11` *and* `/experimental:c11atomics`.** `_native.c` includes `eventprop_batch.h` → `<stdatomic.h>`. distutils passes `/TC` with no language standard, so `vcruntime_c11_stdatomic.h(16)` `#error`s "C atomics require C11 or later"; MSVC needs the atomics switch on top of that. `setup.py` supplies the pair. Without them the extension cannot be compiled at all.
-- **A stale `.pyd` is a memory-corruption bug, not a staleness nuisance.** Cython compiles the `SpikeOutput` / `MaximaOutput` struct layouts out of `eventprop.h`. An extension built against July's headers and run against October's reads those structs at July offsets: the suite died with `Windows fatal exception: access violation` inside `spikes.py __getitem__` via `loss_layer._find_first_spikes`. **Nothing in the build checks that the extension is newer than the headers** — on any platform.
+- **A stale `.pyd` is a memory-corruption bug, not a staleness nuisance.** Cython compiles the `SpikeOutput` / `MaximaOutput` struct layouts out of `eventprop.h`. An extension built against July's headers and run against October's reads those structs at July offsets: the suite died with `Windows fatal exception: access violation` inside `spikes.py __getitem__` via `loss_layer._find_first_spikes`. **Nothing in the build checked that the extension is newer than the headers** — on any platform. It now does, in three places: `_native.pyx` runs `abi_check()` at import and raises `ImportError` naming both the compiled and the loaded values; `build.ps1` regenerates `_native.c` when `_native.pyx` is newer; and `EventProp.Native` gates its layer constructors and batch entry points on `Api.EnsureAbiMatches()`. See *ABI: One Version Stamp, Checked by Every Consumer*.
 - **`vcvarsall.bat` failing is often the machine, not the repo.** Symptom: `pip install -e .` reports "Microsoft Visual C++ 14.0 or greater is required" with VS installed. Cause on this machine: a machine-PATH entry with an unbalanced quote (`C:\Program Files\WSL"`), which makes vcvars' own batch parsing die (`\NVIDIA was unexpected at this time`). Check the raw value — `(Get-Item 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment').GetValue('Path', $null, 'DoNotExpandEnvironmentNames')` — for a `"` before blaming the toolchain, and never fix it with `setx PATH "%PATH%"` (merges machine+user into one `REG_SZ`, expands every `%placeholder%`, truncates at 1024 chars).
 
 ### Layer Chain Flow
@@ -993,6 +1049,8 @@ Both now use presets, check every step, and summarise with a real exit code. Fou
 - PowerShell **drops empty strings** from a native command's argument array. `run_all.py` documents "pass `''` to skip" for `--reports-dir` / `--benchmarks-md`; from PowerShell that is unreachable — `-ReportsDir ''` arrives as a bare `--reports-dir` and the runner silently uses the default. Measured: a scratch run overwrote the committed `BENCHMARKS.md` with a single-suite report. Fix: `-NoReports` / `-NoBenchmarksMd`, which pass the single-token `--reports-dir=` form.
 - `where bash` returns `C:\WINDOWS\System32\bash.exe` (**WSL**) before Git's. The same `submodule-state.sh` call succeeded from Git bash and exited 1 from a PATH where System32 precedes Git's `usr\bin` — and Git bash needs that directory on `PATH` for coreutils, failing with `dirname: command not found` without it.
 - `Tee-Object` writes **UTF-16LE** on 5.1, so a captured log greps clean and reads as an empty run. Convert with `iconv -f UTF-16LE -t UTF-8`.
+- `cmd /c "… && cmake --build … & echo EXIT=%ERRORLEVEL%"` is a **phantom success**: `%ERRORLEVEL%` expands at **parse** time, so it prints the code that was there before the command ran, and `&` runs the echo even when the `&&` chain stopped. It reported `BUILD_C_EXIT=0` twice while `vcvarsall` had failed and **nothing had compiled** — verified afterwards by the missing `.obj` and an old DLL timestamp. Real checks need `if errorlevel 1` in a .bat (or `$LASTEXITCODE` in PowerShell, read immediately after the command).
+- A shell's `PATH` is a **snapshot from process start**. A machine-PATH defect fixed in the registry is invisible to every shell opened before the sign-in that applies it, so `vcvarsall` dies parsing the stale value (`\NVIDIA was unexpected at this time`, exit 255) on a machine whose PATH is already repaired. `build.ps1` re-reads `PATH` from the registry for exactly this reason.
 
 `scripts/bench/run_all.py` had one real defect: `--out` / `--reports-dir` / `--benchmarks-md` were used verbatim, and every suite runs with its own cwd, so a relative `--out` is opened relative to the suite. Measured with `--out ../bench-test`: pytest tried to open `../bench-test\kernels.json` under `src/EventProp.Python.Benchmarks` and the python suite failed in 0s. The defaults are built from `SRC` and absolute, which is why it never surfaced. All three are resolved with `os.path.abspath` at parse time.
 
@@ -1000,7 +1058,7 @@ Both now use presets, check every step, and summarise with a real exit code. Fou
 
 - **macOS** — developed and tested
 - **Linux** — intended support. **Not exercised by the benchmark pipeline yet**, and two things this session changed land there first: the `-march=native` **PUBLIC** propagation on `eventprop_eigen_core` (it was `PRIVATE`, the same aligned-allocator ABI mismatch that produced heap corruption on Windows — see *SIMD: One ISA Level*), and the SIMD level now decided by a CPUID+XCR0 probe instead of by reading `/proc/cpuinfo`.
-- **Windows** — supported via MSVC + CMake; validated end to end 2026-10-16 on MSVC 19.52 / VS 18: C tests 214/214, parity 105/105, .NET 374/374, `eventprop_c` Python 29/29, `werror` preset zero warnings, and a full benchmark run (46m 40s) producing `bench-reports/report_windows-amd64.md`. CMake's VS generator is **multi-config**, so artifacts land in `build\Release\`, not `build\` — every path in the scripts and in `EventProp.Native.csproj` has to say so.
+- **Windows** — supported via MSVC + CMake; validated end to end 2026-10-16 on MSVC 19.52 / VS 18: C tests 220/220, parity 105/105, .NET 382/382, `eventprop_c` Python 29/29, `werror` preset zero warnings, and a full benchmark run (46m 40s) producing `bench-reports/report_windows-amd64.md`. CMake's VS generator is **multi-config**, so artifacts land in `build\Release\`, not `build\` — every path in the scripts and in `EventProp.Native.csproj` has to say so.
   Windows traps, each of which has already cost a session:
   - `where bash` → `System32\bash.exe` (**WSL**) before Git's; WSL bash cannot see `G:\` as a Windows tree. Resolve Git's bash from `git.exe`'s location and prepend its directory for coreutils.
   - PowerShell 5.1: native stderr + `EAP=Stop` is a terminating `NativeCommandError`; `Tee-Object` writes UTF-16LE; empty-string arguments to native commands are dropped.

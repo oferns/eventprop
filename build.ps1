@@ -27,7 +27,7 @@
 #   number.
 #
 # What it builds that the previous version did not
-#   - EventProp.C.Tests (the 214-test Google Test suite)
+#   - EventProp.C.Tests (the 220-test Google Test suite)
 #   - EventProp.Benchmarks (the .NET benchmark dll)
 #   The second is a prerequisite run_benchmarks.ps1 checks for, so `-Build` could
 #   never satisfy the check its own script performs.
@@ -132,6 +132,93 @@ function Get-GitBash {
     return $null
 }
 
+function Get-RegistryPathValue {
+    <#
+    .SYNOPSIS
+        Read a PATH value straight from the registry, unexpanded.
+
+    The process PATH is a snapshot taken when the shell started. On this machine that
+    mattered: the machine PATH had a broken entry (an unbalanced quote) that was fixed
+    in the registry, and every shell opened before the sign-in that applies it kept the
+    broken one. vcvarsall dies parsing it - "\NVIDIA was unexpected at this time", exit
+    255 - so a script that inherits PATH inherits the defect. Reading the registry gets
+    the state the machine is actually in.
+    #>
+    param([Parameter(Mandatory)] [string]$Key)
+
+    $out = & reg.exe query $Key /v Path 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $out) { return $null }
+    foreach ($line in $out) {
+        if ($line -match 'REG_(EXPAND_)?SZ\s+(.*)$') { return $matches[2].Trim() }
+    }
+    return $null
+}
+
+function Enter-VisualStudioEnvironment {
+    param([string]$Arch = "x86_amd64")
+
+    # 1. PATH from the registry, machine then user, expanded.
+    $machinePath = Get-RegistryPathValue -Key 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment'
+    $userPath    = Get-RegistryPathValue -Key 'HKCU\Environment'
+    if ($machinePath) {
+        $env:PATH = [Environment]::ExpandEnvironmentVariables($machinePath)
+        Write-Host "  PATH read from the registry (machine), not inherited from this shell" -ForegroundColor DarkGray
+    }
+    if ($userPath) {
+        $env:PATH = $env:PATH + ';' + [Environment]::ExpandEnvironmentVariables($userPath)
+    }
+
+    # 2. vcvarsall, located by vswhere (the VS Installer), not by a hardcoded path: the
+    #    directory name carries the product year and the Insider channel.
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+    $vcvars = $null
+    if (Test-Path $vswhere) {
+        $found = & $vswhere -latest -prerelease -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -find "VC\Auxiliary\Build\vcvarsall.bat" 2>$null
+        if ($found) { $vcvars = @($found)[0] }
+    }
+    if (-not $vcvars -or -not (Test-Path $vcvars)) {
+        Write-Host "  vcvarsall.bat not found via vswhere - leaving the environment as-is" -ForegroundColor Yellow
+        Write-Host "  the CMake steps may still work; the Python extension build will not" -ForegroundColor Yellow
+        return $false
+    }
+
+    # 3. Run it through a temp .bat and capture the environment it produces. Passing
+    #    `call "..." && set` as one quoted string to cmd.exe is the classic quoting trap
+    #    (exit 255, "The syntax of the command is incorrect"); a file has no quoting at
+    #    all. `set` after the call prints the environment vcvars built.
+    $dumpScript = Join-Path $env:TEMP "eventprop_vcvars_dump.bat"
+    Set-Content -Path $dumpScript -Value "@echo off`r`ncall `"$vcvars`" $Arch`r`nset" -Encoding Ascii
+    $dump = & cmd.exe /c "`"$dumpScript`""
+    $dumpExit = $LASTEXITCODE
+    Remove-Item $dumpScript -ErrorAction SilentlyContinue
+    if ($dumpExit -ne 0) {
+        Write-Host "  vcvarsall $Arch failed (exit $dumpExit)" -ForegroundColor Yellow
+        Write-Host "  PATH it was given starts: $($env:PATH.Substring(0, [Math]::Min(80, $env:PATH.Length)))" -ForegroundColor DarkGray
+        return $false
+    }
+    foreach ($line in $dump) {
+        $i = $line.IndexOf('=')
+        if ($i -lt 1) { continue }
+        Set-Item -Path "Env:$($line.Substring(0, $i))" -Value $line.Substring($i + 1) -ErrorAction SilentlyContinue
+    }
+    Write-Host "  MSVC $env:VCToolsVersion ($Arch) environment imported" -ForegroundColor Green
+    return $true
+}
+
+# --- MSVC environment ---------------------------------------------------------
+# CMake finds the compiler by itself (the generator probes the registry), so the CMake
+# steps work in a plain shell. The Python extension build does NOT: setuptools' MSVC
+# probe needs the vcvars environment, and without it `pip install -e .` dies with
+#
+#   DistutilsPlatformError: Microsoft Visual C++ 14.0 or greater is required
+#
+# Measured: `build.ps1 release` passed steps 2-6 and failed step 8 with exactly that
+# message, while the same pip command succeeded in a shell where vcvarsall had been
+# called. The script therefore imports the vcvars environment up front, so every step -
+# CMake and pip alike - sees one compiler.
+
 # --- 1. Submodule state -------------------------------------------------------
 # The reference submodule is read-only and needs local modifications to build.
 # scripts/submodule-state.sh is the single owner of that state, so call it rather
@@ -184,6 +271,10 @@ if ($SkipSubmodule) {
 
 # --- 2-3. C library, then the Eigen core --------------------------------------
 # Order matters: the consumers import pre-built artifacts from these two.
+Write-Host ""
+Write-Host "[env] MSVC environment for the Python extension build" -ForegroundColor Cyan
+Enter-VisualStudioEnvironment | Out-Null
+
 Write-Step "2/9" "C library (EventProp.C)"
 Invoke-CMakePreset "src\EventProp.C" $Preset "eventprop_c_api.dll (build\$Preset on MSVC)" | Out-Null
 
@@ -194,7 +285,7 @@ Invoke-CMakePreset "src\EventProp.Cpp.Wrapper" $Preset "eventprop_eigen_core + e
 # EventProp.C.Tests ships `release` and `asan` presets only, so there is nothing to
 # do in debug. Say so: the previous version did not build this project at all, and a
 # silent omission reads as "tests passed".
-Write-Step "4/9" "C unit tests (EventProp.C.Tests, 214 tests)"
+Write-Step "4/9" "C unit tests (EventProp.C.Tests, 220 tests)"
 if ($Preset -eq "release") {
     Invoke-CMakePreset "src\EventProp.C.Tests" "release" "eventprop_tests.exe  (ctest --preset release)" | Out-Null
 } else {
@@ -252,6 +343,25 @@ if ($SkipPython) {
     Push-Location (Join-Path $ScriptDir "src\EventProp.Native.Python")
     $py = Get-PyFor (Get-Location)
     Write-Host "  interpreter: $py  $(& $py --version 2>&1)" -ForegroundColor DarkGray
+
+    # The extension compiles _native.c, which Cython generates from _native.pyx, and
+    # _native.c is NOT tracked - it is a build artifact. Two consequences: a fresh clone
+    # has no _native.c at all, and an edited .pyx does not rebuild. The second is the
+    # stale-extension class this project measured (a .pyd compiled from old headers reads
+    # struct fields at the wrong offsets, and the ABI check in _native.pyx now refuses to
+    # import when that happens), so regenerate whenever the .pyx is newer than the .c.
+    $pyx = Join-Path (Get-Location) "eventprop_c\_native.pyx"
+    $cfile = Join-Path (Get-Location) "eventprop_c\_native.c"
+    $needCython = -not (Test-Path $cfile)
+    if ((Test-Path $cfile) -and (Test-Path $pyx)) {
+        $needCython = (Get-Item $pyx).LastWriteTime -gt (Get-Item $cfile).LastWriteTime
+    }
+    if ($needCython) {
+        Invoke-Step "cython _native.pyx" { & $py -m cython "eventprop_c\_native.pyx" } | Out-Null
+    } else {
+        Write-Host "  _native.c is newer than _native.pyx - skipping cython" -ForegroundColor DarkGray
+    }
+
     Invoke-Step "pip install -e . (EventProp.Native.Python)" {
         & $py -m pip install -e . --no-build-isolation
     } | Out-Null

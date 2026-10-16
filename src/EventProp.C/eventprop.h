@@ -14,6 +14,29 @@
 extern "C" {
 #endif
 
+/** ABI version of the public struct layouts declared in this header.
+ *
+ *  Every consumer COMPILES these layouts into its own binary: the Cython extension
+ *  (`_native.pyx` cdef extern blocks), the .NET P/Invoke layer (`EventProp.Native`,
+ *  `[StructLayout]` structs) and the C++ consumers. A change that moves a field
+ *  offset is invisible at link time — the consumer keeps reading the offsets it
+ *  compiled, against a library whose fields moved, and reads plausible-looking
+ *  garbage instead of failing to load. See eventprop_abi.c for the measured
+ *  failure this guards.
+ *
+ *  BUMP on any change to a public struct's layout: field order, field type, field
+ *  width, or the width of a field's type. Appending a field changes nothing a
+ *  consumer reads, but it changes `sizeof`, which `eventprop_abi_struct_size`
+ *  reports — so bump for that too.
+ *
+ *  Consumers check it at load: `eventprop_abi_version()` must equal this macro as
+ *  compiled from the consumer's own copy of this header, and
+ *  `eventprop_abi_struct_size(name)` must equal the consumer's own `sizeof` for
+ *  every struct it embeds by value. Both are checked on import by the Cython layer
+ *  and at layer construction by `EventProp.Native`.
+ */
+#define EVENTPROP_ABI_VERSION 1
+
 /** Error codes returned by EventProp functions.
  *  Set via the `error_no` field on output structs when validation is enabled */
 typedef enum EventPropError {
@@ -230,6 +253,17 @@ EventPropError eventprop_validate_input_no_v_th(EventPropInput input);
  * Returns "Unknown error" for out-of-range codes.
  */
 const char* eventprop_error_string(int error_no);
+
+/** ABI self-check — see EVENTPROP_ABI_VERSION. Returns the ABI version this build
+ * of the library was compiled with. A consumer compares it against the macro it
+ * compiled from its own copy of this header. */
+int eventprop_abi_version(void);
+
+/** sizeof of a public struct, as compiled inside the library. `struct_name` is the
+ * exact typedef name, e.g. "SpikeOutput". Returns 0 for a NULL pointer or an
+ * unknown name — a consumer asking about a struct the library does not know is
+ * itself a mismatch, so 0 is the value that makes its check fail loudly. */
+size_t eventprop_abi_struct_size(const char* struct_name);
 
 #ifdef __cplusplus
 }

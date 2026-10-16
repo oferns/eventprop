@@ -31,6 +31,8 @@ from ._native import (
     compute_maxima_batch,
     backward_maxima_batch_accumulate as backward_maxima_batch,
     dropout_spikes_batch,
+    abi_check,
+    abi_struct_sizes,
 )
 from .spikes import Spikes, SpikesVector, Maxima, MaximaVector
 
@@ -86,6 +88,9 @@ __all__ = [
     'compute_maxima_batch',
     'backward_maxima_batch',  # alias for backward_maxima_batch_accumulate
     'dropout_spikes_batch',
+    # ABI self-check (it also runs at import; exposed for tests and diagnostics)
+    'abi_check',
+    'abi_struct_sizes',
     # Python data classes (matching pybind11 interface)
     'Spikes',
     'SpikesVector',

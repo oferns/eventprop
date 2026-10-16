@@ -14,6 +14,7 @@ Philosophy:
 import numpy as np
 cimport numpy as cnp
 from libc.stdlib cimport free, malloc
+from libc.stddef cimport size_t
 
 cnp.import_array()
 
@@ -28,7 +29,11 @@ cnp.import_array()
 
 cdef extern from "eventprop.h":
 
-
+    # ABI self-check. The library reports the version and struct sizes it was
+    # COMPILED with; this extension compares them against its own compiled layouts
+    # at import (section 3c).
+    int eventprop_abi_version()
+    size_t eventprop_abi_struct_size(const char* struct_name)
 
     ctypedef struct MatrixView:
         const double* data
@@ -244,6 +249,94 @@ cdef extern from "eventprop_diag.h":
     void eventprop_free_lambda_i_trace_output(LambdaITraceOutput output)
 
     LambdaITraceOutput eventprop_compute_lambda_i_trace(const LambdaITraceInput input)
+
+
+# ---------------------------------------------------------------------------
+# 3c. ABI self-check — refuse to import on a header/binary layout mismatch
+# ---------------------------------------------------------------------------
+
+cdef extern from *:
+    """
+    /* The ABI version as compiled INTO this extension — i.e. read out of the copy of
+       eventprop.h this extension was built from. Defined here rather than mirrored as
+       a hand-maintained Cython constant so there is no second value that can drift
+       from the header. */
+    #include "eventprop.h"
+    static int eventprop_compiled_abi_version(void) {
+        return EVENTPROP_ABI_VERSION;
+    }
+    """
+    int eventprop_compiled_abi_version()
+
+
+def abi_struct_sizes():
+    """sizeof of every public struct, as compiled INTO this extension.
+
+    The extension embeds these layouts (the cdef extern structs above), so these are
+    the offsets its own code reads. abi_check() compares them against the library's.
+    """
+    return {
+        "EventPropInput": <Py_ssize_t>sizeof(EventPropInput),
+        "SpikeOutput": <Py_ssize_t>sizeof(SpikeOutput),
+        "SumsOutput": <Py_ssize_t>sizeof(SumsOutput),
+        "MaximaOutput": <Py_ssize_t>sizeof(MaximaOutput),
+        "BackwardOutput": <Py_ssize_t>sizeof(BackwardOutput),
+        "SpikesBatch": <Py_ssize_t>sizeof(SpikesBatch),
+        "MaximaBatch": <Py_ssize_t>sizeof(MaximaBatch),
+        "BackwardsBatch": <Py_ssize_t>sizeof(BackwardsBatch),
+        "GradientOutput": <Py_ssize_t>sizeof(GradientOutput),
+        "DropoutOutput": <Py_ssize_t>sizeof(DropoutOutput),
+        "DropoutBatch": <Py_ssize_t>sizeof(DropoutBatch),
+        "AccumulatedBackwardResult": <Py_ssize_t>sizeof(AccumulatedBackwardResult),
+    }
+
+
+def abi_check():
+    """(ok, details) — this extension's compiled layouts vs the loaded library's.
+
+    Returns, never raises: the caller decides what to do. Exposed for tests and
+    diagnostics; the import-time check below is what protects users of the package.
+    """
+    cdef int compiled_v = eventprop_compiled_abi_version()
+    cdef int library_v = eventprop_abi_version()
+    cdef size_t library_size
+    mismatches = []
+    if compiled_v != library_v:
+        mismatches.append(f"abi_version: extension compiled={compiled_v}, library={library_v}")
+    own_sizes = abi_struct_sizes()
+    for name, own_size in own_sizes.items():
+        library_size = eventprop_abi_struct_size(name.encode("utf-8"))
+        if <Py_ssize_t>library_size != own_size:
+            mismatches.append(f"{name}: extension compiled sizeof={own_size}, "
+                              f"library sizeof={library_size}")
+    return (not mismatches), {
+        "compiled_abi_version": compiled_v,
+        "library_abi_version": library_v,
+        "sizes": own_sizes,
+        "mismatches": mismatches,
+    }
+
+
+# Runs at import. A layout mismatch is not a soft condition: the extension reads struct
+# fields at the offsets it compiled, so a mismatch means every number it returns comes
+# from the wrong offsets. Measured, not theoretical — a _native.cp311-win_amd64.pyd
+# built against July headers, loaded against a library rebuilt from October headers,
+# produced an access violation inside spikes.py __getitem__ via loss_layer._find_first_spikes,
+# 40 minutes into a benchmark run, in a frame with no hint that a header/binary offset
+# mismatch was the cause. Nothing in the build checked that the extension was newer than
+# the headers it was compiled from. Refusing to import names both values at the moment
+# the mismatch exists.
+_abi_ok, _abi_details = abi_check()
+if not _abi_ok:
+    raise ImportError(
+        "eventprop_c._native: ABI mismatch between this extension and the EventProp C "
+        "library it loaded. The extension compiled struct layouts that the loaded "
+        "library does not have, so every value it returns would be read from the wrong "
+        "offsets. Rebuild the extension against the current headers: "
+        "`pip install -e src/EventProp.Native.Python --no-build-isolation`. "
+        "Mismatches: " + "; ".join(_abi_details["mismatches"])
+    )
+del _abi_ok, _abi_details
 
 
 # ---------------------------------------------------------------------------

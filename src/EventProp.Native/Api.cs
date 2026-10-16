@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace CW.EventProp.Native;
 
@@ -242,6 +243,116 @@ public static unsafe partial class Api
     /// <summary>Get human-readable error string for an error code.</summary>
     [LibraryImport(Lib, EntryPoint = "eventprop_error_string")]
     private static unsafe partial IntPtr NativeErrorString(int errorNo);
+
+    // ── ABI self-check ────────────────────────────────────────────
+    //
+    // This assembly declares the C structs BY HAND — [StructLayout] here and in
+    // Batch.cs — so a header change that moves a field offset is invisible at compile
+    // time and invisible at the call site: the marshalling reads the offsets this
+    // assembly compiled, against a library whose fields moved, and returns
+    // plausible-looking garbage. The Cython layer measured exactly that failure
+    // (AGENTS.md, "Python bindings on Windows": a .pyd built against July headers,
+    // loaded against an October library, faulted 40 minutes later inside
+    // spikes.py __getitem__). The P/Invoke layer has the same exposure, so it gets
+    // the same guard.
+    //
+    // CompiledAbiVersion is the version these declarations were written against; keep
+    // it in step with EVENTPROP_ABI_VERSION in eventprop.h. The struct-size check
+    // needs no such discipline, which is why both halves exist.
+
+    /// <summary>The ABI version these struct declarations were written against. Keep in step with EVENTPROP_ABI_VERSION in eventprop.h.</summary>
+    public const int CompiledAbiVersion = 1;
+
+    [LibraryImport(Lib)]
+    private static partial int eventprop_abi_version();
+
+    [LibraryImport(Lib)]
+    private static partial nint eventprop_abi_struct_size(byte* structNameUtf8);
+
+    /// <summary>The ABI version the loaded library was compiled with.</summary>
+    public static int LibraryAbiVersion() => eventprop_abi_version();
+
+    /// <summary>sizeof of a public struct as compiled inside the library. 0 for a name the library does not know.</summary>
+    public static int LibraryStructSize(string name)
+    {
+        int byteCount = Encoding.UTF8.GetByteCount(name);
+        Span<byte> buffer = stackalloc byte[byteCount + 1];   // +1 for the NUL
+        Encoding.UTF8.GetBytes(name, buffer);
+        buffer[byteCount] = 0;
+        fixed (byte* p = buffer)
+        {
+            return (int)eventprop_abi_struct_size(p);
+        }
+    }
+
+    /// <summary>sizeof of every C struct this assembly declares, as compiled here.</summary>
+    /// <remarks>
+    /// The key set is the public surface a consumer embeds by value, and it is
+    /// deliberately duplicated in eventprop_abi.c, _native.pyx and the test suites:
+    /// adding a struct to the headers must fail a test in every consumer, which is what
+    /// forces this check to be extended. sizeof works on the Batch.cs ref structs
+    /// because this is an unsafe context and they are unmanaged.
+    /// </remarks>
+    public static IReadOnlyDictionary<string, int> CompiledStructSizes() => new Dictionary<string, int>
+    {
+        ["EventPropInput"] = sizeof(EventPropInput),
+        ["SpikeOutput"] = sizeof(SpikeOutput),
+        ["SumsOutput"] = sizeof(SumsOutput),
+        ["MaximaOutput"] = sizeof(MaximaOutput),
+        ["BackwardOutput"] = sizeof(BackwardOutput),
+        ["SpikesBatch"] = sizeof(Batch.SpikesBatch),
+        ["MaximaBatch"] = sizeof(Batch.MaximaBatch),
+        ["BackwardsBatch"] = sizeof(Batch.BackwardsBatch),
+        ["GradientOutput"] = sizeof(Batch.GradientOutput),
+        ["AccumulatedBackwardResult"] = sizeof(Batch.AccumulatedBackwardResult),
+        ["DropoutOutput"] = sizeof(Batch.DropoutOutput),
+        ["DropoutBatch"] = sizeof(Batch.DropoutBatch),
+    };
+
+    /// <summary>Compare this assembly's compiled layouts against the loaded library. Never throws.</summary>
+    public static (bool Ok, IReadOnlyList<string> Mismatches) AbiCheck()
+    {
+        var mismatches = new List<string>();
+        int libraryVersion = eventprop_abi_version();
+        if (libraryVersion != CompiledAbiVersion)
+            mismatches.Add($"abi_version: assembly compiled={CompiledAbiVersion}, library={libraryVersion}");
+
+        foreach (var (name, compiledSize) in CompiledStructSizes())
+        {
+            int librarySize = LibraryStructSize(name);
+            if (librarySize != compiledSize)
+                mismatches.Add($"{name}: assembly compiled sizeof={compiledSize}, library sizeof={librarySize}");
+        }
+        return (mismatches.Count == 0, mismatches);
+    }
+
+    private static bool _abiChecked;
+    private static readonly object _abiLock = new();
+
+    /// <summary>
+    /// Run <see cref="AbiCheck"/> once per process and throw on a mismatch. Called from
+    /// the layer constructors, so a mismatch surfaces at construction naming both
+    /// values — not as a wrong number, and not as an access violation minutes later.
+    /// </summary>
+    public static void EnsureAbiMatches()
+    {
+        if (_abiChecked) return;
+        lock (_abiLock)
+        {
+            if (_abiChecked) return;
+            var (ok, mismatches) = AbiCheck();
+            if (!ok)
+            {
+                throw new InvalidOperationException(
+                    "EventProp C ABI mismatch: this assembly's P/Invoke struct declarations do not " +
+                    "match the loaded eventprop_c_api library, so every marshalled value would be read " +
+                    "from the wrong offsets. Rebuild EventProp.Native against the current headers, and " +
+                    "check that the loaded library is a build output of this repo. Mismatches: " +
+                    string.Join("; ", mismatches));
+            }
+            _abiChecked = true;
+        }
+    }
 
     public static string GetErrorString(EventPropError error)
     {

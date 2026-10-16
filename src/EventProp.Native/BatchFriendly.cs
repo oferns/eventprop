@@ -264,6 +264,12 @@ public static unsafe partial class Batch
     private static void ValidateFlat(int batchSize, ReadOnlySpan<int> nSpikesPerSample,
         int timesLength, int sourcesLength)
     {
+        // Every friendly batch entry point runs through here, so this is the single
+        // place to check the ABI: the batch structs are hand-declared ref structs, and
+        // a header/library offset mismatch would otherwise show up as wrong numbers
+        // from a marshalled struct. Once per process; the fast path is a bool read.
+        Api.EnsureAbiMatches();
+
         if (batchSize <= 0)
             throw new ArgumentException("Batch size must be positive", nameof(nSpikesPerSample));
         if (timesLength != sourcesLength)
