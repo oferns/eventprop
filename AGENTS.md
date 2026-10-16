@@ -106,6 +106,17 @@ clean.sh -full        # also delete the reference binary, forcing a rebuild
 
 Targets **compose** — `clean.sh c cpp parity` cleans all three, and an unrecognised argument is a hard error (exit 2), not a silent no-op. `-full` takes effect only when `python`/`all` is selected, since the reference binary lives in the Python target.
 
+**Windows** — `build.ps1` is the same contract for MSVC: presets, the same dependency order, per-step exit codes, and a failure list that ends in a real exit code.
+
+```powershell
+.\build.ps1 release                          # C -> Eigen core -> C.Tests -> Parity -> Benchmarks
+.\build.ps1 debug                            # C.Tests skipped: its presets are release + asan
+.\build.ps1 -Clean                           # delete each build dir first (flag changes, cache leaks)
+.\build.ps1 -PythonExe python                # which interpreter gets the two Python layers
+```
+
+It builds `EventProp.C.Tests` and `EventProp.Benchmarks` as well; the .NET benchmark dll is a prerequisite `run_benchmarks.ps1` checks for, so a build script that omits it can never satisfy its own check. The Python layers install into the interpreter that will **run** the suite (`run_all.py` invokes every tool with `sys.executable`), not into a `.venv` nobody uses — which is why the interpreter is a parameter and is printed.
+
 ### CMake Presets
 
 All six first-party CMake projects declare `cmake_minimum_required(VERSION 3.21)`. **Five** ship a `CMakePresets.json` — `EventProp.C`, `EventProp.C.Tests`, `EventProp.Cpp.Wrapper`, `EventProp.Native.ParityTests`, `EventProp.Native.Benchmarks`. The sixth, `EventProp.Cpp.Wrapper/benchmarks/`, is a standalone project with no presets; configure it by hand. Presets are the supported way to drive the other five; the hand-typed `mkdir build && cd build` sequences are kept only as a fallback.
@@ -223,6 +234,8 @@ cmake --preset release && cmake --build --preset release
 ./build/parity_test ../../EventProp.C/build/libeventprop_c_api.dylib
 ```
 > **Note**: requires the `release` presets of `EventProp.C` (SHARED library) and `EventProp.Cpp.Wrapper` (Eigen core) — both are imported from their `./build` directories at configure time, so configuring before them fails with a `FATAL_ERROR` naming the missing library.
+
+> **Note (Windows)**: the exe lands in `src/EventProp.C/build/Release/Release/` — its `RUNTIME_OUTPUT_DIRECTORY` plus the multi-config generator's config dir, not `ParityTests/build`. It links `eventprop_c_api.dll`, and MSYS bash reports a Windows exe whose DLL cannot be resolved as **"No such file or directory" (exit 127)**, which reads like a missing build product. Run it from a directory containing the DLL, or with that directory on `PATH` (a native process honours `PATH`; a Python extension does not — see *Python bindings on Windows*).
 
 ### Native Benchmarks (C vs C++) — Standard Workflow
 
@@ -364,12 +377,21 @@ The pipeline is six Python scripts in `scripts/bench/` (stdlib only — no pip i
 iteration takes the minimum of ONE iteration. Measured on macOS/arm64: native full suite
 incl. XL is 162 s per binary; the ~30 min full run is dominated by .NET's 75 benchmarks.
 
-### TEMPORARY — cross-platform status of the benchmark pipeline
+**That dominance is per-platform, and on Windows it is inverted.** Full run, Windows/x64
+(10 cores), 2026-10-16 at `8ef41a9`: native **7m 04s** (`bench_c` 3m 22s, `bench_cpp`
+3m 40s), dotnet **16m 07s** (95 benchmarks, BDN global total 16m 05s), python
+**22m 26s** (96 kernel benchmarks), total wall clock **46m 40s**. The python suite is the
+longest on Windows — 40% over dotnet, and ~11x its macOS wall clock (~2 min). Not
+diagnosed; the number is the finding. Quote timings per platform, never as one number.
 
-**Built and validated on macOS/arm64.** Windows and Linux have not been run. The
-platform-dependent paths in `run_all.py` are now resolved at runtime (see "fixed" below),
-so the Windows/Linux clone has a real chance of working first try — but "chance" is not
-"tested", and the last item in this section is the only thing that settles it.
+### Cross-platform status of the benchmark pipeline
+
+**Validated on macOS/arm64 and Windows/x64. Linux has not been run.** The Windows
+validation is a full run (all three suites, XL included, 46m 40s) producing
+`bench-reports/report_windows-amd64.md`; the per-pair geomeans against
+`report_darwin-arm64.md` are in that commit's message. It is also the run that found the
+UTF-8/cp1252 adapter defect (see *Fixed — BenchmarkDotNet adapter*), the relative-`--out`
+defect, and the Python DLL-loading defect (see *Python bindings on Windows*).
 
 **Fixed — platform-dependent paths now resolve at runtime:**
 
@@ -382,11 +404,19 @@ so the Windows/Linux clone has a real chance of working first try — but "chanc
 - **`PYTHONPATH` separator.** Was a hardcoded `:` — on Windows (`os.pathsep` is `;`) that
   silently made the second entry unimportable, so the reference submodule import would fail
   with a confusing `ModuleNotFoundError`. Now `os.pathsep.join(...)`.
-- **Library path.** Sets `DYLD_LIBRARY_PATH` (macOS), `LD_LIBRARY_PATH` (Linux), **and**
-  prepends the C build dir to `PATH` (Windows). Each is ignored on platforms that don't
-  read it. Note the Cython extension embeds an **rpath at build time** (`_native.pyx:21`),
-  so on Windows the `.dll` must be on `PATH` or next to the extension — `PATH` is the only
-  one of the three that does anything there.
+- **Library path.** Sets `DYLD_LIBRARY_PATH` (macOS) and `LD_LIBRARY_PATH` (Linux), both
+  of which work, and prepends the C build dir to `PATH` (Windows) — which **does not work
+  for the Cython extension**, and never did: since Python 3.8, CPython loads extension
+  modules with `LOAD_LIBRARY_SEARCH_DEFAULT_DIRS`, whose search set is the extension's own
+  directory, the process directory, the system directories, and directories registered with
+  `os.add_dll_directory`. **PATH is excluded.** Measured on the same directory both times:
+  PATH pointing at the one holding `eventprop_c_api.dll` gives `ImportError: DLL load failed
+  while importing _native`; `os.add_dll_directory` on it imports. The registration lives in
+  `eventprop_c/_library_path.py` and runs at package import. The `PATH` entry in
+  `run_all.py` is kept for non-Python consumers of that directory (the native benchmark
+  exes, which do honour it) and is not what makes the import work. The extension also
+  embeds an **rpath at build time** (`_native.pyx:21`), which is why the same code is fine
+  on macOS.
 - **.NET binary path.** `bin/Release/net10.0/EventProp.Benchmarks.dll` is
   framework-dependent and uses the **same layout on Windows and Linux** — no branch needed.
   Stated here because it looks like the kind of path that would need one.
@@ -410,20 +440,19 @@ unaffected.
 - Provenance is what makes that safe: every record carries `host`, `cpu`, `tool_version`,
   `vcs_rev`, and `vcs_dirty`. Check them before comparing two reports.
 
-**Known-good on all three:** the CMake presets, `build.sh`, `scripts/submodule-state.sh`,
-and the .NET projects. The benchmark *suites* are portable; only the *runner's* path
-assumptions were not.
+**Known-good on macOS and Windows:** the CMake presets, `build.sh` (macOS/Linux),
+`build.ps1` + `run_benchmarks.ps1` (Windows), `scripts/submodule-state.sh` (runs under
+Git bash on Windows too), and the .NET projects. The benchmark *suites* are portable; the
+*runner's* path assumptions were not, and are what the Windows run fixed.
 
 **To get benchmarks after cloning on Windows:**
 
-```bat
-:: 1. build everything (C -> Eigen -> consumers, in that order)
-bash build.sh release
-:: 2. native benchmark binaries
-cd src\EventProp.Native.Benchmarks
-cmake --preset release && cmake --build --preset release
-:: 3. runner — native path resolves to build\Release automatically
-python ..\..\scripts\bench\run_all.py --quick
+```powershell
+.\build.ps1 release            # presets, in dependency order, per-step exit codes
+.\run_benchmarks.ps1           # quick (Tiny/Small, skips XL)
+.\run_benchmarks.ps1 -Full     # full run incl. XL: ~47 min, python is the long one
+# scratch run that must not touch the committed BENCHMARKS.md / bench-reports\
+.\run_benchmarks.ps1 -Suites python -Out ..\bench-test -NoReports -NoBenchmarksMd
 ```
 
 **To get benchmarks after cloning on Linux:**
@@ -435,9 +464,13 @@ cd ../EventProp.Native.Python && pip install -e .     # Cython ext; needs the C 
 cd ../../ && python3 scripts/bench/run_all.py --quick
 ```
 
-**Not yet done:** (1) run `--quick` on Windows and on Linux, and record the per-pair
-geomeans side by side. That is the first real cross-platform claim this pipeline can make,
-and no amount of code reading substitutes for it. (2) Linux `_cpu_label` fallback.
+**Not yet done:** (1) run the pipeline on **Linux** and record its per-pair geomeans
+alongside the darwin and windows reports — that is the remaining leg, and no amount of
+code reading substitutes for it. Two things it must check, both found on Windows: the
+`-march=native` **PUBLIC** propagation on `eventprop_eigen_core` changes consumer codegen
+on Linux (it was `PRIVATE`, which is the same aligned-allocator ABI mismatch that produced
+heap corruption on Windows — see *SIMD: one ISA level*), and the SIMD probe now decides the
+level by CPUID+XCR0 instead of reading `/proc/cpuinfo`. (2) Linux `_cpu_label` fallback.
 ### Coverage Report Generation
 
 ```bash
@@ -510,6 +543,12 @@ Extract hardcoded thresholds to named constants at the top of files (e.g., `TOMS
 ### Compiler Warnings
 
 The CMake build enables strict warnings: `-Wall -Wextra -Wpedantic -Wshadow -Wimplicit-fallthrough -Wformat=2 -Wnull-dereference -Wsign-conversion` (GCC/Clang), `/W4` (MSVC). GCC additionally gets `-Wduplicated-cond`, `-Wmisleading-indentation`, `-Wlogical-op`. Code must compile with zero warnings — now enforced mechanically by the `werror` preset in `EventProp.C`.
+
+MSVC specifics, all probe-derived rather than version-gated:
+
+- **C11 atomics need two switches, and the build probes for them.** `eventprop_batch.h` includes `<stdatomic.h>` in C mode. MSVC defines `__STDC_NO_ATOMICS__` (so `vcruntime_c11_stdatomic.h` `#error`s "C atomic support is not enabled") on every toolset tested up to 14.52 / VS 2026, **including with `/std:c11` and `/std:c17`**; the switch that enables them is `/experimental:c11atomics`. `EventProp.C/CMakeLists.txt` proves it by compiling a probe **at the library's own language standard**: a compiler-version test would keep passing the flag after a toolset dropped it, and a probe at the default standard reports "no atomics" about a toolset that has them (the second failure mode is `__STDC_VERSION__ < 201112L`).
+- **`/wd4756` is deliberate.** UCRT defines `INFINITY` as `((float)(_HUGE_ENUF * _HUGE_ENUF))`, so every use folds to a constant expression that overflows and MSVC reports "overflow in constant arithmetic" at the *use site*. The library's uses are the forward pass's "no root in this interval" sentinel, not arithmetic on a huge value. Suppressed by name so the zero-warning rule stays meaningful for everything else.
+- **A SIMD build must not leave a dead scalar tail.** `dot_product_simd`'s scalar tail is provably unreachable once a `HAVE_AVX*` / `HAVE_NEON` branch is compiled — every SIMD branch folds the remainder loop into itself and returns, and `simd_available()` is a compile-time constant — so `/W4` reports **C4702 unreachable code** on all four lines. Guarded with the same `#if` as the `vec`/`vec_count` declarations: the shape of that function depends on which branch the target compiles. Clang does not warn (its `-Wunreachable-code` is opt-in), so this is MSVC-only.
 
 ### Memory Testing: AddressSanitizer
 
@@ -601,6 +640,39 @@ So the C library is the stricter *diagnostic*, not the divergent *implementation
 
 Pinned by `ComputeSpikes.UnsortedTimesRejected` and `ComputeSpikes.EqualTimesAccepted` (`src/EventProp.C.Tests/test/compute_spikes.cpp`), alongside the existing validator and `BackwardSpikes` ordering tests. Non-decreasing (equal times) is valid and is the simultaneous-spike case the parity suite covers.
 
+### SIMD: One ISA Level, Decided by Probe, Shared by Four Projects
+
+`cmake/EventPropSimd.cmake` decides **one** level — `avx512 | avx2 | neon | scalar` — and `EventProp.C`, `EventProp.Cpp.Wrapper`, `EventProp.Native.ParityTests` and `EventProp.Native.Benchmarks` all call it. Override with `-DEVENTPROP_SIMD=scalar|avx2|avx512` (the A/B below used `scalar`). It is shared because the parity suite compares the C library against the Eigen core at `ABS_TOLERANCE 1e-10` / `REL_TOLERANCE 1e-9` on sums, spike times and gradients: if one side is vectorised and the other is not, that suite measures a code-generation difference instead of the algorithm.
+
+**Why a probe replaced `/proc/cpuinfo`.** The old detection read `/proc/cpuinfo` and, on its absence, ran `sysctl`. Neither exists on Windows, so the level stayed "not detected" and the library ran its **scalar fallback on an AVX2 CPU** — `simd_vec_width()` 0 instead of 4 — in the `ComputeSums` prefix-sum inner loop (2 × `fma_row_simd` per input spike, `eventprop_sums.c:65-66`) and the backward pass's λ_I jump (`eventprop_backward.c:233`). The probe is a CPUID + **XGETBV** program run on the host by `check_c_source_runs`, so it asks the same question on every OS. It checks **XCR0 bits 1|2**, not just the CPUID bit: the bit says the hardware has AVX2; the OS has to preserve YMM state for user code to use it. Linux's `/proc/cpuinfo` "avx2" flag already implies OS support (the kernel checks XCR0 before setting it), so a CPUID-only probe would have been *weaker* than the path it replaces. Cross-compiling yields `scalar` with a message — the old probe described the build host, which is the wrong machine in that case.
+
+**Three layers, each of which alone leaves the scalar path in place:**
+
+1. **detection** (above);
+2. **flag spelling** — `-mavx2` / `-mavx512f` are GCC/Clang. `cl` ignores them with only `Command line warning D9002 : ignoring unknown option '-mavx2'`, so a detection-only fix defines `HAVE_AVX2` and compiles `_mm256_set1_pd` against the SSE2 baseline. MSVC spells them `/arch:AVX2` / `/arch:AVX512`;
+3. **macros** — x64 MSVC predefines **neither `__SSE2__` nor `__AVX2__`**, so `eventprop_simd.c`'s `#if defined(__AVX2__)` auto-detect is dead there. The explicit `HAVE_AVX2` define is the signal that works; with `/arch:AVX2` MSVC does define `__AVX2__`, so the source needs no change.
+
+**The arch flag on the Eigen core is an ABI switch, not a performance knob.** Eigen's `EIGEN_MAX_ALIGN_BYTES` is **32 with AVX/AVX2 and 16 without**, and the aligned allocator is header-inlined. `eventprop_eigen_core` is a **STATIC** library, and consumer TUs include the Eigen headers and destroy the matrices the core returned. Applying the flag `PRIVATE` means the core allocates with the 32-byte convention and the consumer frees with the 16-byte convention → `STATUS_HEAP_CORRUPTION` (`0xC0000374`) in `RtlFreeHeap`, first test, every time, with the `DenseStorage` destructor inlined into the *calling* TU:
+
+```
+ntdll!RtlpHeapHandleError -> ucrtbase!free_base
+  Eigen::internal::handmade_aligned_free    (Memory.h:118)
+  Eigen::DenseStorage<double,-1,-1,-1,1>::~ (DenseStorage.h:452)
+  compute_sums (eventprop_eigen_core_stripped.cpp:30, inlined at tests.cpp:51)
+```
+
+It is `PUBLIC` now, and the two projects that import the **prebuilt** core (`ParityTests`, `Native.Benchmarks`) apply the same level to their own TUs, because an `IMPORTED` target carries no usage requirements. `INTERFACE` alone is also wrong: it leaves the core's own TU at the baseline — the same mismatch in the other direction, and the identical crash.
+
+**The same mismatch existed on Linux before this was found**: the core was `-march=native` **PRIVATE** and `parity_test` / `bench_c` were not, i.e. `EIGEN_MAX_ALIGN_BYTES` 32 in one TU and 16 in the next. Silent there because glibc does not always notice. The Linux leg of the benchmark run must confirm the `PUBLIC` propagation, which changes consumer codegen on that platform.
+
+**Scalar-vs-AVX2 delta, measured** (50×20, 100 spikes, `tau_mem` 0.02, `tau_syn` 0.005, `v_th` 1.0; same source, two builds): output spike count, source checksum and `max_time` **identical**; spike times differ by 7e-18 absolute (tolerance 1e-10); gradient total by 3e-13 absolute / 2e-14 relative (tolerance 1e-9); maxima values by 3e-15. Three to four orders of headroom — matching the two sides is worth doing, and the mismatch was never something the tolerances would catch.
+
+**Diagnostic signatures:**
+
+- CMake's VS generator maps `/arch:AVX2` to `<EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>`, so `grep arch:AVX2 *.vcxproj` finds **nothing** in a build that has the flag. Grep for `EnableEnhancedInstructionSet`.
+- A SIMD probe that inherits `CMAKE_*_FLAGS` degrades silently under ASan: the instrumented try-compile binary cannot run without its runtime, so `check_c_source_runs` fails and the level becomes `scalar`.
+- The library is compiled for the **build host** with no runtime dispatch — the same contract `-mavx2` on Linux and `-march=native` on macOS already had. The binary requires the ISA it was built for.
+
 **Non-negative times are the same kind of shared contract.** `eventprop_validate_input_no_v_th` rejects `times[i] < 0` with `EVENTPROP_NEGATIVE_SPIKE_TIME` (7); the Eigen reference does not check. It is not C-only strictness either — the forward pass floors the first interval at `t_before = 0.0`, so it cannot bracket a spike before t = 0, and a negative input time is outside the model the prefix sums describe.
 
 This bit two numerical-gradient tests in `src/EventProp.Native.Python/test/test_loss_layer.py`: both take a **central difference** of the loss with respect to a spike time, and the base spike train started at exactly `0.0`, so `spike_idx = 0` was perturbed to `-1e-8`. Only the Cython side failed, because only the C library validates. Fix: start the base trains at `0.001` (`(np.arange(n) + 1) * 0.001`) so the minus leg stays non-negative. The tests' intent — numerical vs analytical spike-time gradient — is unchanged.
@@ -676,6 +748,15 @@ Thin Cython wrappers with managed heap-backed wrapper classes that own C memory:
 | `_DropoutBatchOutput` | `DropoutBatch*` | Zero-copy views via `[i]` → `(times, sources)` tuple |
 
 All wrappers use `__dealloc__` to call the appropriate C free function. Numpy views are created via `PyArray_SimpleNewFromData` (zero-copy).
+
+### Python bindings on Windows: finding the C library, and building the extension
+
+Four Windows-specific facts, all measured:
+
+- **`os.add_dll_directory`, not `PATH`.** `_native.pyd` links `eventprop_c_api.dll`. Since Python 3.8, extension modules are loaded with `LOAD_LIBRARY_SEARCH_DEFAULT_DIRS`, whose search set is the extension's own directory, the process directory, the system directories, and directories registered with `os.add_dll_directory` — **`PATH` is excluded**. Measured on the same directory both times: `PATH` gives `ImportError: DLL load failed while importing _native`; `os.add_dll_directory` imports. `eventprop_c/_library_path.py` registers `EVENTPROP_C_LIB_DIR` (os.pathsep-split) and then the repo layout — `build/`, `build/Release`, `build/Debug` (Release because MSVC is multi-config) — and `__init__.py` calls it **before** `from ._native import`. The handles are kept in a module global, because `os.add_dll_directory`'s handle *removes* the directory when it is finalised. No-op on POSIX, where the extension carries an rpath. Pinned by `test/test_library_path.py`.
+- **The extension needs `/std:c11` *and* `/experimental:c11atomics`.** `_native.c` includes `eventprop_batch.h` → `<stdatomic.h>`. distutils passes `/TC` with no language standard, so `vcruntime_c11_stdatomic.h(16)` `#error`s "C atomics require C11 or later"; MSVC needs the atomics switch on top of that. `setup.py` supplies the pair. Without them the extension cannot be compiled at all.
+- **A stale `.pyd` is a memory-corruption bug, not a staleness nuisance.** Cython compiles the `SpikeOutput` / `MaximaOutput` struct layouts out of `eventprop.h`. An extension built against July's headers and run against October's reads those structs at July offsets: the suite died with `Windows fatal exception: access violation` inside `spikes.py __getitem__` via `loss_layer._find_first_spikes`. **Nothing in the build checks that the extension is newer than the headers** — on any platform.
+- **`vcvarsall.bat` failing is often the machine, not the repo.** Symptom: `pip install -e .` reports "Microsoft Visual C++ 14.0 or greater is required" with VS installed. Cause on this machine: a machine-PATH entry with an unbalanced quote (`C:\Program Files\WSL"`), which makes vcvars' own batch parsing die (`\NVIDIA was unexpected at this time`). Check the raw value — `(Get-Item 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment').GetValue('Path', $null, 'DoNotExpandEnvironmentNames')` — for a `"` before blaming the toolchain, and never fix it with `setx PATH "%PATH%"` (merges machine+user into one `REG_SZ`, expands every `%placeholder%`, truncates at 1024 chars).
 
 ### Layer Chain Flow
 
@@ -860,8 +941,51 @@ C is reading a relocated array — the `sources` values no longer index `[0, n_p
 
 Regression guards: `src/EventProp.Tests/PinningStressTests.cs` — `FmaRow_WritesLandUnderConcurrentGcPressure` and `NativeForward_IsBitIdenticalUnderConcurrentGcPressure`, each running a bounded window of concurrent allocation against the operation. **These are probabilistic tripwires, not proofs** — they do not reliably fail if the pinning regresses (see the reproduction rates above). The AGENTS.md post-mortem and `DOTNET_GCStress=0x4` are the real record; the tests are the cheap net.
 
+### Fixed — BenchmarkDotNet adapter read its CSV with the locale encoding
+
+The first full Windows run completed all three suites and then lost the .NET one:
+
+```
+ValueError: unparsable Mean: '169.8 ╬╝s'
+```
+
+BenchmarkDotNet writes the Mean column as **UTF-8** — `169.8 <CE BC>s`, where `CE BC` is U+03BC GREEK SMALL LETTER MU. `from_benchmarkdotnet.py` opened the CSV with no `encoding`, so Python used `locale.getpreferredencoding()`, which is **cp1252** on a Western Windows; those two bytes decode as `Î¼`, the unit regex misses, and the adapter raised **after a 16-minute run of 95 benchmarks**. No dotnet record file, so `merge.py` produced a report with no .NET column and the pipeline exited non-zero.
+
+macOS and Linux locales are UTF-8, so the same code is correct there and silently wrong here. `UNIT_TO_NS` already accepts both U+03BC and U+00B5 — the two-spelling problem, one layer above the one that broke.
+
+Fixed at every site, not just the failing one: **all 12 opens** across the six `scripts/bench/` scripts state an encoding. The writes matter as much as the reads — the adapters and `report.py` emit non-ASCII, and a cp1252 write of a committed artifact is mojibake for the next machine. Audit: `grep -n "open(" scripts/bench/*.py | grep -v encoding=` → 12 hits, now 0.
+
+Diagnostic signature: a suite that ran to completion, produced artifacts, and contributes **zero** records, with a `ValueError` naming a mangled unit.
+
+### Fixed — the Eigen core's arch flag was `PRIVATE`: aligned-allocator ABI heap corruption
+
+See *SIMD: One ISA Level* above for the mechanism (`EIGEN_MAX_ALIGN_BYTES` 32 vs 16, header-inlined allocator, STATIC library, consumer TU frees the block). The failure signature is worth repeating because it points nowhere near the cause: `STATUS_HEAP_CORRUPTION` (`0xC0000374`) in `RtlFreeHeap` on the **first** test, with zero program output (the fast-fail discards the stdout buffer), in a process that had just been rebuilt with one added compiler flag.
+
+How it was localised, in order, because each step is cheap: (1) split the two sides — `bench_c` completed, `bench_cpp` fast-failed, so the C library was innocent; (2) `cdb.exe` (Windows SDK Debuggers) with `-c "g; k 25; q"` on a **RelWithDebInfo** build (Release has no PDB, so frames are `eventprop_cpp_tests+0x1292a`; RelWithDebInfo names them) → `handmade_aligned_free` → `DenseStorage::~` inlined at the caller. That is the whole diagnosis in two commands.
+
+Guards: the flag is `PUBLIC` on `eventprop_eigen_core`, and `ParityTests` / `Native.Benchmarks` apply the module's level to their own TUs. The regression is silent on Linux, so the guard there is the parity suite running at all.
+
+### Fixed — the Windows scripts reported success they had not measured
+
+`build.ps1` checked **no exit code at all** and ended with "Build complete"; it also never built `EventProp.C.Tests` or `EventProp.Benchmarks` — the second being the artifact `run_benchmarks.ps1` checks for, so `-Build` could never satisfy the check the same script performs. `run_benchmarks.ps1` printed the green "Report (committed):" line regardless of the pipeline's exit code, pointing at a report a failed run may not have written, and its Cython prerequisite was "the `.pyd` exists", which was true while `import eventprop_c._native` failed.
+
+Both now use presets, check every step, and summarise with a real exit code. Four Windows mechanisms made the old behaviour misleading, and all four are invisible in the code:
+
+- `$ErrorActionPreference = "Stop"` + a native command writing to stderr is a **terminating** `NativeCommandError` in PowerShell 5.1. The prereq probe `python -c "import numpy, pytest, pytest_benchmark"` died with `NativeCommandError` on the very failure it was written to report, so the install hint never printed. Fix: `$PSNativeCommandUseErrorActionPreference = $false` (a no-op on 5.1) and `Continue`.
+- PowerShell **drops empty strings** from a native command's argument array. `run_all.py` documents "pass `''` to skip" for `--reports-dir` / `--benchmarks-md`; from PowerShell that is unreachable — `-ReportsDir ''` arrives as a bare `--reports-dir` and the runner silently uses the default. Measured: a scratch run overwrote the committed `BENCHMARKS.md` with a single-suite report. Fix: `-NoReports` / `-NoBenchmarksMd`, which pass the single-token `--reports-dir=` form.
+- `where bash` returns `C:\WINDOWS\System32\bash.exe` (**WSL**) before Git's. The same `submodule-state.sh` call succeeded from Git bash and exited 1 from a PATH where System32 precedes Git's `usr\bin` — and Git bash needs that directory on `PATH` for coreutils, failing with `dirname: command not found` without it.
+- `Tee-Object` writes **UTF-16LE** on 5.1, so a captured log greps clean and reads as an empty run. Convert with `iconv -f UTF-16LE -t UTF-8`.
+
+`scripts/bench/run_all.py` had one real defect: `--out` / `--reports-dir` / `--benchmarks-md` were used verbatim, and every suite runs with its own cwd, so a relative `--out` is opened relative to the suite. Measured with `--out ../bench-test`: pytest tried to open `../bench-test\kernels.json` under `src/EventProp.Python.Benchmarks` and the python suite failed in 0s. The defaults are built from `SRC` and absolute, which is why it never surfaced. All three are resolved with `os.path.abspath` at parse time.
+
 ## Platform Support
 
 - **macOS** — developed and tested
-- **Linux** — intended support
-- **Windows** — supported via MSVC + CMake. `.vscode/` is **gitignored**, so `settings.json` / `tasks.json` are local to each machine, not shared; `tasks.json` on this machine still encodes the pre-presets manual `rm -rf build && mkdir build` sequence and needs modernising to `cmake --preset`
+- **Linux** — intended support. **Not exercised by the benchmark pipeline yet**, and two things this session changed land there first: the `-march=native` **PUBLIC** propagation on `eventprop_eigen_core` (it was `PRIVATE`, the same aligned-allocator ABI mismatch that produced heap corruption on Windows — see *SIMD: One ISA Level*), and the SIMD level now decided by a CPUID+XCR0 probe instead of by reading `/proc/cpuinfo`.
+- **Windows** — supported via MSVC + CMake; validated end to end 2026-10-16 on MSVC 19.52 / VS 18: C tests 214/214, parity 105/105, .NET 374/374, `eventprop_c` Python 29/29, `werror` preset zero warnings, and a full benchmark run (46m 40s) producing `bench-reports/report_windows-amd64.md`. CMake's VS generator is **multi-config**, so artifacts land in `build\Release\`, not `build\` — every path in the scripts and in `EventProp.Native.csproj` has to say so.
+  Windows traps, each of which has already cost a session:
+  - `where bash` → `System32\bash.exe` (**WSL**) before Git's; WSL bash cannot see `G:\` as a Windows tree. Resolve Git's bash from `git.exe`'s location and prepend its directory for coreutils.
+  - PowerShell 5.1: native stderr + `EAP=Stop` is a terminating `NativeCommandError`; `Tee-Object` writes UTF-16LE; empty-string arguments to native commands are dropped.
+  - MSYS bash reports an exe whose dependent DLL is missing as "No such file or directory" (127).
+  - Python 3.8+ excludes `PATH` from extension-module dependency resolution (`os.add_dll_directory` is the mechanism); `grep arch:AVX2 *.vcxproj` finds nothing because CMake maps the flag to `EnableEnhancedInstructionSet`.
+  - `.vscode/` is **gitignored**, so `settings.json` / `tasks.json` are local to each machine, not shared; `tasks.json` on this machine still encodes the pre-presets manual `rm -rf build && mkdir build` sequence and needs modernising to `cmake --preset`
