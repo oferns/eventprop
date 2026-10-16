@@ -139,20 +139,24 @@ def main():
         L.append(f"Ratio column: time({b}) / time({a}). "
                  f">1 means **{a} is faster**, <1 means **{b} is faster**.")
         L.append("")
-        # Name what each side of the pair actually measures. The .NET suite's
-        # "C" impl is the C library reached through P/Invoke, so its timing
-        # INCLUDES native allocation and result marshalling — not the C kernel
-        # alone. Without this, a table where Managed wins at Tiny reads as "the
-        # managed kernel beats the C kernel", which is not what was measured:
-        # BDN's own Ratio column reports Native 3.95x slower at ComputeMaxima/Tiny
-        # because the round-trip dominates a 20-spike workload.
+        # Name what each side of the pair measures, and why the small cells are
+        # excluded. The .NET suite's "C" impl goes through P/Invoke, and its
+        # numbers MATCH the native suite's bare C column (XL 4,899,000 vs
+        # 4,761,962 us = 2.9%; Medium 7,828 vs 7,600), so the round-trip is NOT
+        # what makes Managed win the Tiny cells — those cells produce ZERO output
+        # spikes (the neuron never fires), so both sides time near-nothing and the
+        # row is not a kernel comparison at all. They are excluded by
+        # zero_output_spikes / peer_zero_output_spikes, not by interop cost.
+        # An earlier version of this note blamed P/Invoke marshalling; that was
+        # wrong, and the C-vs-C agreement across suites disproves it.
         if {a, b} == {"C", "Managed"}:
-            L.append(f"`C` here is the C library **reached through P/Invoke from the "
-                     f".NET suite** (`via_pinvoke`), so its time includes native "
-                     f"allocation and result marshalling — it is **not** the bare C "
-                     f"kernel. The bare C kernel is the `C` column of the C vs Eigen "
-                     f"table above. Managed wins the small cells because the "
-                     f"round-trip dominates them; from Medium up C wins.")
+            L.append(f"`C` is the C library reached through P/Invoke from the .NET "
+                     f"suite (`via_pinvoke`); its numbers match the native suite's "
+                     f"bare `C` column within ~3%, so this is a kernel comparison. "
+                     f"The Tiny/Small rows are excluded because they produce **zero "
+                     f"output spikes** — the neuron never fires, so the row times "
+                     f"near-nothing on both sides. From Medium up, C wins every "
+                     f"valid cell (1.11x–1.67x).")
             L.append("")
         L.append("| benchmark | size | pattern | " + a + " (us) | " + b + " (us) | ratio | valid |")
         L.append("|---|---|---|---:|---:|---:|:--|")

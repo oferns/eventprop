@@ -124,7 +124,7 @@ Per-size geomean (ratio Eigen/C, pooled across families): Tiny 1.17x (16), Small
 
 Ratio column: time(Managed) / time(C). >1 means **C is faster**, <1 means **Managed is faster**.
 
-`C` here is the C library **reached through P/Invoke from the .NET suite** (`via_pinvoke`), so its time includes native allocation and result marshalling — it is **not** the bare C kernel. The bare C kernel is the `C` column of the C vs Eigen table above. Managed wins the small cells because the round-trip dominates them; from Medium up C wins.
+`C` is the C library reached through P/Invoke from the .NET suite (`via_pinvoke`); its numbers match the native suite's bare `C` column within ~3%, so this is a kernel comparison. The Tiny/Small rows are excluded because they produce **zero output spikes** — the neuron never fires, so the row times near-nothing on both sides. From Medium up, C wins every valid cell (1.11x–1.67x).
 
 | benchmark | size | pattern | C (us) | Managed (us) | ratio | valid |
 |---|---|---|---:|---:|---:|:--|
