@@ -98,6 +98,12 @@ __pycache__/
 *.pyc
 .benchmarks/
 .venv/
+# Editable-install metadata (`pip install -e .`) lands next to the package. The
+# Cython package already ignores it locally; this covers every package, because
+# `untracked` is a REPORTED provenance field in every benchmark record (see
+# scripts/bench/provenance.py) — a build artifact leaking into it is noise in the
+# artifact that is supposed to say whether a run measured a clean tree.
+*.egg-info/
 
 # clangd cache
 src/EventProp.C/.cache/
