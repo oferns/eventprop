@@ -202,6 +202,19 @@ if ($BenchmarksMd)  { $runnerArgs += @("--benchmarks-md", $BenchmarksMd) }
 if ($NoReports)       { $runnerArgs += "--reports-dir=" }
 if ($NoBenchmarksMd)  { $runnerArgs += "--benchmarks-md=" }
 
+# A subset run rewrites the COMMITTED report from whatever records are in -Out, so a
+# native-only run replaces the three-suite report with a one-suite report AT THE SAME
+# PATH. Measured on this machine: a scratch `--report-only -Out <scratch>` overwrote
+# bench-reports\report_windows-amd64.md and BENCHMARKS.md with a native-only report and
+# exited 0 - a green run that destroyed the committed artifact. The -NoReports flag is the
+# escape hatch; say so before the run rather than after.
+if (-not $NoReports -and ($ReportOnly -or $Suites)) {
+    Write-Host "  NOTE: partial run. This WILL rewrite the committed" -ForegroundColor Yellow
+    Write-Host "  bench-reports\report_<tag>.md and BENCHMARKS.md from a SUBSET of the suites." -ForegroundColor Yellow
+    Write-Host "  For a scratch run add:  -NoReports -NoBenchmarksMd" -ForegroundColor Yellow
+    Write-Host ""
+}
+
 # Progress expectation: the runner streams each suite's own output (BenchmarkDotNet
 # prints a live table per benchmark, pytest prints dots) AND emits a heartbeat to
 # stderr every 60s, "done in Nm SSs" per command, and "[suite i/N]" markers. So a

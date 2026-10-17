@@ -350,6 +350,30 @@ scripts/bench/run_all.py --quick          # Tiny/Small only
 scripts/bench/run_all.py                  # full run, includes XL
 ```
 
+`run_benchmarks.sh` (macOS/Linux) and `run_benchmarks.ps1` (Windows) wrap that runner with
+the same contract: they verify the prerequisites by checking what the suites actually need
+(native executables in `build/`, `build/Release/` and `build/Debug/`; the .NET benchmark
+dll; the C library; and an **actual `import eventprop_c._native`**, not "the extension file
+exists"), refuse to run when something is missing rather than building it silently, pass
+through `--suites` / `--tag` / `--out` / `--sweeps` / `--reports-dir` / `--benchmarks-md`,
+and print the committed-report line only when the runner exited 0 **and** the file exists.
+The import probe is the load-bearing check: it runs with the same `PYTHONPATH` the runner
+uses, and on Windows the extension cannot load without `os.add_dll_directory` (PATH is
+excluded since Python 3.8), so a file-existence check reported ready while the suite could
+not start.
+
+**Two scripts share the name `run_benchmarks.sh`.** The repo-root one is this cross-suite
+runner; `src/EventProp.Native.Benchmarks/run_benchmarks.sh` runs the native C-vs-C++ suite
+alone and calls Google Benchmark's `compare.py`. Same name, two scopes, two directories.
+
+**A subset run rewrites the committed report at the same path.** `--suites native` (or
+`--report-only`) merges whatever records are in `--out` and writes
+`bench-reports/report_<tag>.md` **and** `BENCHMARKS.md` from that subset — a one-suite
+report replacing the three-suite one, with a green exit. Measured: a scratch
+`--report-only --out <scratch>` overwrote both committed files and exited 0. Both wrappers
+now print that warning before running; the escape hatch is `--no-reports --no-benchmarks-md`
+(PowerShell: `-NoReports -NoBenchmarksMd`), and that is what a scratch run should use.
+
 Writes `bench-results/records_<tag>_*.json`, `merged_<tag>.json`, `report_<tag>.md`, and
 regenerates `BENCHMARKS.md` plus `bench-reports/report_<tag>.md`. `<tag>` is the platform —
 `darwin-arm64`, `linux-x86_64`, `windows-amd64` — taken from the same
@@ -492,6 +516,12 @@ Python step failed there for Windows reasons (setuptools' vcvars probe under a s
 PATH; MSVC env is `build.ps1`'s job) — which is a demonstration that the reporting works, not
 that the script is right on Linux/macOS. **Its first real run is the Linux leg.**
 
+`run_benchmarks.sh` is new, and is in the same state: its prerequisite probes, argument
+mapping, exit-code reporting and the scratch-run guard were all exercised on Windows under
+Git bash (including the failure paths — a missing interpreter reports and exits 1, a
+`--report-only` against an empty `--out` exits 1, a scratch run leaves the committed
+artifacts alone). It has never run on the platform it is for.
+
 **To get benchmarks after cloning on Windows:**
 
 ```powershell
@@ -502,14 +532,23 @@ that the script is right on Linux/macOS. **Its first real run is the Linux leg.*
 .\run_benchmarks.ps1 -Suites python -Out ..\bench-test -NoReports -NoBenchmarksMd
 ```
 
-**To get benchmarks after cloning on Linux:**
+**To get benchmarks after cloning on Linux or macOS:**
 
 ```bash
-./build.sh release                                    # applies submodule patches
-cd src/EventProp.Native.Benchmarks && cmake --preset release && cmake --build --preset release
-cd ../EventProp.Native.Python && pip install -e .     # Cython ext; needs the C lib built
-cd ../../ && python3 scripts/bench/run_all.py --quick
+./build.sh release                 # presets, dependency order, per-step exit codes
+./run_benchmarks.sh                # quick (Tiny/Small, skips XL)
+./run_benchmarks.sh --full         # full run, includes XL
+./run_benchmarks.sh --build        # ./build.sh release first, then the run
+# scratch run that must not touch the committed BENCHMARKS.md / bench-reports/
+./run_benchmarks.sh --suites python --out /tmp/bench-test --no-reports --no-benchmarks-md
+# a non-default interpreter (the suite runs with the one that launches run_all.py)
+./run_benchmarks.sh --python python3.11
 ```
+
+The manual `cd src/EventProp.Native.Benchmarks && cmake --preset release …` and
+`pip install -e .` lines are no longer needed: `build.sh` builds the native benchmark
+binaries and installs both Python layers, and `run_benchmarks.sh` checks for them rather
+than assuming them.
 
 **Not yet done:** (1) run the pipeline on **Linux** and record its per-pair geomeans
 alongside the darwin and windows reports — that is the remaining leg, and no amount of
