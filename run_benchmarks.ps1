@@ -108,14 +108,26 @@ if (-not $benchC -or -not $benchCpp) {
     # target failed.
 }
 
+# MSBuild honours the Platform environment variable: Platform=X64, which the Visual Studio
+# developer environment (vcvarsall) sets, redirects output to bin\x64\Release\net10.0\.
+# build.ps1 now strips it, but a user building from a VS Developer Prompt gets the same
+# layout with none of our scripts involved, so every layout is probed and the found path is
+# printed — naming one path is what made this report a missing binary after a green build.
 $dotnetDll = Find-Artifact @(
     "src\EventProp.Benchmarks\bin\Release\net10.0\EventProp.Benchmarks.dll",
-    "src\EventProp.Benchmarks\bin\Debug\net10.0\EventProp.Benchmarks.dll"
+    "src\EventProp.Benchmarks\bin\x64\Release\net10.0\EventProp.Benchmarks.dll",
+    "src\EventProp.Benchmarks\bin\AnyCPU\Release\net10.0\EventProp.Benchmarks.dll",
+    "src\EventProp.Benchmarks\bin\Debug\net10.0\EventProp.Benchmarks.dll",
+    "src\EventProp.Benchmarks\bin\x64\Debug\net10.0\EventProp.Benchmarks.dll"
 )
 if (-not $dotnetDll) {
     $missing += ".NET benchmark dll"
-    Write-Host "  MISSING: src\EventProp.Benchmarks\bin\Release\net10.0\EventProp.Benchmarks.dll" -ForegroundColor Red
+    Write-Host "  MISSING: EventProp.Benchmarks.dll under src\EventProp.Benchmarks\bin\*\Release\net10.0\" -ForegroundColor Red
     Write-Host "           Build: .\build.ps1 release   (it builds EventProp.Benchmarks)" -ForegroundColor DarkGray
+    Write-Host "           bin\x64\Release\net10.0\ (a VS Developer Prompt build) is probed too." -ForegroundColor DarkGray
+} else {
+    $rel = $dotnetDll.Substring([Math]::Min($ScriptDir.Length, $dotnetDll.Length)).TrimStart('\')
+    Write-Host "  .NET   : $rel" -ForegroundColor DarkGray
 }
 
 # The C library .dll, at the path the Cython extension resolves. run_all.py exports
@@ -248,7 +260,16 @@ if ($code -ne 0) {
     Write-Host "Pipeline exited non-zero ($code). Partial results are expected on a" -ForegroundColor Yellow
     Write-Host "first run on a new machine - read the suite output above before re-running." -ForegroundColor Yellow
     $reportPath = Join-Path $ScriptDir "bench-reports\report_${derivedTag}.md"
-    if (Test-Path $reportPath) {
+    if ($NoReports) {
+        # With -NoReports this run wrote NO report, so an existing file at that path is a
+        # PREVIOUS run's committed artifact. Saying "a report exists … from this FAILED run"
+        # would misattribute it - the same pointing-at-a-stale-file the comment above warns
+        # about, just in the other direction.
+        if (Test-Path $reportPath) {
+            Write-Host "No report was written (-NoReports). bench-reports\report_${derivedTag}.md is a" -ForegroundColor Yellow
+            Write-Host "PREVIOUS run's committed report - this run did not modify it." -ForegroundColor Yellow
+        }
+    } elseif (Test-Path $reportPath) {
         Write-Host "A report exists at bench-reports\report_${derivedTag}.md, but it is from" -ForegroundColor Yellow
         Write-Host "this FAILED run - check its provenance header (vcs_rev, vcs_dirty) before" -ForegroundColor Yellow
         Write-Host "quoting it, and note it may cover fewer suites than a full run." -ForegroundColor Yellow

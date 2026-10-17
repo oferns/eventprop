@@ -203,7 +203,18 @@ function Enter-VisualStudioEnvironment {
         if ($i -lt 1) { continue }
         Set-Item -Path "Env:$($line.Substring(0, $i))" -Value $line.Substring($i + 1) -ErrorAction SilentlyContinue
     }
-    Write-Host "  MSVC $env:VCToolsVersion ($Arch) environment imported" -ForegroundColor Green
+    # Strip Platform for the WHOLE script. MSBuild's $(Platform) inference reads the
+    # environment, so with Platform=X64 imported from vcvarsall the `dotnet build` steps in
+    # this SAME process wrote bin\x64\Release\net10.0\ instead of bin\Release\net10.0\.
+    # Measured: EventProp.Benchmarks and EventProp.Tests both grew a bin\x64\ tree, while
+    # run_benchmarks.ps1's prerequisite check and scripts/bench/run_all.py name the
+    # framework-dependent path — so the pipeline reported the benchmark binary MISSING after
+    # a green build, and the only reason it worked before is that a pre-existing
+    # bin\Release\net10.0\ from an IDE build was still on disk. Platform is a VS/MSBuild
+    # concept; the framework-dependent layout is what every consumer here expects, and the
+    # CMake presets do not want it either.
+    Remove-Item Env:Platform -ErrorAction SilentlyContinue
+    Write-Host "  MSVC $env:VCToolsVersion ($Arch) environment imported; Platform stripped for MSBuild" -ForegroundColor Green
     return $true
 }
 

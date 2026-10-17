@@ -1185,6 +1185,49 @@ platforms.
 platform scripts are one contract — a fix in one is a fix in both, or the platforms measure
 different trees.
 
+### Fixed — the MSVC environment import leaked `Platform=X64` into the .NET build
+
+`run_benchmarks.ps1 -Full -Build` reported
+`MISSING: src\EventProp.Benchmarks\bin\Release\net10.0\EventProp.Benchmarks.dll` **immediately
+after `build.ps1` printed "Build complete"**, with step 9 (".NET (libraries, tests,
+benchmarks)") green. Both statements were true: the binary existed, at
+`bin\x64\Release\net10.0\`.
+
+MSBuild's `$(Platform)` inference reads the **environment**, and
+`Enter-VisualStudioEnvironment` (added in `8ef41a9`) imports the whole vcvars environment into
+the script's process — including `Platform=X64`. Every later step inherits it, so the
+`dotnet build` steps in that same process wrote the platform-qualified layout while the
+prerequisite check and `run_all.py` named the framework-dependent path.
+
+Why it hid through a successful 47-minute run: `bin\Release\net10.0\` already existed from an
+IDE build, so the path resolved. It surfaced the moment `clean.ps1` deleted `bin\` and the
+rebuild produced the `x64` layout.
+
+Fix, in three layers:
+
+- `build.ps1` strips `Platform` from the process environment **globally**, right after importing vcvars — the CMake presets do not want it either.
+- `run_benchmarks.ps1` probes `bin\Release\net10.0`, `bin\x64\Release\net10.0`, `bin\AnyCPU\Release\net10.0` and the Debug variants, and **prints the layout it found**.
+- `run_all.py` gained `dotnet_dll_path()` with the same probe, prints `.NET binary: <relpath>`, and hangs the per-job cleanup glob off the located directory.
+
+The consumer-side probe is not redundancy: **any** Visual Studio developer prompt sets
+`Platform=X64`, so a user who runs `dotnet build` from one gets the `x64` layout with none of
+these scripts involved. Naming one layout in a consumer is the trap; probing is the fix.
+
+Also fixed in the same pass: with `-NoReports` the failure text said "a report exists at
+`bench-reports\report_<tag>.md`, … from this FAILED run", which misattributes the previously
+committed report — that run writes no report. It now says the file is a previous run's and was
+not modified.
+
+Verification: `build.ps1 release` → `bin\Release\net10.0\EventProp.Benchmarks.dll`;
+`run_benchmarks.ps1 -Full -ReportOnly -NoReports -NoBenchmarksMd` prints
+`.NET : src\EventProp.Benchmarks\bin\Release\net10.0\EventProp.Benchmarks.dll` and
+`artifacts: ok` and proceeds into the pipeline; running the located dll directly executes
+(`Bench_TrainingLoop_Tiny` Managed **4.124 µs** / Native **18.305 µs**, ShortRun).
+
+**The rule:** importing a vendor environment into your own process means every later step
+inherits it. Enumerate what it sets (`set` after `vcvarsall`), and strip the variables your
+other tools interpret — `Platform` for MSBuild, `PLATFORM`/`VSINSTALLDIR` for CMake.
+
 ## Platform Support
 
 - **macOS** — developed and tested

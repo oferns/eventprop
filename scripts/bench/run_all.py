@@ -154,6 +154,31 @@ def run(cmd, cwd=None, env=None, timeout=7200, capture=False, label=None):
         print(f"    done in {mins}m {secs:02d}s", file=sys.stderr, flush=True)
 
 
+def dotnet_dll_path():
+    """Locate the built benchmarks binary across MSBuild output layouts.
+
+    `bin/Release/net10.0/` is the framework-dependent layout, and the layout on Linux
+    and macOS. It is NOT the only layout on Windows: MSBuild's `$(Platform)` inference
+    reads the environment, and `Platform=X64` — set by vcvarsall, i.e. by any Visual
+    Studio developer prompt, and previously by build.ps1's own MSVC environment import —
+    redirects output to `bin/x64/Release/net10.0/`. Measured: the binary sat at
+    `bin/x64/Release/net10.0/EventProp.Benchmarks.dll` while this file named the other
+    path, so the pipeline reported the .NET suite missing after a green build. Probe the
+    layouts, and print which one was found.
+    """
+    base = os.path.join(DOTNET_PROJ, "bin")
+    rels = ["Release/net10.0", "x64/Release/net10.0", "AnyCPU/Release/net10.0",
+            "x64/Release/net10.0/win-x64", "Release/net10.0/win-x64",
+            "Debug/net10.0", "x64/Debug/net10.0"]
+    for rel in rels:
+        p = os.path.join(base, *rel.split("/"), "EventProp.Benchmarks.dll")
+        if os.path.isfile(p):
+            return p
+    hits = sorted(glob.glob(os.path.join(base, "*", "*", "net10.0",
+                                         "EventProp.Benchmarks.dll")))
+    return hits[0] if hits else None
+
+
 def require(path, hint):
     if not os.path.exists(path):
         print(f"ERROR: missing {path}\n  {hint}", file=sys.stderr)
@@ -233,6 +258,18 @@ def suite_dotnet(out_dir, quick, tag, sweeps=False):
         return False
     print(f"  BenchmarkDotNet version: {version}")
 
+    # Resolve the binary BEFORE the cleanup block, which needs its directory.
+    exe = dotnet_dll_path()
+    if not exe:
+        print(f"ERROR: EventProp.Benchmarks.dll not found under "
+              f"{os.path.join(DOTNET_PROJ, 'bin')}\\<layout>\\net10.0\\\n"
+              "  Build it: dotnet build src/EventProp.Benchmarks -c Release\n"
+              "  Layouts probed: Release/net10.0, x64/Release/net10.0 (a VS Developer\n"
+              "  Prompt build), AnyCPU/Release/net10.0, Debug variants.",
+              file=sys.stderr)
+        return False
+    print(f"  .NET binary: {os.path.relpath(exe, BENCH)}")
+
     # BDN's `Artifacts cleanup` deletes the per-job build dir under bin/ when a
     # run is interrupted, which leaves a stale artifacts dir that makes the NEXT
     # run fail with DirectoryNotFoundException on `<Name>-DefaultJob-1/bin/...`
@@ -241,7 +278,7 @@ def suite_dotnet(out_dir, quick, tag, sweeps=False):
     # placeholders (UnrollFactor=1), so leftovers cannot become fabricated records.
     if os.path.isdir(DOTNET_ARTIFACTS):
         shutil.rmtree(DOTNET_ARTIFACTS)
-    for d in glob.glob(os.path.join(DOTNET_PROJ, "bin", "Release", "net10.0",
+    for d in glob.glob(os.path.join(os.path.dirname(exe),
                                     "EventProp.Benchmarks-*Job-*")):
         shutil.rmtree(d, ignore_errors=True)
 
@@ -251,12 +288,6 @@ def suite_dotnet(out_dir, quick, tag, sweeps=False):
     # path does not exist, so it dies with DirectoryNotFoundException after a
     # successful build. Verified: `dotnet run -c Release -- -a ... -f '*Tiny*'`
     # fails this way; running the dll directly does not.
-    #
-    # The path is framework-dependent (`bin/Release/net10.0/`), which is the same
-    # layout on Windows and Linux — no platform branch needed here, unlike the
-    # native CMake outputs.
-    exe = os.path.join(DOTNET_PROJ, "bin", "Release", "net10.0",
-                       "EventProp.Benchmarks.dll")
     if not require(exe, "run ./build.sh release"):
         return False
 
