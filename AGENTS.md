@@ -84,7 +84,17 @@ Each of the five preset-driven CMake projects also carries a `CMakePresets.json`
 
 ## Building
 
-`build.sh` drives the CMake projects through their presets, in the dependency order the hardcoded import paths require (C library → Eigen core → consumers), and calls `scripts/submodule-state.sh apply` for the read-only submodule.
+`build.sh` (macOS/Linux) and `build.ps1` (Windows) implement **one contract**, in the same
+nine steps and the same dependency order the hardcoded import paths require (C library →
+Eigen core → C.Tests / parity / native benchmarks → Python → .NET): presets, not
+`mkdir build && cmake ..`; a per-step exit code; a failure list; a real exit code. Keeping
+the two scripts the same shape is the point — a fix that lands in one and not the other is
+how the two platforms end up measuring different things. Both build `EventProp.C.Tests`
+and `EventProp.Benchmarks`; both regenerate `_native.c` when `_native.pyx` is newer (it is
+untracked, so a fresh clone has none and an edited `.pyx` silently does not rebuild); both
+install the Python layers into the interpreter that will **run** the suite
+(`run_all.py` invokes every tool with `sys.executable`), treating a project `.venv` as a
+note rather than a precondition.
 
 ```bash
 # Build everything — Release mode
@@ -92,6 +102,11 @@ Each of the five preset-driven CMake projects also carries a `CMakePresets.json`
 
 # Build everything — Debug mode
 ./build.sh debug
+
+./build.sh --clean                   # delete each build dir first (cache vars leak)
+./build.sh --python python3.11       # which interpreter gets the Python layers
+./build.sh --skip-python             # skip the reference library and the Cython bindings
+./build.sh --skip-submodule          # skip scripts/submodule-state.sh apply
 
 # Clean all build outputs
 clean.sh              # removes everything (all targets)
@@ -105,6 +120,8 @@ clean.sh -full        # also delete the reference binary, forcing a rebuild
 ```
 
 Targets **compose** — `clean.sh c cpp parity` cleans all three, and an unrecognised argument is a hard error (exit 2), not a silent no-op. `-full` takes effect only when `python`/`all` is selected, since the reference binary lives in the Python target.
+
+**A failed step is reported, not swallowed.** The version of `build.sh` this replaced piped the three Python installs to `/dev/null` with `|| true`, and installed the Cython bindings **only if a project `.venv` existed** — while printing `→ eventprop_c (editable install)` unconditionally. On a machine with no venv, nothing was installed and the log said it was; the next thing to touch the missing extension was the benchmark suite, far from the cause. That is the same defect class as the old `build.ps1` (no exit checks at all) and the `patch -p1 … || true` submodule line, and all three are now measured rather than asserted.
 
 **Windows** — `build.ps1` is the same contract for MSVC: presets, the same dependency order, per-step exit codes, and a failure list that ends in a real exit code.
 
@@ -463,10 +480,17 @@ unaffected.
   `vcs_rev`, `vcs_dirty`, `submodule_dirty` and `untracked`. Check them before comparing
   two reports.
 
-**Known-good on macOS and Windows:** the CMake presets, `build.sh` (macOS/Linux),
-`build.ps1` + `run_benchmarks.ps1` (Windows), `scripts/submodule-state.sh` (runs under
-Git bash on Windows too), and the .NET projects. The benchmark *suites* are portable; the
-*runner's* path assumptions were not, and are what the Windows run fixed.
+**Known-good on macOS and Windows:** the CMake presets, `build.ps1` + `run_benchmarks.ps1`
+(Windows), `scripts/submodule-state.sh` (runs under Git bash on Windows too), and the .NET
+projects. The benchmark *suites* are portable; the *runner's* path assumptions were not,
+and are what the Windows run fixed.
+
+`build.sh` is the open case: it was rewritten to the `build.ps1` contract (exit checks, the
+two missing projects, Cython regeneration, interpreter targeting). Its mechanics were
+exercised on Windows — every CMake, .NET and pip step ran through the new reporting, and the
+Python step failed there for Windows reasons (setuptools' vcvars probe under a stale shell
+PATH; MSVC env is `build.ps1`'s job) — which is a demonstration that the reporting works, not
+that the script is right on Linux/macOS. **Its first real run is the Linux leg.**
 
 **To get benchmarks after cloning on Windows:**
 
@@ -489,11 +513,13 @@ cd ../../ && python3 scripts/bench/run_all.py --quick
 
 **Not yet done:** (1) run the pipeline on **Linux** and record its per-pair geomeans
 alongside the darwin and windows reports — that is the remaining leg, and no amount of
-code reading substitutes for it. Two things it must check, both found on Windows: the
+code reading substitutes for it. Three things it must check, all found on Windows: the
 `-march=native` **PUBLIC** propagation on `eventprop_eigen_core` changes consumer codegen
 on Linux (it was `PRIVATE`, which is the same aligned-allocator ABI mismatch that produced
-heap corruption on Windows — see *SIMD: one ISA level*), and the SIMD probe now decides the
-level by CPUID+XCR0 instead of reading `/proc/cpuinfo`. (2) Linux `_cpu_label` fallback.
+heap corruption on Windows — see *SIMD: one ISA level*), the SIMD probe now decides the
+level by CPUID+XCR0 instead of reading `/proc/cpuinfo`, and `build.sh` itself is new —
+start the Linux run with `./build.sh release` and read its failure list, if any. (2) Linux
+`_cpu_label` fallback.
 ### Coverage Report Generation
 
 ```bash
