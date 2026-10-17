@@ -113,13 +113,30 @@ clean.sh              # removes everything (all targets)
 clean.sh c            # only C library (build/ and build-werror/, plus EventProp.C.Tests/build/)
 clean.sh cpp          # only C++ wrapper
 clean.sh python       # Python package, Cython bindings and Python benchmarks
-clean.sh dotnet       # only .NET projects
+clean.sh dotnet       # only .NET projects (incl. EventProp.Abstractions)
 clean.sh parity       # only parity tests
 clean.sh benchmarks   # only native (C vs C++) benchmarks
+clean.sh results      # bench-results/, BenchmarkDotNet.Artifacts/, baselines/*.json, caches
 clean.sh -full        # also delete the reference binary, forcing a rebuild
+clean.sh --dry-run -full            # print what -full would remove, remove nothing
+clean.sh --python python3.11 python # which interpreter's pip uninstall runs
 ```
 
 Targets **compose** — `clean.sh c cpp parity` cleans all three, and an unrecognised argument is a hard error (exit 2), not a silent no-op. `-full` takes effect only when `python`/`all` is selected, since the reference binary lives in the Python target.
+
+`clean.ps1` is the **same contract**, not a parallel implementation: targets compose
+(`.\clean.ps1 c cpp parity`), an unknown target is exit 2, every platform suffix is matched
+for the compiled extensions (`.pyd`/`.dll`/`.so`/`.dylib`), `_native.c` is removed, removal
+failures are collected into a non-zero exit, and `-DryRun` / `-PythonExe` match
+`--dry-run` / `--python`. The two scripts had drifted in both directions, each correct only
+on the platform the other covers, and both were silent about it — measured, not assumed; see
+*Fixed — the two clean scripts had drifted apart, and each reported success*.
+
+**No clean target ever touches `bench-reports/` or `BENCHMARKS.md`** — they are committed
+artifacts. `results` stops at that boundary: it removes the regenerable measurements
+(`bench-results/`, `BenchmarkDotNet.Artifacts/`, `baselines/*.json`, caches) that a
+47-minute run produces, which is why it ships with `--dry-run`. A project `.venv` is not a
+build output and is never removed.
 
 **A failed step is reported, not swallowed.** The version of `build.sh` this replaced piped the three Python installs to `/dev/null` with `|| true`, and installed the Cython bindings **only if a project `.venv` existed** — while printing `→ eventprop_c (editable install)` unconditionally. On a machine with no venv, nothing was installed and the log said it was; the next thing to touch the missing extension was the benchmark suite, far from the cause. That is the same defect class as the old `build.ps1` (no exit checks at all) and the `patch -p1 … || true` submodule line, and all three are now measured rather than asserted.
 
@@ -1118,6 +1135,55 @@ Both now use presets, check every step, and summarise with a real exit code. Fou
 - A shell's `PATH` is a **snapshot from process start**. A machine-PATH defect fixed in the registry is invisible to every shell opened before the sign-in that applies it, so `vcvarsall` dies parsing the stale value (`\NVIDIA was unexpected at this time`, exit 255) on a machine whose PATH is already repaired. `build.ps1` re-reads `PATH` from the registry for exactly this reason.
 
 `scripts/bench/run_all.py` had one real defect: `--out` / `--reports-dir` / `--benchmarks-md` were used verbatim, and every suite runs with its own cwd, so a relative `--out` is opened relative to the suite. Measured with `--out ../bench-test`: pytest tried to open `../bench-test\kernels.json` under `src/EventProp.Python.Benchmarks` and the python suite failed in 0s. The defaults are built from `SRC` and absolute, which is why it never surfaced. All three are resolved with `os.path.abspath` at parse time.
+
+### Fixed — the two clean scripts had drifted apart, and each reported success
+
+`clean.sh` and `clean.ps1` implement one contract, and each had broken the half the other
+covered — while both printed `Done.` and exited 0.
+
+**`clean.ps1`**, four defects, all measured:
+
+- `-Target bogus` printed `Cleaning… Done.` and **exited 0 having removed nothing**. `clean.sh`'s exit-2 guard never landed here, so a typo read as a successful clean.
+- The `dotnet` list contained `EventProp.Cpp.Native` (**not a project — the directory does not exist**) and omitted `EventProp.Abstractions`, which has real `bin/` and `obj/`. So `clean.ps1 dotnet`, and `all`, left Abstractions' build output behind forever.
+- `-Target` was a single string: targets did not compose, unlike `clean.sh c cpp parity`.
+- `Remove-Item` errors are **non-terminating** by default, so a locked `build\` — the normal Windows case while a benchmark exe has the C DLL loaded — printed an error and the script still printed `Done.`
+
+**`clean.sh`**, five:
+
+- `-full` matched only `eventprop_cpp.*.so` / `.dylib`. Measured on Windows: **0 files match, 2 `.pyd` exist** — so it deleted nothing and printed `→ Deleted reference binary (use build.sh to rebuild)`, while AGENTS.md promises `-full` forces a rebuild.
+- `eventprop_c/*.so` likewise matched **0** files (2 `.pyd` present), so `clean.sh python` **left the compiled extension in place** — the stale-extension class survived a clean.
+- `_native.c` was never removed, and that defeats `build.sh`'s regeneration rule ("regenerate when `_native.pyx` is newer than `_native.c`"): after a clean the surviving `_native.c` is the newer file, so Cython is skipped and the "clean" build compiles the stale generated C — the exact artifact the ABI check refuses to import on.
+- `pip uninstall` ran on the ambient `pip` (3.14 on this machine) while the suite runs on 3.11, so "cleaned" can describe an interpreter the suite never uses.
+- `eventprop/**/*.pyc` is decorative — `globstar` is **off** by default, so it acts as `eventprop/*/*.pyc` (the `find` covers it). Plus: no target for the pipeline's own outputs (`bench-results/` 684K, `BenchmarkDotNet.Artifacts/` **2.5M**, `baselines/` 136K), and `rm -rf .venv/` in the benchmarks step, where a venv is not a build output.
+
+**The defect the test of the fix found.** Declaring `$Targets` **last** with
+`ValueFromRemainingArguments` makes a bare word bind to the first bindable positional —
+which was `$PythonExe`. Running `.\clean.ps1 bogus` therefore set the interpreter to
+`bogus`, left `$Targets` empty (so it defaulted to `all`), and **ran a full clean: 39 paths
+removed**, including the compiled extension, `_native.c` and 6 baseline JSONs. `.\clean.ps1 c`
+would have done the same. Fixed by declaring `$Targets` as `Position = 0` with the
+remaining-arguments binding (bare words → targets, `-PythonExe` named-only) and validating
+that `PythonExe` resolves **before** the first removal.
+
+**Caught by the new `--dry-run`:** the `__pycache__` walk recursed **into `.venv`** — it
+would have deleted numpy's and pytest's caches inside the user's virtualenv. A virtualenv is
+now pruned from that walk, and never removed.
+
+Both scripts now: compose targets, exit 2 on an unknown target, match `.pyd`/`.dll`/`.so`/`.dylib`,
+remove `_native.c`, take the interpreter (`--python` / `-PythonExe`), collect removal failures
+into a non-zero exit, and add a `results` target for the pipeline's regenerable outputs — with
+`--dry-run` / `-DryRun` to inspect first. **No target touches `bench-reports/` or
+`BENCHMARKS.md`**, which are committed; that boundary is the guard against the subset-run
+overwrite trap.
+
+Verification after the accidental clean: full rebuild, then **C 220/220**, **parity 105/105**,
+**eventprop_c 29/29**, **.NET 382/382**. `--dry-run` lists Abstractions' `bin`/`obj`, both
+`.pyd`, `_native.c` and the 6 baselines, and no `.venv` path; an unknown target exits 2 on both
+platforms.
+
+**The rule:** a destructive script needs a dry run and a real exit code, and the two
+platform scripts are one contract — a fix in one is a fix in both, or the platforms measure
+different trees.
 
 ## Platform Support
 
