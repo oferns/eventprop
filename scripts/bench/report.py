@@ -156,8 +156,25 @@ def main():
                  + ("  _(count changed mid-run)_" if len(untracked) > 1 else ""))
     dates = prov.get("date") or []
     if dates:
-        L.append(f"- date: {', '.join(dates)}"
-                 + ("  _(records span multiple dates)_" if len(dates) > 1 else ""))
+        # Compare CALENDAR DATES, not ISO strings. The three suites stamp their own
+        # clocks: one reports UTC, the others local time with an offset. Measured on a
+        # single Windows run: 10:32:29+00:00, 10:47:04+01:00, 10:50:28+01:00 — one run,
+        # one calendar day, three distinct strings — so `len(dates) > 1` printed
+        # "records span multiple dates" on every normal multi-suite run. That note is the
+        # signal for "this record set was not one run", so it must not fire on a run that
+        # was one run.
+        #
+        # Each timestamp is read as the local day it declares for itself. Normalising to
+        # UTC would split a run that crosses midnight locally, which is the case the note
+        # is genuinely about (records from different sessions).
+        def _day(s):
+            s = str(s)
+            return s[:10] if len(s) >= 10 and s[10:11] == "T" else s
+        days = sorted(set(_day(d) for d in dates))
+        note = ""
+        if len(days) > 1:
+            note = f"  _(records span {len(days)} local dates: {', '.join(days)} — not one run)_"
+        L.append(f"- date: {', '.join(dates)}{note}")
     for suite, tools in sorted((prov.get("tools") or {}).items()):
         L.append(f"- suite `{suite}`: {'; '.join(tools)}")
     L.append(f"- sources: {', '.join(prov.get('sources', []))}")
