@@ -214,14 +214,31 @@ probe_pip_isolation() {
   if [[ $sys_rc -ne 0 && $sys_rc_nobi -eq 0 ]]; then
     printf '  \033[31mNOT A REPO PROBLEM: an empty probe package fails the same way under this\033[0m\n'
     printf '  \033[31minterpreter and installs fine with --no-build-isolation.\033[0m\n'
-    printf '  Stop reading pip subprocess traceback for a bug in this project; the\n'
-    printf '  failure reproduces on an empty package. The mechanism is NOT diagnosed here\n'
-    printf '  (every reproduction outside pips own invocation succeeds), so no fix is\n'
-    printf '  prescribed. A --no-build-isolation install works and is a reasonable local\n'
-    printf '  workaround, but build.sh does not apply it silently: isolation is what makes\n'
-    printf '  a package fetch its own build deps instead of inheriting global\n'
-    printf '  site-packages, and disabling it repo-wide would hide a real dependency\n'
-    printf '  problem.\n'
+    # Name the culprit when the version boundary is the one measured here.
+    local pipver
+    pipver="$("$py" -m pip --version 2>/dev/null | awk '{print $2}')"
+    case "$pipver" in
+      26.*)
+        printf '  \033[33mThis interpreter bundles pip %s. Measured A/B on the SAME interpreter\033[0m\n' "$pipver"
+        printf '  \033[33mand the SAME package: pip 25.0 installs it; pip 26.x cannot import the\033[0m\n'
+        printf '  \033[33mstdlib (json, traceback) from its build-isolation subprocess.\033[0m\n'
+        printf '  Verified workaround that makes the install succeed:\n'
+        printf '    %s -m pip install --break-system-packages "pip<26"\n' "$py"
+        printf '  (--break-system-packages is required: Homebrew Python is PEP 668 externally\n'
+        printf '  managed, which is why a plain `pip install -U pip` refuses to run here.)\n'
+        printf '  Do NOT expect `brew reinstall python@3.14` to help: it pours the SAME bottle\n'
+        printf '  and reinstalls the same pip. Verified — it changed nothing.\n'
+        ;;
+      *)
+        printf '  Stop reading pip subprocess traceback for a bug in this project; the\n'
+        printf '  failure reproduces on an empty package, so the fix is not in this repo.\n'
+        printf '  The mechanism is not diagnosed here, so no fix is prescribed.\n'
+        ;;
+    esac
+    printf '  A --no-build-isolation install works and is a reasonable local workaround,\n'
+    printf '  but build.sh does not apply it silently: isolation is what makes a package\n'
+    printf '  fetch its own build deps instead of inheriting global site-packages, and\n'
+    printf '  disabling it repo-wide would hide a real dependency problem.\n'
     return 1
   fi
   if [[ $sys_rc -ne 0 && $sys_rc_nobi -ne 0 ]]; then
@@ -330,6 +347,20 @@ else
   cd "$SCRIPT_DIR/src/EventProp.Python" || exit 1
   py_note_venv "$PWD"
   echo "  interpreter: $PYTHON  $("$PYTHON" --version 2>&1)"
+  # Warn BEFORE the failure, not after an 8-line subprocess traceback. pip 26.x cannot
+  # import the stdlib from its build-isolation subprocess (measured A/B on one
+  # interpreter: pip 25.0 installs, pip 26.2.1 raises ModuleNotFoundError for json and
+  # traceback), and Homebrew Python 3.14.8_2 bundles 26.2.1. The editable installs in
+  # this step use build isolation, so they fail on a pip regression that has nothing to
+  # do with this repo.
+  pip_ver="$("$PYTHON" -m pip --version 2>/dev/null | awk '{print $2}')"
+  case "$pip_ver" in
+    26.*)
+      note "pip $pip_ver: editable installs with build isolation are broken in this pip line."
+      note "  Workaround: $PYTHON -m pip install --break-system-packages 'pip<26'"
+      note "  (brew reinstall python@3.14 does NOT help — it pours the same bottle.)"
+      ;;
+  esac
 
   # Detect the built extension with a nullglob array, not `ls a*.so b*.dylib c*.pyd`:
   # ls exits non-zero if ANY pattern fails to match, so on a machine where the .pyd
