@@ -347,18 +347,34 @@ else
   cd "$SCRIPT_DIR/src/EventProp.Python" || exit 1
   py_note_venv "$PWD"
   echo "  interpreter: $PYTHON  $("$PYTHON" --version 2>&1)"
-  # Warn BEFORE the failure, not after an 8-line subprocess traceback. pip 26.x cannot
-  # import the stdlib from its build-isolation subprocess (measured A/B on one
-  # interpreter: pip 25.0 installs, pip 26.2.1 raises ModuleNotFoundError for json and
-  # traceback), and Homebrew Python 3.14.8_2 bundles 26.2.1. The editable installs in
-  # this step use build isolation, so they fail on a pip regression that has nothing to
-  # do with this repo.
+  # All editable installs in this script use --no-build-isolation, matching build.ps1
+  # (which uses it on both of its Python steps and is the working Windows reference).
+  # The reason is measured, not stylistic: pip 26.x cannot import the STDLIB from its
+  # build-isolation subprocess — A/B on ONE interpreter with ONE package: pip 25.0
+  # installs it, pip 26.2.1 raises ModuleNotFoundError for json and traceback. Homebrew
+  # Python 3.14.8_2 bundles pip 26.2.1, so `pip install -U pip` has nothing to upgrade
+  # and `brew reinstall python@3.14` pours the same bottle and reinstalls the same pip
+  # (verified: it changed nothing). The failure is at pip's "checking if build backend
+  # supports build_editable" call, before pip reads any packaging metadata — so it is
+  # not fixable from the repo: the pristine unpatched submodule fails identically, and
+  # so does a 2-line dummy package in /tmp, and adding a pyproject.toml changes nothing.
+  #
+  # COST, stated plainly: --no-build-isolation builds against the interpreter's existing
+  # packages, so a build dependency (numpy for these C extensions) must already be
+  # installed, and a genuine version conflict surfaces as a compile error that looks like
+  # a code bug rather than a pip dependency error. Accepted: these are dev installs of a
+  # fixed local tree, not a published distribution, and the repo was already mostly
+  # non-isolated (the Cython step used it, and build.ps1 uses it throughout).
+  #
+  # The pip-version note is kept because it is the diagnostic for anyone who hits a
+  # build-dependency failure here, and for anyone who adds an isolated install later.
   pip_ver="$("$PYTHON" -m pip --version 2>/dev/null | awk '{print $2}')"
   case "$pip_ver" in
     26.*)
-      note "pip $pip_ver: editable installs with build isolation are broken in this pip line."
-      note "  Workaround: $PYTHON -m pip install --break-system-packages 'pip<26'"
-      note "  (brew reinstall python@3.14 does NOT help — it pours the same bottle.)"
+      note "pip $pip_ver: build isolation is broken in this pip line (cannot import json/"
+      note "  traceback from its subprocess). This script avoids it with --no-build-isolation,"
+      note "  so the steps below are unaffected. Build deps must be present: numpy."
+      note "  To restore isolation on the machine: $PYTHON -m pip install --break-system-packages 'pip<26'"
       ;;
   esac
 
@@ -404,7 +420,7 @@ else
       note "existing extension(s) are for a DIFFERENT interpreter (none match $abi_tag) — rebuilding"
     fi
     if run "pip install -e . (EventProp.Python)" \
-      "$PYTHON" -m pip install --break-system-packages -e .; then
+      "$PYTHON" -m pip install --break-system-packages -e . --no-build-isolation; then
       ok "eventprop.eventprop_cpp (editable install)"
     else
       # Distinguish "our package is broken" from "this interpreter cannot build
@@ -415,11 +431,20 @@ else
 
   # The benchmark suite package, installed into the same interpreter: run_all.py runs
   # pytest against it with sys.executable.
+  #
+  # `.[dev]`, not `.`. pytest and pytest-benchmark are declared under
+  # [project.optional-dependencies] dev, so a bare `pip install -e .` does NOT install
+  # them — and with --no-build-isolation nothing else does either. Measured: after a
+  # clean.sh python, the build reported success and pytest then died with
+  # "unrecognized arguments: --benchmark-min-time=0.05", because the pytest-benchmark
+  # plugin that owns those options was absent. A green build that leaves the benchmark
+  # suite unrunnable is the failure mode this repo calls out everywhere else: the
+  # consumer only finds out far from the step that skipped the work.
   cd "$SCRIPT_DIR/src/EventProp.Python.Benchmarks" || exit 1
   if [[ -f pyproject.toml || -f setup.py ]]; then
-    if run "pip install -e . (EventProp.Python.Benchmarks)" \
-      "$PYTHON" -m pip install --break-system-packages -e .; then
-      ok "eventprop-python-benchmarks"
+    if run "pip install -e .[dev] (EventProp.Python.Benchmarks)" \
+      "$PYTHON" -m pip install --break-system-packages -e ".[dev]" --no-build-isolation; then
+      ok "eventprop-python-benchmarks (+ pytest, pytest-benchmark)"
     else
       probe_pip_isolation "$PYTHON"
     fi
@@ -469,9 +494,9 @@ else
   # "→ eventprop_c (editable install)" unconditionally, and pip's output went to
   # /dev/null with `|| true` — so a failed extension build was reported as success, and
   # the next thing to touch it was the benchmark suite, 40 minutes later.
-  if run "pip install -e . (EventProp.Native.Python)" \
-    "$PYTHON" -m pip install --break-system-packages -e . --no-build-isolation; then
-    ok "eventprop_c (editable install)"
+  if run "pip install -e .[dev] (EventProp.Native.Python)" \
+    "$PYTHON" -m pip install --break-system-packages -e ".[dev]" --no-build-isolation; then
+    ok "eventprop_c (editable install, + pytest)"
   fi
 fi
 
