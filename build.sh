@@ -108,65 +108,128 @@ note() { printf '  \033[33m%s\033[0m\n' "$1"; }
 
 # pip build-isolation probe.
 #
-# When `pip install -e .` fails, the honest question is "is this our package or this
+# When `pip install -e .` fails, the honest question is "is this our package, or this
 # interpreter?" — and it is answered by construction, not by pattern-matching pip's
 # error text. Write a two-file package with no dependency on this repo and try to
-# install it the same way. If the trivial package fails too, the interpreter's build
-# isolation is broken and no change to our packages can fix it.
+# install it the same way. If the trivial package fails too, no change to OUR packages
+# can fix this, and the reader should stop reading pip's 8-line subprocess traceback
+# looking for a project bug.
 #
 # Measured on a Homebrew python3.14 + pip 26.2.1: a pyproject.toml plus one .py file
-# fails with the identical "Failed to build ... when checking if build backend
-# supports build_editable", and the same package installs cleanly with
-# --no-build-isolation. The subprocess pip spawns cannot import the stdlib
-# (ModuleNotFoundError: No module named 'json' / 'traceback'), while the same script
-# run outside isolation imports json fine.
+# fails with the identical "Failed to build ... when checking if build backend supports
+# build_editable", and the same package installs cleanly with --no-build-isolation.
+# python3.9 (Xcode) passes the probe, so it discriminates rather than crying wolf.
 #
-# This exists because the failure looks like a project problem: it names a project
-# path, and the plausible causes (an editable .pth from a sibling package, PYTHONPATH
-# vs Homebrew's sitecustomize exit(), the CWD shadowing stdlib, the editable finder's
-# MAPPING) all survive inspection and none of them is the cause. Each was tested and
-# discarded. The trivial-package probe settles it in one step.
+# This is worth the code because the failure LOOKS like a project problem — it names a
+# project path — and four plausible causes survive inspection and none is the cause: an
+# editable .pth from a sibling package (removed it, unchanged), PYTHONPATH vs
+# Homebrew's sitecustomize exit() (3.14 accepts the project path), the CWD shadowing
+# stdlib (no such files), the editable finder's MAPPING (maps only eventprop_c, cannot
+# shadow json). Each was tested and discarded. The probe settles the scope question in
+# one step.
+#
+# SCOPE LIMIT — read this before trusting the wording. The probe proves WHERE the
+# failure is not (the repo). It does NOT diagnose why. An earlier version of this
+# message asserted "pip build isolation is BROKEN" and prescribed `pip install -U pip`
+# and `brew reinstall python@3.14`. Both prescriptions were unverified and one was
+# wrong: pip was already at the latest 26.2.1, so there was nothing to upgrade. Every
+# attempt to reproduce the failure outside pip's own invocation also succeeded — a bare
+# venv, a venv plus the system pip's vendored hook script, a clean TMPDIR, the exact
+# command run directly — so the mechanism is not understood. Say only what is proven.
+#
+# The probe installs into a THROWAWAY VENV, never into the interpreter's site-packages.
+# The first version installed into site-packages and uninstalled afterwards, and
+# `pip uninstall` does NOT remove the editable .pth: every probe run left an
+# __editable__.isolation-probe-0.1.pth plus a finder module pointing at a deleted temp
+# dir. Four such .pth files accumulated, one of them the probe's own. A diagnostic that
+# litters the environment it is diagnosing is worse than no diagnostic.
+#
+# BUT a venv-only probe is a WEAKER test, and measuring that is what found this:
+# the same package that fails under the system interpreter's pip installs CLEANLY
+# under a venv's pip (venv pip 26.2.1, same version). So "isolated install of a trivial
+# package succeeds in a venv" does NOT mean the system interpreter is fine — it means
+# the venv is fine. The probe therefore runs the probe package under BOTH pips and
+# reports them separately, because the two answers mean different things:
+#   venv fails, system fails -> the interpreter's pip, not this repo
+#   venv passes, system fails -> specific to the system interpreter's pip; the repo is
+#                               exonerated (the venv proves the package is installable)
+#   venv passes, system passes -> the failure is specific to the package under test
 probe_pip_isolation() {
-  local py="$1" probe_dir rc
+  local py="$1" probe_dir venv_dir rc sys_rc sys_rc_nobi probe_err
   probe_dir="$(mktemp -d 2>/dev/null)" || { note "cannot create a probe dir; skipping the pip isolation probe"; return 2; }
+  venv_dir="$(mktemp -d 2>/dev/null)" || { rm -rf "$probe_dir"; note "cannot create a probe venv; skipping"; return 2; }
   # Deliberately NOT inside the repo, and NOT named after anything in it.
   printf '[build-system]\nrequires = ["setuptools"]\nbuild-backend = "setuptools.build_meta"\n\n[project]\nname = "isolation-probe"\nversion = "0.0"\n' \
     > "$probe_dir/pyproject.toml" 2>/dev/null
   printf 'def noop():\n    return 1\n' > "$probe_dir/isolation_probe.py" 2>/dev/null
-  "$py" -m pip install --break-system-packages -e "$probe_dir" >"$probe_dir/pip.log" 2>&1
-  rc=$?
-  "$py" -m pip install --break-system-packages --no-build-isolation -e "$probe_dir" >>"$probe_dir/pip.log" 2>&1
-  local rc_nobi=$?
-  # Uninstall the probe so it cannot shadow anything later in the run.
-  "$py" -m pip uninstall -y --break-system-packages isolation-probe >/dev/null 2>&1
-  local out="$probe_dir/pip.log"
-  # Capture the diagnostic line BEFORE the dir is removed — the log lives in it.
-  local probe_err
-  probe_err="$(grep -m1 -E "ModuleNotFoundError|No module named|ERROR:" "$out" 2>/dev/null | sed 's/^ *//')"
-  rm -rf "$probe_dir"
-  if [[ $rc -ne 0 && $rc_nobi -eq 0 ]]; then
-    # Isolated fails, non-isolated succeeds: the interpreter, not the package.
-    printf '  \033[31mpip BUILD ISOLATION IS BROKEN on this interpreter.\033[0m\n'
-    printf '  \033[31mA two-file probe package with NO dependency on this repo fails\033[0m\n'
-    printf '  \033[31midentically under isolation, and installs fine with --no-build-isolation.\033[0m\n'
-    printf '  interpreter: %s (%s)\n' "$py" "$("$py" --version 2>&1)"
-    printf '  pip:         %s\n' "$("$py" -m pip --version 2>&1 | head -1)"
-    printf '  probe error: %s\n' "${probe_err:-(none captured; see the pip output above)}"
-    printf '  This is NOT fixable from the repo. On the machine, try:\n'
-    printf '    %s -m pip install -U pip\n' "$py"
-    printf '    brew reinstall python@3.14        # macOS/Homebrew\n'
-    printf '  A --no-build-isolation install WORKS and is a reasonable local workaround,\n'
-    printf '  but build.sh does not apply it silently: isolation is what makes a package\n'
-    printf '  fetch its own build deps instead of inheriting global site-packages, and\n'
-    printf '  disabling it repo-wide would hide a real dependency-version problem.\n'
-    return 1
-  fi
-  if [[ $rc -ne 0 && $rc_nobi -ne 0 ]]; then
-    printf '  \033[33mthe probe package fails BOTH ways, so this is not an isolation-specific\033[0m\n'
-    printf '  \033[33mbreakage — treat it as a real install failure and read pip output above.\033[0m\n'
+
+  if ! "$py" -m venv "$venv_dir" >"$probe_dir/pip.log" 2>&1; then
+    note "probe could not create a venv; skipping (see $probe_dir/pip.log)"
     return 2
   fi
-  note "pip isolation probe PASSES (isolated install of a trivial package works) — the failure above is specific to this package; read pip's output"
+  local vpy="$venv_dir/bin/python"
+  [[ -x "$vpy" ]] || vpy="$venv_dir/Scripts/python.exe"   # Windows layout
+
+  # 1. The venv's pip — a clean, self-managed interpreter, nothing to do with the
+  #    system site-packages. No --break-system-packages: a venv is not externally managed.
+  #    Only the ISOLATED leg is run. A fresh venv has no setuptools, so a
+  #    --no-build-isolation install there fails with BackendUnavailable:
+  #    Cannot import 'setuptools.build_meta' — measured. That is the venv having no build
+  #    deps, not the failure under investigation, so probing it would report a FAIL that
+  #    means nothing.
+  "$vpy" -m pip install -e "$probe_dir" >>"$probe_dir/pip.log" 2>&1
+  rc=$?
+
+  # 2. The interpreter under test — the one that just failed. This is the shape that
+  #    actually reproduces, so it is the one that carries the diagnostic weight. It
+  #    writes to site-packages, so it is uninstalled AND the editable .pth and finder
+  #    module are removed explicitly: `pip uninstall` leaves those behind.
+  "$py" -m pip install --break-system-packages -e "$probe_dir" >>"$probe_dir/pip.log" 2>&1
+  sys_rc=$?
+  "$py" -m pip install --break-system-packages --no-build-isolation -e "$probe_dir" >>"$probe_dir/pip.log" 2>&1
+  sys_rc_nobi=$?
+  "$py" -m pip uninstall -y --break-system-packages isolation-probe >>"$probe_dir/pip.log" 2>&1
+  # pip uninstall does NOT remove these; deleting them by name is the only way to leave
+  # the interpreter as it was. Names are pip's own editable-install convention.
+  rm -f "$($py -c 'import sysconfig;print(sysconfig.get_paths()["purelib"])' 2>/dev/null)/__editable__.isolation-probe-0.1.pth" \
+        "$($py -c 'import sysconfig;print(sysconfig.get_paths()["purelib"])' 2>/dev/null)/__editable___isolation_probe_0_1_finder.py" \
+        2>/dev/null
+
+  local out="$probe_dir/pip.log"
+  # Capture the diagnostic line BEFORE the dirs are removed — the log lives in them.
+  # Prefer a real cause over a bare "ERROR: Exception:" header, which the venv's
+  # BackendUnavailable leg emits and which says nothing on its own.
+  probe_err="$(grep -m1 -E "ModuleNotFoundError|No module named|BackendUnavailable|Cannot import" "$out" 2>/dev/null | sed 's/^ *//')"
+  [[ -n "$probe_err" ]] || probe_err="$(grep -m1 -E "^ERROR:" "$out" 2>/dev/null | sed 's/^ *//')"
+  # Removing the venv removes the probe completely from the clean side.
+  rm -rf "$probe_dir" "$venv_dir"
+
+  printf '  probe (two-file package, no repo dependency):\n'
+  printf '    venv pip:    isolated=%s\n' "$([[ $rc -eq 0 ]] && echo ok || echo FAIL)"
+  printf '    system pip:  isolated=%s  --no-build-isolation=%s\n' "$([[ $sys_rc -eq 0 ]] && echo ok || echo FAIL)" "$([[ $sys_rc_nobi -eq 0 ]] && echo ok || echo FAIL)"
+  printf '  interpreter: %s (%s)\n' "$py" "$("$py" --version 2>&1)"
+  printf '  pip:         %s\n' "$("$py" -m pip --version 2>&1 | head -1)"
+  [[ -n "$probe_err" ]] && printf '  probe error: %s\n' "$probe_err"
+
+  if [[ $sys_rc -ne 0 && $sys_rc_nobi -eq 0 ]]; then
+    printf '  \033[31mNOT A REPO PROBLEM: an empty probe package fails the same way under this\033[0m\n'
+    printf '  \033[31minterpreter and installs fine with --no-build-isolation.\033[0m\n'
+    printf '  Stop reading pip subprocess traceback for a bug in this project; the\n'
+    printf '  failure reproduces on an empty package. The mechanism is NOT diagnosed here\n'
+    printf '  (every reproduction outside pips own invocation succeeds), so no fix is\n'
+    printf '  prescribed. A --no-build-isolation install works and is a reasonable local\n'
+    printf '  workaround, but build.sh does not apply it silently: isolation is what makes\n'
+    printf '  a package fetch its own build deps instead of inheriting global\n'
+    printf '  site-packages, and disabling it repo-wide would hide a real dependency\n'
+    printf '  problem.\n'
+    return 1
+  fi
+  if [[ $sys_rc -ne 0 && $sys_rc_nobi -ne 0 ]]; then
+    printf '  \033[33mthe probe fails under the system pip BOTH ways, so this is not\033[0m\n'
+    printf '  \033[33misolation-specific — treat it as a real install failure and read pip.\033[0m\n'
+    return 2
+  fi
+  note "pip isolation probe PASSES under the interpreter under test — the failure above is specific to that package; read pip's output"
   return 0
 }
 
