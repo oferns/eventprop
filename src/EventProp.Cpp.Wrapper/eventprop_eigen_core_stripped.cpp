@@ -1,10 +1,12 @@
 #include "eventprop_eigen_stripped.h"
 #include <algorithm>
-#include <boost/format.hpp>
+#include <execution>
+// #include <boost/format.hpp>  // unused
 #include <boost/math/tools/roots.hpp>
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <numeric>
 #include <random>
 
 
@@ -187,7 +189,7 @@ compute_spikes(Eigen::Ref<RowMatrixXd const> w, Spikes const &spikes,
     bool finished = false;
     int processed_up_to = 0;
     double tmax, vmax, t_before, t_pre, t_post;
-    while (not finished) {
+    while (!finished) {
       for (int i = processed_up_to; i < n_spikes + 1; i++) {
         if (i == n_spikes) {
           t_pre = inf;
@@ -263,9 +265,9 @@ compute_spikes(Eigen::Ref<RowMatrixXd const> w, Spikes const &spikes,
   auto all_sources_array = Eigen::ArrayXi(all_post_spikes.size());
   auto all_currents_array = Eigen::ArrayXd(all_post_spikes.size());
   std::vector<int> first_spike_idxs(n);
-  #pragma omp parallel for
+#pragma omp parallel for
   for (int nrn_idx=0; nrn_idx<n; nrn_idx++) {
-    if (not std::isnan(first_spike_times.at(nrn_idx))) {
+    if (!std::isnan(first_spike_times.at(nrn_idx))) {
       #ifdef __APPLE__
       auto find_result = std::distance(all_post_spikes.begin(), std::find_if(all_post_spikes.begin(), all_post_spikes.end(), [&](std::pair<std::pair<double, double>, int> spike) -> bool { return spike.second == nrn_idx; }));
       #else
@@ -510,7 +512,7 @@ std::pair<RowMatrixXd, Eigen::ArrayXd> backward(Spikes & input_spikes, Maxima co
 std::vector<Maxima>
 compute_maxima_batch(Eigen::Ref<RowMatrixXd const> w, std::vector<Spikes> const& batch, double tau_mem, double tau_syn) {
   auto result = std::vector<Maxima>(batch.size());
-  #pragma omp parallel for
+#pragma omp parallel for
     for (int batch_idx = 0; batch_idx < batch.size(); batch_idx++) {
     result.at(batch_idx) =
         compute_maxima(w, batch[batch_idx], tau_mem, tau_syn);

@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>CW.EventProp</RootNamespace>
+    <AssemblyName>CW.EventProp.Abstractions</AssemblyName>
+  </PropertyGroup>
+
+</Project>

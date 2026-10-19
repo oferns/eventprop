@@ -19,8 +19,66 @@ public class NativeVsManagedTests
     private const double RelTolerance = 1e-9;
 
     // ========================================================================
-    // Shared Data Generation (seed 42, deterministic) — matches NativeLibraryParityTests
+    // Helpers to extract native output data before await boundaries (ref structs can't cross awaits)
     // ========================================================================
+
+    private static (int nSpikes, double[] times, int[] sources) GetNativeComputeSpikes(
+        ReadOnlySpan<double> w, int nPre, int nPost,
+        ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
+        double vTh, double tauMem, double tauSyn)
+    {
+        using var output = Native.Api.ComputeSpikes(w, nPre, nPost, times, sources, vTh, tauMem, tauSyn);
+        return (output.NSpikes, output.Times.ToArray(), output.Sources.ToArray());
+    }
+
+    private static (double[] sum0, double[] sum1) GetNativeComputeSums(
+        ReadOnlySpan<double> w, int nPre, int nPost,
+        ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
+        double tauMem, double tauSyn)
+    {
+        using var output = Native.Api.ComputeSums(w, nPre, nPost, times, sources, tauMem, tauSyn);
+        return (output.Sum0.ToArray(), output.Sum1.ToArray());
+    }
+
+    private static (double[] times, double[] values) GetNativeComputeMaxima(
+        ReadOnlySpan<double> w, int nPre, int nPost,
+        ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
+        double tauMem, double tauSyn)
+    {
+        using var output = Native.Api.ComputeMaxima(w, nPre, nPost, times, sources, tauMem, tauSyn);
+        return (output.Times.ToArray(), output.Values.ToArray());
+    }
+
+    private static (double[] gradient, double[] spikeErrors) GetNativeBackwardSpikes(
+        ReadOnlySpan<double> inputTimes, ReadOnlySpan<int> inputSources,
+        ReadOnlySpan<double> postTimes, ReadOnlySpan<int> postSources,
+        ReadOnlySpan<double> postErrors,
+        int nPostSpikes,
+        ReadOnlySpan<double> w, int nPre, int nPost,
+        double vTh, double tauMem, double tauSyn)
+    {
+        using var output = Native.Api.BackwardSpikes(inputTimes, inputSources,
+            postTimes, postSources, postErrors, nPostSpikes,
+            w, nPre, nPost, vTh, tauMem, tauSyn);
+        return (output.Gradient.ToArray(), output.SpikeErrors.ToArray());
+    }
+
+    private static (double[] gradient, double[] spikeErrors) GetNativeBackwardMaxima(
+        ReadOnlySpan<double> inputTimes, ReadOnlySpan<int> inputSources,
+        ReadOnlySpan<double> maximaTimes, ReadOnlySpan<double> maximaValues,
+        ReadOnlySpan<double> maximaErrors, int nMaxima,
+        ReadOnlySpan<double> w, int nPre, int nPost,
+        double tauMem, double tauSyn)
+    {
+        using var output = Native.Api.BackwardMaxima(inputTimes, inputSources,
+            maximaTimes, maximaValues, maximaErrors, nMaxima,
+            w, nPre, nPost, tauMem, tauSyn);
+        return (output.Gradient.ToArray(), output.SpikeErrors.ToArray());
+    }
+
+    // ========================================================================
+    // Shared Data Generation (seed 42, deterministic) — matches NativeLibraryParityTests
+    // ============================================================================
 
     private static void GenerateUniformData(Random rng, int nPre, int nPost, int nSpikes,
         out double[] w, out double[] times, out int[] sources)
@@ -183,9 +241,7 @@ public class NativeVsManagedTests
             new double[times.Length], new double[times.Length]);
 
         // C library via P/Invoke
-        using var cOutput = Native.Api.ComputeSums(w, nPre, nPost, times, sources, 0.02, 0.005);
-        var cSum0 = cOutput.Sum0.ToArray();
-        var cSum1 = cOutput.Sum1.ToArray();
+        (var cSum0, var cSum1) = GetNativeComputeSums(w, nPre, nPost, times, sources, 0.02, 0.005);
 
         // Assert: .NET matches C (scaled tolerance)
         for (int i = 0; i < csSum0.Length; i++)
@@ -256,11 +312,7 @@ public class NativeVsManagedTests
         var csResult = EventPropMath.ComputeSpikes(w, times, sources, nPost, 1.0, 0.02, 0.005, buffers);
 
         // C library via P/Invoke
-        using var cOutput = Native.Api.ComputeSpikes(w, nPre, nPost, times, sources, 1.0, 0.02, 0.005);
-        int nCSpikes = cOutput.NSpikes;
-        var cTimes = cOutput.Times.ToArray();
-        var cSources = cOutput.Sources.ToArray();
-        var cCurrents = cOutput.Currents.ToArray();
+        (int nCSpikes, var cTimes, var cSources) = GetNativeComputeSpikes(w, nPre, nPost, times, sources, 1.0, 0.02, 0.005);
 
         // Assert: spike counts match
         await Assert.That(csResult.NSpikes).IsEqualTo(nCSpikes);
@@ -270,7 +322,8 @@ public class NativeVsManagedTests
         {
             AssertScaled(csResult.Times[i], cTimes[i], "times", i);
             await Assert.That(csResult.Sources[i]).IsEqualTo(cSources[i]);
-            AssertScaled(csResult.Currents[i], cCurrents[i], "currents", i);
+            // Currents are no longer part of the C spike output — the backward
+            // pass derives them, so gradient parity covers them instead.
         }
     }
 
@@ -334,9 +387,7 @@ public class NativeVsManagedTests
         var csMaxima = EventPropMath.ComputeMaxima(w, times, sources, nPost, 0.02, 0.005, maximaBuffers);
 
         // C library via P/Invoke
-        using var cOutput = Native.Api.ComputeMaxima(w, nPre, nPost, times, sources, 0.02, 0.005);
-        var cTimes = cOutput.Times.ToArray();
-        var cValues = cOutput.Values.ToArray();
+        (var cTimes, var cValues) = GetNativeComputeMaxima(w, nPre, nPost, times, sources, 0.02, 0.005);
 
         // Assert: C matches .NET (scaled tolerance)
         for (int i = 0; i < nPost; i++)
@@ -423,11 +474,10 @@ public class NativeVsManagedTests
             1.0, 0.02, 0.005, csGradient, buffers);
 
         // C library via P/Invoke
-        using var cOutput = Native.Api.BackwardSpikes(times, sources,
+        (var cGradient, _) = GetNativeBackwardSpikes(times, sources,
             postSpikes.Times[..postSpikes.NSpikes], postSpikes.Sources[..postSpikes.NSpikes],
-            postSpikes.Currents[..postSpikes.NSpikes], postSpikes.Errors[..postSpikes.NSpikes],
+            postSpikes.Errors[..postSpikes.NSpikes],
             postSpikes.NSpikes, w, nPre, nPost, 1.0, 0.02, 0.005);
-        var cGradient = cOutput.Gradient.ToArray();
 
         // Assert: .NET matches C (scaled tolerance)
         try
@@ -527,10 +577,9 @@ public class NativeVsManagedTests
             w, nPost, 0.02, 0.005, csGradient);
 
         // C library via P/Invoke
-        using var cOutput = Native.Api.BackwardMaxima(times, sources,
+        (var cGradient, _) = GetNativeBackwardMaxima(times, sources,
             maximaTimes, maximaValues, maximaErrors, nPost,
             w, nPre, nPost, 0.02, 0.005);
-        var cGradient = cOutput.Gradient.ToArray();
 
         // Assert: .NET matches C (scaled tolerance)
         for (int i = 0; i < csGradient.Length; i++)

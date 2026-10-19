@@ -30,12 +30,12 @@ from eventprop.loss_layer import (
 )
 
 # Cython (under test)
-from eventprop_c.spikes import Spikes as CtSpikes, SpikesVector as CtSpikesVector
-from eventprop_c.lif_layer import LIFLayer as CtLIFLayer, LIFLayerParameters as CtLIFParams
-from eventprop_c.li_layer import LILayer as CtLILayer, LILayerParameters as CtLIParams
+from eventprop_c.spikes import Spikes as CySpikes, SpikesVector as CySpikesVector
+from eventprop_c.lif_layer import LIFLayer as CyLIFLayer, LIFLayerParameters as CyLIFParams
+from eventprop_c.li_layer import LILayer as CyLILayer, LILayerParameters as CyLIParams
 from eventprop_c.loss_layer import (
-    TTFSCrossEntropyLoss as CtTTFS,
-    VMaxCrossEntropyLoss as CtVMax,
+    TTFSCrossEntropyLoss as CyTTFS,
+    VMaxCrossEntropyLoss as CyVMax,
 )
 
 from conftest import SIZES, TAU_MEM, TAU_SYN, V_TH, make_input_batch, make_weights
@@ -80,8 +80,8 @@ class TestLIF_Forward:
         w = make_weights(n_in, n_out)
         times, sources = make_input_batch(n_in, n_out, spn, pattern)
 
-        layer = CtLIFLayer(CtLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
-        batch = CtSpikesVector([CtSpikes(times=times, sources=sources)])
+        layer = CyLIFLayer(CyLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
+        batch = CySpikesVector([CySpikes(times=times, sources=sources)])
 
         benchmark(layer.forward, batch)
 
@@ -118,8 +118,8 @@ class TestLIF_Backward:
         w = make_weights(n_in, n_out)
         times, sources = make_input_batch(n_in, n_out, spn, pattern)
 
-        layer = CtLIFLayer(CtLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
-        batch = CtSpikesVector([CtSpikes(times=times, sources=sources)])
+        layer = CyLIFLayer(CyLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
+        batch = CySpikesVector([CySpikes(times=times, sources=sources)])
         post = layer.forward(batch)
 
         # Set errors on output spikes — matches pybind11 benchmark exactly
@@ -161,8 +161,8 @@ class TestLI_Forward:
         w = make_weights(n_in, n_out)
         times, sources = make_input_batch(n_in, n_out, spn, pattern)
 
-        layer = CtLILayer(CtLIParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN), w_in=w)
-        batch = CtSpikesVector([CtSpikes(times=times, sources=sources)])
+        layer = CyLILayer(CyLIParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN), w_in=w)
+        batch = CySpikesVector([CySpikes(times=times, sources=sources)])
 
         benchmark(layer.forward, batch)
 
@@ -199,8 +199,8 @@ class TestLI_Backward:
         w = make_weights(n_in, n_out)
         times, sources = make_input_batch(n_in, n_out, spn, pattern)
 
-        layer = CtLILayer(CtLIParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN), w_in=w)
-        batch = CtSpikesVector([CtSpikes(times=times, sources=sources)])
+        layer = CyLILayer(CyLIParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN), w_in=w)
+        batch = CySpikesVector([CySpikes(times=times, sources=sources)])
         maxima = layer.forward(batch)
 
         for i in range(maxima[0].n_post):
@@ -246,11 +246,11 @@ class TestTTFSForward:
         times, sources = make_input_batch(n_in, n_out, spn, pattern)
 
         from eventprop_c.loss_layer import TTFSCrossEntropyLossParameters
-        lif_params = CtLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
+        lif_params = CyLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
         loss_params = TTFSCrossEntropyLossParameters(lif_parameters=lif_params, alpha=1e-2)
 
-        layer = CtTTFS(loss_params, w_in=w)
-        batch = CtSpikesVector([CtSpikes(times=times, sources=sources)])
+        layer = CyTTFS(loss_params, w_in=w)
+        batch = CySpikesVector([CySpikes(times=times, sources=sources)])
 
         benchmark(layer.forward, batch)
 
@@ -289,11 +289,11 @@ class TestTTFSBackward:
         times, sources = make_input_batch(n_in, n_out, spn, pattern)
 
         from eventprop_c.loss_layer import TTFSCrossEntropyLossParameters
-        lif_params = CtLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
+        lif_params = CyLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH)
         loss_params = TTFSCrossEntropyLossParameters(lif_parameters=lif_params, alpha=1e-2)
 
-        layer = CtTTFS(loss_params, w_in=w)
-        batch = CtSpikesVector([CtSpikes(times=times, sources=sources)])
+        layer = CyTTFS(loss_params, w_in=w)
+        batch = CySpikesVector([CySpikes(times=times, sources=sources)])
         layer.forward(batch)
 
         benchmark(layer.backward, np.array([0]))
@@ -327,8 +327,8 @@ class TestVMaxForward:
         w = make_weights(n_in, n_out)
         times, sources = make_input_batch(n_in, n_out, spn, pattern)
 
-        layer = CtVMax(CtLIParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN), w_in=w)
-        batch = CtSpikesVector([CtSpikes(times=times, sources=sources)])
+        layer = CyVMax(CyLIParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN), w_in=w)
+        batch = CySpikesVector([CySpikes(times=times, sources=sources)])
 
         benchmark(layer.forward, batch)
 
@@ -362,8 +362,8 @@ class TestVMaxBackward:
         w = make_weights(n_in, n_out)
         times, sources = make_input_batch(n_in, n_out, spn, pattern)
 
-        layer = CtVMax(CtLIParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN), w_in=w)
-        batch = CtSpikesVector([CtSpikes(times=times, sources=sources)])
+        layer = CyVMax(CyLIParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN), w_in=w)
+        batch = CySpikesVector([CySpikes(times=times, sources=sources)])
         layer.forward(batch)
 
         benchmark(layer.backward, np.array([0]))
@@ -396,15 +396,15 @@ class TestBatchForward:
         n_in, n_out = 50, 20
         w = make_weights(n_in, n_out)
 
-        layer = CtLIFLayer(CtLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
+        layer = CyLIFLayer(CyLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
 
         rng = np.random.default_rng(42)
-        spikes = [CtSpikes(
+        spikes = [CySpikes(
             times=np.sort(rng.uniform(0.001, 0.1, size=20)),
             sources=rng.integers(0, n_in, 20, dtype=np.int32),
         ) for _ in range(batch_size)]
 
-        benchmark(layer.forward, CtSpikesVector(spikes))
+        benchmark(layer.forward, CySpikesVector(spikes))
 
 
 # ============================================================
@@ -433,19 +433,120 @@ class TestDropout:
 
         rng = np.random.default_rng(42)
         n_in, n_spikes_per_sample = 10, 30
-        spikes = [CtSpikes(
+        spikes = [CySpikes(
             times=np.sort(rng.uniform(0.001, 0.1, size=n_spikes_per_sample)),
             sources=rng.integers(0, n_in, n_spikes_per_sample, dtype=np.int32),
         ) for _ in range(batch_size)]
 
-        benchmark(dropout_spikes, CtSpikesVector(spikes), 0.3, 42)
+        benchmark(dropout_spikes, CySpikesVector(spikes), 0.3, 42)
 
 
 # ============================================================
-# Full training step — forward + backward chain (2-layer TTFS/VMax)
+# Full training step — single layer LIF, forward + set errors + backward
+# Matches .NET Bench_TrainingLoop_Tiny/Small/Medium/Large exactly:
+#   Same problem sizes, single sample (no batch)
 # ============================================================
 
-class TestTrainingStep:
+class TestTrainingStepLIF:
+    """Benchmark a full training step: forward -> set errors -> backward.
+
+    Problem sizes match .NET Bench_TrainingLoop_* for direct comparison."""
+
+    @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    def test_pybind11_training_step(self, benchmark, size_name):
+        cfg = SIZES[size_name]
+        n_in, n_out, spn = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spn, "uniform")
+
+        layer = PyLIFLayer(PyLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
+        batch = PySpikesVector([PySpikes(times, sources)])
+
+        def step():
+            post = layer.forward(batch)
+            for i in range(post[0].n_spikes):
+                post[0].set_error(i, 1.0)
+            layer.backward()
+
+        benchmark(step)
+
+    @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    def test_cython_training_step(self, benchmark, size_name):
+        cfg = SIZES[size_name]
+        n_in, n_out, spn = cfg["n_in"], cfg["n_out"], cfg["spikes_per_neuron"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spn, "uniform")
+
+        layer = CyLIFLayer(CyLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
+        batch = CySpikesVector([CySpikes(times=times, sources=sources)])
+
+        def step():
+            post = layer.forward(batch)
+            for i in range(post[0].n_spikes):
+                post[0].set_error(i, 1.0)
+            layer.backward()
+
+        benchmark(step)
+
+
+# ============================================================
+# Parameter sweep — full matrix: neuron size x spike count
+# ============================================================
+
+SWEEP_SPIKE_COUNTS = [10, 100, 500, 1000]
+
+
+class TestTrainingStepSweep:
+    """Full matrix sweep: every neuron size (Tiny/Small/Medium/Large) x every spike count (10/100/500/1000).
+
+    Isolates whether slowdown comes from more neurons (larger weight matrix, adjoint state)
+    or more spikes (more root-finding iterations, longer backward sweep)."""
+
+    @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    @pytest.mark.parametrize("spike_count", SWEEP_SPIKE_COUNTS)
+    def test_pybind11_sweep(self, benchmark, size_name, spike_count):
+        cfg = SIZES[size_name]
+        n_in, n_out = cfg["n_in"], cfg["n_out"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spike_count, "uniform")
+
+        layer = PyLIFLayer(PyLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
+        batch = PySpikesVector([PySpikes(times, sources)])
+
+        def step():
+            post = layer.forward(batch)
+            for i in range(post[0].n_spikes):
+                post[0].set_error(i, 1.0)
+            layer.backward()
+
+        benchmark(step)
+
+    @pytest.mark.parametrize("size_name", SIZES.keys(), ids=list(SIZES.keys()))
+    @pytest.mark.parametrize("spike_count", SWEEP_SPIKE_COUNTS)
+    def test_cython_sweep(self, benchmark, size_name, spike_count):
+        cfg = SIZES[size_name]
+        n_in, n_out = cfg["n_in"], cfg["n_out"]
+        w = make_weights(n_in, n_out)
+        times, sources = make_input_batch(n_in, n_out, spike_count, "uniform")
+
+        layer = CyLIFLayer(CyLIFParams(n=n_out, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w)
+        batch = CySpikesVector([CySpikes(times=times, sources=sources)])
+
+        def step():
+            post = layer.forward(batch)
+            for i in range(post[0].n_spikes):
+                post[0].set_error(i, 1.0)
+            layer.backward()
+
+        benchmark(step)
+
+
+# ============================================================
+# Full training step — 2-layer network with loss computation
+# (TTFS/VMax cross-entropy, batch sizes 4 & 8)
+# ============================================================
+
+class TestTrainingStepLoss:
     """Benchmark a full training step: hidden.forward -> loss.forward -> loss.backward."""
 
     @pytest.mark.parametrize("batch_size", [4, 8])
@@ -481,20 +582,20 @@ class TestTrainingStep:
         w2 = make_weights(n_hidden, n_classes)
 
         from eventprop_c.loss_layer import TTFSCrossEntropyLossParameters
-        hidden = CtLIFLayer(CtLIFParams(n=n_hidden, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w1)
-        loss = CtTTFS(
-            TTFSCrossEntropyLossParameters(lif_parameters=CtLIFParams(n=n_classes, n_in=n_hidden, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), alpha=1e-2),
+        hidden = CyLIFLayer(CyLIFParams(n=n_hidden, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w1)
+        loss = CyTTFS(
+            TTFSCrossEntropyLossParameters(lif_parameters=CyLIFParams(n=n_classes, n_in=n_hidden, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), alpha=1e-2),
             w_in=w2,
         )
 
         rng = np.random.default_rng(42)
-        spikes = [CtSpikes(
+        spikes = [CySpikes(
             times=np.sort(rng.uniform(0.001, 0.05, size=15)),
             sources=rng.integers(0, n_in, 15, dtype=np.int32),
         ) for _ in range(batch_size)]
 
         def step():
-            hidden.forward(CtSpikesVector(spikes))
+            hidden.forward(CySpikesVector(spikes))
             loss.forward(hidden.post_batch)
             loss.backward(np.array([i % n_classes for i in range(batch_size)]))
 
@@ -528,17 +629,17 @@ class TestTrainingStep:
         w1 = make_weights(n_in, n_hidden)
         w2 = make_weights(n_hidden, n_classes)
 
-        hidden = CtLIFLayer(CtLIFParams(n=n_hidden, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w1)
-        loss = CtVMax(CtLIParams(n=n_classes, n_in=n_hidden, tau_mem=TAU_MEM, tau_syn=TAU_SYN), w_in=w2)
+        hidden = CyLIFLayer(CyLIFParams(n=n_hidden, n_in=n_in, tau_mem=TAU_MEM, tau_syn=TAU_SYN, v_th=V_TH), w_in=w1)
+        loss = CyVMax(CyLIParams(n=n_classes, n_in=n_hidden, tau_mem=TAU_MEM, tau_syn=TAU_SYN), w_in=w2)
 
         rng = np.random.default_rng(42)
-        spikes = [CtSpikes(
+        spikes = [CySpikes(
             times=np.sort(rng.uniform(0.001, 0.05, size=15)),
             sources=rng.integers(0, n_in, 15, dtype=np.int32),
         ) for _ in range(batch_size)]
 
         def step():
-            hidden.forward(CtSpikesVector(spikes))
+            hidden.forward(CySpikesVector(spikes))
             loss.forward(hidden.post_batch)
             loss.backward(np.array([i % n_classes for i in range(batch_size)]))
 

@@ -179,6 +179,25 @@ public class ScratchBuffersTests
     }
 
     [Test]
+    public void PostSpikeRow_GrowPreservesLiveSpikes()
+    {
+        using var buffers = new ScratchBuffers();
+        buffers.InitPostSpikeBuffers(1, 2);
+
+        var row = buffers.PostSpikeRowAt(0);
+        row.Times[0] = 1.25;
+        row.Currents[0] = 3.5;
+        row.ExpSt[0] = 0.75;
+
+        row.Grow(1, 8);
+
+        SyncAssert.That(row.Capacity).IsGreaterThanOrEqualTo(8);
+        SyncAssert.That(row.Times[0]).IsCloseTo(1.25, 1e-12);
+        SyncAssert.That(row.Currents[0]).IsCloseTo(3.5, 1e-12);
+        SyncAssert.That(row.ExpSt[0]).IsCloseTo(0.75, 1e-12);
+    }
+
+    [Test]
     public void ScratchBuffers_IsIDisposable()
     {
         using var buffers = new ScratchBuffers();

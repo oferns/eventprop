@@ -1,0 +1,83 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release (shared library)",
+      "description": "SHARED libeventprop_c_api. Build this before EventProp.C.Tests, EventProp.Native.ParityTests and EventProp.Native.Benchmarks, which import it from ./build. Sets ENABLE_ASAN=OFF explicitly: it is a cache variable, so a prior asan run would otherwise leak into this build and silently produce an instrumented STATIC library.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ENABLE_ASAN": "OFF"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug (shared library)",
+      "description": "Unoptimised. ASan requires a Debug build.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ENABLE_ASAN": "OFF"
+      }
+    },
+    {
+      "name": "asan",
+      "displayName": "Debug + AddressSanitizer",
+      "description": "Instrumented. On macOS this builds a STATIC libeventprop_c_api.a (AppleClang cannot instrument shared libraries). Build this before the asan preset in EventProp.C.Tests — both sides must be instrumented consistently. Output lands in ./build, the path the test project hardcodes.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ENABLE_ASAN": "ON"
+      }
+    },
+    {
+      "name": "werror",
+      "displayName": "Release, warnings as errors",
+      "description": "Enforces the 'code must compile with zero warnings' rule. Separate build dir so it never clobbers the release build.",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build-werror",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ENABLE_ASAN": "OFF",
+        "CMAKE_COMPILE_WARNING_AS_ERROR": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "configuration": "Release"
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "configuration": "Debug"
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
+      "configuration": "Debug",
+      "cleanFirst": true
+    },
+    {
+      "name": "werror",
+      "configurePreset": "werror",
+      "configuration": "Release"
+    }
+  ]
+}

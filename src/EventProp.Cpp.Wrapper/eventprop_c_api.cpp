@@ -6,6 +6,9 @@
 #include <Eigen/Dense>
 #include <boost/math/tools/roots.hpp>
 #include <boost/system/error_code.hpp>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 // ============================================================
 // Helpers: flat array ↔ Eigen/Spikes conversion
@@ -136,31 +139,53 @@ void eventprop_backward_spikes(
     double* gradient,      // row-major n_pre x n_post, caller zero-initialized
     double* spike_errors)  // output: n_input_spikes (mutated)
 {
+#ifdef _WIN32
+    fprintf(stderr, "DEBUG_API: entered eventprop_backward_spikes [thread=%lu]\n", (unsigned long)GetCurrentThreadId());
+    {
+        void* frames[16];
+        int n = CaptureStackBackTrace(0, 16, frames, NULL);
+        fprintf(stderr, "DEBUG_API: stack depth=%d\n", n); fflush(stderr);
+    }
+    fflush(stderr);
+#else
+    fprintf(stderr, "DEBUG_API: entered eventprop_backward_spikes\n");
+    fflush(stderr);
+#endif
     auto w_mat = make_matrix(w, n_pre, n_post);
+    fprintf(stderr, "DEBUG_API: after make_matrix\n"); fflush(stderr);
 
     Spikes input_spikes = make_spikes(input_times, input_sources, n_input_spikes);
+    fprintf(stderr, "DEBUG_API: after make_spikes input\n"); fflush(stderr);
     Spikes post_spikes;
 
     if (n_post_spikes > 0) {
         // Build post-spikes with currents and errors
+        fprintf(stderr, "DEBUG_API: before make_spikes_with_currents\n"); fflush(stderr);
         Spikes tmp = make_spikes_with_currents(post_times, post_sources, post_currents, n_post_spikes);
+        fprintf(stderr, "DEBUG_API: after make_spikes_with_currents\n"); fflush(stderr);
         tmp.errors = Eigen::Map<const Eigen::ArrayXd>(post_errors, n_post_spikes);
+        fprintf(stderr, "DEBUG_API: after setting errors\n"); fflush(stderr);
         post_spikes = tmp;
+        fprintf(stderr, "DEBUG_API: after assigning post_spikes\n"); fflush(stderr);
     } else {
         // Empty post-spikes — create minimal Spikes object
         post_spikes = Spikes();
     }
 
     // Zero-copy: library writes gradient and spike errors directly into caller's buffers.
+    fprintf(stderr, "DEBUG_API: before creating maps\n"); fflush(stderr);
     auto grad_map = MAP_OUTPUT_MATRIX(gradient, n_pre, n_post);
     auto errors_map = MAP_OUTPUT_ARRAY(spike_errors, n_input_spikes);
+    fprintf(stderr, "DEBUG_API: before backward call\n"); fflush(stderr);
     try {
         ::backward(input_spikes, post_spikes, w_mat, v_th, tau_mem, tau_syn,
                    grad_map, errors_map);
+        fprintf(stderr, "DEBUG_API: after backward call\n"); fflush(stderr);
     } catch (const std::exception& e) {
         // Boost toms748_solve throws domain_error on same-sign bracket.
         return;
     }
+    fprintf(stderr, "DEBUG_API: about to return from eventprop_backward_spikes\n"); fflush(stderr);
 }
 
 // ============================================================

@@ -1,46 +1,64 @@
-"""Build script for eventprop Cython bindings."""
+"""Build script for eventprop_c Python C-API extension."""
 
 import os
+import sys
+import glob
 import numpy as np
 from setuptools import setup, Extension
-from Cython.Build import cythonize
 
-# Find the C library
-c_lib_dir = os.path.join(os.path.dirname(__file__), '..', 'EventProp.C', 'build')
-c_lib_path = os.path.join(c_lib_dir, 'libeventprop_c_api.dylib')
+# Find the C library build directory
+c_build_base = os.path.join(os.path.dirname(__file__), '..', 'EventProp.C', 'build')
 
-if not os.path.exists(c_lib_path):
-    c_lib_path = os.path.join(c_lib_dir, 'libeventprop_c_api.so')
+# Platform-specific library discovery
+if sys.platform == 'win32':
+    lib_candidates = glob.glob(os.path.join(c_build_base, '*', 'eventprop_c_api.lib'))
+    c_lib_dir = os.path.dirname(lib_candidates[0]) if lib_candidates else c_build_base
+    libraries = ['eventprop_c_api'] if os.path.exists(c_lib_dir) else []
+    extra_link_args = []
+    # _native.c includes eventprop_batch.h, which includes <stdatomic.h> in C mode.
+    # MSVC needs TWO switches for that header, and distutils supplies neither:
+    #   /std:c11                — vcruntime_c11_stdatomic.h(16) #errors "C atomics
+    #                             require C11 or later"; distutils passes /TC only, and
+    #                             MSVC's default C mode leaves __STDC_VERSION__ unset.
+    #   /experimental:c11atomics — MSVC defines __STDC_NO_ATOMICS__ (so the header
+    #                             #errors "C atomic support is not enabled") on every
+    #                             toolset tested up to 14.52 / VS 2026, even with
+    #                             /std:c11. EventProp.C applies the same pair to the
+    #                             library itself.
+    extra_compile_args = ['/std:c11', '/experimental:c11atomics']
+elif sys.platform == 'darwin':
+    c_lib_dir = c_build_base
+    libraries = ['eventprop_c_api']
+    # Build native arch only (not universal2) to match C library
+    import platform
+    arch = platform.machine()
+    extra_link_args = ['-arch', arch, '-Wl,-rpath,' + c_lib_dir]
+    extra_compile_args = ['-arch', arch]
+else:
+    c_lib_dir = c_build_base
+    libraries = ['eventprop_c_api']
+    extra_link_args = []
+    extra_compile_args = []
 
-include_dirs = [
-    os.path.join(os.path.dirname(__file__), '..', 'EventProp.C'),
-    np.get_include(),
-]
-library_dirs = [c_lib_dir] if os.path.exists(c_lib_dir) else []
-libraries = ['eventprop_c_api'] if library_dirs else []
-
-# Extra link args for macOS dylib
-extra_link_args = []
-if c_lib_path.endswith('.dylib'):
-    extra_link_args = ['-Wl,-rpath,' + c_lib_dir]
-
-ext_modules = [
-    Extension(
-        "eventprop_c._native",
-        sources=["eventprop_c/_native.pyx"],
-        include_dirs=include_dirs,
-        library_dirs=library_dirs,
-        libraries=libraries,
-        extra_link_args=extra_link_args,
-        define_macros=[("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION")],
-    ),
-]
+ext = Extension(
+    "eventprop_c._native",
+    sources=["eventprop_c/_native.c"],
+    include_dirs=[
+        os.path.join(os.path.dirname(__file__), '..', 'EventProp.C'),
+        np.get_include(),
+    ],
+    library_dirs=[c_lib_dir] if libraries else [],
+    libraries=libraries,
+    define_macros=[("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION")],
+    extra_compile_args=extra_compile_args,
+    extra_link_args=extra_link_args,
+)
 
 setup(
-    name="eventprop",
+    name="eventprop_c",
     version="0.1.0",
-    description="EventProp Cython bindings — zero-copy access to C library",
-    ext_modules=cythonize(ext_modules, compiler_directives={'language_level': '3'}),
+    description="EventProp Python C-API bindings",
+    ext_modules=[ext],
     python_requires=">=3.10",
     install_requires=["numpy"],
 )

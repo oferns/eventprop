@@ -5,7 +5,7 @@ from typing import NamedTuple, Tuple
 
 from .layer import GaussianDistribution, Layer, WeightDistribution
 from ._native import (
-    compute_spikes_batch_ptrs, backward_spikes_batch_accumulate_ptrs,
+    compute_spikes_batch, backward_spikes_batch_accumulate,
 )
 from .spikes import Spikes, SpikesVector
 
@@ -44,17 +44,16 @@ class LIFLayer(Layer):
     def forward(self, input_batch: SpikesVector) -> SpikesVector:
         super().forward(input_batch)
 
-        # Extract per-sample arrays — C iterates via pointer array (no Python concatenation)
-        times_list = [inp.times for inp in input_batch]
-        sources_list = [inp.sources for inp in input_batch]
+        # Use flat array API — SpikesVector already has _flat_times, _flat_sources,
+        # and _n_spikes_per_sample pre-built at construction.
+        times, sources, n_per_sample = SpikesVector._extract_flat_buffers(input_batch)
 
-        c_output = compute_spikes_batch_ptrs(
-            times_list, sources_list,
-            self.w_in_flat, self.parameters.n_in, self.parameters.n,
+        c_output = compute_spikes_batch(
+            times, sources, n_per_sample,
+            self._w_in, self.parameters.n_in, self.parameters.n,
             self.parameters.tau_mem, self.parameters.tau_syn, self.parameters.v_th,
         )
 
-        # Wrap in SpikesVector (zero-copy, keeps C memory alive via _batch_output)
         self.post_batch = SpikesVector._from_batch_output(c_output)
         self._ran_forward = True
 
@@ -66,36 +65,31 @@ class LIFLayer(Layer):
 
     @w_in.setter
     def w_in(self, value: np.ndarray):
-        self._w_in = value
-        self.w_in_flat = np.ascontiguousarray(value).ravel().reshape(self.parameters.n_in, self.parameters.n)
+        # Ensure row-contiguous for zero-copy Cython transfer (double[:, ::1])
+        self._w_in = np.ascontiguousarray(value)
 
     def backward(self):
-        batch_size = len(self.input_batch)
-
-        # Extract per-sample arrays — C iterates via pointer array (no Python concatenation)
-        times_list = [inp.times for inp in self.input_batch]
-        sources_list = [inp.sources for inp in self.input_batch]
-
-        # Errors are already in native memory (BatchSpikeOutput._errors)
-        # backward_spikes_batch_accumulate_ptrs reads them directly — zero concatenation
-        result = backward_spikes_batch_accumulate_ptrs(
-            times_list, sources_list,
+        # C owns inputs internally — no Python-side buffer extraction needed
+        result = backward_spikes_batch_accumulate(
             self.post_batch._batch_output,
-            self.w_in_flat, self.parameters.n_in, self.parameters.n,
-            self.parameters.tau_mem, self.parameters.tau_syn, self.parameters.v_th,
+            SpikesVector._error_arrays(self.post_batch),
         )
 
         self.gradient[:] = result.grad.reshape(self.w_in.shape)
 
-        # Propagate spike errors back to input spikes (for layer chains)
-        if result.spike_errors is not None:
-            offset = 0
-            for i in range(batch_size):
-                inp = self.input_batch[i]
-                n_spikes_i = len(inp.times) if hasattr(inp, 'times') else 0
-                if n_spikes_i > 0 and offset + n_spikes_i <= len(result.spike_errors):
-                    inp._errors = np.array(result.spike_errors[offset:offset + n_spikes_i])
-                offset += n_spikes_i
+        # Propagate spike errors back to input spikes (per-sample, zero-copy).
+        # get_spike_errors() is a view into the native AccumulatedBackwardResult,
+        # which __dealloc__ frees — so the result has to outlive this call. The
+        # consumer is the *ancestor* layer's backward, which runs below in
+        # super().backward(), and the views stay live on the input spikes after
+        # that. Dropping the last reference here frees the buffers those views
+        # point at, and the ancestor then reads freed heap memory (observed as
+        # identical 1.2e+79 garbage in every sample of the batch).
+        self._backward_result = result
+        for i in range(result.batch_size):
+            inp = self.input_batch[i]
+            if len(inp.times) > 0:
+                inp._errors = result.get_spike_errors(i)
 
         self._ran_backward = True
         super().backward()

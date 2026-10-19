@@ -39,15 +39,14 @@ def dropout_spikes(spikes: SpikesVector, p_drop: float, random_seed: int) -> Spi
         return spikes
 
     batch_size = len(spikes)
-    n_spikes_per_sample = np.array([s.n_spikes for s in spikes], dtype=np.intc)
 
-    # Flatten times and sources into contiguous arrays for C
-    total_spikes = sum(n_spikes_per_sample)
-    if total_spikes == 0:
+    # Reuse the SpikesVector's cached flat buffers (built once at construction,
+    # same path layer.forward uses). The old code re-concatenated + astype'd every
+    # call — that Python-side work dominated the dropout benchmark.
+    all_times, all_sources, n_spikes_per_sample = SpikesVector._extract_flat_buffers(spikes)
+
+    if int(n_spikes_per_sample.sum()) == 0:
         return SpikesVector([Spikes() for _ in range(batch_size)])
-
-    all_times = np.concatenate([s.times for s in spikes])
-    all_sources = np.concatenate([s.sources for s in spikes]).astype(np.intc)
 
     # Call Cython — zero-copy, returns DropoutBatchOutput owning C memory
     c_output = dropout_spikes_batch(all_times, all_sources, n_spikes_per_sample, p_drop, random_seed)

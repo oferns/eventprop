@@ -1,612 +1,8 @@
 #include "eventprop_batch.h"
+#include "eventprop.h"
 #include <stdlib.h>
-
-/**
- * Batch backward pass (spikes).
- */
-BackwardOutput* eventprop_backward_spikes_batch(const BatchEventPropInput* input, SpikeOutput* fwd_batch, const double* post_errors)
-{
-    int batch_size = input->batch_size;
-    const EventPropInput* base = input->input;
-    const int* n_spikes_per_sample = input->n_spikes_per_sample;
-
-    /* Allocate array of BackwardOutput structs */
-    BackwardOutput* result = (BackwardOutput*)calloc(batch_size, sizeof(BackwardOutput));
-
-    /* Compute input sample offsets and forward error offsets */
-    int* offsets = (int*)malloc(batch_size * sizeof(int));
-    int* err_offsets = (int*)malloc(batch_size * sizeof(int));
-    offsets[0] = 0;
-    err_offsets[0] = 0;
-    for (int i = 1; i < batch_size; i++) {
-        offsets[i] = offsets[i-1] + n_spikes_per_sample[i-1];
-        err_offsets[i] = err_offsets[i-1] + fwd_batch[i-1].n_spikes;
-    }
-
-    /* Process each sample in parallel */
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static) shared(base, offsets, err_offsets, n_spikes_per_sample,\
-            batch_size, result, fwd_batch, post_errors) \
-          if(batch_size >= 2)
-#endif
-    for (int b = 0; b < batch_size; b++) {
-        int offset = offsets[b];
-        int n_spikes = n_spikes_per_sample[b];
-
-        /* Extract forward spike data directly from SpikeOutput */
-        int n_fwd_spikes = fwd_batch[b].n_spikes;
-
-        EventPropInput fwbase = {
-            .w=base->w, .n_pre=base->n_pre, .n_post=base->n_post,
-            .times=base->times + offset, .sources=base->sources + offset, .n_spikes=n_spikes,
-            .tau_mem=base->tau_mem, .tau_syn=base->tau_syn, .v_th=base->v_th
-        };
-        BackwardSpikesInput backward_input = {
-            .input = &fwbase,
-            .fwd_times=fwd_batch[b].times,
-            .fwd_sources=fwd_batch[b].sources,
-            .fwd_currents=fwd_batch[b].currents,
-            .post_errors=post_errors + err_offsets[b],
-            .n_post_spikes=n_fwd_spikes,
-        };
-        result[b] = *eventprop_backward_spikes(&backward_input);
-    }
-
-    free(offsets);
-    free(err_offsets);
-    return result;
-}
-
-/**
- * Batch backward pass (spikes) with gradient accumulation.
- */
-BackwardOutput* eventprop_backward_spikes_batch_accumulate(const BatchEventPropInput* input, SpikeOutput* fwd_batch, const double* post_errors)
-{
-    int batch_size = input->batch_size;
-    const EventPropInput* base = input->input;
-
-    /* Allocate accumulated gradient buffer + flat spike errors buffer */
-    int n_pre = base->n_pre;
-    int n_post = base->n_post;
-    double* grad_acc = (double*)calloc(n_pre * n_post, sizeof(double));
-
-    /* Compute total input spikes for error buffer */
-    int total_input_spikes = 0;
-    for (int i = 0; i < batch_size; i++) {
-        total_input_spikes += input->n_spikes_per_sample[i];
-    }
-    double* spike_errors_flat = (double*)calloc(total_input_spikes, sizeof(double));
-
-    /* Compute offsets */
-    int* offsets = (int*)malloc(batch_size * sizeof(int));
-    int* err_offsets = (int*)malloc(batch_size * sizeof(int));
-    offsets[0] = 0;
-    err_offsets[0] = 0;
-    for (int i = 1; i < batch_size; i++) {
-        offsets[i] = offsets[i-1] + input->n_spikes_per_sample[i-1];
-        err_offsets[i] = err_offsets[i-1] + fwd_batch[i-1].n_spikes;
-    }
-
-    /* Process each sample in parallel, accumulate gradients */
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static) shared(base, offsets, err_offsets, batch_size, grad_acc, fwd_batch, post_errors) if(batch_size >= 2)
-#endif
-    for (int b = 0; b < batch_size; b++) {
-        int offset = offsets[b];
-        int n_spikes = input->n_spikes_per_sample[b];
-
-        EventPropInput fwbase = {
-            .w=base->w, .n_pre=n_pre, .n_post=n_post,
-            .times=base->times + offset, .sources=base->sources + offset, .n_spikes=n_spikes,
-            .tau_mem=base->tau_mem, .tau_syn=base->tau_syn, .v_th=base->v_th
-        };
-        BackwardSpikesInput backward_input = {
-            .input = &fwbase,
-            .fwd_times=fwd_batch[b].times,
-            .fwd_sources=fwd_batch[b].sources,
-            .fwd_currents=fwd_batch[b].currents,
-            .post_errors=post_errors + err_offsets[b],
-            .n_post_spikes=fwd_batch[b].n_spikes,
-        };
-        BackwardOutput* sample_result = eventprop_backward_spikes(&backward_input);
-
-        /* Accumulate gradient */
-#ifdef _OPENMP
-#pragma omp critical
-#endif
-        for (int i = 0; i < n_pre * n_post; i++) {
-            grad_acc[i] += sample_result->grad[i];
-        }
-
-        /* Copy spike errors into flat buffer */
-        int spike_err_offset = offsets[b];
-        for (int s = 0; s < n_spikes; s++) {
-            spike_errors_flat[spike_err_offset + s] = sample_result->spike_errors[s];
-        }
-
-        eventprop_free_backward_output(sample_result);
-    }
-
-    free(offsets);
-    free(err_offsets);
-
-    /* Build result */
-    BackwardOutput* result = (BackwardOutput*)malloc(sizeof(BackwardOutput));
-    result->n_pre = n_pre;
-    result->n_post = n_post;
-    result->grad = grad_acc;
-    result->spike_errors = spike_errors_flat;
-    return result;
-}
-
-/**
- * Batch forward pass (spikes).
- */
-SpikeOutput* eventprop_compute_spikes_batch(const BatchEventPropInput* input)
-{
-    int batch_size = input->batch_size;
-    const EventPropInput* base = input->input;
-    const int* n_spikes_per_sample = input->n_spikes_per_sample;
-
-    /* Allocate array of SpikeOutput structs */
-    SpikeOutput* result = (SpikeOutput*)calloc(batch_size, sizeof(SpikeOutput));
-
-    /* Compute sample offsets into flat concatenated arrays */
-    int* offsets = (int*)malloc(batch_size * sizeof(int));
-    offsets[0] = 0;
-    for (int i = 1; i < batch_size; i++) {
-        offsets[i] = offsets[i-1] + n_spikes_per_sample[i-1];
-    }
-
-    /* Process each sample in parallel */
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static) shared(base, offsets, n_spikes_per_sample, \
-         batch_size, result) if(batch_size >= 2)
-#endif
-    for (int b = 0; b < batch_size; b++) {
-        int offset = offsets[b];
-        int n_spikes = n_spikes_per_sample[b];
-
-        /* Call single-sample function for this batch element */
-        EventPropInput sample_input = {
-            .w=base->w, .n_pre=base->n_pre, .n_post=base->n_post,
-            .times=base->times + offset, .sources=base->sources + offset, .n_spikes=n_spikes,
-            .tau_mem=base->tau_mem, .tau_syn=base->tau_syn,
-            .v_th = base->v_th
-        };
-        result[b] = *eventprop_compute_spikes(&sample_input);
-    }
-    free(offsets);
-    return result;
-}
-
-/**
- * Batch forward pass — compute membrane potential maxima.
- */
-MaximaOutput* eventprop_compute_maxima_batch(const BatchEventPropInput* input)
-{
-    int batch_size = input->batch_size;
-    const EventPropInput* base = input->input;
-    const int* n_spikes_per_sample = input->n_spikes_per_sample;
-
-    /* Allocate array of MaximaOutput structs */
-    MaximaOutput* result = (MaximaOutput*)calloc(batch_size, sizeof(MaximaOutput));
-
-    /* Compute sample offsets into flat concatenated arrays */
-    int* offsets = (int*)malloc(batch_size * sizeof(int));
-    offsets[0] = 0;
-    for (int i = 1; i < batch_size; i++) {
-        offsets[i] = offsets[i-1] + n_spikes_per_sample[i-1];
-    }
-
-    /* Process each sample in parallel */
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static) shared(base, offsets, n_spikes_per_sample, \
-         batch_size, result) if(batch_size >= 2)
-#endif
-    for (int b = 0; b < batch_size; b++) {
-        int offset = offsets[b];
-        int n_spikes = n_spikes_per_sample[b];
-
-        EventPropInput sample_input = {
-            .w=base->w, .n_pre=base->n_pre, .n_post=base->n_post,
-            .times=base->times + offset, .sources=base->sources + offset, .n_spikes=n_spikes,
-            .tau_mem=base->tau_mem, .tau_syn=base->tau_syn,
-            .v_th = base->v_th
-        };
-        result[b] = *eventprop_compute_maxima(&sample_input);
-    }
-    free(offsets);
-    return result;
-}
-
-/**
- * Batch backward pass (maxima).
- */
-BackwardOutput* eventprop_backward_maxima_batch(const BatchEventPropInput* input, MaximaOutput* fwd_batch, const double* maxima_errors)
-{
-    int batch_size = input->batch_size;
-    const EventPropInput* base = input->input;
-    const int* n_spikes_per_sample = input->n_spikes_per_sample;
-
-    /* Allocate array of BackwardOutput structs */
-    BackwardOutput* result = (BackwardOutput*)calloc(batch_size, sizeof(BackwardOutput));
-
-    /* Compute input sample offsets and error offsets (n_post per sample) */
-    int* offsets = (int*)malloc(batch_size * sizeof(int));
-    int n_post = base->n_post;
-    offsets[0] = 0;
-    for (int i = 1; i < batch_size; i++) {
-        offsets[i] = offsets[i-1] + n_spikes_per_sample[i-1];
-    }
-
-    /* Process each sample in parallel */
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static) shared(base, offsets, n_spikes_per_sample, \
-            batch_size, result, fwd_batch, maxima_errors, n_post) \
-          if(batch_size >= 2)
-#endif
-    for (int b = 0; b < batch_size; b++) {
-        int offset = offsets[b];
-        int n_spikes = n_spikes_per_sample[b];
-
-        EventPropInput fwbase = {
-            .w=base->w, .n_pre=base->n_pre, .n_post=base->n_post,
-            .times=base->times + offset, .sources=base->sources + offset, .n_spikes=n_spikes,
-            .tau_mem=base->tau_mem, .tau_syn=base->tau_syn, .v_th=base->v_th
-        };
-
-        /* Error offset: each sample has n_post errors */
-        int err_offset = b * n_post;
-
-        BackwardMaximaInput backward_input = {
-            .input = &fwbase,
-            .maxima_times=fwd_batch[b].times,
-            .maxima_values=fwd_batch[b].values,
-            .maxima_errors=maxima_errors + err_offset,
-            .n_maxima=n_post,
-        };
-        result[b] = *eventprop_backward_maxima(&backward_input);
-    }
-
-    free(offsets);
-    return result;
-}
-
-/**
- * Batch backward pass (maxima) with gradient accumulation.
- */
-BackwardOutput* eventprop_backward_maxima_batch_accumulate(const BatchEventPropInput* input, MaximaOutput* fwd_batch, const double* maxima_errors)
-{
-    int batch_size = input->batch_size;
-    const EventPropInput* base = input->input;
-
-    /* Allocate accumulated gradient buffer + flat spike errors buffer */
-    int n_pre = base->n_pre;
-    int n_post = base->n_post;
-    double* grad_acc = (double*)calloc(n_pre * n_post, sizeof(double));
-
-    /* Compute total input spikes for error buffer */
-    int total_input_spikes = 0;
-    for (int i = 0; i < batch_size; i++) {
-        total_input_spikes += input->n_spikes_per_sample[i];
-    }
-    double* spike_errors_flat = (double*)calloc(total_input_spikes, sizeof(double));
-
-    /* Compute offsets */
-    int* offsets = (int*)malloc(batch_size * sizeof(int));
-    offsets[0] = 0;
-    for (int i = 1; i < batch_size; i++) {
-        offsets[i] = offsets[i-1] + input->n_spikes_per_sample[i-1];
-    }
-
-    /* Process each sample in parallel, accumulate gradients */
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static) shared(base, offsets, batch_size, grad_acc, fwd_batch, maxima_errors, n_post) if(batch_size >= 2)
-#endif
-    for (int b = 0; b < batch_size; b++) {
-        int offset = offsets[b];
-        int n_spikes = input->n_spikes_per_sample[b];
-
-        EventPropInput fwbase = {
-            .w=base->w, .n_pre=n_pre, .n_post=n_post,
-            .times=base->times + offset, .sources=base->sources + offset, .n_spikes=n_spikes,
-            .tau_mem=base->tau_mem, .tau_syn=base->tau_syn, .v_th=base->v_th
-        };
-
-        int err_offset = b * n_post;
-
-        BackwardMaximaInput backward_input = {
-            .input = &fwbase,
-            .maxima_times=fwd_batch[b].times,
-            .maxima_values=fwd_batch[b].values,
-            .maxima_errors=maxima_errors + err_offset,
-            .n_maxima=n_post,
-        };
-        BackwardOutput* sample_result = eventprop_backward_maxima(&backward_input);
-
-#ifdef _OPENMP
-#pragma omp critical
-#endif
-        for (int i = 0; i < n_pre * n_post; i++) {
-            grad_acc[i] += sample_result->grad[i];
-        }
-
-        /* Copy spike errors into flat buffer */
-        int spike_err_offset = offsets[b];
-        for (int s = 0; s < n_spikes; s++) {
-            spike_errors_flat[spike_err_offset + s] = sample_result->spike_errors[s];
-        }
-
-        eventprop_free_backward_output(sample_result);
-    }
-
-    free(offsets);
-
-    /* Build result */
-    BackwardOutput* result = (BackwardOutput*)malloc(sizeof(BackwardOutput));
-    result->n_pre = n_pre;
-    result->n_post = n_post;
-    result->grad = grad_acc;
-    result->spike_errors = spike_errors_flat;
-    return result;
-}
-
-/**
- * ── Pointer-based batch functions (no flattening) ────────────────
- *
- * These mirror the flat-array versions but accept per-sample pointers,
- * matching how pybind11 iterates std::vector<Spikes>.
- */
-
-/**
- * Pointer-based batch forward pass (spikes).
- */
-SpikeOutput* eventprop_compute_spikes_batch_ptrs(const BatchEventPropInputPtrs* input)
-{
-    int batch_size = input->batch_size;
-
-    /* Allocate result array */
-    SpikeOutput* result = (SpikeOutput*)calloc(batch_size, sizeof(SpikeOutput));
-
-    /* Process each sample in parallel */
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static) if(batch_size >= 2)
-#endif
-    for (int b = 0; b < batch_size; b++) {
-        EventPropInput sample_input = {
-            .w=input->w,
-            .n_pre=input->n_pre,
-            .n_post=input->n_post,
-            .times=input->times[b],
-            .sources=input->sources[b],
-            .n_spikes=input->n_spikes[b],
-            .tau_mem=input->tau_mem,
-            .tau_syn=input->tau_syn,
-            .v_th=input->v_th
-        };
-        result[b] = *eventprop_compute_spikes(&sample_input);
-    }
-    return result;
-}
-
-/**
- * Pointer-based batch forward pass (maxima).
- */
-MaximaOutput* eventprop_compute_maxima_batch_ptrs(const BatchEventPropInputPtrs* input)
-{
-    int batch_size = input->batch_size;
-
-    /* Allocate result array */
-    MaximaOutput* result = (MaximaOutput*)calloc(batch_size, sizeof(MaximaOutput));
-
-    /* Process each sample in parallel */
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static) if(batch_size >= 2)
-#endif
-    for (int b = 0; b < batch_size; b++) {
-        EventPropInput sample_input = {
-            .w=input->w,
-            .n_pre=input->n_pre,
-            .n_post=input->n_post,
-            .times=input->times[b],
-            .sources=input->sources[b],
-            .n_spikes=input->n_spikes[b],
-            .tau_mem=input->tau_mem,
-            .tau_syn=input->tau_syn,
-            .v_th=input->v_th
-        };
-        result[b] = *eventprop_compute_maxima(&sample_input);
-    }
-    return result;
-}
-
-/**
- * Pointer-based batch backward pass (spikes) with gradient accumulation.
- */
-BackwardOutput* eventprop_backward_spikes_batch_accumulate_ptrs(
-    const BatchEventPropInputPtrs* input,
-    SpikeOutput* fwd_batch,
-    const double** post_errors,
-    const int* n_post_errors
-)
-{
-    int batch_size = input->batch_size;
-    int n_pre = input->n_pre;
-    int n_post = input->n_post;
-
-    /* Allocate accumulated gradient buffer */
-    double* grad_acc = (double*)calloc(n_pre * n_post, sizeof(double));
-
-    /* Compute total input spikes for error buffer */
-    int total_input_spikes = 0;
-    for (int i = 0; i < batch_size; i++) {
-        total_input_spikes += input->n_spikes[i];
-    }
-    double* spike_errors_flat = (double*)calloc(total_input_spikes, sizeof(double));
-
-    /* Compute spike error offsets */
-    int* err_offsets = (int*)malloc(batch_size * sizeof(int));
-    err_offsets[0] = 0;
-    for (int i = 1; i < batch_size; i++) {
-        err_offsets[i] = err_offsets[i-1] + input->n_spikes[i-1];
-    }
-
-    /* Process each sample in parallel, accumulate gradients */
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static) shared(grad_acc, spike_errors_flat, err_offsets) if(batch_size >= 2)
-#endif
-    for (int b = 0; b < batch_size; b++) {
-        EventPropInput sample_input = {
-            .w=input->w,
-            .n_pre=n_pre,
-            .n_post=n_post,
-            .times=input->times[b],
-            .sources=input->sources[b],
-            .n_spikes=input->n_spikes[b],
-            .tau_mem=input->tau_mem,
-            .tau_syn=input->tau_syn,
-            .v_th=input->v_th
-        };
-        BackwardSpikesInput backward_input = {
-            .input = &sample_input,
-            .fwd_times=fwd_batch[b].times,
-            .fwd_sources=fwd_batch[b].sources,
-            .fwd_currents=fwd_batch[b].currents,
-            .post_errors=post_errors[b],
-            .n_post_spikes=n_post_errors[b],
-        };
-        BackwardOutput* sample_result = eventprop_backward_spikes(&backward_input);
-
-#ifdef _OPENMP
-#pragma omp critical
-#endif
-        for (int i = 0; i < n_pre * n_post; i++) {
-            grad_acc[i] += sample_result->grad[i];
-        }
-
-        /* Copy spike errors into flat buffer */
-        int offset = err_offsets[b];
-        int n_spikes = input->n_spikes[b];
-        for (int s = 0; s < n_spikes; s++) {
-            spike_errors_flat[offset + s] = sample_result->spike_errors[s];
-        }
-
-        eventprop_free_backward_output(sample_result);
-    }
-
-    free(err_offsets);
-
-    /* Build result */
-    BackwardOutput* result = (BackwardOutput*)malloc(sizeof(BackwardOutput));
-    result->n_pre = n_pre;
-    result->n_post = n_post;
-    result->grad = grad_acc;
-    result->spike_errors = spike_errors_flat;
-    return result;
-}
-
-/**
- * Pointer-based batch backward pass (maxima) with gradient accumulation.
- */
-BackwardOutput* eventprop_backward_maxima_batch_accumulate_ptrs(
-    const BatchEventPropInputPtrs* input,
-    MaximaOutput* fwd_batch,
-    const double** maxima_errors,
-    int n_post
-)
-{
-    int batch_size = input->batch_size;
-    int n_pre = input->n_pre;
-
-    /* Allocate accumulated gradient buffer */
-    double* grad_acc = (double*)calloc(n_pre * n_post, sizeof(double));
-
-    /* Compute total input spikes for error buffer */
-    int total_input_spikes = 0;
-    for (int i = 0; i < batch_size; i++) {
-        total_input_spikes += input->n_spikes[i];
-    }
-    double* spike_errors_flat = (double*)calloc(total_input_spikes, sizeof(double));
-
-    /* Compute spike error offsets */
-    int* err_offsets = (int*)malloc(batch_size * sizeof(int));
-    err_offsets[0] = 0;
-    for (int i = 1; i < batch_size; i++) {
-        err_offsets[i] = err_offsets[i-1] + input->n_spikes[i-1];
-    }
-
-    /* Process each sample in parallel, accumulate gradients */
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static) shared(grad_acc, spike_errors_flat, err_offsets) if(batch_size >= 2)
-#endif
-    for (int b = 0; b < batch_size; b++) {
-        EventPropInput sample_input = {
-            .w=input->w,
-            .n_pre=n_pre,
-            .n_post=n_post,
-            .times=input->times[b],
-            .sources=input->sources[b],
-            .n_spikes=input->n_spikes[b],
-            .tau_mem=input->tau_mem,
-            .tau_syn=input->tau_syn,
-            .v_th=input->v_th
-        };
-        BackwardMaximaInput backward_input = {
-            .input = &sample_input,
-            .maxima_times=fwd_batch[b].times,
-            .maxima_values=fwd_batch[b].values,
-            .maxima_errors=maxima_errors[b],
-            .n_maxima=n_post,
-        };
-        BackwardOutput* sample_result = eventprop_backward_maxima(&backward_input);
-
-#ifdef _OPENMP
-#pragma omp critical
-#endif
-        for (int i = 0; i < n_pre * n_post; i++) {
-            grad_acc[i] += sample_result->grad[i];
-        }
-
-        /* Copy spike errors into flat buffer */
-        int offset = err_offsets[b];
-        int n_spikes = input->n_spikes[b];
-        for (int s = 0; s < n_spikes; s++) {
-            spike_errors_flat[offset + s] = sample_result->spike_errors[s];
-        }
-
-        eventprop_free_backward_output(sample_result);
-    }
-
-    free(err_offsets);
-
-    /* Build result */
-    BackwardOutput* result = (BackwardOutput*)malloc(sizeof(BackwardOutput));
-    result->n_pre = n_pre;
-    result->n_post = n_post;
-    result->grad = grad_acc;
-    result->spike_errors = spike_errors_flat;
-    return result;
-}
-
-/**
- * Free dropout output array.
- */
-void eventprop_free_dropout_output(DropoutOutput* output, int batch_size)
-{
-    if (output == NULL) return;
-    for (int i = 0; i < batch_size; i++) {
-        free(output[i].times);
-        free(output[i].sources);
-    }
-    free(output);
-}
-
-/**
- * Simple LCG PRNG (glibc parameters) for reproducible dropout.
- * Uses uint64_t to ensure consistent wrapping across platforms.
- */
 #include <stdint.h>
+#include <limits.h>
 
 static inline double lcg_rand(uint64_t* state)
 {
@@ -614,64 +10,534 @@ static inline double lcg_rand(uint64_t* state)
     return ((double)(*state >> 11)) / 9007199254740992.0;  /* [0, 1), ~53 bits of precision */
 }
 
-/**
- * Batch dropout — randomly drop spikes from each sample.
- */
-DropoutOutput* eventprop_dropout_spikes_batch(
-    const BatchEventPropInput* input,
+/* Public output-freeing functions live in eventprop_memory.c. */
+
+SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, const int batch_size)
+{
+    SpikesBatch result = (SpikesBatch){ .spikes = 0 };
+  
+    if (batch_size <= 0) {
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
+        result.error_no = EVENTPROP_BATCHSIZE_ZERO_OR_NEG;
+        return result;
+    }
+
+    if (inputs == NULL) {
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
+        result.error_no = EVENTPROP_BATCH_EMPTY; 
+        return result;
+    }
+
+    result.batch_size = batch_size;
+
+    result.spikes = (SpikeOutput*)eventprop_try_calloc((size_t)batch_size, sizeof(SpikeOutput));
+    
+    if (!result.spikes) {
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
+        result.error_no = EVENTPROP_ALLOC_BATCH_OUTPUTS;
+        return result;
+    }
+
+    int b;
+#ifdef _OPENMP
+    if (batch_size >= 2) {
+#pragma omp parallel for schedule(static)
+        for (b = 0; b < batch_size; b++) {
+            result.spikes[b] = eventprop_compute_spikes(inputs[b]);
+            if (result.spikes[b].error_no != EVENTPROP_OK)
+                atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
+        }
+    } else
+#endif
+    {
+        for (b = 0; b < batch_size; b++) {
+            result.spikes[b] = eventprop_compute_spikes(inputs[b]);
+            if (result.spikes[b].error_no != EVENTPROP_OK)
+                atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
+        }
+    }
+    return result;
+}
+
+BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs,
+                                                const SpikesBatch spikes_batch,
+                                                const double* const* post_spike_errors)
+{
+    BackwardsBatch batch = (BackwardsBatch){ .error_no = EVENTPROP_OK };
+ 
+    const int batch_size = spikes_batch.batch_size;
+
+    if (batch_size <= 0) {
+        atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
+        batch.error_no = EVENTPROP_BATCHSIZE_ZERO_OR_NEG;
+        return batch;
+    }
+
+    if (inputs == NULL) {
+        atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
+        batch.error_no = EVENTPROP_BATCH_EMPTY;
+        return batch;
+    }
+
+    /* Parallel per-sample backward */
+    batch.outputs = (BackwardOutput*)eventprop_try_calloc((size_t)batch_size, sizeof(BackwardOutput));
+    if (!batch.outputs) {
+        atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
+        batch.error_no = EVENTPROP_ALLOC_BATCH_OUTPUTS;
+        return batch;
+    }
+
+    int b;
+#ifdef _OPENMP
+    if (batch_size >= 2) {
+#pragma omp parallel for schedule(static)
+        for (b = 0; b < batch_size; b++) {
+            batch.outputs[b] = eventprop_backward_spikes(inputs[b], spikes_batch.spikes[b],
+                                       post_spike_errors ? post_spike_errors[b] : NULL);
+            if (batch.outputs[b].error_no != EVENTPROP_OK)
+                atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
+        }
+    } else
+#endif
+    {
+        for (b = 0; b < batch_size; b++) {
+            batch.outputs[b] = eventprop_backward_spikes(inputs[b], spikes_batch.spikes[b],
+                                       post_spike_errors ? post_spike_errors[b] : NULL);
+            if (batch.outputs[b].error_no != EVENTPROP_OK)
+                atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
+        }
+    }
+
+    batch.batch_size = batch_size;
+    return batch;
+}
+
+MaximaBatch eventprop_compute_maxima_batch(const EventPropInput* inputs, const int batch_size)
+{
+    MaximaBatch batch = (MaximaBatch) { .error_no = EVENTPROP_OK };
+
+    if (batch_size <= 0) {
+        atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
+        batch.error_no = EVENTPROP_BATCHSIZE_ZERO_OR_NEG;
+        return batch;
+    }
+
+    if (inputs == NULL) {
+        atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
+        batch.error_no = EVENTPROP_BATCH_EMPTY; 
+        return batch;
+    }
+
+    /* Parallel per-sample maxima */
+    batch.outputs = (MaximaOutput*)eventprop_try_calloc((size_t)batch_size, sizeof(MaximaOutput));
+    if (!batch.outputs) {
+        atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
+        batch.error_no = EVENTPROP_ALLOC_BATCH_OUTPUTS;
+        return batch;
+    }
+
+    int b;
+#ifdef _OPENMP
+    if (batch_size >= 2) {
+#pragma omp parallel for schedule(static)
+        for (b = 0; b < batch_size; b++) {
+            batch.outputs[b] = eventprop_compute_maxima(inputs[b]);
+            if (batch.outputs[b].error_no != EVENTPROP_OK)
+                atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
+        }
+    } else
+#endif
+    {
+        for (b = 0; b < batch_size; b++) {
+            batch.outputs[b] = eventprop_compute_maxima(inputs[b]);
+            if (batch.outputs[b].error_no != EVENTPROP_OK)
+                atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
+        }
+    }
+
+    batch.batch_size = batch_size;
+    return batch;
+}
+
+BackwardsBatch eventprop_backward_maxima_batch(const EventPropInput* inputs, const MaximaBatch maxima_batch)
+{
+    BackwardsBatch batch = (BackwardsBatch){ .error_no = EVENTPROP_OK };
+ 
+    const int batch_size = maxima_batch.batch_size;
+
+    if (batch_size <= 0) {
+        atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
+        batch.error_no = EVENTPROP_BATCHSIZE_ZERO_OR_NEG;
+        return batch;
+    }
+
+    if (inputs == NULL) {
+        atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
+        batch.error_no = EVENTPROP_BATCH_EMPTY;
+        return batch;
+    }
+
+    /* Parallel per-sample backward */
+    batch.outputs = (BackwardOutput*)eventprop_try_calloc((size_t)batch_size, sizeof(BackwardOutput));
+    if (!batch.outputs) {
+        atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
+        batch.error_no = EVENTPROP_ALLOC_BATCH_OUTPUTS;
+        return batch;
+    }
+
+    int b;
+#ifdef _OPENMP
+    if (batch_size >= 2) {
+#pragma omp parallel for schedule(static)
+        for (b = 0; b < batch_size; b++) {
+            batch.outputs[b] = eventprop_backward_maxima(
+                inputs[b],
+                maxima_batch.outputs[b].times,
+                maxima_batch.outputs[b].errors);
+            if (batch.outputs[b].error_no != EVENTPROP_OK)
+                atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
+        }
+    } else
+#endif
+    {
+        for (b = 0; b < batch_size; b++) {
+            batch.outputs[b] = eventprop_backward_maxima(
+                inputs[b],
+                maxima_batch.outputs[b].times,
+                maxima_batch.outputs[b].errors);
+            if (batch.outputs[b].error_no != EVENTPROP_OK)
+                atomic_store_explicit(&batch.has_errors, 1, memory_order_relaxed);
+        }
+    }
+
+    batch.batch_size = batch_size;
+    return batch;
+}
+
+GradientOutput eventprop_accumulate_gradients(const BackwardsBatch batch, const int n_pre, const int n_post)
+{
+    GradientOutput result = (GradientOutput) { .error_no = EVENTPROP_OK  };
+ 
+    if (n_pre <= 0 || n_post <= 0) {
+        result.error_no = EVENTPROP_INVALID_DIMENSION;
+        return result;
+    }
+
+    result.rows = n_pre;
+    result.cols = n_post;
+ 
+    if (batch.batch_size <= 0) {
+        result.error_no = EVENTPROP_BATCHSIZE_ZERO_OR_NEG;
+        return result;
+    }
+
+ 
+    /* Check for integer overflow */
+    if (n_pre > INT_MAX / n_post) {
+        result.error_no = EVENTPROP_DIMENSION_TOO_LARGE;
+        return result;
+    }
+
+    result.data = (double*)eventprop_try_calloc((size_t)n_pre * (size_t)n_post, sizeof(double));
+    if (!result.data) {
+        result.error_no = EVENTPROP_ALLOC_BATCH_GRAD;
+        return result;
+    }
+
+    int skipped = 0;
+    for (int b = 0; b < batch.batch_size; b++) {
+        if (batch.outputs[b].error_no != EVENTPROP_OK) { skipped++; continue; }
+        /* Homogeneous-batch guard: a smaller sample would read past its .grad buffer */
+        if (batch.outputs[b].n_pre != n_pre || batch.outputs[b].n_post != n_post) {
+            skipped++;
+            continue;
+        }
+        for (int i = 0; i < n_pre * n_post; i++)
+            result.data[i] += batch.outputs[b].grad[i];
+    }
+
+    /* Partial sum is still returned, but must not masquerade as a full one */
+    if (skipped > 0)
+        result.error_no = EVENTPROP_BATCH_PARTIAL_ACCUMULATION;
+
+    return result;
+}
+
+AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(
+    const EventPropInput* inputs,
+    const SpikesBatch spikes_batch,
+    const double* const* post_spike_errors)
+{
+    AccumulatedBackwardResult result = (AccumulatedBackwardResult)  { .error_no = EVENTPROP_OK };
+
+    const int batch_size = spikes_batch.batch_size;
+
+     if (batch_size <= 0) {
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
+        result.error_no = EVENTPROP_BATCHSIZE_ZERO_OR_NEG;
+        return result;
+    }
+
+    result.batch_size = batch_size;
+
+    if (inputs == NULL) {
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
+        result.error_no = EVENTPROP_BATCH_EMPTY; 
+        return result;
+    }
+
+    /* Parallel per-sample backward */
+    BackwardOutput* outputs = eventprop_try_calloc((size_t)batch_size, sizeof(BackwardOutput));
+    if (!outputs) {
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
+        result.error_no = EVENTPROP_ALLOC_BATCH_OUTPUTS;
+        return result;
+    }
+
+    int b;
+#ifdef _OPENMP
+    if (batch_size >= 2) {
+#pragma omp parallel for schedule(static)
+        for (b = 0; b < batch_size; b++) {
+            outputs[b] = eventprop_backward_spikes(inputs[b], spikes_batch.spikes[b],
+                                       post_spike_errors ? post_spike_errors[b] : NULL);
+            if (outputs[b].error_no != EVENTPROP_OK)
+                atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
+        }
+    } else
+#endif
+    {
+        for (b = 0; b < batch_size; b++) {
+            outputs[b] = eventprop_backward_spikes(inputs[b], spikes_batch.spikes[b],
+                                       post_spike_errors ? post_spike_errors[b] : NULL);
+            if (outputs[b].error_no != EVENTPROP_OK)
+                atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
+        }
+    }
+
+    BackwardsBatch batch = {
+        .batch_size = batch_size,
+        .has_errors = 0,                    /* not used here */
+        .outputs = outputs
+    };
+
+    GradientOutput* grad = (GradientOutput*)eventprop_try_malloc(sizeof(GradientOutput));
+    if (!grad) {
+        for (int i = 0; i < batch_size; i++)
+            eventprop_free_backward_output(outputs[i]);
+        free(outputs);
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
+        result.error_no = EVENTPROP_ALLOC_BATCH_GRAD;
+        return result;
+    }
+    *grad = eventprop_accumulate_gradients(batch, inputs[0].n_pre, inputs[0].n_post);
+
+    result.batch_size = batch_size;
+    result.summed_grads = grad;
+    result.outputs = outputs;
+    return result;
+}
+
+AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(
+    const EventPropInput* inputs, const MaximaBatch maxima_batch)
+{
+    const int batch_size = maxima_batch.batch_size;
+    AccumulatedBackwardResult result  = (AccumulatedBackwardResult) { .error_no = EVENTPROP_OK };
+  
+    if (batch_size <= 0) {
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
+        result.error_no = EVENTPROP_BATCHSIZE_ZERO_OR_NEG;
+        return result;
+    }
+    if (inputs == NULL) {
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
+        result.error_no = EVENTPROP_BATCH_EMPTY;
+        return result;
+    }
+
+    /* Parallel per-sample backward */
+    BackwardOutput* outputs = (BackwardOutput*)eventprop_try_calloc((size_t)batch_size, sizeof(BackwardOutput));
+    if (!outputs) {
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
+        result.error_no = EVENTPROP_ALLOC_BATCH_OUTPUTS;
+        return result;
+    }
+
+    int b;
+#ifdef _OPENMP
+    if (batch_size >= 2) {
+#pragma omp parallel for schedule(static)
+        for (b = 0; b < batch_size; b++) {
+            outputs[b] = eventprop_backward_maxima(
+                inputs[b],
+                maxima_batch.outputs[b].times,
+                maxima_batch.outputs[b].errors);
+            if (outputs[b].error_no != EVENTPROP_OK)
+                atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
+        }
+    } else
+#endif
+    {
+        for (b = 0; b < batch_size; b++) {
+            outputs[b] = eventprop_backward_maxima(
+                inputs[b],
+                maxima_batch.outputs[b].times,
+                maxima_batch.outputs[b].errors);
+            if (outputs[b].error_no != EVENTPROP_OK)
+                atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
+        }
+    }
+
+    BackwardsBatch batch = {
+        .batch_size = batch_size,
+        .has_errors = 0,                    /* not used here */
+        .outputs = outputs
+    };
+
+    GradientOutput* grad = (GradientOutput*)eventprop_try_malloc(sizeof(GradientOutput));
+    if (!grad) {
+        for (int i = 0; i < batch_size; i++)
+            eventprop_free_backward_output(outputs[i]);
+        free(outputs);
+        atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
+        result.error_no = EVENTPROP_ALLOC_BATCH_GRAD;
+        return result;
+    }
+    *grad = eventprop_accumulate_gradients(batch, inputs[0].n_pre, inputs[0].n_post);
+
+    result.batch_size = batch_size;
+    result.summed_grads = grad;
+    result.outputs = outputs;
+    return result;
+}
+
+DropoutBatch eventprop_dropout_spikes_batch(
+    const double* times,
+    const int* sources,
+    const int* n_per_sample,
+    const int batch_size,
     double p_drop,
     int seed
 )
 {
-    int batch_size = input->batch_size;
-    const EventPropInput* base = input->input;
-    const int* n_spikes_per_sample = input->n_spikes_per_sample;
+    DropoutBatch result;
+    result.error_no = EVENTPROP_OK;
+    result.batch_size = 0;
+    atomic_store_explicit(&result.has_errors, 0, memory_order_relaxed);
+    result.outputs = NULL;
 
-    /* Allocate result array */
-    DropoutOutput* result = (DropoutOutput*)calloc(batch_size, sizeof(DropoutOutput));
+    if (batch_size <= 0) {
+        result.error_no = EVENTPROP_BATCHSIZE_ZERO_OR_NEG;
+        return result;
+    }
+    if (times == NULL || sources == NULL || n_per_sample == NULL) {
+        result.error_no = EVENTPROP_BATCH_EMPTY;
+        return result;
+    }
+    /* Dropout probability must be a real probability (NaN rejected) */
+    if (!(p_drop >= 0.0 && p_drop <= 1.0)) {
+        result.error_no = EVENTPROP_INVALID_DROPOUT_PROB;
+        return result;
+    }
+    /* Per-sample spike counts must be non-negative */
+    for (int i = 0; i < batch_size; i++) {
+        if (n_per_sample[i] < 0) {
+            result.error_no = EVENTPROP_NEGATIVE_SAMPLE_COUNT;
+            return result;
+        }
+    }
+
+    result.batch_size = batch_size;
+    result.outputs = (DropoutOutput*)eventprop_try_calloc((size_t)batch_size, sizeof(DropoutOutput));
+    if (!result.outputs) {
+        result.batch_size = 0;
+        result.error_no = EVENTPROP_ALLOC_BATCH_OUTPUTS;
+        return result;
+    }
 
     /* Compute sample offsets */
-    int* offsets = (int*)malloc(batch_size * sizeof(int));
+    int* offsets = (int*)eventprop_try_malloc(((size_t)batch_size + 1) * sizeof(int));
+    if (!offsets) {
+        eventprop_free_dropout_batch(result);
+        result.outputs = NULL;   /* already freed — keep caller's free() safe */
+        result.batch_size = 0;
+        result.error_no = EVENTPROP_ALLOC_DROPOUT_OFFSETS;
+        return result;
+    }
     offsets[0] = 0;
-    for (int i = 1; i < batch_size; i++) {
-        offsets[i] = offsets[i-1] + n_spikes_per_sample[i-1];
+    long long running = 0;
+    for (int i = 0; i < batch_size; i++) {
+        running += n_per_sample[i];
+        if (running > INT_MAX) {   /* total spike count would overflow int offsets */
+            free(offsets);
+            eventprop_free_dropout_batch(result);
+            result.outputs = NULL;
+            result.batch_size = 0;
+            result.error_no = EVENTPROP_DIMENSION_TOO_LARGE;
+            return result;
+        }
+        offsets[i+1] = (int)running;
     }
 
     /* Process each sample — sequential (malloc per-sample) */
     for (int b = 0; b < batch_size; b++) {
         int offset = offsets[b];
-        int n_spikes = n_spikes_per_sample[b];
+        int n_spikes = n_per_sample[b];
 
         /* Per-sample seed for reproducibility */
         uint64_t state = (uint64_t)(seed + b) + 1;
 
         if (n_spikes == 0 || p_drop <= 0.0) {
             /* No dropout — copy all spikes */
-            result[b].n_spikes = n_spikes;
+            result.outputs[b].n_spikes = n_spikes;
             if (n_spikes > 0) {
-                result[b].times = (double*)malloc(n_spikes * sizeof(double));
-                result[b].sources = (int*)malloc(n_spikes * sizeof(int));
+                result.outputs[b].times = (double*)eventprop_try_malloc((size_t)n_spikes * sizeof(double));
+                result.outputs[b].sources = (int*)eventprop_try_malloc((size_t)n_spikes * sizeof(int));
+                if (!result.outputs[b].times || !result.outputs[b].sources) {
+                    free(result.outputs[b].times);
+                    free(result.outputs[b].sources);
+                    result.outputs[b].times = NULL;
+                    result.outputs[b].sources = NULL;
+                    atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
+                    eventprop_free_dropout_batch(result);
+                    result.outputs = NULL; /* already freed above — keep caller's free() safe */
+                    result.error_no = EVENTPROP_ALLOC_DROPOUT_SAMPLE;
+                    result.batch_size = 0;
+                    return result;
+                }
                 for (int i = 0; i < n_spikes; i++) {
-                    result[b].times[i] = base->times[offset + i];
-                    result[b].sources[i] = base->sources[offset + i];
+                    result.outputs[b].times[i] = times[offset + i];
+                    result.outputs[b].sources[i] = sources[offset + i];
                 }
             }
             continue;
         }
 
         /* Single-pass: pre-allocate max size, then compact */
-        result[b].times = (double*)malloc(n_spikes * sizeof(double));
-        result[b].sources = (int*)malloc(n_spikes * sizeof(int));
+        result.outputs[b].times = (double*)eventprop_try_malloc((size_t)n_spikes * sizeof(double));
+        result.outputs[b].sources = (int*)eventprop_try_malloc((size_t)n_spikes * sizeof(int));
+        if (!result.outputs[b].times || !result.outputs[b].sources) {
+            free(result.outputs[b].times);
+            free(result.outputs[b].sources);
+            result.outputs[b].times = NULL;
+            result.outputs[b].sources = NULL;
+            atomic_store_explicit(&result.has_errors, 1, memory_order_relaxed);
+            eventprop_free_dropout_batch(result);
+            result.outputs = NULL; /* already freed above — keep caller's free() safe */
+            result.error_no = EVENTPROP_ALLOC_DROPOUT_SAMPLE;
+            result.batch_size = 0;
+            return result;
+        }
 
         int idx = 0;
         for (int i = 0; i < n_spikes; i++) {
             if (lcg_rand(&state) > p_drop) {
-                result[b].times[idx] = base->times[offset + i];
-                result[b].sources[idx] = base->sources[offset + i];
+                result.outputs[b].times[idx] = times[offset + i];
+                result.outputs[b].sources[idx] = sources[offset + i];
                 idx++;
             }
         }
-        result[b].n_spikes = idx;
+        result.outputs[b].n_spikes = idx;
     }
 
     free(offsets);

@@ -1,0 +1,9 @@
+# Build outputs
+build/
+
+# Generated benchmark JSON results (keep baselines/ dir, ignore contents)
+baselines/*.json
+
+# Keep scripts tracked
+!*.bat
+!*.sh

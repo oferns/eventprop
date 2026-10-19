@@ -17,7 +17,7 @@ extern "C" {
 
 /** Input for voltage-trace computation. */
 typedef struct VoltageTraceInput {
-    const EventPropInput* input;       /* Forward pass parameters (weights, spikes, v_th, tau_mem, tau_syn) */
+    EventPropInput input;              /* Forward pass parameters (weights, spikes, v_th, tau_mem, tau_syn) */
     int target_nrn_idx;                /* Post-synaptic neuron to trace */
     const double* fwd_times;           /* Forward-pass spike times (borrowed) */
     const int* fwd_sources;            /* Forward-pass spike sources (borrowed) */
@@ -31,6 +31,7 @@ typedef struct VoltageTraceOutput {
     int n_t;                           /* Number of time points (= t_max / dt) */
     double* v_trace;                   /* Voltage values (malloc'd, length n_t) */
     double* ts;                        /* Time array (malloc'd, length n_t) */
+    EventPropError error_no;           /* Error code (EVENTPROP_OK on success) */
 } VoltageTraceOutput;
 
 typedef struct LambdaITraceInput {
@@ -49,22 +50,23 @@ typedef struct LambdaITraceOutput {
     int n_t;                           /* Number of time points (= t_max / dt) */
     double* lambda_trace;              /* Lambda-I values (malloc'd, length n_t) */
     double* ts;                        /* Time array (malloc'd, length n_t) */
+    EventPropError error_no;           /* Error code (EVENTPROP_OK on success) */
 } LambdaITraceOutput;
 
-void eventprop_free_voltage_trace_output(VoltageTraceOutput* output);
-void eventprop_free_lambda_i_trace_output(LambdaITraceOutput* output);
+void eventprop_free_voltage_trace_output(VoltageTraceOutput output);
+void eventprop_free_lambda_i_trace_output(LambdaITraceOutput output);
 
 /**
  * Compute the membrane potential trace for a single post-synaptic neuron.
  * Includes both pre-synaptic drive and post-synaptic spike-reset effects.
  */
-VoltageTraceOutput* eventprop_compute_voltage_trace(const VoltageTraceInput* input);
+VoltageTraceOutput eventprop_compute_voltage_trace(VoltageTraceInput input);
 
 /**
  * Compute the synaptic adjoint (lambda_i) trace for a single neuron.
  * Useful for debugging the backward pass.
  */
-LambdaITraceOutput* eventprop_compute_lambda_i_trace(const LambdaITraceInput* input);
+LambdaITraceOutput eventprop_compute_lambda_i_trace(LambdaITraceInput input);
 
 #ifdef __cplusplus
 }

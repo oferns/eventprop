@@ -6,11 +6,12 @@
     <Nullable>enable</Nullable>
     <RootNamespace>CW.EventProp.Tests</RootNamespace>
     <AssemblyName>CW.EventProp.Tests</AssemblyName>
+    <IsTestProject>true</IsTestProject>
+    <SelfContained>false</SelfContained>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <PackageReference Include="TUnit" Version="1.45.*" />
+    <PackageReference Include="TUnit" Version="1.75.*" />
   </ItemGroup>
 
   <ItemGroup>
@@ -24,6 +25,10 @@
 
   <!-- Copy native C library to output directory -->
   <Target Name="CopyNativeLib" BeforeTargets="Build">
+    <!-- Windows DLLs -->
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)../EventProp.C/build/Release/eventprop_c_api.dll" DestinationFolder="$(OutDir)" Condition="Exists('$(MSBuildThisFileDirectory)../EventProp.C/build/Release/eventprop_c_api.dll')" />
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)../EventProp.Cpp.Wrapper/build/Release/eventprop_cpp_wrapper.dll" DestinationFolder="$(OutDir)" Condition="Exists('$(MSBuildThisFileDirectory)../EventProp.Cpp.Wrapper/build/Release/eventprop_cpp_wrapper.dll')" />
+    <!-- macOS/Linux dylibs -->
     <Copy SourceFiles="$(MSBuildThisFileDirectory)../EventProp.C/build/libeventprop_c_api.dylib" DestinationFolder="$(OutDir)" Condition="Exists('$(MSBuildThisFileDirectory)../EventProp.C/build/libeventprop_c_api.dylib')" />
     <Copy SourceFiles="$(MSBuildThisFileDirectory)../EventProp.Cpp.Wrapper/build/libeventprop_cpp_wrapper.dylib" DestinationFolder="$(OutDir)" Condition="Exists('$(MSBuildThisFileDirectory)../EventProp.Cpp.Wrapper/build/libeventprop_cpp_wrapper.dylib')" />
   </Target>

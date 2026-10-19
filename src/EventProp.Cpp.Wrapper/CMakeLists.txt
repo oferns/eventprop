@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.21)
 project(eventprop_c_api LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -11,9 +11,15 @@ if(NOT EXISTS "${EIGEN_DIR}")
 endif()
 
 # ── Boost (header-only: math) ───────────────────────────────────
-find_path(BOOST_INCLUDE_DIR NAMES boost/math/tools/roots.hpp PATHS /opt/homebrew/include NO_DEFAULT_PATH)
-if(NOT BOOST_INCLUDE_DIR)
-    message(FATAL_ERROR "Boost not found at /opt/homebrew/include")
+if(WIN32)
+    # Use vcpkg-installed Boost on Windows (4 levels up from src/EventProp.Cpp.Wrapper to repo root)
+    set(BOOST_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/vcpkg/installed/x64-windows/include")
+else()
+    find_path(BOOST_INCLUDE_DIR NAMES boost/math/tools/roots.hpp
+              PATHS /opt/homebrew/include /usr/include NO_DEFAULT_PATH)
+endif()
+if(NOT BOOST_INCLUDE_DIR OR NOT EXISTS "${BOOST_INCLUDE_DIR}/boost/math/tools/roots.hpp")
+    message(FATAL_ERROR "Boost not found at ${BOOST_INCLUDE_DIR}. Install libboost-dev (Linux) or boost (macOS Homebrew), or use vcpkg on Windows")
 endif()
 
 # ── OpenMP (optional, for parallelization) ─────────────────────
@@ -31,6 +37,61 @@ endif()
 
 # ── Eigen core (stripped copy without pybind11) — build as static lib
 add_library(eventprop_eigen_core STATIC eventprop_eigen_core_stripped.cpp)
+set_target_properties(eventprop_eigen_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# CPU-specific optimization and aggressive FP math optimizations
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    # GCC/Clang flags
+    # PUBLIC, not PRIVATE: -march=native sets EIGEN_MAX_ALIGN_BYTES for every TU that
+    # includes the Eigen headers, and aligned allocation is header-inlined, so the
+    # core and its consumers must agree. See eventprop_simd_eigen_interface in
+    # cmake/EventPropSimd.cmake for the measured failure when it is PRIVATE.
+    target_compile_options(eventprop_eigen_core PUBLIC -march=native)
+    target_compile_options(eventprop_eigen_core PRIVATE -ffp-contract=fast)
+    # Aggressive FP math optimizations — matches EventProp.Python's C++ flags.
+    # Subset of -ffast-math but without -ffinite-math-only (avoids NaN/infinity UB).
+    target_compile_options(eventprop_eigen_core PRIVATE
+        -freciprocal-math   # x / y → x * (1/y) — many exp-decay divisions benefit
+        -fno-signed-zeros   # treat ±0 as identical, enables more FP simplifications
+        -fassociative-math  # allow reassociation of FP operations (e.g., (a+b)+c → a+(b+c))
+        -fno-trapping-math  # assume FP operations will not generate traps
+        -fno-math-errno     # do not set errno on FP errors
+        -funroll-loops      # unroll small per-neuron/per-spike loops
+    )
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+    # MSVC equivalent optimizations:
+    # /O2 = Optimize for speed
+    # /Ob2 = Inline functions
+    # /Oi = Enable intrinsic functions
+    # /Ot = Favor fast code
+    # /fp:fast = Fast floating-point math (equivalent to -ffp-contract=fast, -freciprocal-math, -fno-signed-zeros)
+    target_compile_options(eventprop_eigen_core PRIVATE /O2 /Ob2 /Oi /Ot /fp:fast)
+    # Parity symmetry + ABI. The GCC/Clang branch above gets the ISA from
+    # -march=native, so on Linux this core and the C library are both vectorised; on
+    # macOS both are NEON. On MSVC neither had an arch flag, which was also symmetric.
+    # Adding /arch:AVX2 to EventProp.C alone would make Windows the one platform where
+    # the parity suite compares vectorised C against SSE2 Eigen, at ABS_TOLERANCE
+    # 1e-10 / REL_TOLERANCE 1e-9 on sums, spike times and gradients — scalar-vs-FMA is
+    # a single-rounding difference that accumulates through the prefix-sum recurrence,
+    # and the root finder amplifies a voltage delta into a time delta by 1/V'.
+    # Same module, same probe, so the two projects cannot drift apart.
+    #
+    # Applied as a PUBLIC property (see eventprop_simd_eigen_interface): the flag is an
+    # ABI property of this header-heavy static library, so it must reach the core's own
+    # TU and every consumer. PRIVATE here, and INTERFACE here, both reproduced as heap
+    # corruption in a consumer that destroys a matrix the core returned.
+    include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/EventPropSimd.cmake")
+    eventprop_simd_eigen_interface(eventprop_eigen_core)
+    eventprop_simd_level(EVENTPROP_SIMD_LEVEL)
+    eventprop_simd_compile_options(EVENTPROP_SIMD_COMPILE_OPTIONS LEVEL "${EVENTPROP_SIMD_LEVEL}")
+    if(EVENTPROP_SIMD_COMPILE_OPTIONS)
+        message(STATUS "Eigen core: ${EVENTPROP_SIMD_LEVEL} (${EVENTPROP_SIMD_COMPILE_OPTIONS}) as "
+                       "PUBLIC — propagated to every consumer that includes Eigen "
+                       "headers; matched to the C library for parity")
+    else()
+        message(STATUS "Eigen core: x86 baseline (${EVENTPROP_SIMD_LEVEL}) — matched to the C library")
+    endif()
+endif()
 target_include_directories(eventprop_eigen_core PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
     ${EIGEN_DIR}
@@ -40,12 +101,17 @@ target_include_directories(eventprop_eigen_core PRIVATE
 # OpenMP for parallelization (no CPU-specific flags — let compiler auto-detect)
 if(APPLE AND _BREW_FAIL EQUAL 0)
     target_include_directories(eventprop_eigen_core PRIVATE ${OpenMP_CXX_INCLUDE_DIRS})
-    target_link_libraries(eventprop_eigen_core PRIVATE ${OpenMP_CXX_LIBRARIES})
+    # AppleClang requires -Xpreprocessor -fopenmp to enable OpenMP pragmas
+    target_compile_options(eventprop_eigen_core PRIVATE "-Xpreprocessor" "-fopenmp")
+    # PUBLIC so consumers (tests, wrapper DLL) get the OpenMP runtime linked
+    target_link_libraries(eventprop_eigen_core PUBLIC ${OpenMP_CXX_LIBRARIES})
 elseif(OpenMP_CXX_FOUND)
-    target_link_libraries(eventprop_eigen_core PRIVATE OpenMP::OpenMP_CXX)
+    # PUBLIC so consumers (tests, wrapper DLL) get the OpenMP runtime linked
+    target_link_libraries(eventprop_eigen_core PUBLIC OpenMP::OpenMP_CXX)
 endif()
 
 # ── C API wrapper as a shared library ───────────────────────────
+set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 add_library(eventprop_c_api SHARED eventprop_c_api.cpp)
 set_target_properties(eventprop_c_api PROPERTIES OUTPUT_NAME "eventprop_cpp_wrapper")
 target_include_directories(eventprop_c_api PRIVATE

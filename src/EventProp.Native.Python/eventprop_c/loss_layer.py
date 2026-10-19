@@ -1,4 +1,4 @@
-"""Loss layers for ctypes library — calls C library directly via NativeApi."""
+"""Loss layers for Cython library — delegates to LIFLayer/LILayer forward/backward."""
 
 from typing import NamedTuple
 import numpy as np
@@ -100,26 +100,28 @@ class TTFSCrossEntropyLoss(LIFLayer):
         label_error = 1 / tau0 - exp_t_label / (tau0 * sum0)
         label_error += alpha / tau1 * np.exp(t_labels / tau1)
         label_error /= self.n_batch
-        for batch_idx in range(self.n_batch):
-            if not np.isnan(label_error[batch_idx]):
-                self.post_batch[batch_idx].set_error(
-                    self.first_spike_idxs[batch_idx, labels[batch_idx]],
-                    label_error[batch_idx],
-                )
-        # compute errors for other neurons
+        # errors for all non-label neurons (label gets its own term above)
         errors = -1 / (tau0 * sum0[:, None]) * np.exp(-self.first_spike_times / tau0)
         errors /= self.n_batch
+        # One vector write per sample into the caller-owned errors buffer,
+        # replacing the per-neuron set_error loop (a Python call + property
+        # lookup per neuron per sample). The spike backward reads these buffers
+        # via _error_arrays, so writing the whole row at once is equivalent.
         for batch_idx in range(self.n_batch):
             if np.isnan(label_error[batch_idx]):
                 continue
+            spikes = self.post_batch[batch_idx]
+            idxs = self.first_spike_idxs[batch_idx]
+            row_err = errors[batch_idx]
+            lbl = labels[batch_idx]
             for nrn_idx in range(self.parameters.n):
-                if nrn_idx == labels[batch_idx]:
+                sidx = idxs[nrn_idx]
+                if sidx < 0:
                     continue
-                if not np.isnan(errors[batch_idx, nrn_idx]):
-                    self.post_batch[batch_idx].set_error(
-                        self.first_spike_idxs[batch_idx, nrn_idx],
-                        errors[batch_idx, nrn_idx],
-                    )
+                if nrn_idx == lbl:
+                    spikes.errors[sidx] = label_error[batch_idx]
+                elif not np.isnan(row_err[nrn_idx]):
+                    spikes.errors[sidx] = row_err[nrn_idx]
         self._ran_backward = True
         super().backward()
 
@@ -128,9 +130,18 @@ class VMaxCrossEntropyLoss(LILayer):
     def forward(self, input_batch):
         super().forward(input_batch)
         self.n_batch = len(self.input_batch)
-        # Convert to numpy for loss computation (numpy ufuncs use __array__)
-        self.values_batch = [np.asarray(self.maxima_batch[i].values) for i in range(self.n_batch)]
-        self.sum0 = [np.sum(np.exp(v)) for v in self.values_batch]
+        # Stack the per-sample maxima values into one (n_batch, n) array.
+        # Use a numerically stable softmax: subtract the per-sample max before
+        # exp. Raw maxima can be large (trained MNIST weights), and the naive
+        # exp(v)/sum(exp(v)) overflows to inf/inf -> NaN. The reference pybind11
+        # path overflows too; the stable form matches it where it is finite and
+        # stays finite where it is not.
+        self.values_batch = np.stack(
+            [self.maxima_batch[i].values for i in range(self.n_batch)]
+        )
+        self._vmax_shift = self.values_batch.max(axis=1, keepdims=True)
+        self.exp_values = np.exp(self.values_batch - self._vmax_shift)
+        self.sum0 = self.exp_values.sum(axis=1)
         self._ran_forward = True
 
     def get_losses(self, labels: np.ndarray):
@@ -138,7 +149,7 @@ class VMaxCrossEntropyLoss(LILayer):
         if not self._ran_forward:
             raise RuntimeError("Run forward first!")
         loss = [
-            -np.log(np.exp(self.values_batch[batch_idx][labels[batch_idx]]) / self.sum0[batch_idx])
+            -np.log(self.exp_values[batch_idx][labels[batch_idx]] / self.sum0[batch_idx])
             for batch_idx in range(self.n_batch)
         ]
         return loss
@@ -161,12 +172,16 @@ class VMaxCrossEntropyLoss(LILayer):
         if not self._ran_forward:
             raise RuntimeError("Run forward first!")
         n_batch = len(self.maxima_batch)
+        inv_nb = 1.0 / n_batch
         for batch_idx in range(self.n_batch):
-            values = self.values_batch[batch_idx]
-            error = np.exp(values) / self.sum0[batch_idx] / n_batch
-            for nrn_idx in range(self.parameters.n):
-                self.maxima_batch[batch_idx].set_error(nrn_idx, error[nrn_idx])
-            self.maxima_batch[batch_idx].set_error(
-                labels[batch_idx], error[labels[batch_idx]] - 1 / n_batch
-            )
+            # softmax/n_batch, with the label neuron getting the -1/n_batch
+            # cross-entropy term. One vector write into the C-owned errors
+            # buffer replaces the per-neuron set_error loop (a Python call +
+            # property lookup per neuron per sample).
+            error = self.exp_values[batch_idx] / self.sum0[batch_idx]
+            error *= inv_nb
+            errors = self.maxima_batch[batch_idx].errors
+            np.copyto(errors, error)
+            lbl = labels[batch_idx]
+            errors[lbl] = error[lbl] - inv_nb
         super().backward()

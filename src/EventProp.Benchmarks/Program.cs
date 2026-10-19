@@ -30,7 +30,6 @@ public abstract class BenchBase
     protected SpikesData PostSpikesManaged { get; set; } = null!;
     protected double[] PostTimesNative { get; set; } = null!;
     protected int[] PostSourcesNative { get; set; } = null!;
-    protected double[] PostCurrentsNative { get; set; } = null!;
     protected double[] PostErrorsNative { get; set; } = null!;
     protected double[] SpikeErrorsNative { get; set; } = null!;
 
@@ -91,14 +90,12 @@ public abstract class BenchBase
 
         PostTimesNative = new double[NPostSpikes];
         PostSourcesNative = new int[NPostSpikes];
-        PostCurrentsNative = new double[NPostSpikes];
         PostErrorsNative = new double[NPostSpikes];
         SpikeErrorsNative = new double[NSpikes];
         for (int i = 0; i < NPostSpikes; i++)
         {
             PostTimesNative[i] = fwdResult.Times[i];
             PostSourcesNative[i] = fwdResult.Sources[i];
-            PostCurrentsNative[i] = fwdResult.Currents[i];
             PostErrorsNative[i] = 1.0;
         }
 
@@ -113,29 +110,8 @@ public abstract class BenchBase
     }
 }
 
-[MemoryDiagnoser]
-public class Bench_ComputeSums_Small : BenchBase
-{
-    protected override void Configure() => (NPre, NPost, NSpikes) = (50, 20, 100);
-
-    [Benchmark(Baseline = true)]
-    public void Managed()
-    {
-        Buffers.Sum0.AsSpan(0, (NSpikes + 1) * NPost).Clear();
-        Buffers.Sum1.AsSpan(0, (NSpikes + 1) * NPost).Clear();
-        EventPropMath.ComputeSums(W, Times, Sources, TauMem, TauSyn,
-            Buffers.Sum0, Buffers.Sum1, NPost,
-            Buffers.ExpInputMem, Buffers.ExpInputSyn);
-    }
-
-    [Benchmark]
-    public void Native()
-    {
-        using var output = CApi.Api.ComputeSums(W, NPre, NPost, Times, Sources, TauMem, TauSyn);
-        var _ = output.Sum0[0]; // Access to prevent optimization
-    }
-}
-
+// Bench_ComputeSums_Small (50,20,100) deliberately ABSENT — see the note in
+// ComputeMaxima.cs. Small-n kernel coverage lives in the native suite.
 [MemoryDiagnoser]
 public class Bench_ComputeSums_Medium : BenchBase
 {
@@ -183,23 +159,6 @@ public class Bench_ComputeSums_Large : BenchBase
 }
 
 [MemoryDiagnoser]
-public class Bench_ComputeSpikes_Small : BenchBase
-{
-    protected override void Configure() => (NPre, NPost, NSpikes) = (50, 20, 100);
-
-    [Benchmark(Baseline = true)]
-    public SpikesData Managed()
-        => EventPropMath.ComputeSpikes(W, Times, Sources, NPost, VTh, TauMem, TauSyn, Buffers);
-
-    [Benchmark]
-    public int Native()
-    {
-        using var output = CApi.Api.ComputeSpikes(W, NPre, NPost, Times, Sources, VTh, TauMem, TauSyn);
-        return output.NSpikes;
-    }
-}
-
-[MemoryDiagnoser]
 public class Bench_ComputeSpikes_Medium : BenchBase
 {
     protected override void Configure() => (NPre, NPost, NSpikes) = (200, 80, 500);
@@ -234,30 +193,6 @@ public class Bench_ComputeSpikes_Large : BenchBase
 }
 
 [MemoryDiagnoser]
-public class Bench_BackwardSpikes_Small : BenchBase
-{
-    protected override void Configure() => (NPre, NPost, NSpikes) = (50, 20, 100);
-
-    [Benchmark(Baseline = true)]
-    public void Managed()
-    {
-        Array.Clear(GradManaged);
-        EventPropMath.BackwardSpikes(W, Times, Sources, PostSpikesManaged, NPost,
-            VTh, TauMem, TauSyn, GradManaged, Buffers);
-    }
-
-    [Benchmark]
-    public void Native()
-    {
-        using var output = CApi.Api.BackwardSpikes(Times, Sources,
-            PostTimesNative, PostSourcesNative, PostCurrentsNative,
-            PostErrorsNative, NPostSpikes, W, NPre, NPost,
-            VTh, TauMem, TauSyn);
-        var _ = output.Gradient[0]; // Access to prevent optimization
-    }
-}
-
-[MemoryDiagnoser]
 public class Bench_BackwardSpikes_Medium : BenchBase
 {
     protected override void Configure() => (NPre, NPost, NSpikes) = (200, 80, 500);
@@ -274,7 +209,7 @@ public class Bench_BackwardSpikes_Medium : BenchBase
     public void Native()
     {
         using var output = CApi.Api.BackwardSpikes(Times, Sources,
-            PostTimesNative, PostSourcesNative, PostCurrentsNative,
+            PostTimesNative, PostSourcesNative,
             PostErrorsNative, NPostSpikes, W, NPre, NPost,
             VTh, TauMem, TauSyn);
         var _ = output.Gradient[0]; // Access to prevent optimization
@@ -298,7 +233,7 @@ public class Bench_BackwardSpikes_Large : BenchBase
     public void Native()
     {
         using var output = CApi.Api.BackwardSpikes(Times, Sources,
-            PostTimesNative, PostSourcesNative, PostCurrentsNative,
+            PostTimesNative, PostSourcesNative,
             PostErrorsNative, NPostSpikes, W, NPre, NPost,
             VTh, TauMem, TauSyn);
         var _ = output.Gradient[0]; // Access to prevent optimization

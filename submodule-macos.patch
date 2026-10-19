@@ -1,0 +1,39 @@
+diff --git a/eventprop/loss_layer.py b/eventprop/loss_layer.py
+index 9209c56..a7217c7 100644
+--- a/eventprop/loss_layer.py
++++ b/eventprop/loss_layer.py
+@@ -40,7 +40,7 @@ class TTFSCrossEntropyLoss(LIFLayer):
+             (self.n_batch, self.parameters.n),
+         )
+         self.first_spike_idxs = np.empty(
+-            (self.n_batch, self.parameters.n), dtype=np.int
++            (self.n_batch, self.parameters.n), dtype=int
+         )
+         for batch_idx, spikes in enumerate(self.post_batch):
+             self.first_spike_times[batch_idx, :] = self.post_batch[
+diff --git a/setup.py b/setup.py
+index a53268b..7b09385 100644
+--- a/setup.py
++++ b/setup.py
+@@ -3,18 +3,18 @@ import setuptools
+ cpp_ext = setuptools.Extension(
+     name="eventprop.eventprop_cpp",
+     sources=["src/eventprop_cpp.cpp"],
+-    include_dirs=["src/pybind11/include", "src/eigen"],
++    include_dirs=["src/pybind11/include", "src/eigen", "/opt/homebrew/opt/libomp/include", "/opt/homebrew/include"],
+     language="c++",
+     # extra_compile_args=["-std=c++17", "-O0", "-g"]
+     extra_compile_args=[
+         "-std=c++17",
+         "-O3",
+-        "-march=native",
+-        "-fopenmp",
++        "-Xpreprocessor", "-fopenmp",
+         "-freciprocal-math",
+         "-fno-signed-zeros",
+         "-funroll-loops",
+     ],
++    extra_link_args=["-L/opt/homebrew/opt/libomp/lib", "-lomp"],
+ )
+ 
+ yin_yang_dir = "eventprop/yin_yang_data_set/publication_data"

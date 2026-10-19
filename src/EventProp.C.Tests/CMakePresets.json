@@ -1,0 +1,77 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release",
+      "description": "Google Test suite against the SHARED library in ../EventProp.C/build. Run the release preset there first. Required for parity tests.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ENABLE_ASAN": "OFF"
+      }
+    },
+    {
+      "name": "asan",
+      "displayName": "AddressSanitizer",
+      "description": "Requires the asan preset in ../EventProp.C (same ENABLE_ASAN=ON, Debug) so library and tests are instrumented together. On macOS the library is STATIC there. On Linux add leak detection at run time: ASAN_OPTIONS=detect_leaks=1 ctest --preset asan. It must not go in a preset — gtest_discover_tests runs the binary at build time, inherits preset environment, and macOS ASan aborts on detect_leaks.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ENABLE_ASAN": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "configuration": "Release"
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
+      "configuration": "Debug",
+      "cleanFirst": true
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "release",
+      "displayName": "C unit tests (Release)",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "asan",
+      "displayName": "C unit tests (AddressSanitizer)",
+      "configurePreset": "asan",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "stopOnFailure": false
+      }
+    }
+  ]
+}

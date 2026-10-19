@@ -4,8 +4,8 @@
 #include <limits>
 #include <vector>
 
-double inf = std::numeric_limits<double>::infinity();
-double eps = std::numeric_limits<double>::epsilon();
+inline double inf = std::numeric_limits<double>::infinity();
+inline double eps = std::numeric_limits<double>::epsilon();
 
 using RowMatrixXd =
     Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;

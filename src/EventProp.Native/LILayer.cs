@@ -1,44 +1,43 @@
+using System.Runtime.InteropServices;
+
 namespace CW.EventProp.Native;
 
 /// <summary>
-/// Leaky Integrate (LI) layer backed by the C library via P/Invoke.
-/// 
-/// Forward pass: computes membrane potential maxima per neuron using batch operations
-/// (single C call for the entire batch via OpenMP parallelization).
-/// 
-/// Backward pass: computes weight gradients via the adjoint method,
-/// accumulating across all samples in a single C call.
+/// Leaky Integrate (LI) layer backed by the C library through P/Invoke.
+///
+/// Mirrors <see cref="CW.EventProp.LILayer"/>: no spike threshold, forward computes
+/// membrane maxima, backward uses the maxima-based loss. Same <see cref="Layer"/>
+/// contract as the managed layer so the two are comparable in benchmarks.
+///
+/// The forward maxima are exposed through <see cref="MaximaBatch"/>; the caller writes
+/// loss derivatives with <c>MaximaBatch[b].SetError(i, …)</c> and Backward reads them.
 /// </summary>
-public sealed class LILayer : Layer
+public sealed unsafe class LILayer : Layer, IDisposable
 {
     private readonly LILayerParameters _params;
+    private readonly double[] _weights;
 
-    /// <summary>Weight matrix (row-major, nIn × nOut).</summary>
-    private double[] _weights;
-
-    /// <summary>Raw native pointer to forward batch output (for backward pass).</summary>
-    private IntPtr _fwdBatchPtr = IntPtr.Zero;
-
-    /// <summary>Membrane potential maxima from the forward pass.</summary>
+    /// <summary>Per-sample maxima from the last forward pass (managed view of native output).</summary>
     private MaximaVector? _maximaBatch;
 
-    /// <summary>
-    /// Create an LI layer with the given parameters.
-    /// Weights are initialized using the initializer from parameters (default: Gaussian(0, 1)).
-    /// </summary>
+    /// <summary>Pinned pointer array: one native double* per sample, into MaximaData.Errors.</summary>
+    private IntPtr[] _errorPtrs = [];
+    private GCHandle[] _errorPins = [];
+
     public LILayer(LILayerParameters parameters)
         : this(parameters, null) { }
 
-    /// <summary>
-    /// Create an LI layer with pre-initialized weights.
-    /// </summary>
     public LILayer(LILayerParameters parameters, double[]? weights)
     {
+        // The P/Invoke structs are hand-declared, so a header/library offset mismatch
+        // is invisible here and shows up as wrong numbers. Check once per process.
+        Api.EnsureAbiMatches();
+
         _params = parameters;
 
         if (weights is not null)
         {
-            var expectedLen = parameters.NIn * parameters.N;
+            int expectedLen = parameters.NIn * parameters.N;
             if (weights.Length != expectedLen)
                 throw new ArgumentException(
                     $"Weight array length ({weights.Length}) must be {expectedLen} (nIn={parameters.NIn} × nOut={parameters.N})",
@@ -47,7 +46,7 @@ public sealed class LILayer : Layer
         }
         else
         {
-            var init = parameters.Weights ?? new GaussianInitializer();
+            WeightInitializer init = parameters.Weights ?? new GaussianInitializer();
             _weights = init.GetWeights(parameters.NIn, parameters.N);
         }
 
@@ -59,192 +58,178 @@ public sealed class LILayer : Layer
     /// <summary>Weight matrix (row-major, nIn × nOut).</summary>
     public double[] Weights => _weights;
 
-    /// <summary>Number of input neurons.</summary>
-    public override int NIn => _params.NIn;
+    /// <summary>Per-sample maxima from the last forward pass (the LI layer's loss signal).</summary>
+    public MaximaVector? MaximaBatch => _maximaBatch;
 
-    /// <summary>Number of output neurons.</summary>
+    public override int NIn => _params.NIn;
     public override int NOut => _params.N;
 
-    /// <summary>Get the weight matrix as a Span (row-major, nIn × nOut).</summary>
     public override ReadOnlySpan<double> GetWeights() => _weights.AsSpan();
 
-    /// <summary>Set the weight matrix from a Span (row-major, nIn × nOut).</summary>
     public override void SetWeights(ReadOnlySpan<double> weights)
     {
         if (weights.Length != _weights.Length)
-            throw new ArgumentException($"Weight span length ({weights.Length}) must match (_weights.Length={_weights.Length})", nameof(weights));
+            throw new ArgumentException(
+                $"Weight span length ({weights.Length}) must match ({_weights.Length})",
+                nameof(weights));
         weights.CopyTo(_weights);
     }
 
-    /// <summary>Membrane potential maxima from the forward pass.</summary>
-    public MaximaVector MaximaBatch => _maximaBatch ?? throw new InvalidOperationException("Forward has not been run.");
-
-    /// <summary>
-    /// Run forward pass: compute membrane potential maxima per neuron given input spikes.
-    /// Uses batch C API — single call for entire batch.
-    /// </summary>
+    /// <summary>Forward pass: one batched native maxima call, exposed as managed MaximaData.</summary>
     public override void Forward(SpikesVector inputBatch)
     {
         _inputBatch = inputBatch;
+        int batchSize = inputBatch.Count;
 
-        // Free previous forward output
-        if (_fwdBatchPtr != IntPtr.Zero)
-        {
-            Batch.eventprop_free_batch_maxima_output(_fwdBatchPtr, inputBatch.Count);
-            _fwdBatchPtr = IntPtr.Zero;
-        }
+        Flatten(inputBatch, out var flatTimes, out var flatSources, out var nPerSample);
 
-        // Flatten batch into concatenated arrays + per-sample spike counts
-        var (flatTimes, flatSources, nSpikesPerSample) = FlattenSpikes(inputBatch);
-
-        // Batch forward pass — single C call
-        var nativeOutput = Batch.ComputeMaximaBatch(
-            _weights, _params.NIn, _params.N,
-            flatTimes, flatSources, nSpikesPerSample,
+        using var maxima = Batch.ComputeMaximaBatch(
+            _weights, _params.NIn, _params.N, flatTimes, flatSources, nPerSample,
             _params.TauMem, _params.TauSyn);
 
-        // Transfer ownership of native pointer to this layer.
-        _fwdBatchPtr = nativeOutput.GetHandle();
+        if (maxima.ErrorNo != Api.EventPropError.Ok)
+            throw new InvalidOperationException(
+                $"Forward pass failed: {Api.GetErrorString(maxima.ErrorNo)}");
 
-        // Reconstruct managed MaximaData from native output
-        var maximaBatch = new MaximaVector(inputBatch.Count);
-        for (int i = 0; i < inputBatch.Count; i++)
+        var maximaBatch = new MaximaVector(batchSize);
+        for (int b = 0; b < batchSize; b++)
         {
-            var sample = nativeOutput[i];
-            var times = new double[sample.NPost];
-            var values = new double[sample.NPost];
-            sample.Times.CopyTo(times);
-            sample.Values.CopyTo(values);
+            var entry = maxima.MaximaAt(b);
+            if (entry.ErrorNo != Api.EventPropError.Ok)
+                throw new InvalidOperationException(
+                    $"Forward pass failed for sample {b}: {Api.GetErrorString(entry.ErrorNo)}");
+
+            int n = entry.NPost;
+            var times = new double[n];
+            var values = new double[n];
+            new ReadOnlySpan<double>(entry.Times.ToPointer(), n).CopyTo(times);
+            new ReadOnlySpan<double>(entry.Values.ToPointer(), n).CopyTo(values);
             maximaBatch.Add(new MaximaData(times, values));
         }
 
+        BuildErrorPointers(maximaBatch);
+
         _maximaBatch = maximaBatch;
         _ranForward = true;
+        _ranBackward = false;
     }
 
     /// <summary>
-    /// Run backward pass: compute weight gradients via the adjoint method.
-    /// Uses batch C API — single call for entire batch (accumulated gradient).
+    /// Backward pass: gradients come straight out of the native maxima accumulate call.
+    /// Reads loss derivatives from <see cref="MaximaBatch"/>'s per-neuron error buffers.
+    /// **Accumulates** into <see cref="Layer.Gradient"/> (not zeroed) — matching the
+    /// managed layer and the Python reference. Call <see cref="ZeroGrad"/> first for a
+    /// single-step gradient.
     /// </summary>
     public override void Backward()
     {
         if (!_ranForward)
             throw new InvalidOperationException("Run Forward() before Backward().");
 
-        // Zero gradient before accumulation
-        Gradient.AsSpan().Clear();
+        var inputBatch = _inputBatch!;
+        int batchSize = inputBatch.Count;
 
-        if (_inputBatch is null || _maximaBatch is null)
-            throw new InvalidOperationException("Forward has not been run.");
+        int totalSpikes = 0;
+        for (int b = 0; b < batchSize; b++) totalSpikes += inputBatch[b].NSpikes;
+        if (totalSpikes == 0)
+        {
+            _ranBackward = true;
+            return;
+        }
 
-        // Flatten input batch
-        var (flatTimes, flatSources, nSpikesPerSample) = FlattenSpikes(_inputBatch);
+        Flatten(inputBatch, out var flatTimes, out var flatSources, out var nPerSample);
 
-        // Flatten maxima errors
-        var flatErrors = FlattenMaximaErrors(_maximaBatch);
-
-        // Batch backward pass — single C call (accumulated gradient)
-        using var result = Batch.BackwardMaximaBatchAccumulate(
-            _weights, _params.NIn, _params.N,
-            flatTimes, flatSources, nSpikesPerSample,
-            _fwdBatchPtr,
-            flatErrors,
+        // MaximaBatch is a ref struct, so the forward maxima cannot be stored on the layer.
+        // Recompute it (deterministic for the same weights + input) and feed the backward
+        // accumulate call in the same scope.
+        using var maxima = Batch.ComputeMaximaBatch(
+            _weights, _params.NIn, _params.N, flatTimes, flatSources, nPerSample,
             _params.TauMem, _params.TauSyn);
 
-        // Copy gradient from native output
-        result.Gradient.CopyTo(Gradient.AsSpan());
+        // The C backward reads the loss derivative from each sample's native errors array.
+        // Copy the caller's managed MaximaData.Errors into it.
+        for (int b = 0; b < batchSize; b++)
+        {
+            var entry = maxima.MaximaAt(b);
+            int n = entry.NPost;
+            if (n == 0) continue;
+            _maximaBatch![b].Errors.AsSpan(0, n).CopyTo(new Span<double>(entry.Errors.ToPointer(), n));
+        }
 
+        using var accumulated = Batch.BackwardMaximaBatchAccumulate(
+            _weights, _params.NIn, _params.N, flatTimes, flatSources, nPerSample,
+            maxima, _params.TauMem, _params.TauSyn);
+
+        if (accumulated.ErrorNo != Api.EventPropError.Ok)
+            throw new InvalidOperationException(
+                $"Backward pass failed: {Api.GetErrorString(accumulated.ErrorNo)}");
+
+        var summed = accumulated.GetSummedGrads();
+        if (summed.Rows != _params.NIn || summed.Cols != _params.N)
+            throw new InvalidOperationException(
+                $"Gradient shape mismatch: got {summed.Rows}x{summed.Cols}, expected {_params.NIn}x{_params.N}");
+
+        int gradLen = Math.Min(summed.Rows * summed.Cols, Gradient.Length);
+        var native = new ReadOnlySpan<double>(summed.Data.ToPointer(), gradLen);
+        for (int i = 0; i < gradLen; i++) Gradient[i] += native[i];
         _ranBackward = true;
     }
 
-    /// <summary>Zero the weight gradient.</summary>
     public override void ZeroGrad() => Gradient.AsSpan().Clear();
 
-    /// <summary>
-    /// Compute the voltage trace for a single neuron during forward pass.
-    /// Uses vTh = double.PositiveInfinity to simulate an LI neuron (no threshold).
-    /// </summary>
-    public override (double[] times, double[] voltages) GetVoltageTrace(
-        int batchIdx, int targetNrnIdx, double tMax = 1.0, double dt = 1e-4)
-    {
-        if (!_ranForward || _inputBatch is null)
-            throw new InvalidOperationException("Run Forward() first.");
+    public override void Dispose() => FreeErrorPointers();
 
-        if (batchIdx < 0 || batchIdx >= _inputBatch.Count)
-            throw new ArgumentOutOfRangeException(nameof(batchIdx));
+    // ── Helpers ──────────────────────────────────────────────────────
 
-        var inputSpikes = _inputBatch[batchIdx];
-
-        // LI layer has no spikes — pass empty forward output
-        using var result = Diag.ComputeVoltageTrace(
-            _weights, _params.NIn, _params.N,
-            inputSpikes.Times, inputSpikes.Sources,
-            Array.Empty<double>(),
-            Array.Empty<int>(),
-            targetNrnIdx, tMax, dt,
-            double.PositiveInfinity, _params.TauMem, _params.TauSyn);
-
-        var times = new double[result.NT];
-        var voltages = new double[result.NT];
-        result.Ts.CopyTo(times);
-        result.VTrace.CopyTo(voltages);
-
-        return (times, voltages);
-    }
-
-    /// <summary>Dispose native resources.</summary>
-    public void Dispose()
-    {
-        if (_fwdBatchPtr != IntPtr.Zero)
-        {
-            int batchSize = _inputBatch?.Count ?? 1;
-            Batch.eventprop_free_batch_maxima_output(_fwdBatchPtr, batchSize);
-            _fwdBatchPtr = IntPtr.Zero;
-        }
-    }
-
-    // ── Helpers ────────────────────────────────────────────────
-
-    /// <summary>Flatten a SpikesVector into concatenated arrays + per-sample counts.</summary>
-    private static (double[] times, int[] sources, int[] nSpikesPerSample) FlattenSpikes(SpikesVector batch)
-    {
-        int totalSpikes = 0;
-        var nSpikesPerSample = new int[batch.Count];
-        for (int i = 0; i < batch.Count; i++)
-        {
-            nSpikesPerSample[i] = batch[i].NSpikes;
-            totalSpikes += batch[i].NSpikes;
-        }
-
-        var times = new double[totalSpikes];
-        var sources = new int[totalSpikes];
-        int offset = 0;
-        for (int i = 0; i < batch.Count; i++)
-        {
-            var sample = batch[i];
-            System.Array.Copy(sample.Times, 0, times, offset, sample.NSpikes);
-            System.Array.Copy(sample.Sources, 0, sources, offset, sample.NSpikes);
-            offset += sample.NSpikes;
-        }
-
-        return (times, sources, nSpikesPerSample);
-    }
-
-    /// <summary>Flatten maxima errors from batch into a single array.</summary>
-    private static double[] FlattenMaximaErrors(MaximaVector batch)
+    private void Flatten(SpikesVector batch, out double[] times, out int[] sources, out int[] nPerSample)
     {
         int total = 0;
-        for (int i = 0; i < batch.Count; i++)
-            total += batch[i].NNeurons;
+        for (int b = 0; b < batch.Count; b++) total += batch[b].NSpikes;
 
-        var errors = new double[total];
+        times = new double[total];
+        sources = new int[total];
+        nPerSample = new int[batch.Count];
+
         int offset = 0;
-        for (int i = 0; i < batch.Count; i++)
+        for (int b = 0; b < batch.Count; b++)
         {
-            System.Array.Copy(batch[i].Errors, 0, errors, offset, batch[i].NNeurons);
-            offset += batch[i].NNeurons;
+            int n = batch[b].NSpikes;
+            nPerSample[b] = n;
+            batch[b].Times.AsSpan(0, n).CopyTo(times.AsSpan(offset));
+            batch[b].Sources.AsSpan(0, n).CopyTo(sources.AsSpan(offset));
+            offset += n;
         }
+    }
 
-        return errors;
+    private void BuildErrorPointers(MaximaVector maximaBatch)
+    {
+        FreeErrorPointers();
+
+        int batchSize = maximaBatch.Count;
+        _errorPtrs = new IntPtr[batchSize];
+        _errorPins = new GCHandle[batchSize];
+        for (int b = 0; b < batchSize; b++)
+        {
+            int n = maximaBatch[b].NNeurons;
+            if (n == 0)
+            {
+                _errorPtrs[b] = IntPtr.Zero;
+                continue;
+            }
+            var handle = GCHandle.Alloc(maximaBatch[b].Errors, GCHandleType.Pinned);
+            _errorPins[b] = handle;
+            _errorPtrs[b] = handle.AddrOfPinnedObject();
+        }
+    }
+
+    private void FreeErrorPointers()
+    {
+        for (int b = 0; b < _errorPins.Length; b++)
+        {
+            if (_errorPins[b].IsAllocated) _errorPins[b].Free();
+            _errorPins[b] = default;
+        }
+        _errorPins = [];
+        _errorPtrs = [];
     }
 }

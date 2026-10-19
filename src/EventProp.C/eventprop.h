@@ -2,27 +2,137 @@
  * @file eventprop.h
  * @brief EventProp: Event-based backpropagation for SNN training.
  *
- * Pure C implementation with optional SIMD (AVX2/NEON). 
- *
- * Parameters (SI units):
- *   tau_mem  — membrane time constant (seconds, typically 0.02)
- *   tau_syn  — synaptic time constant (seconds, typically 0.005)
- *   v_th     — spike threshold voltage (typically 1.0)
+ * Pure C implementation with optional SIMD (AVX2/NEON) and threading OpenMP
  */
 
 #ifndef EVENTPROP_H
 #define EVENTPROP_H
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+/** ABI version of the public struct layouts declared in this header.
+ *
+ *  Every consumer COMPILES these layouts into its own binary: the Cython extension
+ *  (`_native.pyx` cdef extern blocks), the .NET P/Invoke layer (`EventProp.Native`,
+ *  `[StructLayout]` structs) and the C++ consumers. A change that moves a field
+ *  offset is invisible at link time — the consumer keeps reading the offsets it
+ *  compiled, against a library whose fields moved, and reads plausible-looking
+ *  garbage instead of failing to load. See eventprop_abi.c for the measured
+ *  failure this guards.
+ *
+ *  BUMP on any change to a public struct's layout: field order, field type, field
+ *  width, or the width of a field's type. Appending a field changes nothing a
+ *  consumer reads, but it changes `sizeof`, which `eventprop_abi_struct_size`
+ *  reports — so bump for that too.
+ *
+ *  Consumers check it at load: `eventprop_abi_version()` must equal this macro as
+ *  compiled from the consumer's own copy of this header, and
+ *  `eventprop_abi_struct_size(name)` must equal the consumer's own `sizeof` for
+ *  every struct it embeds by value. Both are checked on import by the Cython layer
+ *  and at layer construction by `EventProp.Native`.
+ */
+#define EVENTPROP_ABI_VERSION 1
+
+/** Error codes returned by EventProp functions.
+ *  Set via the `error_no` field on output structs when validation is enabled */
+typedef enum EventPropError {
+    EVENTPROP_OK                      = 0,
+    EVENTPROP_INVALID_DIMENSION       = 1,   /* n_pre <= 0 or n_post <= 0 */
+    EVENTPROP_NEGATIVE_SPIKES         = 2,   /* n_spikes < 0 */
+    EVENTPROP_NULL_POINTER            = 3,   /* w/times/sources is NULL when required */
+    EVENTPROP_INVALID_SOURCE          = 4,   /* sources[i] out of [0, n_pre) range */
+    EVENTPROP_INVALID_TAU             = 5,   /* tau_mem <= 0, tau_syn <= 0, or tau_mem == tau_syn */
+    EVENTPROP_INVALID_CURRENT         = 6,   /* spike.currents[i] == v_th (division by zero) */
+    EVENTPROP_NEGATIVE_SPIKE_TIME     = 7,   /* times[i] < 0 */
+    EVENTPROP_EXCESSIVE_SPIKE_TIME    = 8,   /* max(times) > MAX_SPIKE_TIME */
+    EVENTPROP_TAU_TOO_SMALL           = 9,   /* tau_mem or tau_syn < MIN_TAU */
+    EVENTPROP_TAU_TOO_LARGE           = 10,  /* tau_mem or tau_syn > MAX_TAU */
+    EVENTPROP_INVALID_VTH             = 11,  /* v_th <= 0 */
+    EVENTPROP_DIMENSION_TOO_LARGE     = 12,  /* n_pre or n_post > MAX_DIM */
+    EVENTPROP_TIMES_TAU_MISMATCH      = 13,  /* max(times)/min(tau) >= EXP_OVERFLOW_THRESHOLD */
+    EVENTPROP_TAU_TOO_CLOSE           = 14,  /* |tau_mem - tau_syn| / min(tau) < TAU_REL_DIFF_MIN */
+    EVENTPROP_BATCHSIZE_ZERO_OR_NEG   = 15,  /* Bad batch size*/
+    EVENTPROP_ALLOC_SUM0              = 16,  /* result.sum0 */
+    EVENTPROP_ALLOC_SUM1              = 17,  /* result.sum1 */
+    EVENTPROP_ALLOC_EXP_MEM           = 18,  /* exp_mem lookup table */
+    EVENTPROP_ALLOC_EXP_SYN           = 19,  /* exp_syn lookup table */
+    EVENTPROP_ALLOC_TIMES_ARR         = 20,  /* post_times_arr */
+    EVENTPROP_ALLOC_CURRENTS_ARR      = 21,  /* post_currents_arr */
+    EVENTPROP_ALLOC_SPIKE_CAPS        = 22,  /* spike_caps */
+    EVENTPROP_ALLOC_SPIKE_COUNTS      = 23,  /* spike_counts */
+    EVENTPROP_ALLOC_NEURON_BUF        = 24,  /* per-neuron times/currents buffer */
+    EVENTPROP_ALLOC_ENTRIES           = 25,  /* entries (sorted collection) — no longer reachable; kept so codes stay stable */
+    EVENTPROP_ALLOC_RESULT_TIMES      = 26,  /* result.times */
+    EVENTPROP_ALLOC_RESULT_SOURCES    = 27,  /* result.sources */
+    EVENTPROP_ALLOC_RESULT_CURRENTS   = 28,  /* result.currents */
+    EVENTPROP_ALLOC_RESULT_ERRORS     = 29,  /* result.errors */
+    EVENTPROP_ALLOC_MAXIMA_TIMES      = 30,  /* maxima result.times */
+    EVENTPROP_ALLOC_MAXIMA_VALUES     = 31,  /* maxima result.values */
+    EVENTPROP_ALLOC_MAXIMA_ERRORS     = 32,  /* maxima result.errors */
+    EVENTPROP_ALLOC_BWD_GRAD          = 33,  /* backward result.grad */
+    EVENTPROP_ALLOC_BWD_SPIKE_ERRORS  = 34,  /* backward result.spike_errors */
+    EVENTPROP_ALLOC_BWD_MERGED        = 35,  /* backward merged spike array */
+    EVENTPROP_ALLOC_BWD_ALL_ERRORS    = 36,  /* backward all_errors buffer */
+    EVENTPROP_ALLOC_BWD_LAMBDA_V      = 37,  /* backward lambda_v */
+    EVENTPROP_ALLOC_BWD_LAMBDA_I      = 38,  /* backward lambda_i */
+    EVENTPROP_ALLOC_BWD_JUMP_TIME     = 39,  /* backward jump_time array */
+    EVENTPROP_ALLOC_BWD_JUMP_MAG      = 40,  /* backward jump_mag array */
+    EVENTPROP_ALLOC_BWD_JUMP_COUNT    = 41,  /* backward jump_count array */
+    EVENTPROP_ALLOC_BWD_JUMP_CAP      = 42,  /* backward jump_cap array */
+    EVENTPROP_ALLOC_BWD_PER_NEURON    = 43,  /* per-neuron jump_time/mag buffer */
+    EVENTPROP_ALLOC_BATCH_OUTPUTS     = 44,  /* batch outputs array */
+    EVENTPROP_ALLOC_BATCH_GRAD        = 45,  /* accumulate grad pointer */
+    EVENTPROP_ALLOC_DROPOUT_SAMPLE    = 46,  /* dropout per-sample buffer */
+    EVENTPROP_ALLOC_DIAG_V_TRACE      = 47,  /* voltage trace v_trace array */
+    EVENTPROP_ALLOC_DIAG_TS           = 48,  /* trace ts (time) array */
+    EVENTPROP_ALLOC_DIAG_LAMBDA       = 49,  /* lambda-I trace array */
+    EVENTPROP_BATCH_EMPTY             = 50,  /* batch input was null */
+    EVENTPROP_ALLOC_DROPOUT_OFFSETS   = 51,  /* dropout offsets scratch buffer */
+    EVENTPROP_BATCH_PARTIAL_ACCUMULATION = 52, /* gradient sum excludes failed samples — data is a partial sum */
+    EVENTPROP_NONFINITE_SPIKE_TIME    = 53,  /* times[i] is NaN (±Inf caught by range checks) */
+    EVENTPROP_DIAG_TIMESTEP_INVALID   = 54,  /* trace dt <= 0 or t_max <= 0 */
+    EVENTPROP_DIAG_TARGET_OUT_OF_RANGE = 55, /* trace target_nrn_idx out of [0, n_post) */
+    EVENTPROP_DIAG_TRACE_TOO_LONG     = 56,  /* t_max / dt exceeds max trace samples */
+    EVENTPROP_INVALID_DROPOUT_PROB    = 57,  /* p_drop outside [0, 1] */
+    EVENTPROP_NEGATIVE_SAMPLE_COUNT   = 58,  /* n_per_sample[i] < 0 */
+    EVENTPROP_BATCH_DIMENSION_MISMATCH = 59,  /* sample dims differ from requested n_pre/n_post */
+    EVENTPROP_UNSORTED_SPIKE_TIMES    = 60,  /* times[i] < times[i-1] (algorithms require ascending order) */
+    EVENTPROP_ALLOC_THREAD_SCRATCH    = 61,  /* per-thread forward-pass scratch row failed */
+    EVENTPROP_ALLOC_BWD_CUR_SUM       = 62,  /* backward-pass running current sum failed */
+    EVENTPROP_ALLOC_BWD_CURRENTS      = 63   /* backward-pass per-post-spike current array failed */
+} EventPropError;
+
+/** ── Validation limits ──────────────────────────────────────────────── */
+
+/// Maximum allowed spike time (seconds). ~11.6 days.
+#define EVENTPROP_MAX_SPIKE_TIME        1e6
+/// Minimum allowed tau (seconds). Below this, exp(-t/tau) underflows instantly.
+#define EVENTPROP_MIN_TAU               1e-9
+/// Maximum allowed tau (seconds). ~17 minutes; impractical above for SNN timescales.
+#define EVENTPROP_MAX_TAU               1e3
+/// Maximum allowed dimension per axis. Prevents int overflow in indexing and impossible allocations.
+#define EVENTPROP_MAX_DIM               100000
+/// exp(x) overflows to INF at x ≈ 709.78. We use a safety margin of 700.
+#define EVENTPROP_EXP_OVERFLOW_THRESHOLD 700.0
+/// Minimum relative difference between tau_mem and tau_syn (tau_mem == tau_syn already caught).
+/// Below this, k_prefactor = tau_syn / (tau_mem - tau_syn) blows up.
+#define EVENTPROP_TAU_REL_DIFF_MIN      1e-6
+/// Maximum number of samples in a diagnostic trace (guards t_max/dt int overflow).
+#define EVENTPROP_MAX_DIAG_SAMPLES      100000000
+
+/** Non-owning view into a flat row-major double array.
+ *  Mimics Eigen::Ref<RowMatrixXd const>: attached dimensions,
+ *  .row(i) access, and element-wise indexing without allocation. */
 typedef struct EventPropInput {
     const double* w;           /* Weight matrix (row-major) */
     int n_pre;                 /* Pre-synaptic neurons */
     int n_post;                /* Post-synaptic neurons */
-    const double* times;       /* Input spike times */
-    const int* sources;        /* Input source neurons  */
+    const double* times;       /* Input spike times — MUST be sorted non-decreasing (enforced by eventprop_validate_input) */
+    const int* sources;        /* Input source neurons (must match times ordering) */
     int n_spikes;              /* Number of input spikes */
     double tau_mem;            /* Membrane time constant (seconds) */
     double tau_syn;            /* Synaptic time constant (seconds) */
@@ -30,82 +140,130 @@ typedef struct EventPropInput {
 } EventPropInput;
 
 typedef struct SpikeOutput {
+    EventPropError error_no;  /* Error code (EVENTPROP_OK on success) */
     int n_spikes;            /* Number of output spikes */
     double* times;           /* Output spike times (malloc'd) */
-    int* sources;        /* Output source neurons (malloc'd) */
-    double* currents;        /* Synaptic currents at spike times (malloc'd) */
+    int* sources;            /* Output source neurons (malloc'd) */
+    /* The synaptic current at a spike time is not stored: it is exactly
+     *  sum0[k][nrn] * exp(-t / tau_syn) with k the number of input spikes at
+     *  or before t, so the backward pass rebuilds it with one ascending cursor
+     *  over the two spike lists. Passing it around costs 8 bytes per spike for
+     *  a value that is never independent of the input spikes and the time. */
 } SpikeOutput;
 
 typedef struct SumsOutput {
-    int n_rows;              /* n_spikes + 1 */
-    int n_post;              /* Number of post-synaptic neurons */
-    double* sum0;            /* Cumulative sums (malloc'd, n_rows * n_post) */
-    double* sum1;            /* Cumulative sums (malloc'd, n_rows * n_post) */
+    EventPropError error_no;  /* Error code (EVENTPROP_OK on success) */
+    int n_rows;               /* Time intervals (n_spikes + 1) */
+    int n_post;               /* Post-synaptic neurons */
+    double* sum0;             /* Cumulative sums (malloc'd, n_rows * n_post) */
+    double* sum1;             /* Cumulative sums (malloc'd, n_rows * n_post) */
 } SumsOutput;
 
 typedef struct MaximaOutput {
-    int n_post;              /* Number of post-synaptic neurons */
+    EventPropError error_no;  /* Error code (EVENTPROP_OK on success) */
+    int n_post;               /* Post-synaptic neurons */
     double* times;           /* Maxima times (malloc'd, n_post) */
     double* values;          /* Maxima values (malloc'd, n_post) */
+    double* errors;          /* Maxima errors per post-neuron (malloc'd, n_post) — written by caller before backward pass */
 } MaximaOutput;
 
-typedef struct BackwardSpikesInput {
-    const EventPropInput* input;      /* Shared layer params + input spike data (borrowed) */
-    const double* fwd_times;           /* Forward spike times (borrowed) */
-    const int* fwd_sources;        /* Forward spike sources (borrowed) */
-    const double* fwd_currents;         /* Forward spike currents (borrowed) */
-    const double* post_errors;          /* Post-synaptic errors (borrowed) */
-    int n_post_spikes;                  /* Number of post-synaptic spikes */
-} BackwardSpikesInput;
-
-typedef struct BackwardMaximaInput {
-    const EventPropInput* input;      /* Shared layer params + input spike data (borrowed) */
-    const double* maxima_times;        /* Maxima times (borrowed) */
-    const double* maxima_values;         /* Maxima values (borrowed) */
-    const double* maxima_errors;          /* Maxima errors (borrowed) */
-    int n_maxima;                       /* Number of maxima */
-} BackwardMaximaInput;
-
 typedef struct BackwardOutput {
-    int n_pre;               /* Number of pre-synaptic neurons */
-    int n_post;              /* Number of post-synaptic neurons */
+    EventPropError error_no;  /* Error code (EVENTPROP_OK on success) */
+    int n_pre;                /* Pre-synaptic neurons */
+    int n_post;               /* Post-synaptic neurons */
+    int n_spikes;             /* Number of input spikes */
     double* grad;            /* Weight gradient (malloc'd, n_pre * n_post) */
     double* spike_errors;   /* Input spike errors (malloc'd, n_spikes) */
 } BackwardOutput;
 
-void eventprop_free_spike_output(SpikeOutput* output);
-void eventprop_free_sums_output(SumsOutput* output);
-void eventprop_free_maxima_output(MaximaOutput* output);
-void eventprop_free_backward_output(BackwardOutput* output);
+/* Ownership: every compute/backward function above returns a heap-backed struct.
+ * Call the matching free function exactly once, whether the call succeeded or
+ * failed — on failure the library frees its own buffers and NULLs the fields,
+ * so a caller-side free is always safe and never a double free. */
+void eventprop_free_spike_output(SpikeOutput output);
+void eventprop_free_sums_output(SumsOutput output);
+void eventprop_free_maxima_output(MaximaOutput output);
+void eventprop_free_backward_output(BackwardOutput output);
+
 /**
- * Forward pass
+ * Forward pass (original).
  * Returns a SpikeOutput struct — caller must free via eventprop_free_spike_output().
  */
-SpikeOutput* eventprop_compute_spikes(const EventPropInput* input);
+SpikeOutput eventprop_compute_spikes(EventPropInput input);
 
 /**
  * Compute cumulative sums
  * Returns a SumsOutput struct — caller must free via eventprop_free_sums_output().
  */
-SumsOutput* eventprop_compute_sums(const EventPropInput* input);
+SumsOutput eventprop_compute_sums(EventPropInput input);
 
 /**
  * Compute membrane potential maxima
  * Returns a MaximaOutput struct — caller must free via eventprop_free_maxima_output().
  */
-MaximaOutput* eventprop_compute_maxima(const EventPropInput* input);
+MaximaOutput eventprop_compute_maxima(EventPropInput input);
 
 /**
  * Backward pass (spikes).
+ * `post_spike_errors` is a borrowed array of length spike.n_spikes — the loss
+ * derivative at each output spike, owned by the caller (it used to be a
+ * library-allocated array that only the caller wrote).
  * Returns a BackwardOutput struct — caller must free via eventprop_free_backward_output().
  */
-BackwardOutput* eventprop_backward_spikes(const BackwardSpikesInput* input);
+BackwardOutput eventprop_backward_spikes(EventPropInput input, SpikeOutput spike,
+                                         const double* post_spike_errors);
 
 /**
- * Backward pass (maxima).
+ * Backward pass (maxima loss).
+ * `maxima_times` and `maxima_errors` are borrowed arrays of length n_post.
  * Returns a BackwardOutput struct — caller must free via eventprop_free_backward_output().
  */
-BackwardOutput* eventprop_backward_maxima(const BackwardMaximaInput* input);
+BackwardOutput eventprop_backward_maxima(EventPropInput input,
+                                         const double* maxima_times,
+                                         const double* maxima_errors);
+
+/** Allocation fault injection (test-only): force the n-th allocation to fail. */
+void eventprop_test_alloc_reset(void);
+void eventprop_test_alloc_fail_nth(int nth);   /* <= 0 disables; not thread-safe */
+
+/** Test-only: pin the OpenMP width used by the forward sweep (0 = runtime */
+/** default). The sweep allocates scratch per thread, so tests that walk */
+/** allocation indices need this pinned to stay deterministic. */
+void eventprop_test_set_max_threads(int n);
+
+/** Library allocation shim — routes every malloc/calloc/realloc through the injection */
+/** counter above. Defined in eventprop_memory.c. */
+void* eventprop_try_malloc(size_t size);
+void* eventprop_try_calloc(size_t count, size_t elem_size);
+void* eventprop_try_realloc(void* ptr, size_t size);
+
+/** Validate an EventPropInput and return the first error found (or OK).
+ * Includes the v_th > 0 requirement — use it for entry points that read the
+ * threshold voltage (the spike search, the adjoint sweep, the diagnostic traces). */
+EventPropError eventprop_validate_input(EventPropInput input);
+
+/** Same structural checks, without the v_th requirement, for entry points that
+ * never read the threshold voltage (ComputeSums, ComputeMaxima, backward_maxima). */
+EventPropError eventprop_validate_input_no_v_th(EventPropInput input);
+
+/**
+ * Return a human-readable description of an error code.
+ *
+ * Returns English strings.  Callers (Python/C#) can translate these if needed.
+ * Returns "Unknown error" for out-of-range codes.
+ */
+const char* eventprop_error_string(int error_no);
+
+/** ABI self-check — see EVENTPROP_ABI_VERSION. Returns the ABI version this build
+ * of the library was compiled with. A consumer compares it against the macro it
+ * compiled from its own copy of this header. */
+int eventprop_abi_version(void);
+
+/** sizeof of a public struct, as compiled inside the library. `struct_name` is the
+ * exact typedef name, e.g. "SpikeOutput". Returns 0 for a NULL pointer or an
+ * unknown name — a consumer asking about a struct the library does not know is
+ * itself a mismatch, so 0 is the value that makes its check fail loudly. */
+size_t eventprop_abi_struct_size(const char* struct_name);
 
 #ifdef __cplusplus
 }

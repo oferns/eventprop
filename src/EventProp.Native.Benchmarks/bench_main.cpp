@@ -3,6 +3,7 @@
 // Same code, different backend. Run both and compare.
 
 #include <benchmark/benchmark.h>
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -13,8 +14,8 @@
 #include <vector>
 
 #ifdef USE_CPP_WRAPPER
-// C++ Eigen functions (bare header, no pybind11/Python dependency)
-#include "eventprop_cpp_bare.h"
+// C++ Eigen functions (stripped header, no pybind11/Python dependency)
+#include "eventprop_eigen_stripped.h"
 #else
 // C library functions (consolidated header)
 #include "eventprop.h"
@@ -23,7 +24,34 @@
 
 // ============================================================
 // Data generation (same for both)
+//
+// The C library requires non-decreasing input spike times and returns
+// EVENTPROP_UNSORTED_SPIKE_TIMES (60) otherwise; the Eigen reference does not
+// validate at all. Every generator therefore ends with SortTimesSources, so a
+// burst pattern cannot make the C side reject its input, return 0 spikes, and
+// have the benchmark time a validation short-circuit against real work.
 // ============================================================
+
+static void SortTimesSources(int n_spikes, double* times, int* sources)
+{
+    if (n_spikes <= 1 || times == nullptr) return;
+
+    std::vector<int> idx((size_t)n_spikes);
+    for (int i = 0; i < n_spikes; i++) idx[i] = i;
+    std::stable_sort(idx.begin(), idx.end(),
+                     [&](int a, int b) { return times[a] < times[b]; });
+
+    std::vector<double> sorted_times((size_t)n_spikes);
+    std::vector<int> sorted_sources((size_t)n_spikes);
+    for (int i = 0; i < n_spikes; i++) {
+        sorted_times[i]   = times[idx[i]];
+        sorted_sources[i] = sources[idx[i]];
+    }
+    for (int i = 0; i < n_spikes; i++) {
+        times[i]   = sorted_times[i];
+        sources[i] = sorted_sources[i];
+    }
+}
 
 static void GenerateUniformData(int n_pre, int n_post, int n_spikes,
                                  double* w, double* times, int* sources)
@@ -38,8 +66,16 @@ static void GenerateUniformData(int n_pre, int n_post, int n_spikes,
         times[i] = (i + 1) / static_cast<double>(n_spikes + 1);
         sources[i] = std::uniform_int_distribution<int>(0, n_pre - 1)(rng);
     }
+    SortTimesSources(n_spikes, times, sources);   // already ascending — no-op
 }
 
+// "Poisson" pattern — the shared cross-suite key is `poisson`, but this is NOT a
+// homogeneous Poisson process over [0, 1). Each spike time is an independent
+// exponential order statistic -log(1-u)/rate, so the whole train concentrates in
+// the first few tens of ms: measured max_time ~11 ms (Tiny, 20 spikes) to ~46 ms
+// (Medium, 500 spikes), i.e. an effective rate of ~1.8 kHz to ~10.8 kHz, not 200 Hz.
+// All three suites use this identical form, so cross-suite ratios are valid; the
+// label is a misnomer, kept for the shared pattern key. See AGENTS.md.
 static void GeneratePoissonData(int n_pre, int n_post, int n_spikes,
                                  double* w, double* times, int* sources)
 {
@@ -49,7 +85,7 @@ static void GeneratePoissonData(int n_pre, int n_post, int n_spikes,
     for (int i = 0; i < n_pre * n_post; i++)
         w[i] = w_dist(rng);
 
-    double rate = 200.0; // Hz
+    double rate = 200.0; // nominal Hz; effective rate is ~10x higher (see above)
     double dt = 1.0 / (rate * n_spikes);
     std::uniform_real_distribution<double> u_dist(0.0, 1.0);
 
@@ -61,8 +97,24 @@ static void GeneratePoissonData(int n_pre, int n_post, int n_spikes,
         if (idx > 0 && times[idx] <= times[idx - 1])
             times[idx] = times[idx - 1] + dt;
     }
+    SortTimesSources(n_spikes, times, sources);   // already ascending — no-op
 }
 
+// Canonical burst pattern — shared by all three benchmark suites
+// (native bench_main.cpp, Python conftest.py, .NET BenchPatterns.cs).
+//
+// Each bursting neuron fires 5 bursts of 5 spikes; spikes within a burst are
+// 0.002 s apart and consecutive bursts are 0.2 s apart, which is > 5 * tau_mem
+// (0.1 s) so the membrane decays between bursts. Neurons are staggered by a
+// computed offset so that exactly n_spikes land inside [0, 1) for every size.
+//
+// The stagger is computed, not hardcoded: a fixed 0.1/0.15 s per-neuron offset
+// saturates at ~7-10 bursting neurons, so Medium/Large/XL used to leave most of
+// the array unwritten (zero-initialised memory = thousands of spikes at t = 0),
+// which is a pathological input rather than a burst workload.
+//
+// Filled neuron by neuron, so the result is NOT sorted — every generator ends
+// with SortTimesSources, and the C library requires non-decreasing times.
 static void GenerateBurstData(int n_pre, int n_post, int n_spikes,
                                double* w, double* times, int* sources)
 {
@@ -72,20 +124,37 @@ static void GenerateBurstData(int n_pre, int n_post, int n_spikes,
     for (int i = 0; i < n_pre * n_post; i++)
         w[i] = w_dist(rng);
 
+    if (n_spikes <= 0) return;
+
+    constexpr int    kSpikesPerBurst = 5;
+    constexpr int    kBurstsPerNeuron = 5;
+    constexpr double kBurstGap   = 0.2;    /* > 5 * tau_mem */
+    constexpr double kSpikeStep  = 0.002;
+    constexpr double kStart      = 0.05;
+    constexpr double kWindowEnd  = 1.0;
+    constexpr double kEdgeEps    = 1e-6;   /* keep the last spike strictly inside [0, 1) */
+
+    const int per_neuron = kSpikesPerBurst * kBurstsPerNeuron;               /* 25 */
+    const int n_bursting = (n_spikes + per_neuron - 1) / per_neuron;         /* ceil */
+    const double burst_span = (kBurstsPerNeuron - 1) * kBurstGap;            /* 0.8 */
+    const double last_in_burst = (kSpikesPerBurst - 1) * kSpikeStep;         /* 0.008 */
+    const double room = kWindowEnd - kEdgeEps - kStart - burst_span - last_in_burst;
+    const double stagger = (n_bursting > 1) ? room / (n_bursting - 1) : 0.0;
+
     int spike_idx = 0;
-    for (int nrn = 0; nrn < n_pre && spike_idx < n_spikes; nrn++) {
-        /* Increased spacing between bursts to allow voltage decay */
-        double burst_start = 0.05 + nrn * 0.15; /* Was 0.1 */
-        for (int b = 0; burst_start < 1.0 && spike_idx < n_spikes; b++) {
-            for (int s = 0; s < 5 && spike_idx < n_spikes; s++) {
-                times[spike_idx] = burst_start + s * 0.002;
-                sources[spike_idx] = nrn;
+    for (int j = 0; j < n_bursting && spike_idx < n_spikes; j++) {
+        const double base = kStart + j * stagger;
+        const int src = j % n_pre;
+        for (int b = 0; b < kBurstsPerNeuron && spike_idx < n_spikes; b++) {
+            for (int s = 0; s < kSpikesPerBurst && spike_idx < n_spikes; s++) {
+                times[spike_idx]   = base + b * kBurstGap + s * kSpikeStep;
+                sources[spike_idx] = src;
                 spike_idx++;
             }
-            /* Increased inter-burst gap to ensure voltage decay */
-            burst_start += 0.2; /* Was 0.12 - need >5*tau_mem = 0.1s */
         }
     }
+
+    SortTimesSources(n_spikes, times, sources);
 }
 
 // ============================================================
@@ -136,8 +205,8 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
         EventPropInput fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                     .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
                     .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
-        SpikeOutput* warmup = eventprop_compute_spikes(&fi);
-        benchmark::DoNotOptimize(warmup->times);
+        SpikeOutput warmup = eventprop_compute_spikes(fi);
+        benchmark::DoNotOptimize(warmup.times);
         eventprop_free_spike_output(warmup);
 #endif
     }
@@ -151,25 +220,26 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
         EventPropInput fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                     .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
                     .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
-        SpikeOutput* output = eventprop_compute_spikes(&fi);
-        benchmark::DoNotOptimize(output->times);
-        benchmark::DoNotOptimize(output->currents);
+        SpikeOutput output = eventprop_compute_spikes(fi);
+        benchmark::DoNotOptimize(output.times);
+        benchmark::DoNotOptimize(output.sources);
         eventprop_free_spike_output(output);
 #endif
     }
 
 #ifdef USE_CPP_WRAPPER
     Spikes last = compute_spikes(w_map, input_spikes, 1.0, 0.02, 0.005);
+    state.counters["output_spikes"] = benchmark::Counter(last.n_spikes);
 #else
     EventPropInput fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                 .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
                 .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
-    SpikeOutput* last = eventprop_compute_spikes(&fi);
-#endif
-#ifdef USE_CPP_WRAPPER
+    SpikeOutput last = eventprop_compute_spikes(fi);
     state.counters["output_spikes"] = benchmark::Counter(last.n_spikes);
-#else
-    state.counters["output_spikes"] = benchmark::Counter(last->n_spikes);
+    /* A rejected input returns 0 spikes in ~0 ns. Surface the code so a
+       validation failure can never be read as a very fast pass. */
+    state.counters["c_error"] = (double)last.error_no;
+    eventprop_free_spike_output(last);
 #endif
 
     state.SetItemsProcessed(state.iterations() * sz.n_spikes);
@@ -188,9 +258,42 @@ static void BM_ComputeSpikes(benchmark::State& state, const ProblemSize& sz, Dat
 
 COMPUTESPIKES_BENCH(Tiny,    10,   5,   20);
 COMPUTESPIKES_BENCH(Small,   50,   20,  100);
-COMPUTESPIKES_BENCH(Medium,  200,  80,  500);
-COMPUTESPIKES_BENCH(Large,   500,  200, 1000);
-COMPUTESPIKES_BENCH(XL,      2000, 500, 5000);
+// Medium — burst excluded on MSVC (Toms748 throws); probe elsewhere
+#ifndef _MSC_VER
+BENCHMARK_CAPTURE(BM_ComputeSpikes, Medium_burst,
+    {"Medium", 200, 80, 500}, GenerateBurstData)->UseRealTime()->Name(
+    "ComputeSpikes/Medium/burst/default");
+#endif
+BENCHMARK_CAPTURE(BM_ComputeSpikes, Medium_uniform,
+    {"Medium", 200, 80, 500}, GenerateUniformData)->UseRealTime()->Name(
+    "ComputeSpikes/Medium/uniform/default");
+BENCHMARK_CAPTURE(BM_ComputeSpikes, Medium_poisson,
+    {"Medium", 200, 80, 500}, GeneratePoissonData)->UseRealTime()->Name(
+    "ComputeSpikes/Medium/poisson/default");
+// Large — burst excluded on MSVC (Toms748 throws); probe elsewhere
+#ifndef _MSC_VER
+BENCHMARK_CAPTURE(BM_ComputeSpikes, Large_burst,
+    {"Large", 500, 200, 1000}, GenerateBurstData)->UseRealTime()->Name(
+    "ComputeSpikes/Large/burst/default");
+#endif
+BENCHMARK_CAPTURE(BM_ComputeSpikes, Large_uniform,
+    {"Large", 500, 200, 1000}, GenerateUniformData)->UseRealTime()->Name(
+    "ComputeSpikes/Large/uniform/default");
+BENCHMARK_CAPTURE(BM_ComputeSpikes, Large_poisson,
+    {"Large", 500, 200, 1000}, GeneratePoissonData)->UseRealTime()->Name(
+    "ComputeSpikes/Large/poisson/default");
+// XL — burst excluded on MSVC (Toms748 throws); probe elsewhere
+#ifndef _MSC_VER
+BENCHMARK_CAPTURE(BM_ComputeSpikes, XL_burst,
+    {"XL", 2000, 500, 5000}, GenerateBurstData)->UseRealTime()->Name(
+    "ComputeSpikes/XL/burst/default");
+#endif
+BENCHMARK_CAPTURE(BM_ComputeSpikes, XL_uniform,
+    {"XL", 2000, 500, 5000}, GenerateUniformData)->UseRealTime()->Name(
+    "ComputeSpikes/XL/uniform/default");
+BENCHMARK_CAPTURE(BM_ComputeSpikes, XL_poisson,
+    {"XL", 2000, 500, 5000}, GeneratePoissonData)->UseRealTime()->Name(
+    "ComputeSpikes/XL/poisson/default");
 
 // ============================================================
 // Benchmark: BackwardSpikes (backward pass)
@@ -232,29 +335,30 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
     EventPropInput fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                 .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
                 .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
-    SpikeOutput* fwd_result = eventprop_compute_spikes(&fi);
+    SpikeOutput fwd_result = eventprop_compute_spikes(fi);
 
-    int n_post_spikes = fwd_result->n_spikes;
-    
-    // Post-spike errors (all 1.0)
-    std::vector<double> post_errors(n_post_spikes, 1.0);
+    int n_post_spikes = fwd_result.n_spikes;
 
+    // Post-spike derivatives are caller-owned now: the forward pass no longer
+    // hands an error array over.
+    std::vector<double> post_errors((size_t)n_post_spikes, 1.0);
+
+    EventPropInput base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+                              .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
+                              .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0 };
+
+    int last_bwd_error = 0;
     for (auto _ : state) {
-        EventPropInput base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
-                                  .tau_mem=0.02, .tau_syn=0.005 };
-        BackwardSpikesInput backward_input = {
-            .input = &base,
-            .fwd_times=fwd_result->times, .fwd_sources=fwd_result->sources,
-            .fwd_currents=fwd_result->currents, .post_errors=post_errors.data(),
-            .n_post_spikes=n_post_spikes
-        };
-        BackwardOutput* result = eventprop_backward_spikes(&backward_input);
+        BackwardOutput result = eventprop_backward_spikes(base, fwd_result, post_errors.data());
 
-        benchmark::DoNotOptimize(result->grad);
+        benchmark::DoNotOptimize(result.grad);
+        last_bwd_error = (int)result.error_no;
         eventprop_free_backward_output(result);
     }
 
     state.counters["output_spikes"] = benchmark::Counter(n_post_spikes);
+    state.counters["c_fwd_error"]   = (double)fwd_result.error_no;
+    state.counters["c_bwd_error"]   = (double)last_bwd_error;
     eventprop_free_spike_output(fwd_result);
 #endif
 
@@ -274,9 +378,42 @@ static void BM_BackwardSpikes(benchmark::State& state, const ProblemSize& sz, Da
 
 BACKWARDSPIKES_BENCH(Tiny,    10,   5,   20);
 BACKWARDSPIKES_BENCH(Small,   50,   20,  100);
-BACKWARDSPIKES_BENCH(Medium,  200,  80,  500);
-BACKWARDSPIKES_BENCH(Large,   500,  200, 1000);
-BACKWARDSPIKES_BENCH(XL,      2000, 500, 5000);
+// Medium — burst excluded on MSVC (Toms748 throws); probe elsewhere
+#ifndef _MSC_VER
+BENCHMARK_CAPTURE(BM_BackwardSpikes, Medium_burst,
+    {"Medium", 200, 80, 500}, GenerateBurstData)->UseRealTime()->Name(
+    "BackwardSpikes/Medium/burst/default");
+#endif
+BENCHMARK_CAPTURE(BM_BackwardSpikes, Medium_uniform,
+    {"Medium", 200, 80, 500}, GenerateUniformData)->UseRealTime()->Name(
+    "BackwardSpikes/Medium/uniform/default");
+BENCHMARK_CAPTURE(BM_BackwardSpikes, Medium_poisson,
+    {"Medium", 200, 80, 500}, GeneratePoissonData)->UseRealTime()->Name(
+    "BackwardSpikes/Medium/poisson/default");
+// Large — burst excluded on MSVC (Toms748 throws); probe elsewhere
+#ifndef _MSC_VER
+BENCHMARK_CAPTURE(BM_BackwardSpikes, Large_burst,
+    {"Large", 500, 200, 1000}, GenerateBurstData)->UseRealTime()->Name(
+    "BackwardSpikes/Large/burst/default");
+#endif
+BENCHMARK_CAPTURE(BM_BackwardSpikes, Large_uniform,
+    {"Large", 500, 200, 1000}, GenerateUniformData)->UseRealTime()->Name(
+    "BackwardSpikes/Large/uniform/default");
+BENCHMARK_CAPTURE(BM_BackwardSpikes, Large_poisson,
+    {"Large", 500, 200, 1000}, GeneratePoissonData)->UseRealTime()->Name(
+    "BackwardSpikes/Large/poisson/default");
+// XL — burst excluded on MSVC (Toms748 throws); probe elsewhere
+#ifndef _MSC_VER
+BENCHMARK_CAPTURE(BM_BackwardSpikes, XL_burst,
+    {"XL", 2000, 500, 5000}, GenerateBurstData)->UseRealTime()->Name(
+    "BackwardSpikes/XL/burst/default");
+#endif
+BENCHMARK_CAPTURE(BM_BackwardSpikes, XL_uniform,
+    {"XL", 2000, 500, 5000}, GenerateUniformData)->UseRealTime()->Name(
+    "BackwardSpikes/XL/uniform/default");
+BENCHMARK_CAPTURE(BM_BackwardSpikes, XL_poisson,
+    {"XL", 2000, 500, 5000}, GeneratePoissonData)->UseRealTime()->Name(
+    "BackwardSpikes/XL/poisson/default");
 // ============================================================
 // Benchmark: FullTrainingStep (composite — Sums → Spikes → Backward)
 // Measures the full forward + backward training pipeline end-to-end.
@@ -320,48 +457,52 @@ static void BM_FullTrainingStep(benchmark::State& state, const ProblemSize& sz, 
     }
 #else
     // C library: warmup forward pass to get post-spike data
-    EventPropInput fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+    EventPropInput fi_warmup = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
                 .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
                 .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
-    SpikeOutput* fwd_warmup = eventprop_compute_spikes(&fi);
-    benchmark::DoNotOptimize(fwd_warmup->times);
+    SpikeOutput fwd_warmup = eventprop_compute_spikes(fi_warmup);
+    benchmark::DoNotOptimize(fwd_warmup.times);
+    const int n_post_spikes = fwd_warmup.n_spikes;
+    // Post-spike derivatives are caller-owned: sized from the warmup, since
+    // the same input yields the same spike count every iteration.
+    std::vector<double> post_errors((size_t)n_post_spikes, -1.0);
+    const int fwd_warmup_error = (int)fwd_warmup.error_no;
     eventprop_free_spike_output(fwd_warmup);
+
+    int last_fwd_error = fwd_warmup_error;
+    int last_bwd_error = 0;
+
+    EventPropInput base_input = {
+        .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
+        .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
+        .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0
+    };
 
     for (auto _ : state) {
         // Forward: sums + spikes
-        EventPropInput base_input = {
-            .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
-            .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-            .tau_mem=0.02, .tau_syn=0.005
-        };
-        SumsOutput* sums = eventprop_compute_sums(&base_input);
+        SumsOutput sums = eventprop_compute_sums(base_input);
 
-        EventPropInput fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
-                    .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-                    .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
-        SpikeOutput* fwd = eventprop_compute_spikes(&fi);
+        SpikeOutput fwd = eventprop_compute_spikes(base_input);
 
-        // Set errors for backward pass (all -1.0)
-        std::vector<double> post_errors(fwd->n_spikes, -1.0);
+        // Post-spike derivatives are caller-owned now
+        for (int i = 0; i < n_post_spikes; i++) post_errors[i] = -1.0;
 
         // Backward: gradient computation
-        EventPropInput base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
-                                  .tau_mem=0.02, .tau_syn=0.005 };
-        BackwardSpikesInput backward_input = {
-            .input = &base,
-            .fwd_times=fwd->times, .fwd_sources=fwd->sources,
-            .fwd_currents=fwd->currents, .post_errors=post_errors.data(),
-            .n_post_spikes=fwd->n_spikes
-        };
-        BackwardOutput* result = eventprop_backward_spikes(&backward_input);
+        BackwardOutput result = eventprop_backward_spikes(base_input, fwd, post_errors.data());
 
-        benchmark::DoNotOptimize(result->grad);
-        benchmark::DoNotOptimize(sums->sum0);
+        benchmark::DoNotOptimize(result.grad);
+        benchmark::DoNotOptimize(sums.sum0);
+
+        last_fwd_error = (int)fwd.error_no;
+        last_bwd_error = (int)result.error_no;
 
         eventprop_free_backward_output(result);
         eventprop_free_spike_output(fwd);
         eventprop_free_sums_output(sums);
     }
+
+    state.counters["c_fwd_error"] = (double)last_fwd_error;
+    state.counters["c_bwd_error"] = (double)last_bwd_error;
 #endif
 
     state.SetItemsProcessed(state.iterations() * sz.n_spikes);
@@ -380,9 +521,42 @@ static void BM_FullTrainingStep(benchmark::State& state, const ProblemSize& sz, 
 
 FULLTRAINING_BENCH(Tiny,    10,   5,   20);
 FULLTRAINING_BENCH(Small,   50,   20,  100);
-FULLTRAINING_BENCH(Medium,  200,  80,  500);
-FULLTRAINING_BENCH(Large,   500,  200, 1000);
-FULLTRAINING_BENCH(XL,      2000, 500, 5000);
+// Medium — burst excluded on MSVC (Toms748 throws); probe elsewhere
+#ifndef _MSC_VER
+BENCHMARK_CAPTURE(BM_FullTrainingStep, Medium_burst,
+    {"Medium", 200, 80, 500}, GenerateBurstData)->UseRealTime()->Name(
+    "FullTrainingStep/Medium/burst/default");
+#endif
+BENCHMARK_CAPTURE(BM_FullTrainingStep, Medium_uniform,
+    {"Medium", 200, 80, 500}, GenerateUniformData)->UseRealTime()->Name(
+    "FullTrainingStep/Medium/uniform/default");
+BENCHMARK_CAPTURE(BM_FullTrainingStep, Medium_poisson,
+    {"Medium", 200, 80, 500}, GeneratePoissonData)->UseRealTime()->Name(
+    "FullTrainingStep/Medium/poisson/default");
+// Large — burst excluded on MSVC (Toms748 throws); probe elsewhere
+#ifndef _MSC_VER
+BENCHMARK_CAPTURE(BM_FullTrainingStep, Large_burst,
+    {"Large", 500, 200, 1000}, GenerateBurstData)->UseRealTime()->Name(
+    "FullTrainingStep/Large/burst/default");
+#endif
+BENCHMARK_CAPTURE(BM_FullTrainingStep, Large_uniform,
+    {"Large", 500, 200, 1000}, GenerateUniformData)->UseRealTime()->Name(
+    "FullTrainingStep/Large/uniform/default");
+BENCHMARK_CAPTURE(BM_FullTrainingStep, Large_poisson,
+    {"Large", 500, 200, 1000}, GeneratePoissonData)->UseRealTime()->Name(
+    "FullTrainingStep/Large/poisson/default");
+// XL — burst excluded on MSVC (Toms748 throws); probe elsewhere
+#ifndef _MSC_VER
+BENCHMARK_CAPTURE(BM_FullTrainingStep, XL_burst,
+    {"XL", 2000, 500, 5000}, GenerateBurstData)->UseRealTime()->Name(
+    "FullTrainingStep/XL/burst/default");
+#endif
+BENCHMARK_CAPTURE(BM_FullTrainingStep, XL_uniform,
+    {"XL", 2000, 500, 5000}, GenerateUniformData)->UseRealTime()->Name(
+    "FullTrainingStep/XL/uniform/default");
+BENCHMARK_CAPTURE(BM_FullTrainingStep, XL_poisson,
+    {"XL", 2000, 500, 5000}, GeneratePoissonData)->UseRealTime()->Name(
+    "FullTrainingStep/XL/poisson/default");
 
 // ============================================================
 // Benchmark: BatchTrainingStep (multi-sample forward + backward)
@@ -416,6 +590,11 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
                                Eigen::Map<Eigen::ArrayXi>(sources.data(), sz.n_spikes));
     }
 
+    // Collect results inside the loop and free after — avoids allocation
+    // overhead per iteration for fair comparison with C backend.
+    std::vector<std::vector<Spikes>> fwd_results;
+    fwd_results.reserve(state.iterations());
+
     for (auto _ : state) {
         // Forward: batch compute spikes
         std::vector<Spikes> post_batch = compute_spikes_batch(w_map, input_batch, 1.0, 0.02, 0.005);
@@ -430,71 +609,60 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
         RowMatrixXd gradient(sz.n_pre, sz.n_post);
         backward_spikes_batch(input_batch, post_batch, w_map, gradient, 1.0, 0.02, 0.005);
         benchmark::DoNotOptimize(gradient.data());
+
+        fwd_results.push_back(std::move(post_batch));
     }
 #else
-    // C library: flat arrays + per-sample spike counts
-    std::vector<double> times(batch_size * sz.n_spikes);
-    std::vector<int> sources(batch_size * sz.n_spikes);
-    std::vector<int> n_spikes_per_sample(batch_size, sz.n_spikes);
-    
+    // C library: construct EventPropInput[] from flat arrays
+    std::vector<EventPropInput> inputs(batch_size);
     for (int b = 0; b < batch_size; b++) {
+        double* times = new double[sz.n_spikes];
+        int* sources = new int[sz.n_spikes];
         std::mt19937 rng(42 + b);
         for (int i = 0; i < sz.n_spikes; i++) {
-            times[b * sz.n_spikes + i] = (i + 1) / static_cast<double>(sz.n_spikes + 1);
-            sources[b * sz.n_spikes + i] = std::uniform_int_distribution<int>(0, sz.n_pre - 1)(rng);
+            times[i] = (i + 1) / static_cast<double>(sz.n_spikes + 1);
+            sources[i] = std::uniform_int_distribution<int>(0, sz.n_pre - 1)(rng);
         }
+        inputs[b] = {w.data(), sz.n_pre, sz.n_post, times, sources, sz.n_spikes, 0.02, 0.005, 1.0};
     }
 
-    // Warmup: run forward pass to determine max output sizes
-    {
-        EventPropInput fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
-                    .times=times.data(), .sources=sources.data(),
-                    .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
-        BatchEventPropInput batch = { .input = &fi, .n_spikes_per_sample = n_spikes_per_sample.data(), .batch_size = batch_size };
-        SpikeOutput* warmup = eventprop_compute_spikes_batch(&batch);
-        int total_fwd = 0;
-        for (int b = 0; b < batch_size; b++)
-            total_fwd += warmup[b].n_spikes;
-        // Pre-allocate buffers large enough for all samples
-        std::vector<double> fwd_times(total_fwd);
-        std::vector<int> fwd_sources(total_fwd);
-        std::vector<double> fwd_currents(total_fwd);
-        std::vector<double> post_errors(total_fwd, -1.0);
-        eventprop_free_batch_spike_output(warmup, batch_size);
-    }
+    // Collect results inside the loop and free after — avoids malloc/free
+    // overhead per iteration while keeping the C library's allocation philosophy.
+    std::vector<SpikesBatch> fwd_results;
+    std::vector<BackwardsBatch> bwd_results;
+    fwd_results.reserve(state.iterations());
+    bwd_results.reserve(state.iterations());
 
-    // Pre-allocate buffers outside loop (reuse each iteration)
-    std::vector<double> fwd_times(batch_size * sz.n_spikes);
-    std::vector<int> fwd_sources(batch_size * sz.n_spikes);
-    std::vector<double> fwd_currents(batch_size * sz.n_spikes);
-    std::vector<double> post_errors(batch_size * sz.n_spikes, -1.0);
-    std::vector<int> n_fwd_spikes_per_sample(batch_size);
+    // One caller-owned derivative buffer per sample, plus the pointer array the
+    // batch entry point wants. resize() only allocates on the first iteration.
+    std::vector<std::vector<double>> post_errors(batch_size);
+    std::vector<const double*> post_ptrs(batch_size, nullptr);
 
     for (auto _ : state) {
-        // Forward: batch compute spikes
-        EventPropInput fi = {.w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
-                    .times=times.data(), .sources=sources.data(),
-                    .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
-        BatchEventPropInput batch = { .input = &fi, .n_spikes_per_sample = n_spikes_per_sample.data(), .batch_size = batch_size };
-        SpikeOutput* fwd_batch = eventprop_compute_spikes_batch(&batch);
+        SpikesBatch fwd_batch = eventprop_compute_spikes_batch(inputs.data(), batch_size);
 
-        // Set errors for backward pass
-        int total_fwd = 0;
-        for (int b = 0; b < batch_size; b++)
-            total_fwd += fwd_batch[b].n_spikes;
-        std::vector<double> post_errors(total_fwd, -1.0);
+        // Post-spike derivatives are caller-owned now
+        for (int b = 0; b < batch_size; b++) {
+            post_errors[b].resize((size_t)fwd_batch.spikes[b].n_spikes, -1.0);
+            post_ptrs[b] = post_errors[b].empty() ? nullptr : post_errors[b].data();
+        }
 
-        // Backward: batch gradient computation (pass fwd_batch directly, no copying)
-        EventPropInput base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
-                                  .tau_mem=0.02, .tau_syn=0.005 };
-        BatchEventPropInput batch_bwd = { .input = &base, .n_spikes_per_sample = n_spikes_per_sample.data(), .batch_size = batch_size };
-        BackwardOutput* result_batch = eventprop_backward_spikes_batch(
-            &batch_bwd, fwd_batch, post_errors.data());
-        
-        benchmark::DoNotOptimize(result_batch[0].grad);
-        
-        eventprop_free_backward_batch_output(result_batch, batch_size);
-        eventprop_free_batch_spike_output(fwd_batch, batch_size);
+        BackwardsBatch result_batch = eventprop_backward_spikes_batch(inputs.data(), fwd_batch, post_ptrs.data());
+
+        benchmark::DoNotOptimize(result_batch.outputs[0].grad);
+
+        fwd_results.push_back(std::move(fwd_batch));
+        bwd_results.push_back(std::move(result_batch));
+    }
+
+    // Free all results after the benchmark loop
+    state.counters["c_fwd_error"] = (double)fwd_results.back().has_errors;
+    state.counters["c_bwd_error"] = (double)bwd_results.back().has_errors;
+    for (auto& r : bwd_results) eventprop_free_backwards_batch(r);
+    for (auto& r : fwd_results) eventprop_free_spikes_batch(r);
+    for (int b = 0; b < batch_size; b++) {
+        delete[] inputs[b].times;
+        delete[] inputs[b].sources;
     }
 #endif
 
@@ -504,8 +672,9 @@ static void BM_BatchTrainingStep(benchmark::State& state, const ProblemSize& sz,
 #define BATCHTRAINING_BENCH(SizeName, NP, NPO, NS)                                              \
     BENCHMARK_CAPTURE(BM_BatchTrainingStep, SizeName##_uniform,                                 \
         {#SizeName, NP, NPO, NS}, GenerateUniformData)->UseRealTime()->ArgNames({"batch_size"}) \
-        ->RangeMultiplier(1)->DenseRange(4, 32, 4)->Name("BatchTrainingStep/" #SizeName "/uniform/default")
+        ->DenseRange(4, 32, 4)->Name("BatchTrainingStep/" #SizeName "/uniform/default")
 
+BATCHTRAINING_BENCH(Large,  500,  200, 1000);
 BATCHTRAINING_BENCH(Small,   50,   20,  100);
 BATCHTRAINING_BENCH(Medium,  200,  80,  500);
 
@@ -528,6 +697,7 @@ static void BM_ComputeSpikesVth(benchmark::State& state)
 
     GenerateUniformData(n_pre, n_post, n_spikes, w.data(), times.data(), sources.data());
 
+    int last_error = 0;
     for (auto _ : state) {
 #ifdef USE_CPP_WRAPPER
         Eigen::Map<RowMatrixXd const> w_map(w.data(), n_pre, n_post);
@@ -540,18 +710,23 @@ static void BM_ComputeSpikesVth(benchmark::State& state)
         EventPropInput fi = {.w=w.data(), .n_pre=n_pre, .n_post=n_post,
                     .times=times.data(), .sources=sources.data(), .n_spikes=n_spikes,
                     .tau_mem=0.02, .tau_syn=0.005, .v_th=v_th};
-        SpikeOutput* output = eventprop_compute_spikes(&fi);
-        benchmark::DoNotOptimize(output->times);
-        benchmark::DoNotOptimize(output->currents);
+        SpikeOutput output = eventprop_compute_spikes(fi);
+        benchmark::DoNotOptimize(output.times);
+        benchmark::DoNotOptimize(output.sources);
+        last_error = (int)output.error_no;
         eventprop_free_spike_output(output);
 #endif
     }
+
+#ifndef USE_CPP_WRAPPER
+    state.counters["c_error"] = (double)last_error;
+#endif
 
     state.SetItemsProcessed(state.iterations() * n_spikes);
 }
 
 BENCHMARK(BM_ComputeSpikesVth)->ArgNames({"v_th"})
-    ->RangeMultiplier(1)
+    
     ->DenseRange(5, 20, 5);
 
 // BackwardSpikes with v_th variation (Small size, uniform)
@@ -584,26 +759,25 @@ static void BM_BackwardSpikesVth(benchmark::State& state)
     EventPropInput fi = {.w=w.data(), .n_pre=n_pre, .n_post=n_post,
                 .times=times.data(), .sources=sources.data(), .n_spikes=n_spikes,
                 .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
-    SpikeOutput* fwd = eventprop_compute_spikes(&fi);
+    SpikeOutput fwd = eventprop_compute_spikes(fi);
 
-    std::vector<double> post_errors(fwd->n_spikes, -1.0);
+    const int fwd_error = (int)fwd.error_no;
+    // Post-spike derivatives are caller-owned now
+    std::vector<double> post_errors((size_t)fwd.n_spikes, -1.0);
 #endif
 
+    int last_bwd_error = 0;
     for (auto _ : state) {
 #ifdef USE_CPP_WRAPPER
         gradient = backward(input, post, w_map, v_th, 0.02, 0.005);
         benchmark::DoNotOptimize(gradient.first.data());
 #else
-        EventPropInput base = { .w=w.data(), .n_pre=n_pre, .n_post=n_post,
-                                  .tau_mem=0.02, .tau_syn=0.005 };
-        BackwardSpikesInput backward_input = {
-            .input = &base,
-            .fwd_times=fwd->times, .fwd_sources=fwd->sources,
-            .fwd_currents=fwd->currents, .post_errors=post_errors.data(),
-            .n_post_spikes=fwd->n_spikes
-        };
-        BackwardOutput* result = eventprop_backward_spikes(&backward_input);
-        benchmark::DoNotOptimize(result->grad);
+        EventPropInput base_input = {.w=w.data(), .n_pre=n_pre, .n_post=n_post,
+            .times=times.data(), .sources=sources.data(), .n_spikes=n_spikes,
+            .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0};
+        BackwardOutput result = eventprop_backward_spikes(base_input, fwd, post_errors.data());
+        benchmark::DoNotOptimize(result.grad);
+        last_bwd_error = (int)result.error_no;
         eventprop_free_backward_output(result);
 #endif
     }
@@ -611,6 +785,8 @@ static void BM_BackwardSpikesVth(benchmark::State& state)
 #ifdef USE_CPP_WRAPPER
     // Nothing to free for Eigen
 #else
+    state.counters["c_fwd_error"] = (double)fwd_error;
+    state.counters["c_bwd_error"] = (double)last_bwd_error;
     eventprop_free_spike_output(fwd);
 #endif
 
@@ -618,7 +794,7 @@ static void BM_BackwardSpikesVth(benchmark::State& state)
 }
 
 BENCHMARK(BM_BackwardSpikesVth)->ArgNames({"v_th"})
-    ->RangeMultiplier(1)
+    
     ->DenseRange(5, 20, 5);
 
 // ============================================================
@@ -632,6 +808,8 @@ static void BM_ComputeSums(benchmark::State& state, const ProblemSize& sz, DataG
     std::vector<int> sources(sz.n_spikes);
 
     gen(sz.n_pre, sz.n_post, sz.n_spikes, w.data(), times.data(), sources.data());
+
+    int last_error = 0;
 
 #ifdef USE_CPP_WRAPPER
     Eigen::Map<RowMatrixXd const> w_map(w.data(), sz.n_pre, sz.n_post);
@@ -649,10 +827,10 @@ static void BM_ComputeSums(benchmark::State& state, const ProblemSize& sz, DataG
         EventPropInput base_input = {
             .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
             .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-            .tau_mem=0.02, .tau_syn=0.005
+            .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0
         };
-        SumsOutput* warmup = eventprop_compute_sums(&base_input);
-        benchmark::DoNotOptimize(warmup->sum0);
+        SumsOutput warmup = eventprop_compute_sums(base_input);
+        benchmark::DoNotOptimize(warmup.sum0);
         eventprop_free_sums_output(warmup);
 #endif
     }
@@ -666,14 +844,19 @@ static void BM_ComputeSums(benchmark::State& state, const ProblemSize& sz, DataG
         EventPropInput base_input = {
             .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
             .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-            .tau_mem=0.02, .tau_syn=0.005
+            .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0
         };
-        SumsOutput* output = eventprop_compute_sums(&base_input);
-        benchmark::DoNotOptimize(output->sum0);
-        benchmark::DoNotOptimize(output->sum1);
+        SumsOutput output = eventprop_compute_sums(base_input);
+        benchmark::DoNotOptimize(output.sum0);
+        benchmark::DoNotOptimize(output.sum1);
+        last_error = (int)output.error_no;
         eventprop_free_sums_output(output);
 #endif
     }
+
+#ifndef USE_CPP_WRAPPER
+    state.counters["c_error"] = (double)last_error;
+#endif
 
     state.SetItemsProcessed(state.iterations() * sz.n_spikes);
 }
@@ -691,9 +874,37 @@ static void BM_ComputeSums(benchmark::State& state, const ProblemSize& sz, DataG
 
 COMPUTESUMS_BENCH(Tiny,    10,   5,   20);
 COMPUTESUMS_BENCH(Small,   50,   20,  100);
-COMPUTESUMS_BENCH(Medium,  200,  80,  500);
-COMPUTESUMS_BENCH(Large,   500,  200, 1000);
-COMPUTESUMS_BENCH(XL,      2000, 500, 5000);
+// Medium — burst is safe for ComputeSums (no root finding), so it is registered
+// everywhere; the MSVC Toms748 caveat only applies to the spike-search families.
+BENCHMARK_CAPTURE(BM_ComputeSums, Medium_burst,
+    {"Medium", 200, 80, 500}, GenerateBurstData)->UseRealTime()->Name(
+    "ComputeSums/Medium/burst/default");
+BENCHMARK_CAPTURE(BM_ComputeSums, Medium_uniform,
+    {"Medium", 200, 80, 500}, GenerateUniformData)->UseRealTime()->Name(
+    "ComputeSums/Medium/uniform/default");
+BENCHMARK_CAPTURE(BM_ComputeSums, Medium_poisson,
+    {"Medium", 200, 80, 500}, GeneratePoissonData)->UseRealTime()->Name(
+    "ComputeSums/Medium/poisson/default");
+// Large — burst is safe for ComputeSums (no root finding)
+BENCHMARK_CAPTURE(BM_ComputeSums, Large_burst,
+    {"Large", 500, 200, 1000}, GenerateBurstData)->UseRealTime()->Name(
+    "ComputeSums/Large/burst/default");
+BENCHMARK_CAPTURE(BM_ComputeSums, Large_uniform,
+    {"Large", 500, 200, 1000}, GenerateUniformData)->UseRealTime()->Name(
+    "ComputeSums/Large/uniform/default");
+BENCHMARK_CAPTURE(BM_ComputeSums, Large_poisson,
+    {"Large", 500, 200, 1000}, GeneratePoissonData)->UseRealTime()->Name(
+    "ComputeSums/Large/poisson/default");
+// XL — burst is safe for ComputeSums (no root finding)
+BENCHMARK_CAPTURE(BM_ComputeSums, XL_burst,
+    {"XL", 2000, 500, 5000}, GenerateBurstData)->UseRealTime()->Name(
+    "ComputeSums/XL/burst/default");
+BENCHMARK_CAPTURE(BM_ComputeSums, XL_uniform,
+    {"XL", 2000, 500, 5000}, GenerateUniformData)->UseRealTime()->Name(
+    "ComputeSums/XL/uniform/default");
+BENCHMARK_CAPTURE(BM_ComputeSums, XL_poisson,
+    {"XL", 2000, 500, 5000}, GeneratePoissonData)->UseRealTime()->Name(
+    "ComputeSums/XL/poisson/default");
 
 // ============================================================
 // Benchmark: ComputeMaxima (membrane potential maxima)
@@ -723,10 +934,10 @@ static void BM_ComputeMaxima(benchmark::State& state, const ProblemSize& sz, Dat
         EventPropInput base_input = {
             .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
             .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-            .tau_mem=0.02, .tau_syn=0.005
+            .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0
         };
-        MaximaOutput* warmup = eventprop_compute_maxima(&base_input);
-        benchmark::DoNotOptimize(warmup->times);
+        MaximaOutput warmup = eventprop_compute_maxima(base_input);
+        benchmark::DoNotOptimize(warmup.times);
         eventprop_free_maxima_output(warmup);
 #endif
     }
@@ -740,11 +951,11 @@ static void BM_ComputeMaxima(benchmark::State& state, const ProblemSize& sz, Dat
         EventPropInput base_input = {
             .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
             .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-            .tau_mem=0.02, .tau_syn=0.005
+            .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0
         };
-        MaximaOutput* output = eventprop_compute_maxima(&base_input);
-        benchmark::DoNotOptimize(output->times);
-        benchmark::DoNotOptimize(output->values);
+        MaximaOutput output = eventprop_compute_maxima(base_input);
+        benchmark::DoNotOptimize(output.times);
+        benchmark::DoNotOptimize(output.values);
         eventprop_free_maxima_output(output);
 #endif
     }
@@ -765,9 +976,27 @@ static void BM_ComputeMaxima(benchmark::State& state, const ProblemSize& sz, Dat
 
 COMPUTEMAXIMA_BENCH(Tiny,    10,   5,   20);
 COMPUTEMAXIMA_BENCH(Small,   50,   20,  100);
-COMPUTEMAXIMA_BENCH(Medium,  200,  80,  500);
-COMPUTEMAXIMA_BENCH(Large,   500,  200, 1000);
-COMPUTEMAXIMA_BENCH(XL,      2000, 500, 5000);
+// Medium — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_ComputeMaxima, Medium_uniform,
+    {"Medium", 200, 80, 500}, GenerateUniformData)->UseRealTime()->Name(
+    "ComputeMaxima/Medium/uniform/default");
+BENCHMARK_CAPTURE(BM_ComputeMaxima, Medium_poisson,
+    {"Medium", 200, 80, 500}, GeneratePoissonData)->UseRealTime()->Name(
+    "ComputeMaxima/Medium/poisson/default");
+// Large — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_ComputeMaxima, Large_uniform,
+    {"Large", 500, 200, 1000}, GenerateUniformData)->UseRealTime()->Name(
+    "ComputeMaxima/Large/uniform/default");
+BENCHMARK_CAPTURE(BM_ComputeMaxima, Large_poisson,
+    {"Large", 500, 200, 1000}, GeneratePoissonData)->UseRealTime()->Name(
+    "ComputeMaxima/Large/poisson/default");
+// XL — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_ComputeMaxima, XL_uniform,
+    {"XL", 2000, 500, 5000}, GenerateUniformData)->UseRealTime()->Name(
+    "ComputeMaxima/XL/uniform/default");
+BENCHMARK_CAPTURE(BM_ComputeMaxima, XL_poisson,
+    {"XL", 2000, 500, 5000}, GeneratePoissonData)->UseRealTime()->Name(
+    "ComputeMaxima/XL/poisson/default");
 
 // ============================================================
 // Benchmark: BackwardMaxima (backward pass via maxima)
@@ -797,9 +1026,9 @@ static void BM_BackwardMaxima(benchmark::State& state, const ProblemSize& sz, Da
     EventPropInput base_input = {
         .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
         .times=times.data(), .sources=sources.data(), .n_spikes=sz.n_spikes,
-        .tau_mem=0.02, .tau_syn=0.005
+        .tau_mem=0.02, .tau_syn=0.005, .v_th=1.0
     };
-    MaximaOutput* maxima = eventprop_compute_maxima(&base_input);
+    MaximaOutput maxima = eventprop_compute_maxima(base_input);
 
     std::vector<double> maxima_errors(sz.n_post, -1.0);
 #endif
@@ -809,15 +1038,8 @@ static void BM_BackwardMaxima(benchmark::State& state, const ProblemSize& sz, Da
         gradient = backward(input, maxima, w_map, 0.02, 0.005);
         benchmark::DoNotOptimize(gradient.first.data());
 #else
-        EventPropInput base = { .w=w.data(), .n_pre=sz.n_pre, .n_post=sz.n_post,
-                                  .tau_mem=0.02, .tau_syn=0.005 };
-        BackwardMaximaInput backward_input = {
-            .input = &base,
-            .maxima_times=maxima->times, .maxima_values=maxima->values,
-            .maxima_errors=maxima_errors.data(), .n_maxima=sz.n_post
-        };
-        BackwardOutput* result = eventprop_backward_maxima(&backward_input);
-        benchmark::DoNotOptimize(result->grad[0]);
+        BackwardOutput result = eventprop_backward_maxima(base_input, maxima.times, maxima_errors.data());
+        benchmark::DoNotOptimize(result.grad[0]);
         eventprop_free_backward_output(result);
 #endif
     }
@@ -844,9 +1066,27 @@ static void BM_BackwardMaxima(benchmark::State& state, const ProblemSize& sz, Da
 
 BACKWARDMAXIMA_BENCH(Tiny,    10,   5,   20);
 BACKWARDMAXIMA_BENCH(Small,   50,   20,  100);
-BACKWARDMAXIMA_BENCH(Medium,  200,  80,  500);
-BACKWARDMAXIMA_BENCH(Large,   500,  200, 1000);
-BACKWARDMAXIMA_BENCH(XL,      2000, 500, 5000);
+// Medium — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_BackwardMaxima, Medium_uniform,
+    {"Medium", 200, 80, 500}, GenerateUniformData)->UseRealTime()->Name(
+    "BackwardMaxima/Medium/uniform/default");
+BENCHMARK_CAPTURE(BM_BackwardMaxima, Medium_poisson,
+    {"Medium", 200, 80, 500}, GeneratePoissonData)->UseRealTime()->Name(
+    "BackwardMaxima/Medium/poisson/default");
+// Large — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_BackwardMaxima, Large_uniform,
+    {"Large", 500, 200, 1000}, GenerateUniformData)->UseRealTime()->Name(
+    "BackwardMaxima/Large/uniform/default");
+BENCHMARK_CAPTURE(BM_BackwardMaxima, Large_poisson,
+    {"Large", 500, 200, 1000}, GeneratePoissonData)->UseRealTime()->Name(
+    "BackwardMaxima/Large/poisson/default");
+// XL — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_BackwardMaxima, XL_uniform,
+    {"XL", 2000, 500, 5000}, GenerateUniformData)->UseRealTime()->Name(
+    "BackwardMaxima/XL/uniform/default");
+BENCHMARK_CAPTURE(BM_BackwardMaxima, XL_poisson,
+    {"XL", 2000, 500, 5000}, GeneratePoissonData)->UseRealTime()->Name(
+    "BackwardMaxima/XL/poisson/default");
 
 // ============================================================
 // Benchmark: Dropout (batch)
@@ -885,18 +1125,8 @@ static void BM_Dropout(benchmark::State& state, const ProblemSize& sz, DataGener
 #endif
 
 #ifndef USE_CPP_WRAPPER
-    // Setup C batch input
-    int* n_per_sample = (int*)malloc(batch_size * sizeof(int));
-    for (int b = 0; b < batch_size; b++) n_per_sample[b] = sz.n_spikes;
-
-    EventPropInput input = {
-        .w=NULL, .n_pre=sz.n_pre, .n_post=0,
-        .times=times.data(), .sources=sources.data(), .n_spikes=total_spikes,
-        .tau_mem=0.0, .tau_syn=0.0, .v_th=0.0
-    };
-    BatchEventPropInput batch = {
-        .input=&input, .n_spikes_per_sample=n_per_sample, .batch_size=batch_size
-    };
+    // Setup C flat-array input
+    std::vector<int> n_per_sample(batch_size, sz.n_spikes);
 #endif
 
     for (auto _ : state) {
@@ -904,17 +1134,14 @@ static void BM_Dropout(benchmark::State& state, const ProblemSize& sz, DataGener
         auto dropped = dropout_spikes(cpp_spikes, 0.3, 42);
         benchmark::DoNotOptimize(dropped);
 #else
-        DropoutOutput* dropped = eventprop_dropout_spikes_batch(&batch, 0.3, 42);
+        DropoutBatch dropped = eventprop_dropout_spikes_batch(
+            times.data(), sources.data(), n_per_sample.data(), batch_size, 0.3, 42);
         int total = 0;
-        for (int b = 0; b < batch_size; b++) total += dropped[b].n_spikes;
+        for (int b = 0; b < batch_size; b++) total += dropped.outputs[b].n_spikes;
         benchmark::DoNotOptimize(total);
-        eventprop_free_dropout_output(dropped, batch_size);
+        eventprop_free_dropout_batch(dropped);
 #endif
     }
-
-#ifndef USE_CPP_WRAPPER
-    free(n_per_sample);
-#endif
 
     state.SetItemsProcessed(state.iterations() * total_spikes);
 }
@@ -929,7 +1156,19 @@ static void BM_Dropout(benchmark::State& state, const ProblemSize& sz, DataGener
 
 DROPOUT_BENCH(Tiny,    10,   5,   20);
 DROPOUT_BENCH(Small,   50,   20,  100);
-DROPOUT_BENCH(Medium,  200,  80,  500);
-DROPOUT_BENCH(Large,   500,  200, 1000);
+// Medium — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_Dropout, Medium_uniform,
+    {"Medium", 200, 80, 500}, GenerateUniformData)->UseRealTime()->Name(
+    "Dropout/Medium/uniform");
+BENCHMARK_CAPTURE(BM_Dropout, Medium_poisson,
+    {"Medium", 200, 80, 500}, GeneratePoissonData)->UseRealTime()->Name(
+    "Dropout/Medium/poisson");
+// Large — burst excluded (Toms748 throws on MSVC)
+BENCHMARK_CAPTURE(BM_Dropout, Large_uniform,
+    {"Large", 500, 200, 1000}, GenerateUniformData)->UseRealTime()->Name(
+    "Dropout/Large/uniform");
+BENCHMARK_CAPTURE(BM_Dropout, Large_poisson,
+    {"Large", 500, 200, 1000}, GeneratePoissonData)->UseRealTime()->Name(
+    "Dropout/Large/poisson");
 
 BENCHMARK_MAIN();

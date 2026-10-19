@@ -9,11 +9,28 @@
     <AssemblyName>CW.EventProp.Native</AssemblyName>
   </PropertyGroup>
 
-  <!-- Copy native library to output directory -->
   <ItemGroup>
-    <NativeLibrary Include="..\EventProp.C\libeventprop_c_api.dylib" Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <ProjectReference Include="../EventProp.Abstractions/EventProp.Abstractions.csproj" />
+  </ItemGroup>
+
+  <!-- Copy native library to output directory -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <None Include="..\EventProp.C\build\libeventprop_c_api.dylib">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </NativeLibrary>
+      <TargetPath>libeventprop_c_api.dylib</TargetPath>
+    </None>
+  </ItemGroup>
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <None Include="..\EventProp.C\build\Release\eventprop_c_api.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>eventprop_c_api.dll</TargetPath>
+    </None>
+  </ItemGroup>
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+    <None Include="..\EventProp.C\build\libeventprop_c_api.so">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>libeventprop_c_api.so</TargetPath>
+    </None>
   </ItemGroup>
 
 </Project>

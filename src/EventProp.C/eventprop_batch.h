@@ -2,10 +2,9 @@
  * @file eventprop_batch.h
  * @brief Batch operations for EventProp — parallel processing of multiple samples.
  *
- * All batch functions accept a BatchEventPropInput struct containing shared layer
- * parameters (weights, time constants) and per-sample spike counts. Input spike
- * data (times, sources) must be provided as flat concatenated arrays; the batch
- * functions compute offsets internally.
+ * All batch functions accept an array of per-sample inputs and return a batch result
+ * struct. The caller is responsible for freeing returned structs via the corresponding
+ * _free_ function.
  */
 
 #ifndef EVENTPROP_BATCH_H
@@ -13,42 +12,81 @@
 
 #include "eventprop.h"
 
+/*
+ * <stdatomic.h> is a C header. MSVC ships a C++ <stdatomic.h> as well, but it is
+ * C++23-only (warning STL4038) and does not provide the C `atomic_int`, so every
+ * C++ consumer of this header — bench_main.cpp (bench_c) and the Google Test
+ * suite — fails to compile with "'has_errors': unknown override specifier".
+ *
+ * In C++ the field is therefore a plain int, which is what the C++ consumers
+ * actually use it as: the atomic store happens inside the C library's OpenMP
+ * loops, and C++ only reads the flag (`if (batch.has_errors)`,
+ * `EXPECT_EQ(batch.has_errors, 0)`) and copies the struct by value into the
+ * `eventprop_free_*_batch` functions. Same size and alignment as atomic_int, so
+ * the struct layout is identical on both sides of the boundary.
+ *
+ * std::atomic<int> is NOT a drop-in here: its copy constructor is deleted, which
+ * makes every batch struct containing it non-copyable and breaks the by-value
+ * free functions that are the whole point of the API.
+ */
+#ifdef __cplusplus
+#define EVENTPROP_ATOMIC_INT int
+#else
+#include <stdatomic.h>
+#define EVENTPROP_ATOMIC_INT atomic_int
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /**
- * Batch input — shared layer params + per-sample spike counts.
- *
- * times and sources in the referenced EventPropInput must be flat concatenated
- * arrays: sample 0's spikes first, then sample 1's, etc.
- * n_spikes_per_sample gives the spike count for each sample.
+ * Batch forward output — per-sample spike results.
  */
-typedef struct BatchEventPropInput {
-    const EventPropInput* input;          /* Shared layer params + concatenated spike data */
-    const int* n_spikes_per_sample;       /* Spike count per sample (length: batch_size) */
-    int batch_size;                       /* Number of samples in batch */
-} BatchEventPropInput;
+typedef struct SpikesBatch {
+    EventPropError error_no;           /* Batch Errors */
+    int batch_size;                    /* Number of samples in the batch */
+    EVENTPROP_ATOMIC_INT has_errors;   /* 1 if any sample returned an error — atomically settable from parallel loop */
+    SpikeOutput* spikes;               /* Per-sample outputs (malloc'd, length = batch_size) */
+} SpikesBatch;
+
+void eventprop_free_spikes_batch(SpikesBatch batch);
 
 /**
- * Pointer-based batch input — no flattening required.
- *
- * Each sample's spike data is passed as a separate pointer, mirroring how
- * pybind11 iterates std::vector<Spikes>. C processes each sample directly
- * without computing offsets into concatenated arrays.
+ * Batch backward output — per-sample results.
  */
-typedef struct BatchEventPropInputPtrs {
-    const double** times;       /* Array of pointers: one per sample's spike times */
-    const int** sources;        /* Array of pointers: one per sample's source neurons */
-    const int* n_spikes;        /* Spike count per sample (length: batch_size) */
-    const double* w;            /* Weight matrix (row-major, shared across samples) */
-    int n_pre;                  /* Pre-synaptic neurons */
-    int n_post;                 /* Post-synaptic neurons */
-    int batch_size;             /* Number of samples */
-    double tau_mem;             /* Membrane time constant */
-    double tau_syn;             /* Synaptic time constant */
-    double v_th;                /* Spike threshold voltage */
-} BatchEventPropInputPtrs;
+typedef struct BackwardsBatch {
+    EventPropError error_no;           /* Batch Errors */
+    int batch_size;                    /* Number of samples in the batch */
+    EVENTPROP_ATOMIC_INT has_errors;   /* 1 if any sample returned an error — atomically settable from parallel loop */
+    BackwardOutput* outputs;           /* Per-sample outputs (malloc'd, length = batch_size) */
+} BackwardsBatch;
+
+void eventprop_free_backwards_batch(BackwardsBatch batch);
+
+/**
+ * Batch maxima output — per-sample membrane potential maxima.
+ */
+typedef struct MaximaBatch {
+    EventPropError error_no;           /* Batch Errors */    
+    int batch_size;                    /* Number of samples in the batch */
+    EVENTPROP_ATOMIC_INT has_errors;   /* 1 if any sample returned an error — atomically settable from parallel loop */
+    MaximaOutput* outputs;             /* Per-sample outputs (malloc'd, length = batch_size) */
+} MaximaBatch;
+
+void eventprop_free_maxima_batch(MaximaBatch batch);
+
+/**
+ * Accumulated gradient output with dimensions.
+ */
+typedef struct GradientOutput {
+    EventPropError error_no;           /* Batch Errors */    
+    double* data;     /* malloc'd, size = rows * cols (row-major) */
+    int rows;         /* n_pre */
+    int cols;         /* n_post */
+} GradientOutput;
+
+void eventprop_free_gradient_output(GradientOutput output);
 
 /**
  * Dropout output — per-sample surviving spikes.
@@ -59,142 +97,116 @@ typedef struct DropoutOutput {
     int* sources;              /* Surviving source neurons (malloc'd) */
 } DropoutOutput;
 
-/* ── Free functions ─────────────────────────────────────────────── */
-
-void eventprop_free_batch_spike_output(SpikeOutput* output, int batch_size);
-void eventprop_free_backward_batch_output(BackwardOutput* output, int batch_size);
-void eventprop_free_batch_maxima_output(MaximaOutput* output, int batch_size);
-void eventprop_free_dropout_output(DropoutOutput* output, int batch_size);
-
-/* ── Batch forward pass (spikes) ─────────────────────────────────── */
+void eventprop_free_dropout_output(DropoutOutput output);
 
 /**
- * Batch forward pass.
- * Processes multiple samples in parallel using OpenMP (if available).
+ * Batch dropout result — per-sample outputs.
+ */
+typedef struct DropoutBatch {
+    EventPropError error_no;           /* Batch Errors */
+    int batch_size;
+    EVENTPROP_ATOMIC_INT has_errors;   /* 1 if any sample returned an error — atomically settable from parallel loop */
+    DropoutOutput* outputs;            /* Per-sample surviving spikes (malloc'd, length = batch_size) */
+} DropoutBatch;
+
+void eventprop_free_dropout_batch(DropoutBatch batch);
+
+/**
+ * Combined backward + accumulate result.
  *
- * @param input  BatchEventPropInput with per-sample spike counts
+ * Contains:
+ * - Summed gradient tensor (ready for weight update)
+ * - Per-sample BackwardOutput with spike_errors preserved but .grad freed after summation
  *
- * @return Array of SpikeOutput structs (one per sample), freed via eventprop_free_batch_spike_output()
+ * This is the primary FFI entry point — one call, zero intermediate allocations in Python.
  */
-SpikeOutput* eventprop_compute_spikes_batch(const BatchEventPropInput* input);
+typedef struct AccumulatedBackwardResult {
+    EventPropError error_no;           /* Batch Errors */   
+    GradientOutput* summed_grads;  /* malloc'd — freed by caller via eventprop_free_accumulated_backward_result */
+    EVENTPROP_ATOMIC_INT has_errors;   /* 1 if any sample returned an error — atomically settable from parallel loop */
+    BackwardOutput* outputs;       /* Per-sample outputs (.grad freed, .spike_errors kept) */
+    int batch_size;
+} AccumulatedBackwardResult;
+
+void eventprop_free_accumulated_backward_result(AccumulatedBackwardResult result);
 
 /**
- * Pointer-based batch forward pass (spikes).
- * No flattening required — each sample's data is a separate pointer.
- */
-SpikeOutput* eventprop_compute_spikes_batch_ptrs(const BatchEventPropInputPtrs* input);
-
-/* ── Batch backward pass (spikes) ────────────────────────────────── */
-
-/**
- * Batch backward pass (spikes).
- * Processes multiple samples in parallel using OpenMP.
- * Returns array of BackwardOutput structs (one per sample), freed via eventprop_free_backward_batch_output().
- */
-BackwardOutput* eventprop_backward_spikes_batch(
-    const BatchEventPropInput* input,
-    SpikeOutput* fwd_batch,        /* Forward spike outputs from compute_spikes_batch */
-    const double* post_errors
-    );
-
-/**
- * Batch backward pass (spikes) with gradient accumulation.
- * Processes multiple samples in parallel using OpenMP and accumulates gradients
- * into a single BackwardOutput. Equivalent to summing per-sample outputs.
+ * Flat-array dropout — randomly drop spikes from each sample.
  *
- * @return Single BackwardOutput, freed via eventprop_free_backward_output()
+ * Accepts flat concatenated spike arrays and per-sample offset counts.
+ * Designed for FFI callers (Cython, P/Invoke) that have flat numpy buffers.
  */
-BackwardOutput* eventprop_backward_spikes_batch_accumulate(
-    const BatchEventPropInput* input,
-    SpikeOutput* fwd_batch,
-    const double* post_errors
-    );
-
-/**
- * Pointer-based batch backward pass (spikes) with gradient accumulation.
- */
-BackwardOutput* eventprop_backward_spikes_batch_accumulate_ptrs(
-    const BatchEventPropInputPtrs* input,
-    SpikeOutput* fwd_batch,
-    const double** post_errors,     /* Array of pointers: one per sample's errors */
-    const int* n_post_errors        /* Error count per sample (length: batch_size) */
-    );
-
-/* ── Batch forward pass (maxima) ─────────────────────────────────── */
-
-/**
- * Batch forward pass — compute membrane potential maxima.
- * Processes multiple samples in parallel using OpenMP (if available).
- *
- * @param input  BatchEventPropInput with per-sample spike counts
- *
- * @return Array of MaximaOutput structs (one per sample), freed via eventprop_free_batch_maxima_output()
- */
-MaximaOutput* eventprop_compute_maxima_batch(const BatchEventPropInput* input);
-
-/**
- * Pointer-based batch forward pass (maxima).
- */
-MaximaOutput* eventprop_compute_maxima_batch_ptrs(const BatchEventPropInputPtrs* input);
-
-/* ── Batch backward pass (maxima) ────────────────────────────────── */
-
-/**
- * Batch backward pass (maxima).
- * Processes multiple samples in parallel using OpenMP.
- * Returns array of BackwardOutput structs (one per sample), freed via eventprop_free_backward_batch_output().
- */
-BackwardOutput* eventprop_backward_maxima_batch(
-    const BatchEventPropInput* input,
-    MaximaOutput* fwd_batch,       /* Forward maxima outputs from compute_maxima_batch */
-    const double* maxima_errors
-    );
-
-/**
- * Batch backward pass (maxima) with gradient accumulation.
- * Processes multiple samples in parallel using OpenMP and accumulates gradients
- * into a single BackwardOutput. Equivalent to summing per-sample outputs.
- *
- * @return Single BackwardOutput, freed via eventprop_free_backward_output()
- */
-BackwardOutput* eventprop_backward_maxima_batch_accumulate(
-    const BatchEventPropInput* input,
-    MaximaOutput* fwd_batch,
-    const double* maxima_errors
-    );
-
-/**
- * Pointer-based batch backward pass (maxima) with gradient accumulation.
- */
-BackwardOutput* eventprop_backward_maxima_batch_accumulate_ptrs(
-    const BatchEventPropInputPtrs* input,
-    MaximaOutput* fwd_batch,
-    const double** maxima_errors,   /* Array of pointers: one per sample's errors (length n_post each) */
-    int n_post                      /* Number of post-synaptic neurons (= error count per sample) */
-    );
-
-/* ── Batch dropout ─────────────────────────────────────────────── */
-
-/**
- * Randomly drop spikes from each sample in a batch.
- *
- * For each spike, a Bernoulli trial with probability (1 - p_drop) decides
- * whether to keep it. Uses a simple LCG PRNG seeded per-sample for reproducibility.
- *
- * @param input  BatchEventPropInput with per-sample spike counts
- * @param p_drop Dropout probability (0 = no dropout, 1.0 = drop all)
- * @param seed   Random seed (applied per-sample: sample i uses seed + i)
- *
- * @return Array of DropoutOutput structs (one per sample), freed via eventprop_free_dropout_output()
- */
-DropoutOutput* eventprop_dropout_spikes_batch(
-    const BatchEventPropInput* input,
+DropoutBatch eventprop_dropout_spikes_batch(
+    const double* times,
+    const int* sources,
+    const int* n_per_sample,
+    int batch_size,
     double p_drop,
-    int seed
-    );
+    int seed);
+
+/**
+ * Batch forward pass — compute post-synaptic spikes for each sample.
+ */
+SpikesBatch eventprop_compute_spikes_batch(const EventPropInput* inputs, int batch_size);
+
+/**
+ * Batch backward pass (spike loss) — returns per-sample gradients.
+ * `post_spike_errors` is a borrowed array of length batch_size; entry b holds
+ *  the caller-owned loss derivatives for sample b, of length
+ *  spikes_batch.spikes[b].n_spikes.
+ */
+BackwardsBatch eventprop_backward_spikes_batch(const EventPropInput* inputs,
+                                               SpikesBatch spikes_batch,
+                                               const double* const* post_spike_errors);
+
+/**
+ * Batch forward pass — compute membrane potential maxima for each sample.
+ *
+ * Only the sample count is needed here (maxima depend on the input, not on
+ * forward spikes); pass the same batch_size used for compute_spikes_batch.
+ */
+MaximaBatch eventprop_compute_maxima_batch(const EventPropInput* inputs, int batch_size);
+
+/**
+ * Batch backward pass (maxima loss) — returns per-sample gradients.
+ *
+ * Uses `MaximaOutput.errors` written by caller before this call.
+ */
+BackwardsBatch eventprop_backward_maxima_batch(const EventPropInput* inputs, MaximaBatch maxima_batch);
+
+/**
+ * Sum per-sample gradients into a single tensor.
+ * Caller must free via eventprop_free_gradient_output().
+ *
+ * NOTE: This does NOT free the BackwardsBatch. Call eventprop_free_backwards_batch() separately.
+ */
+GradientOutput eventprop_accumulate_gradients(BackwardsBatch batch, int n_pre, int n_post);
+
+/**
+ * Batch backward (spike loss) + accumulate gradients in one call.
+ *
+ * Parallel backward pass → sequential gradient sum → free per-sample .grad buffers.
+ * Returns combined result with summed gradient and preserved spike errors.
+ * `post_spike_errors` is a borrowed array of per-sample derivative arrays (see
+ *  eventprop_backward_spikes_batch).
+ */
+AccumulatedBackwardResult eventprop_backward_spikes_batch_accumulate(const EventPropInput* inputs,
+                                                                     SpikesBatch spikes_batch,
+                                                                     const double* const* post_spike_errors);
+
+/**
+ * Batch backward (maxima loss) + accumulate gradients in one call.
+ *
+ * Parallel backward pass → sequential gradient sum → free per-sample .grad buffers.
+ * Returns combined result with summed gradient and preserved spike errors.
+ *
+ * Uses `MaximaOutput.errors` written by caller before this call.
+ */
+AccumulatedBackwardResult eventprop_backward_maxima_batch_accumulate(const EventPropInput* inputs, MaximaBatch maxima_batch);
+
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* EVENTPROP_BATCH_H */
+#endif

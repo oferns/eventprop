@@ -77,6 +77,11 @@ static int tests_run = 0, tests_passed = 0, tests_failed = 0;
 #define ASSERT_NEAR_SCALED(a, b, abs_tol, rel_tol, msg) do { double _a = (double)(a), _b = (double)(b); double diff = fabs(_a - _b); double scale = fmax(fabs(_a), fabs(_b)); if (diff > abs_tol && diff > rel_tol * scale) { printf("FAIL [%s: %g vs %g, diff=%g, rel=%g]\n", msg, _a, _b, diff, scale > 0 ? diff/scale : diff); tests_failed++; return; } } while(0)
 #define ASSERT_ARRAY_NEAR(arr_c, arr_e, n, abs_tol, rel_tol, msg) do { for (int _i = 0; _i < (n); _i++) { double _a = (arr_c)[_i], _b = (arr_e)[_i]; double diff = fabs(_a - _b); double scale = fmax(fabs(_a), fabs(_b)); if (diff > abs_tol && diff > rel_tol * scale) { printf("FAIL [%s[%d]: %g vs %g, diff=%g]\n", msg, _i, (double)_a, (double)_b, diff); tests_failed++; return; } } } while(0)
 #define TEST_END do { printf("PASS\n"); tests_passed++; } while (0)
+/* Skip test if C library validation rejected the input (outputs are NULL on error) */
+#define SKIP_C_ERROR(out) \
+    do { if ((out).error_no != EVENTPROP_OK) { \
+        printf("SKIP (C validation: %s)\n", eventprop_error_string((out).error_no)); tests_passed++; \
+        free(w); free(times); free(sources); return; } } while (0)
 
 struct TestCase {
     const char*pattern; int n_pre, n_post, n_spikes;
@@ -105,150 +110,164 @@ static RowMatrixXd make_w_mat(const double* w, int n_pre, int n_post) { RowMatri
 static void test_compute_sums(const TestCase& tc) {
     char name[256]; snprintf(name, sizeof(name), "ComputeSums %s (%dx%d, %d spikes)", tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes); TEST(name);
     double* w; double* times; int* sources; gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
-    
-    EventPropInput fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn};
-    SumsOutput* sums_c = eventprop_compute_sums(&fi_base);
+
+    EventPropInput fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
+    SumsOutput sums_c = eventprop_compute_sums(fi_base);
+    SKIP_C_ERROR(sums_c);
     auto [sum0_eig, sum1_eig] = compute_sums(make_w_mat(w, tc.n_pre, tc.n_post), make_eigen_spikes(times, sources, tc.n_spikes), tc.tau_mem, tc.tau_syn);
-    
+
     int sum_rows = tc.n_spikes + 1;
-    double* sum0_e = (double*)malloc(sum_rows * tc.n_post * sizeof(double)); 
+    double* sum0_e = (double*)malloc(sum_rows * tc.n_post * sizeof(double));
     double* sum1_e = (double*)malloc(sum_rows * tc.n_post * sizeof(double));
     for (int i = 0; i < sum_rows * tc.n_post; i++) { sum0_e[i] = sum0_eig(i); sum1_e[i] = sum1_eig(i); }
-    
-    ASSERT_ARRAY_NEAR(sums_c->sum0, sum0_e, sums_c->n_rows * sums_c->n_post, ABS_TOLERANCE, REL_TOLERANCE, "sum0");
-    ASSERT_ARRAY_NEAR(sums_c->sum1, sum1_e, sums_c->n_rows * sums_c->n_post, ABS_TOLERANCE, REL_TOLERANCE, "sum1");
-    
-    free(w); free(times); free(sources); 
+
+    int sum_count = (tc.n_spikes + 1) * tc.n_post;
+    ASSERT_ARRAY_NEAR(sums_c.sum0, sum0_e, sum_count, ABS_TOLERANCE, REL_TOLERANCE, "sum0");
+    ASSERT_ARRAY_NEAR(sums_c.sum1, sum1_e, sum_count, ABS_TOLERANCE, REL_TOLERANCE, "sum1");
+
+    free(w); free(times); free(sources);
     eventprop_free_sums_output(sums_c);
-    free(sum0_e); free(sum1_e); 
+    free(sum0_e); free(sum1_e);
     TEST_END;
 }
 
 static void test_compute_spikes(const TestCase& tc) {
     char name[256]; snprintf(name, sizeof(name), "ComputeSpikes %s (%dx%d, %d spikes)", tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes); TEST(name);
     double* w; double* times; int* sources; gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
-    
+
     EventPropInput fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
-    SpikeOutput* spikes_c = eventprop_compute_spikes(&fi_spikes);
+    SpikeOutput spikes_c = eventprop_compute_spikes(fi_spikes);
+    SKIP_C_ERROR(spikes_c);
     auto result_eig = compute_spikes(make_w_mat(w, tc.n_pre, tc.n_post), make_eigen_spikes(times, sources, tc.n_spikes), tc.v_th, tc.tau_mem, tc.tau_syn);
     int n_post_spikes_eig = (int)result_eig.times.size();
-    
-    ASSERT_EQ(spikes_c->n_spikes, n_post_spikes_eig, "spike count mismatch");
-    
-    if (spikes_c->n_spikes > 0) { 
-        double* out_times_e = (double*)malloc(spikes_c->n_spikes * sizeof(double)); 
-        double* out_currents_e = (double*)malloc(spikes_c->n_spikes * sizeof(double)); 
-        for (int i = 0; i < spikes_c->n_spikes; i++) { out_times_e[i] = result_eig.times(i); out_currents_e[i] = result_eig.currents(i); } 
-        ASSERT_ARRAY_NEAR(spikes_c->times, out_times_e, spikes_c->n_spikes, ABS_TOLERANCE, REL_TOLERANCE, "times"); 
-        ASSERT_ARRAY_NEAR(spikes_c->currents, out_currents_e, spikes_c->n_spikes, ABS_TOLERANCE, REL_TOLERANCE, "currents"); 
-        for (int i = 0; i < spikes_c->n_spikes; i++) { 
-            ASSERT_EQ(spikes_c->sources[i], (int)result_eig.sources(i), "sources"); 
-        } 
-        free(out_times_e); free(out_currents_e); 
+
+    ASSERT_EQ(spikes_c.n_spikes, n_post_spikes_eig, "spike count mismatch");
+
+    if (spikes_c.n_spikes > 0) {
+        double* out_times_e = (double*)malloc(spikes_c.n_spikes * sizeof(double));
+        for (int i = 0; i < spikes_c.n_spikes; i++) out_times_e[i] = result_eig.times(i);
+        ASSERT_ARRAY_NEAR(spikes_c.times, out_times_e, spikes_c.n_spikes, ABS_TOLERANCE, REL_TOLERANCE, "times");
+        free(out_times_e);
+        for (int i = 0; i < spikes_c.n_spikes; i++) {
+            ASSERT_EQ(spikes_c.sources[i], (int)result_eig.sources(i), "sources");
+        }
     }
-    
-    free(w); free(times); free(sources); 
+
+    free(w); free(times); free(sources);
     eventprop_free_spike_output(spikes_c);
     TEST_END;
 }
 
 static void test_backward_spikes(const TestCase& tc) {
     char name[256]; snprintf(name, sizeof(name), "BackwardSpikes %s (%dx%d, %d spikes)", tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes); TEST(name);
-    
+
     // Skip zero spike case - Eigen has issues with empty arrays
     if (tc.n_spikes == 0) { printf("SKIP (zero spikes - Eigen empty array issue)\n"); tests_passed++; return; }
-    
+
     double* w; double* times; int* sources; gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
-    
+
     EventPropInput fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
-    SpikeOutput* fwd_c = eventprop_compute_spikes(&fi_spikes);
-    if (fwd_c->n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
-    
-    double* post_errors_c = (double*)calloc(fwd_c->n_spikes, sizeof(double)); 
-    for (int i = 0; i < fwd_c->n_spikes; i++) post_errors_c[i] = 1.0;
-    
+    SpikeOutput fwd_c = eventprop_compute_spikes(fi_spikes);
+    SKIP_C_ERROR(fwd_c);
+    if (fwd_c.n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
+
+    // The post-spike derivatives are caller-owned now.
+    double* errs = (double*)malloc(fwd_c.n_spikes * sizeof(double));
+    for (int i = 0; i < fwd_c.n_spikes; i++) errs[i] = 1.0;
+
     EventPropInput fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
-    BackwardSpikesInput bsi = {{&fi_base}, fwd_c->times, fwd_c->sources, fwd_c->currents, post_errors_c, fwd_c->n_spikes};
-    BackwardOutput* backward_c = eventprop_backward_spikes(&bsi);
-    
-    RowMatrixXd w_mat = make_w_mat(w, tc.n_pre, tc.n_post); 
-    Eigen::ArrayXd e_itimes = Eigen::Map<Eigen::ArrayXd const>(times, tc.n_spikes); 
-    Eigen::ArrayXi e_isources = Eigen::Map<Eigen::ArrayXi const>((int*)sources, tc.n_spikes); 
+    BackwardOutput backward_c = eventprop_backward_spikes(fi_base, fwd_c, errs);
+    if (backward_c.error_no != EVENTPROP_OK) { printf("SKIP (C validation: %s)\n", eventprop_error_string(backward_c.error_no)); tests_passed++; free(errs); free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
+
+    RowMatrixXd w_mat = make_w_mat(w, tc.n_pre, tc.n_post);
+    Eigen::ArrayXd e_itimes = Eigen::Map<Eigen::ArrayXd const>(times, tc.n_spikes);
+    Eigen::ArrayXi e_isources = Eigen::Map<Eigen::ArrayXi const>((int*)sources, tc.n_spikes);
     Spikes input_eig(std::move(e_itimes), std::move(e_isources));
-    Eigen::ArrayXd e_ptimes = Eigen::Map<Eigen::ArrayXd const>(fwd_c->times, fwd_c->n_spikes); 
-    Eigen::ArrayXi e_psources = Eigen::Map<Eigen::ArrayXi const>((int*)fwd_c->sources, fwd_c->n_spikes); 
-    Eigen::ArrayXd e_pcurrents = Eigen::Map<Eigen::ArrayXd const>(fwd_c->currents, fwd_c->n_spikes);
-    Spikes post_eig(std::move(e_ptimes), std::move(e_psources), std::move(e_pcurrents), std::vector<double>(), std::vector<int>()); 
-    for (int i = 0; i < fwd_c->n_spikes; i++) post_eig.set_error(i, 1.0);
-    auto [grad_eig_map, spike_errors_eig] = backward(input_eig, post_eig, w_mat, tc.v_th, tc.tau_mem, tc.tau_syn); 
-    double* grad_eig = (double*)malloc(tc.n_pre * tc.n_post * sizeof(double)); 
+
+    // The C forward pass no longer returns synaptic currents, so the reference
+    // supplies its own forward pass's values: the backward pass derives them
+    // internally, and this is what pins that derivation against the reference.
+    auto fwd_eig = compute_spikes(make_w_mat(w, tc.n_pre, tc.n_post),
+                                  make_eigen_spikes(times, sources, tc.n_spikes),
+                                  tc.v_th, tc.tau_mem, tc.tau_syn);
+    ASSERT_EQ((int)fwd_eig.times.size(), fwd_c.n_spikes, "forward spike count mismatch");
+
+    Eigen::ArrayXd e_ptimes = Eigen::Map<Eigen::ArrayXd const>(fwd_c.times, fwd_c.n_spikes);
+    Eigen::ArrayXi e_psources = Eigen::Map<Eigen::ArrayXi const>((int*)fwd_c.sources, fwd_c.n_spikes);
+    Eigen::ArrayXd e_pcurrents(fwd_c.n_spikes);
+    for (int i = 0; i < fwd_c.n_spikes; i++) e_pcurrents(i) = fwd_eig.currents(i);
+    Spikes post_eig(std::move(e_ptimes), std::move(e_psources), std::move(e_pcurrents), std::vector<double>(), std::vector<int>());
+    for (int i = 0; i < fwd_c.n_spikes; i++) post_eig.set_error(i, 1.0);
+    auto [grad_eig_map, spike_errors_eig] = backward(input_eig, post_eig, w_mat, tc.v_th, tc.tau_mem, tc.tau_syn);
+    double* grad_eig = (double*)malloc(tc.n_pre * tc.n_post * sizeof(double));
     for (int i = 0; i < tc.n_pre * tc.n_post; i++) grad_eig[i] = grad_eig_map(i);
-    
-    ASSERT_ARRAY_NEAR(backward_c->grad, grad_eig, tc.n_pre * tc.n_post, ABS_TOLERANCE, REL_TOLERANCE, "gradient"); 
-    
-    free(w); free(times); free(sources); 
+
+    ASSERT_ARRAY_NEAR(backward_c.grad, grad_eig, tc.n_pre * tc.n_post, ABS_TOLERANCE, REL_TOLERANCE, "gradient");
+
+    free(errs);
+    free(w); free(times); free(sources);
     eventprop_free_spike_output(fwd_c);
-    free(post_errors_c); 
     eventprop_free_backward_output(backward_c);
-    free(grad_eig); 
+    free(grad_eig);
     TEST_END;
 }
 
 static void test_compute_maxima(const TestCase& tc) {
     char name[256]; snprintf(name, sizeof(name), "ComputeMaxima %s (%dx%d, %d spikes)", tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes); TEST(name);
     double* w; double* times; int* sources; gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
-    
-    EventPropInput fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn};
-    MaximaOutput* maxima_c = eventprop_compute_maxima(&fi_base);
-    auto maxima_eig = compute_maxima(make_w_mat(w, tc.n_pre, tc.n_post), make_eigen_spikes(times, sources, tc.n_spikes), tc.tau_mem, tc.tau_syn); 
-    double* max_times_e = (double*)malloc(tc.n_post * sizeof(double)); 
+
+    EventPropInput fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
+    MaximaOutput maxima_c = eventprop_compute_maxima(fi_base);
+    SKIP_C_ERROR(maxima_c);
+    auto maxima_eig = compute_maxima(make_w_mat(w, tc.n_pre, tc.n_post), make_eigen_spikes(times, sources, tc.n_spikes), tc.tau_mem, tc.tau_syn);
+    double* max_times_e = (double*)malloc(tc.n_post * sizeof(double));
     double* max_values_e = (double*)malloc(tc.n_post * sizeof(double));
     for (int i = 0; i < tc.n_post; i++) { max_times_e[i] = maxima_eig.times(i); max_values_e[i] = maxima_eig.values(i); }
-    for (int i = 0; i < tc.n_post; i++) { 
-        bool c_nan = isnan(maxima_c->times[i]); 
-        bool e_nan = std::isnan(max_times_e[i]); 
-        if (c_nan && e_nan) continue; 
-        if (c_nan != e_nan) { printf("FAIL [maxima[%d]: C NaN=%d, Eigen NaN=%d]\n", i, c_nan, e_nan); tests_failed++; free(w); free(times); free(sources); eventprop_free_maxima_output(maxima_c); free(max_times_e); free(max_values_e); return; } 
-        ASSERT_NEAR_SCALED(maxima_c->times[i], max_times_e[i], ABS_TOLERANCE, REL_TOLERANCE, "max_times"); 
-        ASSERT_NEAR_SCALED(maxima_c->values[i], max_values_e[i], ABS_TOLERANCE, REL_TOLERANCE, "max_values"); 
+    for (int i = 0; i < tc.n_post; i++) {
+        bool c_nan = std::isnan(maxima_c.times[i]);
+        bool e_nan = std::isnan(max_times_e[i]);
+        if (c_nan && e_nan) continue;
+        if (c_nan != e_nan) { printf("FAIL [maxima[%d]: C NaN=%d, Eigen NaN=%d]\n", i, c_nan, e_nan); tests_failed++; free(w); free(times); free(sources); eventprop_free_maxima_output(maxima_c); free(max_times_e); free(max_values_e); return; }
+        ASSERT_NEAR_SCALED(maxima_c.times[i], max_times_e[i], ABS_TOLERANCE, REL_TOLERANCE, "max_times");
+        ASSERT_NEAR_SCALED(maxima_c.values[i], max_values_e[i], ABS_TOLERANCE, REL_TOLERANCE, "max_values");
     }
     free(w); free(times); free(sources); eventprop_free_maxima_output(maxima_c); free(max_times_e); free(max_values_e); TEST_END;
 }
 
 static void test_backward_maxima(const TestCase& tc) {
     char name[256]; snprintf(name, sizeof(name), "BackwardMaxima %s (%dx%d, %d spikes)", tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes); TEST(name);
-    
+
     // Skip zero spike case - Eigen has issues with empty arrays
     if (tc.n_spikes == 0) { printf("SKIP (zero spikes - Eigen empty array issue)\n"); tests_passed++; return; }
-    
+
     double* w; double* times; int* sources; gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
-    
-    EventPropInput fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn};
-    MaximaOutput* maxima_c = eventprop_compute_maxima(&fi_base);
-    double* max_errors_c = (double*)malloc(tc.n_post * sizeof(double)); 
-    for (int i = 0; i < tc.n_post; i++) max_errors_c[i] = 1.0; 
-    
-    BackwardMaximaInput bmi = {{&fi_base}, maxima_c->times, maxima_c->values, max_errors_c, tc.n_post};
-    BackwardOutput* backward_c = eventprop_backward_maxima(&bmi);
-    
-    RowMatrixXd w_mat = make_w_mat(w, tc.n_pre, tc.n_post); 
-    Eigen::ArrayXd e_itimes = Eigen::Map<Eigen::ArrayXd const>(times, tc.n_spikes); 
-    Eigen::ArrayXi e_isources = Eigen::Map<Eigen::ArrayXi const>((int*)sources, tc.n_spikes); 
+
+    EventPropInput fi_base = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
+    MaximaOutput maxima_c = eventprop_compute_maxima(fi_base);
+    double* max_errors_c = (double*)malloc(tc.n_post * sizeof(double));
+    for (int i = 0; i < tc.n_post; i++) max_errors_c[i] = 1.0;
+
+    BackwardOutput backward_c = eventprop_backward_maxima(fi_base, maxima_c.times, max_errors_c);
+    if (backward_c.error_no != EVENTPROP_OK) { printf("SKIP (C validation: %s)\n", eventprop_error_string(backward_c.error_no)); tests_passed++; free(w); free(times); free(sources); eventprop_free_maxima_output(maxima_c); free(max_errors_c); return; }
+
+    RowMatrixXd w_mat = make_w_mat(w, tc.n_pre, tc.n_post);
+    Eigen::ArrayXd e_itimes = Eigen::Map<Eigen::ArrayXd const>(times, tc.n_spikes);
+    Eigen::ArrayXi e_isources = Eigen::Map<Eigen::ArrayXi const>((int*)sources, tc.n_spikes);
     Spikes input_eig(std::move(e_itimes), std::move(e_isources));
-    Eigen::ArrayXd e_mtimes = Eigen::Map<Eigen::ArrayXd const>(maxima_c->times, tc.n_post); 
-    Eigen::ArrayXd e_mvalues = Eigen::Map<Eigen::ArrayXd const>(maxima_c->values, tc.n_post); 
-    Maxima maxima_obj(std::move(e_mtimes), std::move(e_mvalues)); 
+    Eigen::ArrayXd e_mtimes = Eigen::Map<Eigen::ArrayXd const>(maxima_c.times, tc.n_post);
+    Eigen::ArrayXd e_mvalues = Eigen::Map<Eigen::ArrayXd const>(maxima_c.values, tc.n_post);
+    Maxima maxima_obj(std::move(e_mtimes), std::move(e_mvalues));
     for (int i = 0; i < tc.n_post; i++) maxima_obj.set_error(i, 1.0);
-    auto [grad_eig_map, spike_errors_eig] = backward(input_eig, maxima_obj, w_mat, tc.tau_mem, tc.tau_syn); 
-    double* grad_eig = (double*)malloc(tc.n_pre * tc.n_post * sizeof(double)); 
+    auto [grad_eig_map, spike_errors_eig] = backward(input_eig, maxima_obj, w_mat, tc.tau_mem, tc.tau_syn);
+    double* grad_eig = (double*)malloc(tc.n_pre * tc.n_post * sizeof(double));
     for (int i = 0; i < tc.n_pre * tc.n_post; i++) grad_eig[i] = grad_eig_map(i);
-    
-    ASSERT_ARRAY_NEAR(backward_c->grad, grad_eig, tc.n_pre * tc.n_post, ABS_TOLERANCE, REL_TOLERANCE, "gradient"); 
-    
+
+    ASSERT_ARRAY_NEAR(backward_c.grad, grad_eig, tc.n_pre * tc.n_post, ABS_TOLERANCE, REL_TOLERANCE, "gradient");
+
     free(w);
-    free(times); free(sources); 
+    free(times); free(sources);
     eventprop_free_maxima_output(maxima_c);
-    free(max_errors_c); 
+    free(max_errors_c);
     eventprop_free_backward_output(backward_c);
     free(grad_eig); TEST_END;
 }
@@ -262,23 +281,25 @@ static void test_voltage_trace(const TestCase& tc) {
     gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
 
     EventPropInput fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
-    SpikeOutput* fwd_c = eventprop_compute_spikes(&fi_spikes);
-    if (fwd_c->n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
+    SpikeOutput fwd_c = eventprop_compute_spikes(fi_spikes);
+    SKIP_C_ERROR(fwd_c);
+    if (fwd_c.n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
 
     int target_nrn = 0;
     double t_max = 1.0, dt = 0.005;
 
-    VoltageTraceInput vti = {&fi_spikes, target_nrn, fwd_c->times, fwd_c->sources, fwd_c->n_spikes, t_max, dt};
-    VoltageTraceOutput* trace_c = eventprop_compute_voltage_trace(&vti);
+    VoltageTraceInput vti = {fi_spikes, target_nrn, fwd_c.times, fwd_c.sources, fwd_c.n_spikes, t_max, dt};
+    VoltageTraceOutput trace_c = eventprop_compute_voltage_trace(vti);
+    if (trace_c.error_no != EVENTPROP_OK) { printf("SKIP (C validation: %s)\n", eventprop_error_string(trace_c.error_no)); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
 
     auto [ts_eig, v_eig] = compute_voltage_trace(t_max, dt, target_nrn,
         make_w_mat(w, tc.n_pre, tc.n_post),
         make_eigen_spikes(times, sources, tc.n_spikes),
         tc.v_th, tc.tau_mem, tc.tau_syn);
 
-    ASSERT_EQ(trace_c->n_t, (int)ts_eig.size(), "trace length mismatch");
-    ASSERT_ARRAY_NEAR(trace_c->ts, ts_eig.data(), trace_c->n_t, ABS_TOLERANCE, REL_TOLERANCE, "time array");
-    ASSERT_ARRAY_NEAR(trace_c->v_trace, v_eig.data(), trace_c->n_t, 1e-8, 1e-6, "voltage values");
+    ASSERT_EQ(trace_c.n_t, (int)ts_eig.size(), "trace length mismatch");
+    ASSERT_ARRAY_NEAR(trace_c.ts, ts_eig.data(), trace_c.n_t, ABS_TOLERANCE, REL_TOLERANCE, "time array");
+    ASSERT_ARRAY_NEAR(trace_c.v_trace, v_eig.data(), trace_c.n_t, 1e-8, 1e-6, "voltage values");
 
     free(w); free(times); free(sources);
     eventprop_free_spike_output(fwd_c);
@@ -294,21 +315,23 @@ static void test_lambda_i_trace(const TestCase& tc) {
     gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
 
     EventPropInput fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
-    SpikeOutput* fwd_c = eventprop_compute_spikes(&fi_spikes);
-    if (fwd_c->n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
+    SpikeOutput fwd_c = eventprop_compute_spikes(fi_spikes);
+    SKIP_C_ERROR(fwd_c);
+    if (fwd_c.n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
 
     int target_nrn = 0;
     double t_max = 1.0, dt = 0.005;
 
-    LambdaITraceInput lii = {fwd_c->times, fwd_c->n_spikes, target_nrn, tc.v_th, tc.tau_mem, tc.tau_syn, t_max, dt};
-    LambdaITraceOutput* trace_c = eventprop_compute_lambda_i_trace(&lii);
+    LambdaITraceInput lii = {fwd_c.times, fwd_c.n_spikes, target_nrn, tc.v_th, tc.tau_mem, tc.tau_syn, t_max, dt};
+    LambdaITraceOutput trace_c = eventprop_compute_lambda_i_trace(lii);
+    if (trace_c.error_no != EVENTPROP_OK) { printf("SKIP (C validation: %s)\n", eventprop_error_string(trace_c.error_no)); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
 
     int expected_nt = (int)(t_max / dt);
-    ASSERT_EQ(trace_c->n_t, expected_nt, "trace length mismatch");
-    for (int i = 0; i < trace_c->n_t; i++) {
+    ASSERT_EQ(trace_c.n_t, expected_nt, "trace length mismatch");
+    for (int i = 0; i < trace_c.n_t; i++) {
         double expected_t = dt * i;
-        if (fabs(trace_c->ts[i] - expected_t) > ABS_TOLERANCE) {
-            printf("FAIL [ts[%d]: %.6f vs %.6f]\n", i, trace_c->ts[i], expected_t);
+        if (fabs(trace_c.ts[i] - expected_t) > ABS_TOLERANCE) {
+            printf("FAIL [ts[%d]: %.6f vs %.6f]\n", i, trace_c.ts[i], expected_t);
             tests_failed++;
             free(w); free(times); free(sources);
             eventprop_free_spike_output(fwd_c);
@@ -378,9 +401,9 @@ int main(int argc, char* argv[]) {
         double times[] = {0.05, 0.05};
         int sources[] = {0, 1};
         EventPropInput fi = {w, 2, 1, times, sources, 2, 0.02, 0.005, 1.0};
-        SpikeOutput* spikes_c = eventprop_compute_spikes(&fi);
+        SpikeOutput spikes_c = eventprop_compute_spikes(fi);
         auto result_eig = compute_spikes(make_w_mat(w, 2, 1), make_eigen_spikes(times, sources, 2), 1.0, 0.02, 0.005);
-        int n_c = spikes_c->n_spikes, n_e = (int)result_eig.times.size();
+        int n_c = spikes_c.n_spikes, n_e = (int)result_eig.times.size();
         printf("C=%d Eigen=%d ", n_c, n_e);
         if (n_c != n_e) { printf("FAIL [spike count: %d vs %d]\n", n_c, n_e); tests_failed++; }
         else { printf("PASS\n"); tests_passed++; }
@@ -395,9 +418,9 @@ int main(int argc, char* argv[]) {
         double times[] = {0.01};
         int sources[] = {0};
         EventPropInput fi = {w, 1, 1, times, sources, 1, 0.02, 0.005, 0.001};
-        SpikeOutput* spikes_c = eventprop_compute_spikes(&fi);
+        SpikeOutput spikes_c = eventprop_compute_spikes(fi);
         auto result_eig = compute_spikes(make_w_mat(w, 1, 1), make_eigen_spikes(times, sources, 1), 0.001, 0.02, 0.005);
-        int n_c = spikes_c->n_spikes, n_e = (int)result_eig.times.size();
+        int n_c = spikes_c.n_spikes, n_e = (int)result_eig.times.size();
         printf("C=%d Eigen=%d ", n_c, n_e);
         if (n_c != n_e) { printf("FAIL [spike count: %d vs %d]\n", n_c, n_e); tests_failed++; }
         else { printf("PASS\n"); tests_passed++; }

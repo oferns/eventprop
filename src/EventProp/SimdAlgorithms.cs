@@ -7,13 +7,29 @@ namespace CW.EventProp;
 /// <summary>
 /// SIMD-accelerated span operations using Vector256<double>.
 /// Falls back to scalar when hardware acceleration is unavailable or spans are too small.
-/// Zero-allocation — all methods operate on spans. Uses unsafe pointers for Load/Store only.
+/// Zero-allocation — all methods operate on spans.
+///
+/// Pointer acquisition MUST use `fixed`, never `Unsafe.AsPointer(ref GetReference(span))`.
+/// The latter takes a raw address from unpinned managed memory: if a concurrent GC
+/// relocates the array while the loop runs, the loads read a dead copy and the stores
+/// land at the stale address. The live array then keeps its zero initialisation (the
+/// symptom is an output buffer of all zeros), and the stale region — already recycled
+/// to another live object — is silently overwritten. `fixed` pins for the lifetime of
+/// the pointer, which is the only correct form here.
 /// </summary>
 public static class SimdAlgorithms
 {
-    private static readonly int VEC = Vector256<double>.Count; // Runtime: 4 on AVX-512, 3 on SVE
+    // Vector256<double>.Count is a compile-time constant: 256 / 64 = 4. It is NOT
+    // runtime-variable — hardware support affects Vector256.IsHardwareAccelerated,
+    // not Count. On a CPU without 256-bit vectors the JIT emits a software fallback.
+    private static readonly int VEC = Vector256<double>.Count; // always 4
 
-    /// <summary>Whether SIMD double operations are hardware-accelerated.</summary>
+    /// <summary>
+    /// True when the Vector256 path is usable. Count is the constant 4, so this is
+    /// always true — it is NOT a hardware-acceleration probe. On CPUs without 256-bit
+    /// vectors the JIT substitutes a software fallback, which is why the SIMD path is
+    /// still taken. A real probe would be Vector256.IsHardwareAccelerated.
+    /// </summary>
     public static bool IsAvailable => Vector256<double>.Count > 1;
 
     // ========================================================================
@@ -32,10 +48,10 @@ public static class SimdAlgorithms
         int vecCount = dest.Length / VEC;
         unsafe
         {
-            void* pDestBase = Unsafe.AsPointer(ref MemoryMarshal.GetReference(dest));
-            void* pSrcBase = Unsafe.AsPointer(ref MemoryMarshal.GetReference(src));
-            void* pWBase = Unsafe.AsPointer(ref MemoryMarshal.GetReference(weights));
-
+            fixed (double* pDestBase = dest)
+            fixed (double* pSrcBase = src)
+            fixed (double* pWBase = weights)
+            {
             for (int i = 0; i < vecCount; i++)
             {
                 int offset = i * VEC;
@@ -46,6 +62,7 @@ public static class SimdAlgorithms
                 var s = Vector256.Load<double>(pSrc);
                 var w = Vector256.Load<double>(pW);
                 (s + w * scalar).Store(pDest);
+            }
             }
         }
 
@@ -82,12 +99,14 @@ public static class SimdAlgorithms
         int vecCount = span.Length / VEC;
         unsafe
         {
-            void* pBase = Unsafe.AsPointer(ref MemoryMarshal.GetReference(span));
-            for (int i = 0; i < vecCount; i++)
+            fixed (double* pBase = span)
             {
-                double* p = (double*)pBase + i * VEC;
-                var s = Vector256.Load<double>(p);
-                (s * vScalar).Store(p);
+                for (int i = 0; i < vecCount; i++)
+                {
+                    double* p = pBase + i * VEC;
+                    var s = Vector256.Load<double>(p);
+                    (s * vScalar).Store(p);
+                }
             }
         }
 
@@ -115,16 +134,17 @@ public static class SimdAlgorithms
 
         unsafe
         {
-            void* pA = Unsafe.AsPointer(ref MemoryMarshal.GetReference(a));
-            void* pB = Unsafe.AsPointer(ref MemoryMarshal.GetReference(b));
-
+            fixed (double* pA = a)
+            fixed (double* pB = b)
+            {
             for (int i = 0; i < vecCount; i++)
             {
-                double* pa = (double*)pA + i * VEC;
-                double* pb = (double*)pB + i * VEC;
+                double* pa = pA + i * VEC;
+                double* pb = pB + i * VEC;
                 var va = Vector256.Load<double>(pa);
                 var vb = Vector256.Load<double>(pb);
                 acc += HorizontalSum(va * vb);
+            }
             }
         }
 
@@ -138,9 +158,7 @@ public static class SimdAlgorithms
     /// <summary>Horizontal sum of Vector256<double> elements.</summary>
     static double HorizontalSum(Vector256<double> v)
     {
-        // Vector256<double>.Count is runtime-determined:
-        //   AVX-512: 8, AVX2/NEON: 4, ARM64 SVE: varies (hardware-dependent).
-        // Scalar loop is fine for 3-8 elements.
+        // Count is the constant 4 (256/64), so this sums exactly 4 elements.
         double sum = 0.0;
         for (int i = 0; i < Vector256<double>.Count; i++)
             sum += v.GetElement(i);
@@ -163,16 +181,17 @@ public static class SimdAlgorithms
         int vecCount = dest.Length / VEC;
         unsafe
         {
-            void* pDest = Unsafe.AsPointer(ref MemoryMarshal.GetReference(dest));
-            void* pA = Unsafe.AsPointer(ref MemoryMarshal.GetReference(a));
-            void* pB = Unsafe.AsPointer(ref MemoryMarshal.GetReference(b));
-
+            fixed (double* pDest = dest)
+            fixed (double* pA = a)
+            fixed (double* pB = b)
+            {
             for (int i = 0; i < vecCount; i++)
             {
                 int offset = i * VEC;
-                var va = Vector256.Load<double>((double*)pA + offset);
-                var vb = Vector256.Load<double>((double*)pB + offset);
-                (va + vb).Store((double*)pDest + offset);
+                var va = Vector256.Load<double>(pA + offset);
+                var vb = Vector256.Load<double>(pB + offset);
+                (va + vb).Store(pDest + offset);
+            }
             }
         }
 
@@ -197,16 +216,17 @@ public static class SimdAlgorithms
         int vecCount = dest.Length / VEC;
         unsafe
         {
-            void* pDest = Unsafe.AsPointer(ref MemoryMarshal.GetReference(dest));
-            void* pA = Unsafe.AsPointer(ref MemoryMarshal.GetReference(a));
-            void* pB = Unsafe.AsPointer(ref MemoryMarshal.GetReference(b));
-
+            fixed (double* pDest = dest)
+            fixed (double* pA = a)
+            fixed (double* pB = b)
+            {
             for (int i = 0; i < vecCount; i++)
             {
                 int offset = i * VEC;
-                var va = Vector256.Load<double>((double*)pA + offset);
-                var vb = Vector256.Load<double>((double*)pB + offset);
-                (va - vb).Store((double*)pDest + offset);
+                var va = Vector256.Load<double>(pA + offset);
+                var vb = Vector256.Load<double>(pB + offset);
+                (va - vb).Store(pDest + offset);
+            }
             }
         }
 
@@ -231,16 +251,17 @@ public static class SimdAlgorithms
         int vecCount = dest.Length / VEC;
         unsafe
         {
-            void* pDest = Unsafe.AsPointer(ref MemoryMarshal.GetReference(dest));
-            void* pA = Unsafe.AsPointer(ref MemoryMarshal.GetReference(a));
-            void* pB = Unsafe.AsPointer(ref MemoryMarshal.GetReference(b));
-
+            fixed (double* pDest = dest)
+            fixed (double* pA = a)
+            fixed (double* pB = b)
+            {
             for (int i = 0; i < vecCount; i++)
             {
                 int offset = i * VEC;
-                var va = Vector256.Load<double>((double*)pA + offset);
-                var vb = Vector256.Load<double>((double*)pB + offset);
-                (va * vb).Store((double*)pDest + offset);
+                var va = Vector256.Load<double>(pA + offset);
+                var vb = Vector256.Load<double>(pB + offset);
+                (va * vb).Store(pDest + offset);
+            }
             }
         }
 
@@ -267,18 +288,19 @@ public static class SimdAlgorithms
         int vecCount = dest.Length / VEC;
         unsafe
         {
-            void* pDest = Unsafe.AsPointer(ref MemoryMarshal.GetReference(dest));
-            void* pSrc = Unsafe.AsPointer(ref MemoryMarshal.GetReference(src));
-
+            fixed (double* pDest = dest)
+            fixed (double* pSrc = src)
+            {
             for (int i = 0; i < vecCount; i++)
             {
                 int offset = i * VEC;
-                double* pD = (double*)pDest + offset;
-                double* pS = (double*)pSrc + offset;
+                double* pD = pDest + offset;
+                double* pS = pSrc + offset;
 
                 var d = Vector256.Load<double>(pD);
                 var s = Vector256.Load<double>(pS);
                 (d + s * vScalar).Store(pD);
+            }
             }
         }
 

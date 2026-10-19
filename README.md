@@ -22,7 +22,8 @@ eventprop.net/
 │   ├── EventProp.Python/       # Reference library (git submodule, read-only)
 │   │                           # Python + C++ (Eigen/pybind11) — source of truth
 │   ├── EventProp.C/            # Pure C implementation (libeventprop_c_api)
-│   │                           # 2 sets of batch functions: general + Cython interface
+│   │                           # Batch API, flat-array FFI, strict warnings, ASan support
+│   ├── EventProp.C.Tests/      # Google Test v1.15.2 suite for C library (176 tests)
 │   ├── EventProp.Cpp.Wrapper/  # C++ Eigen core (convenience copy, no pybind11)
 │   │                           # Used for native benchmarks and parity tests
 │   ├── EventProp.Native/       # .NET P/Invoke bindings → C library
@@ -36,19 +37,10 @@ eventprop.net/
 └── coverage-report/            # Generated HTML coverage reports (gitignored)
 ```
 
-### Reference Library
-
-**`EventProp.Python/`** is a git submodule of the original EventProp library. It is the **reference implementation** — all other implementations should mimic its API and produce matching results.
-
-Before building, apply the macOS compatibility patch:
-```bash
-cd src/EventProp.Python && patch -p0 < submodule.patch
-```
-
 ## Building
 
 ```bash
-# Build everything (C, C++, Python, .NET, parity tests, benchmarks) — Release mode
+# Build everything — Release mode
 ./build.sh release
 
 # Build everything — Debug mode
@@ -60,8 +52,6 @@ clean.sh c            # only C library
 clean.sh cpp          # only C++ wrapper
 clean.sh python       # only Python package
 clean.sh dotnet       # only .NET projects
-clean.sh parity       # only parity tests (C vs Eigen)
-clean.sh benchmarks   # only native benchmarks (C vs C++)
 ```
 
 ## Quick Start (.NET)
@@ -136,12 +126,7 @@ chain.Forward(inputTimes, inputSources);  // propagates through both
 Two Python binding layers are available:
 
 - **`EventProp.Python/`** — pybind11-based bindings (git submodule). The reference implementation with a complete Python layer.
-- **`EventProp.Native.Python/`** — Cython bindings to the C library. The Python layer from EventProp.Python rewritten to use `libeventprop_c_api` via Cython (`eventprop_c/_native.pyx`).
-
-**Install pybind11 bindings**:
-```bash
-cd src/EventProp.Python && patch -p0 < submodule.patch && pip install -e .
-```
+- **`EventProp.Native.Python/`** — Cython bindings to the C library. Zero-copy numpy views, managed memory wrappers, and flat-array FFI variants for maximum efficiency.
 
 **Install Cython bindings**:
 ```bash
@@ -156,38 +141,29 @@ cd src/EventProp.Native.Python && pip install -e .
 cd src/EventProp.Tests && dotnet run -c Release -- --no-progress
 ```
 
-> **Note**: TUnit uses Microsoft Testing Platform (MTP), not VSTest. `dotnet test` does NOT work.
-> The `-c` flag goes BEFORE `--`, TUnit flags go AFTER `--`.
+> **Note**: TUnit uses Microsoft Testing Platform (MTP), not VSTest. `dotnet test` does NOT work. The `-c` flag goes BEFORE `--`, TUnit flags go AFTER `--`. Use `--treenode-filter` instead of `--filter`.
 
-### Native Unit Tests
-
-Three independent native test suites validate correctness across implementations:
+### C Library Unit Tests (Google Test)
 
 ```bash
-# C library unit tests (17 tests, includes large-scale 200×80)
-cd src/EventProp.C && rm -rf build && mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build . && ./test_runner
-
-# Eigen direct unit tests (23 tests, edge cases + large-scale)
-cd src/EventProp.Cpp.Wrapper && rm -rf build && mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build . && ./eventprop_cpp_tests
-
-# C API wrapper unit tests (14 tests, flat-array interface over Eigen)
-cd src/EventProp.Cpp.Wrapper/build && ./eventprop_capi_tests
+cd src/EventProp.C.Tests && rm -rf build && mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
+./eventprop_tests  # 176 tests
 ```
 
-| Suite | Tests | Coverage |
-|-------|-------|----------|
-| **C library** (`tests.c`) | 17 | All functions + edge cases (zero spikes, negative weights, large-scale) |
-| **Eigen direct** (`tests.cpp`) | 23 | All Eigen methods + degenerate shapes, parameter variations, temporal extremes |
-| **C API wrapper** (`tests_capi.cpp`) | 14 | Flat-array C interface mirroring pure C suite |
-| **Parity tests** (C vs Eigen) | 85 | Numerical equivalence at ≤50×20 scale |
-| **.NET** (TUnit) | 408+ | Full managed API + three-way parity (C ≡ Eigen ≡ .NET) |
+**With AddressSanitizer** (Debug builds only):
+```bash
+cd src/EventProp.C/build && rm -rf * && cmake .. -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=ON && cmake --build .
+cd ../EventProp.C.Tests/build && rm -rf * && cmake .. -DENABLE_ASAN=ON && cmake --build .
+./eventprop_tests  # detects use-after-free, buffer overflows
+```
 
-### Python Benchmarks
+### C/C++ Parity Tests (C vs Eigen)
 
 ```bash
-cd src/EventProp.Python.Benchmarks && pytest test_benchmarks.py -v
+cd src/EventProp.Native.ParityTests && rm -rf build && mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
+./parity_test /path/to/libeventprop_c_api.dylib
 ```
 
 ### Native Benchmarks (C vs C++)
@@ -199,14 +175,22 @@ cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
 ./bench_cpp --benchmark_min_time=0.1s
 ```
 
+### Python Benchmarks (pytest-benchmark)
+
+```bash
+cd src/EventProp.Python.Benchmarks && pytest test_benchmarks.py -v
+```
+
 ## Coverage
 
 ```bash
+# Run with coverage
 cd src/EventProp.Tests && dotnet run -c Release -- --coverage --coverage-output-format=cobertura
+
+# Generate HTML report
 export PATH="$PATH:$HOME/.dotnet/tools"
 reportgenerator -reports:bin/Release/net10.0/TestResults/*.cobertura.xml \
   -targetdir:../../coverage-report -reporttypes:Html
-open coverage-report/index.html
 ```
 
 ## Technical Details
@@ -231,16 +215,6 @@ All hot-path functions are **allocation-free** when `ScratchBuffers` is provided
 | Synaptic time constant | `tauSyn` | Decay rate of synaptic current (seconds) |
 | Spike threshold | `vTh` | Membrane potential at which a spike fires (volts) |
 
-### Synaptic Kernel
-
-The library uses an α-function synaptic kernel:
-
-```
-k(t) = τ_syn/(τ_mem - τ_syn) * (exp(-t/τ_mem) - exp(-t/τ_syn))
-```
-
-This produces a rise-and-decay current profile that is more biologically realistic than simple exponential decay.
-
 ### Key Algorithms
 
 | Algorithm | Description |
@@ -254,8 +228,4 @@ This produces a rise-and-decay current profile that is more biologically realist
 
 - **macOS** — developed and tested
 - **Linux** — intended support
-- **Windows** — if feasible
-
-## License
-
-See [LICENSE](LICENSE) for details.
+- **Windows** — supported via MSVC + CMake

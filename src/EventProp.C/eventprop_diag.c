@@ -4,94 +4,168 @@
  */
 
 #include "eventprop_diag.h"
+#include "eventprop.h"
+#include "matrixview.inc"  /* inline MatrixView helpers */
 #include <stdlib.h>
 #include <math.h>
 
-void eventprop_free_lambda_i_trace_output(LambdaITraceOutput* output)
+/* Numerical stability epsilon for lambda-I backward current computation */
+#define LAMBDA_I_VTH_EPS 0.001
+
+/* Public output-freeing functions live in eventprop_memory.c. */
+
+VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput input)
 {
-    if (!output) return;
-    free(output->lambda_trace);
-    free(output->ts);
-}
+    VoltageTraceOutput result = (VoltageTraceOutput){0};
 
-void eventprop_free_voltage_trace_output(VoltageTraceOutput* output)
-{
-    if (!output) return;
-    free(output->v_trace);
-    free(output->ts);
-}
+    /* Delegate shared validation to existing function */
+    EventPropError err = eventprop_validate_input(input.input);
+    if (err != EVENTPROP_OK) {
+        result.error_no = err;
+        return result;
+    }
 
-VoltageTraceOutput* eventprop_compute_voltage_trace(const VoltageTraceInput* input)
-{
-    const EventPropInput* fwd = input->input;
-    int n_t = (int)(input->t_max / input->dt);
+    /* Diag-specific checks */
+    if (input.dt <= 0 || input.t_max <= 0) {
+        result.error_no = EVENTPROP_DIAG_TIMESTEP_INVALID;
+        return result;
+    }
+    if (input.target_nrn_idx < 0 || input.target_nrn_idx >= input.input.n_post) {
+        result.error_no = EVENTPROP_DIAG_TARGET_OUT_OF_RANGE;
+        return result;
+    }
+    if (input.n_post_spikes > 0 && (!input.fwd_times || !input.fwd_sources)) {
+        result.error_no = EVENTPROP_NULL_POINTER;
+        return result;
+    }
+    const int n_t = (int)(input.t_max / input.dt);
+    if (n_t <= 0 || n_t > EVENTPROP_MAX_DIAG_SAMPLES) {
+        result.error_no = EVENTPROP_DIAG_TRACE_TOO_LONG;
+        return result;
+    }
+    const EventPropInput* fwd = &input.input;  // local pointer for readability in loop
 
-    VoltageTraceOutput* result = malloc(sizeof(VoltageTraceOutput));
-    result->n_t = n_t;
-    result->v_trace = calloc(n_t, sizeof(double));
-    result->ts      = calloc(n_t, sizeof(double));
+    result.v_trace = eventprop_try_calloc((size_t)n_t, sizeof(double));
+    if (!result.v_trace) {
+        result.error_no = EVENTPROP_ALLOC_DIAG_V_TRACE;
+        return result;
+    }
 
-    double k_prefactor = fwd->tau_syn / (fwd->tau_mem - fwd->tau_syn);
+    result.ts = eventprop_try_calloc((size_t)n_t, sizeof(double));
+    if (!result.ts) {
+        free(result.v_trace);
+        result.v_trace = NULL;
+        result.error_no = EVENTPROP_ALLOC_DIAG_TS;
+        return result;
+    }
+    result.n_t = n_t;  // only set after both allocations succeed
+
+    const double k_prefactor = fwd->tau_syn / (fwd->tau_mem - fwd->tau_syn);
+    MatrixView w = mv(fwd->w, fwd->n_pre, fwd->n_post);
 
     for (int ti = 0; ti < n_t; ti++) {
-        double t = input->dt * ti;
-        result->ts[ti] = t;
+        double t = input.dt * ti;
+        result.ts[ti] = t;
         double mem = 0.0;
 
         /* Pre-synaptic contribution */
         for (int i = 0; i < fwd->n_spikes; i++) {
             if (fwd->times[i] > t) break;
-            mem += fwd->w[fwd->sources[i] * fwd->n_post + input->target_nrn_idx] *
+            mem += *mv_at(w, fwd->sources[i], input.target_nrn_idx) *
                    k_prefactor * (exp(-(t - fwd->times[i]) / fwd->tau_mem) -
                                   exp(-(t - fwd->times[i]) / fwd->tau_syn));
         }
 
         /* Post-synaptic contribution (spike reset) */
-        for (int i = 0; i < input->n_post_spikes; i++) {
-            if (input->fwd_times[i] > t) break;
-            if (input->fwd_sources[i] == input->target_nrn_idx)
-                mem -= fwd->v_th * exp(-(t - input->fwd_times[i]) / fwd->tau_mem);
+        for (int i = 0; i < input.n_post_spikes; i++) {
+            if (input.fwd_times[i] > t) break;
+            if (input.fwd_sources[i] == input.target_nrn_idx)
+                mem -= fwd->v_th * exp(-(t - input.fwd_times[i]) / fwd->tau_mem);
         }
 
-        result->v_trace[ti] = mem;
+        result.v_trace[ti] = mem;
     }
 
     return result;
 }
 
-LambdaITraceOutput* eventprop_compute_lambda_i_trace(const LambdaITraceInput* input)
+LambdaITraceOutput eventprop_compute_lambda_i_trace(const LambdaITraceInput input)
 {
-    int n_t = (int)(input->t_max / input->dt);
+    LambdaITraceOutput result = (LambdaITraceOutput){0};
 
-    LambdaITraceOutput* result = malloc(sizeof(LambdaITraceOutput));
-    result->n_t = n_t;
-    result->lambda_trace = calloc(n_t, sizeof(double));
-    result->ts           = calloc(n_t, sizeof(double));
+    /* Validate dt and t_max */
+    if (input.dt <= 0 || input.t_max <= 0) {
+        result.error_no = EVENTPROP_DIAG_TIMESTEP_INVALID;
+        return result;
+    }
+
+    /* Validate tau values (division by zero in k_bwd_prefactor) */
+    if (input.tau_mem <= 0 || input.tau_syn <= 0 || input.tau_mem == input.tau_syn) {
+        result.error_no = EVENTPROP_INVALID_TAU;
+        return result;
+    }
+
+    /* Validate v_th (division in jump computation) */
+    if (input.v_th <= 0) {
+        result.error_no = EVENTPROP_INVALID_VTH;
+        return result;
+    }
+
+    /* Validate forward spike pointers */
+    if (input.n_post_spikes > 0 && !input.fwd_times) {
+        result.error_no = EVENTPROP_NULL_POINTER;
+        return result;
+    }
+
+    const int n_t = (int)(input.t_max / input.dt);
+    if (n_t <= 0 || n_t > EVENTPROP_MAX_DIAG_SAMPLES) {
+        result.error_no = EVENTPROP_DIAG_TRACE_TOO_LONG;
+        return result;
+    }
+
+    result.lambda_trace = eventprop_try_calloc((size_t)n_t, sizeof(double));
+    if (!result.lambda_trace) {
+        result.error_no = EVENTPROP_ALLOC_DIAG_LAMBDA;
+        return result;
+    }
+
+    result.ts = eventprop_try_calloc((size_t)n_t, sizeof(double));
+    if (!result.ts) {
+        free(result.lambda_trace);
+        result.lambda_trace = NULL;
+        result.error_no = EVENTPROP_ALLOC_DIAG_TS;
+        return result;
+    }
+    result.n_t = n_t;  // only set after both allocations succeed
+
+    /* Handle zero forward spikes — trace is all zeros (already calloc'd) */
+    if (input.n_post_spikes == 0) {
+        for (int ti = 0; ti < n_t; ti++) {
+            result.ts[ti] = input.dt * ti;
+        }
+        return result;
+    }
+
+    /* Constants independent of time step */
+    const double largest_time = input.fwd_times[input.n_post_spikes - 1];
+    const double k_bwd_prefactor = input.tau_mem / (input.tau_mem - input.tau_syn);
 
     for (int ti = 0; ti < n_t; ti++) {
-        double t = input->dt * ti;
-        result->ts[ti] = t;
-
-        if (input->n_post_spikes == 0) {
-            result->lambda_trace[ti] = 0.0;
-            continue;
-        }
-
-        double largest_time = input->fwd_times[input->n_post_spikes - 1];
+        double t = input.dt * ti;
+        result.ts[ti] = t;
 
         double lambda_i = 0.0;
-        double t_bwd_from_t = largest_time - t;
-        double k_bwd_prefactor = input->tau_mem / (input->tau_mem - input->tau_syn);
+        const double t_bwd_from_t = largest_time - t;
 
         /* Collect jumps from post-synaptic spikes after time t */
-        for (int i = input->n_post_spikes - 1; i >= 0; i--) {
-            if (input->fwd_times[i] < t) break;
-            double dt_jump = t_bwd_from_t - (largest_time - input->fwd_times[i]);
-            lambda_i += (1.0 / (input->v_th + 0.001)) * k_bwd_prefactor *
-                        (exp(-dt_jump / input->tau_mem) - exp(-dt_jump / input->tau_syn));
+        for (int i = input.n_post_spikes - 1; i >= 0; i--) {
+            if (input.fwd_times[i] < t) break;
+            double dt_jump = t_bwd_from_t - (largest_time - input.fwd_times[i]);
+            lambda_i += (1.0 / (input.v_th + LAMBDA_I_VTH_EPS)) * k_bwd_prefactor *
+                        (exp(-dt_jump / input.tau_mem) - exp(-dt_jump / input.tau_syn));
         }
 
-        result->lambda_trace[ti] = lambda_i;
+        result.lambda_trace[ti] = lambda_i;
     }
 
     return result;

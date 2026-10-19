@@ -1,1 +1,6 @@
 eventprop_c/_native.c
+# Compiler artifacts from building the extension in place. The .pyd is covered by
+# the package .gitignore; MSVC additionally emits these three when linking it.
+*.obj
+*.exp
+*.lib

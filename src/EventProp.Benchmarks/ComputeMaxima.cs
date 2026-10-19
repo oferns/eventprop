@@ -62,12 +62,26 @@ public abstract class Bench_ComputeMaxima_Base : BenchBase
 // ============================================================
 // Uniform pattern (existing)
 // ============================================================
-public class Bench_ComputeMaxima_Tiny : Bench_ComputeMaxima_Base
-{ protected override void Configure() => (NPre, NPost, NSpikes) = (10, 5, 20); }
-
-public class Bench_ComputeMaxima_Small : Bench_ComputeMaxima_Base
-{ protected override void Configure() => (NPre, NPost, NSpikes) = (50, 20, 100); }
-
+// Tiny (10,5,20) and Small (50,20,100) are deliberately ABSENT for the kernel
+// benchmarks (ComputeSums / ComputeSpikes / BackwardSpikes / ComputeMaxima).
+// Two independent reasons, both measured on this suite:
+//
+//  1. Zero-spike regime. At Tiny/Small the weight span U[0.5,2.0) is far below
+//     v_th = 1.0, so the neuron never fires: ComputeSpikes/BackwardSpikes time an
+//     empty loop on BOTH sides (BackwardSpikes/Tiny/uniform = 0.10x).
+//  2. ComputeMaxima has no threshold check, so it runs at Tiny and produces
+//     near-zero work (n_out = 5). BenchmarkDotNet's own overhead evaluation is the
+//     same order of magnitude as the workload, so the ratio measures the harness:
+//     ComputeMaxima/Tiny/poisson reported 0.20x, i.e. "Managed 5x faster".
+//
+// Those rows dominated the C-vs-Managed geomean and produced two false headline
+// numbers ("Managed is 1.18x/1.20x faster than C"). A benchmark that reliably
+// generates a false conclusion is worse than no benchmark. Small-n coverage stays
+// in the NATIVE suite, where Google Benchmark's ~1 ns overhead can measure it.
+//
+// TrainingLoop and LayerBenchmarks KEEP their Tiny/Small rows: a full
+// forward+backward+update through LIFLayer at Tiny costs 5-54 us, which is real
+// layer plumbing (marshalling, allocation), not harness overhead.
 public class Bench_ComputeMaxima_Medium : Bench_ComputeMaxima_Base
 { protected override void Configure() => (NPre, NPost, NSpikes) = (200, 80, 500); }
 
@@ -136,12 +150,6 @@ public abstract class Bench_ComputeMaxima_Poisson_Base : BenchBase
     }
 }
 
-public class Bench_ComputeMaxima_Poisson_Tiny : Bench_ComputeMaxima_Poisson_Base
-{ protected override void Configure() => (NPre, NPost, NSpikes) = (10, 5, 20); }
-
-public class Bench_ComputeMaxima_Poisson_Small : Bench_ComputeMaxima_Poisson_Base
-{ protected override void Configure() => (NPre, NPost, NSpikes) = (50, 20, 100); }
-
 public class Bench_ComputeMaxima_Poisson_Medium : Bench_ComputeMaxima_Poisson_Base
 { protected override void Configure() => (NPre, NPost, NSpikes) = (200, 80, 500); }
 
@@ -170,22 +178,10 @@ public abstract class Bench_ComputeMaxima_Burst_Base : BenchBase
         Times = new double[NSpikes];
         Sources = new int[NSpikes];
 
-        // Burst pattern: clusters of 5 spikes with 10ms gaps
-        int spike_idx = 0;
-        for (int nrn = 0; nrn < NPre && spike_idx < NSpikes; nrn++)
-        {
-            double burst_start = 0.05 + nrn * 0.1;
-            for (int b = 0; burst_start < 1.0 && spike_idx < NSpikes; b++)
-            {
-                for (int s = 0; s < 5 && spike_idx < NSpikes; s++)
-                {
-                    Times[spike_idx] = burst_start + s * 0.002;
-                    Sources[spike_idx] = nrn;
-                    spike_idx++;
-                }
-                burst_start += 0.12;
-            }
-        }
+        // Canonical burst pattern — see SpikePatterns for the contract.
+        // The previous inline version used a fixed 0.1 s per-neuron offset, which
+        // saturates at ~10 bursting neurons and left the remaining slots at 0.0.
+        SpikePatterns.Burst(NPre, NSpikes, Times, Sources, rng);
 
         Buffers = new ScratchBuffers();
         Buffers.EnsureCapacity(NPost, NPre, NSpikes);
@@ -211,12 +207,6 @@ public abstract class Bench_ComputeMaxima_Burst_Base : BenchBase
         var _ = output.Times[0]; // Access to prevent optimization
     }
 }
-
-public class Bench_ComputeMaxima_Burst_Tiny : Bench_ComputeMaxima_Burst_Base
-{ protected override void Configure() => (NPre, NPost, NSpikes) = (10, 5, 20); }
-
-public class Bench_ComputeMaxima_Burst_Small : Bench_ComputeMaxima_Burst_Base
-{ protected override void Configure() => (NPre, NPost, NSpikes) = (50, 20, 100); }
 
 public class Bench_ComputeMaxima_Burst_Medium : Bench_ComputeMaxima_Burst_Base
 { protected override void Configure() => (NPre, NPost, NSpikes) = (200, 80, 500); }

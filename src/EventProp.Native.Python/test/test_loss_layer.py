@@ -25,7 +25,11 @@ class TTFSCrossEntropyLossTest(unittest.TestCase):
         w = np.ones((params.lif_parameters.n, params.lif_parameters.n)) * 2.0
 
         def get_artificial_output(t_eps, batch_idx, spike_idx):
-            times1 = np.arange(params.lif_parameters.n) * 0.001
+            # Start at 0.001, not 0.0: this is a central difference, so spike_idx 0
+            # would otherwise be perturbed to -t_eps. The C library rejects negative
+            # input times (EVENTPROP_NEGATIVE_SPIKE_TIME, 7) and the forward pass
+            # cannot bracket a spike before t = 0 — its first interval starts at 0.0.
+            times1 = (np.arange(params.lif_parameters.n) + 1) * 0.001
             times2 = times1 * 2
             if batch_idx == 0:
                 times1[spike_idx] += t_eps
@@ -38,7 +42,13 @@ class TTFSCrossEntropyLossTest(unittest.TestCase):
                 ]
             )
 
-        t_eps = 1e-8
+        # 1e-7, not 1e-8: this is a central difference on O(1) losses, so its
+        # absolute noise floor is ~machine_eps / t_eps. At 1e-8 that floor is ~2.2e-8,
+        # which swamps the analytical gradient where it is legitimately exactly 0
+        # (batch 1, spike 4 — the last input spike, which no first-spike time depends
+        # on). The test asserts rtol with no atol, so 0.0 vs rounding noise fails.
+        # Measured worst-case |analytical - numerical|: 8.1e-9 at 1e-8, 1.0e-9 at 1e-7.
+        t_eps = 1e-7
         for label_neuron in range(params.lif_parameters.n):
             batch_numerical_grads = list()
             for batch_idx in range(2):
@@ -66,6 +76,19 @@ class TTFSCrossEntropyLossTest(unittest.TestCase):
                         loss.input_batch[batch_idx].errors[spike_idx],
                         batch_numerical_grads[batch_idx][spike_idx],
                         rtol=1e-6,
+                        # atol, because 5 of the 100 entries are analytically EXACTLY
+                        # 0.0 (the last input spike, which no first-spike time depends
+                        # on) and rtol alone compares 0.0 against the central
+                        # difference's rounding noise. Measured on Windows/x64 at
+                        # t_eps=1e-7: max |numerical| over the analytically-zero
+                        # entries = 5.551e-10 — that is the entry that fails, with
+                        # "DESIRED: array(5.551115e-10)" — while the worst
+                        # discrepancy on a NON-zero entry is 6.957e-10 against a
+                        # signal of 0.173 (relative 4e-9, passes on rtol alone).
+                        # 1e-7 is 180x above that noise and 6 orders below the
+                        # signal, and matches the rtol/atol pair test_layer_chain.py:171
+                        # already uses for finite differences.
+                        atol=1e-7,
                     )
 
 
@@ -77,7 +100,11 @@ class VMaxCrossEntropyLossTest(unittest.TestCase):
         w = np.random.normal(1, 1, size=(10, 10))
         params = LILayerParameters(n_in=n_in, n=n_class)
         # test spike gradient
-        base_times = (np.arange(params.n) * 0.001).astype(np.float64)
+        # Start at 0.001, not 0.0: the central difference perturbs spike_idx 0 to
+        # -t_eps, and the C library rejects negative input times
+        # (EVENTPROP_NEGATIVE_SPIKE_TIME, 7). The Eigen reference does not validate,
+        # which is why this test only ever failed on the Cython side.
+        base_times = ((np.arange(params.n) + 1) * 0.001).astype(np.float64)
         base_sources = np.arange(params.n, dtype=np.int32)
 
         for label_neuron in range(params.n):
