@@ -208,13 +208,43 @@ else
   # ls exits non-zero if ANY pattern fails to match, so on a machine where the .pyd
   # exists and the .so/.dylib do not, the multi-pattern test reports "not built" and
   # rebuilds (or fails) every run.
+  #
+  # "Exists" is NOT the right question — "exists FOR THIS INTERPRETER" is. CPython
+  # extension filenames carry the ABI tag (eventprop_cpp.cpython-39-darwin.so), and a
+  # 3.9 .so is invisible to python3.14. Measured: with only a 3.9 .so present, this
+  # step printed "already built" and skipped, so the 3.14 test run died with
+  # ModuleNotFoundError: No module named 'eventprop.eventprop_cpp' — in the test
+  # suite, several steps after the build that declined to produce it.
+  #
+  # The tag is asked of the interpreter itself (sysconfig SOABI), not parsed from the
+  # version string, so it matches whatever the platform's naming convention is
+  # (cpython-314-darwin.so, .cp314-win_amd64.pyd, ...).
+  abi_tag="$("$PYTHON" -c 'import sysconfig;print(sysconfig.get_config_var("SOABI"))' 2>/dev/null)"
   built=()
   shopt -s nullglob
-  built=(eventprop/eventprop_cpp*.so eventprop/eventprop_cpp*.dylib eventprop/eventprop_cpp*.pyd)
+  all_ext=(eventprop/eventprop_cpp*.so eventprop/eventprop_cpp*.dylib eventprop/eventprop_cpp*.pyd)
   shopt -u nullglob
+  # "${arr[@]}" on an EMPTY array is an unbound variable under `set -u` on bash 3.2
+  # (the macOS default) — it dies with "all_ext[@]: unbound variable" on a fresh
+  # clone, which is exactly the case where all_ext is empty. The
+  # "${arr[@]+"${arr[@]}"}" form expands to nothing when unset and is safe on every
+  # bash that has nullglob.
+  for f in ${all_ext[@]+"${all_ext[@]}"}; do
+    # Match the interpreter's own ABI tag in the filename; a plain .so (no tag) is
+    # accepted, since some builds emit the untagged form.
+    base="${f##*/}"
+    if [[ -z "$abi_tag" ]]; then
+      built+=("$f")
+    elif [[ "$base" == *"$abi_tag"* || "$base" == "eventprop_cpp.so" ]]; then
+      built+=("$f")
+    fi
+  done
   if [[ ${#built[@]} -gt 0 ]]; then
-    ok "eventprop.eventprop_cpp already built (${built[0]}); delete it (or ./clean.sh python -full) to rebuild"
+    ok "eventprop.eventprop_cpp already built for $abi_tag (${built[0]})"
   else
+    if [[ ${#all_ext[@]} -gt 0 ]]; then
+      note "existing extension(s) are for a DIFFERENT interpreter (none match $abi_tag) — rebuilding"
+    fi
     if run "pip install -e . (EventProp.Python)" \
       "$PYTHON" -m pip install --break-system-packages -e .; then
       ok "eventprop.eventprop_cpp (editable install)"
@@ -247,10 +277,18 @@ else
   # not rebuild. The second is the stale-extension class the ABI check in _native.pyx
   # now refuses to import on (AGENTS.md: "ABI: One Version Stamp, Checked by Every
   # Consumer"), so regenerate when the .pyx is newer than the .c.
+  #
+  # The check must test CONTENT, not just mtime. A failed build under an unsupported
+  # interpreter leaves a ZERO-BYTE _native.c (measured: a 3.9.6 run, which the
+  # >=3.10 requirement rejects, truncated it to 0 bytes). An empty file is "newer"
+  # than the .pyx, so a pure -nt test skips Cython, and pip then compiles the empty
+  # file into a ~16 KB stub .so that imports as `ModuleNotFoundError: dynamic module
+  # does not define module export function (PyInit__native)` — a failure far from its
+  # cause, in a different step, on the next build. -s is the content test.
   pyx="eventprop_c/_native.pyx"
   cfile="eventprop_c/_native.c"
   need_cython=0
-  if [[ ! -f "$cfile" ]]; then
+  if [[ ! -s "$cfile" ]]; then
     need_cython=1
   elif [[ -f "$pyx" && "$pyx" -nt "$cfile" ]]; then
     need_cython=1
