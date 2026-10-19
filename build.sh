@@ -106,6 +106,70 @@ run() {
 ok() { printf '  \033[32m→ %s\033[0m\n' "$1"; }
 note() { printf '  \033[33m%s\033[0m\n' "$1"; }
 
+# pip build-isolation probe.
+#
+# When `pip install -e .` fails, the honest question is "is this our package or this
+# interpreter?" — and it is answered by construction, not by pattern-matching pip's
+# error text. Write a two-file package with no dependency on this repo and try to
+# install it the same way. If the trivial package fails too, the interpreter's build
+# isolation is broken and no change to our packages can fix it.
+#
+# Measured on a Homebrew python3.14 + pip 26.2.1: a pyproject.toml plus one .py file
+# fails with the identical "Failed to build ... when checking if build backend
+# supports build_editable", and the same package installs cleanly with
+# --no-build-isolation. The subprocess pip spawns cannot import the stdlib
+# (ModuleNotFoundError: No module named 'json' / 'traceback'), while the same script
+# run outside isolation imports json fine.
+#
+# This exists because the failure looks like a project problem: it names a project
+# path, and the plausible causes (an editable .pth from a sibling package, PYTHONPATH
+# vs Homebrew's sitecustomize exit(), the CWD shadowing stdlib, the editable finder's
+# MAPPING) all survive inspection and none of them is the cause. Each was tested and
+# discarded. The trivial-package probe settles it in one step.
+probe_pip_isolation() {
+  local py="$1" probe_dir rc
+  probe_dir="$(mktemp -d 2>/dev/null)" || { note "cannot create a probe dir; skipping the pip isolation probe"; return 2; }
+  # Deliberately NOT inside the repo, and NOT named after anything in it.
+  printf '[build-system]\nrequires = ["setuptools"]\nbuild-backend = "setuptools.build_meta"\n\n[project]\nname = "isolation-probe"\nversion = "0.0"\n' \
+    > "$probe_dir/pyproject.toml" 2>/dev/null
+  printf 'def noop():\n    return 1\n' > "$probe_dir/isolation_probe.py" 2>/dev/null
+  "$py" -m pip install --break-system-packages -e "$probe_dir" >"$probe_dir/pip.log" 2>&1
+  rc=$?
+  "$py" -m pip install --break-system-packages --no-build-isolation -e "$probe_dir" >>"$probe_dir/pip.log" 2>&1
+  local rc_nobi=$?
+  # Uninstall the probe so it cannot shadow anything later in the run.
+  "$py" -m pip uninstall -y --break-system-packages isolation-probe >/dev/null 2>&1
+  local out="$probe_dir/pip.log"
+  # Capture the diagnostic line BEFORE the dir is removed — the log lives in it.
+  local probe_err
+  probe_err="$(grep -m1 -E "ModuleNotFoundError|No module named|ERROR:" "$out" 2>/dev/null | sed 's/^ *//')"
+  rm -rf "$probe_dir"
+  if [[ $rc -ne 0 && $rc_nobi -eq 0 ]]; then
+    # Isolated fails, non-isolated succeeds: the interpreter, not the package.
+    printf '  \033[31mpip BUILD ISOLATION IS BROKEN on this interpreter.\033[0m\n'
+    printf '  \033[31mA two-file probe package with NO dependency on this repo fails\033[0m\n'
+    printf '  \033[31midentically under isolation, and installs fine with --no-build-isolation.\033[0m\n'
+    printf '  interpreter: %s (%s)\n' "$py" "$("$py" --version 2>&1)"
+    printf '  pip:         %s\n' "$("$py" -m pip --version 2>&1 | head -1)"
+    printf '  probe error: %s\n' "${probe_err:-(none captured; see the pip output above)}"
+    printf '  This is NOT fixable from the repo. On the machine, try:\n'
+    printf '    %s -m pip install -U pip\n' "$py"
+    printf '    brew reinstall python@3.14        # macOS/Homebrew\n'
+    printf '  A --no-build-isolation install WORKS and is a reasonable local workaround,\n'
+    printf '  but build.sh does not apply it silently: isolation is what makes a package\n'
+    printf '  fetch its own build deps instead of inheriting global site-packages, and\n'
+    printf '  disabling it repo-wide would hide a real dependency-version problem.\n'
+    return 1
+  fi
+  if [[ $rc -ne 0 && $rc_nobi -ne 0 ]]; then
+    printf '  \033[33mthe probe package fails BOTH ways, so this is not an isolation-specific\033[0m\n'
+    printf '  \033[33mbreakage — treat it as a real install failure and read pip output above.\033[0m\n'
+    return 2
+  fi
+  note "pip isolation probe PASSES (isolated install of a trivial package works) — the failure above is specific to this package; read pip's output"
+  return 0
+}
+
 # configure+build a CMake project through its presets, from the project dir
 build_cmake() {
   local dir="$1" preset="$2" label="$3"
@@ -248,6 +312,10 @@ else
     if run "pip install -e . (EventProp.Python)" \
       "$PYTHON" -m pip install --break-system-packages -e .; then
       ok "eventprop.eventprop_cpp (editable install)"
+    else
+      # Distinguish "our package is broken" from "this interpreter cannot build
+      # anything" before the reader starts reading pip's 8-line subprocess traceback.
+      probe_pip_isolation "$PYTHON"
     fi
   fi
 
@@ -258,6 +326,8 @@ else
     if run "pip install -e . (EventProp.Python.Benchmarks)" \
       "$PYTHON" -m pip install --break-system-packages -e .; then
       ok "eventprop-python-benchmarks"
+    else
+      probe_pip_isolation "$PYTHON"
     fi
   fi
 fi
