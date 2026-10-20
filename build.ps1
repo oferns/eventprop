@@ -122,12 +122,29 @@ Write-Host "============================================"
 # "bash exists" is not evidence the script can run. That is exactly how this showed
 # up: the same call succeeded from Git Bash and failed with exit 1 from a PATH where
 # System32 precedes Git's usr\bin.
+# Assume exactly ONE "root" above git.exe is wrong, and it is the common case: on a
+# PATH that puts MSYS's mingw64\bin first, Get-Command git.exe resolves to
+# <Git>\mingw64\bin\git.exe, so two levels up is <Git>\mingw64 - which has no
+# usr\bin\bash.exe. Measured on this machine: the probe reported "Git for Windows bash
+# not found" while <Git>\usr\bin\bash.exe sat two directories higher, so build.ps1
+# skipped scripts\submodule-state.sh - the declared single owner of the submodule's
+# local modifications - and fell back to a raw `git apply` instead.
+#
+# Walk up from git.exe to the install root instead. Every candidate lives inside the
+# Git tree, so this still cannot return System32\bash.exe (WSL), which is the whole
+# point of the function. It also resolves an MSYS2 install (<msys>\usr\bin\git.exe ->
+# <msys>\usr\bin\bash.exe), which is the same userland the script needs.
 function Get-GitBash {
     $git = Get-Command git.exe -ErrorAction SilentlyContinue
     if (-not $git) { return $null }
-    $root = Split-Path (Split-Path $git.Source -Parent) -Parent
-    foreach ($c in @((Join-Path $root "usr\bin\bash.exe"), (Join-Path $root "bin\bash.exe"))) {
-        if (Test-Path $c) { return $c }
+    $dir = Split-Path $git.Source -Parent
+    for ($i = 0; $i -lt 4 -and $dir; $i++) {
+        foreach ($c in @((Join-Path $dir "usr\bin\bash.exe"), (Join-Path $dir "bin\bash.exe"))) {
+            if (Test-Path $c) { return $c }
+        }
+        $parent = Split-Path $dir -Parent
+        if ($parent -eq $dir) { break }
+        $dir = $parent
     }
     return $null
 }
@@ -252,15 +269,36 @@ if ($SkipSubmodule) {
         if (-not $bash) {
             Write-Host "  Git for Windows bash not found (not using System32\bash.exe - that is WSL)" -ForegroundColor Yellow
             Write-Host "  applying submodule-windows.patch with git apply instead" -ForegroundColor Yellow
+            Write-Host "  (scripts\submodule-state.sh also owns the pybind11 version - run it if this is unexpected)" -ForegroundColor DarkGray
             Push-Location (Join-Path $ScriptDir "src\EventProp.Python")
             $patch = Join-Path $ScriptDir "submodule-windows.patch"
-            git apply --check $patch 2>&1 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+            # Three states, not two. `git apply --check` answers only "can this be
+            # applied", and that is NO on a tree that already carries the patch - so the
+            # old code printed git's own "patch does not apply" errors plus "already
+            # applied, or upstream moved" without saying which, on every run after the
+            # first, under a green "Build complete". `--reverse --check` separates them
+            # mechanically: if the patch un-applies cleanly, the tree already has it.
+            # Same applied/applicable/blocked classification scripts/submodule-state.sh
+            # uses, and "blocked" is now a recorded failure rather than a yellow line.
+            git apply --check $patch 2>$null | Out-Null
             if ($LASTEXITCODE -eq 0) {
                 git apply $patch
-                Write-Host "  -> submodule-windows.patch applied" -ForegroundColor Green
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "  -> submodule-windows.patch applied" -ForegroundColor Green
+                } else {
+                    Write-Host "  -> git apply failed after a clean --check" -ForegroundColor Red
+                    $Failures.Add("submodule-windows.patch failed to apply")
+                }
             } else {
-                Write-Host "  patch does not apply cleanly: already applied, or upstream moved." -ForegroundColor Yellow
-                Write-Host "  Check: bash scripts/submodule-state.sh status" -ForegroundColor Yellow
+                git apply --reverse --check $patch 2>$null | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "  -> submodule-windows.patch already applied" -ForegroundColor Green
+                } else {
+                    Write-Host "  -> BLOCKED: neither applicable nor already applied - upstream moved?" -ForegroundColor Red
+                    git apply --check $patch 2>&1 | ForEach-Object { Write-Host "     $_" -ForegroundColor DarkGray }
+                    Write-Host "  Check: bash scripts/submodule-state.sh check-patches" -ForegroundColor Yellow
+                    $Failures.Add("submodule-windows.patch blocked (upstream drift?)")
+                }
             }
             Pop-Location
         } else {
@@ -333,14 +371,89 @@ if ($SkipPython) {
     Write-Host "  -SkipPython" -ForegroundColor DarkGray
     $Skips.Add("EventProp.Python (-SkipPython)")
 } else {
+    # Every pip step below uses --no-build-isolation, matching build.sh. The cost of that
+    # flag is stated plainly: the build dependencies must ALREADY live in the interpreter,
+    # so a missing numpy surfaces as a Cython compile error that reads like a code bug
+    # rather than as a pip dependency error. So name the versions up front instead of
+    # letting the compiler deliver the news. (Isolation is off because pip 26.x cannot
+    # import the stdlib from its own build-isolation subprocess - measured A/B on one
+    # interpreter, pip 25.0 installs, pip 26.x raises ModuleNotFoundError for json.)
+    foreach ($m in @("numpy", "setuptools", "wheel")) {
+        $dv = ((& $PythonExe -c "import $m;print(getattr($m,'__version__','?'))" 2>$null) | Out-String).Trim()
+        if ($dv) {
+            Write-Host "  build dep: $m $dv" -ForegroundColor DarkGray
+        } else {
+            Write-Host "  MISSING build dep: $m - --no-build-isolation will NOT fetch it:" -ForegroundColor Red
+            Write-Host "      $PythonExe -m pip install $m" -ForegroundColor Red
+        }
+    }
     Push-Location (Join-Path $ScriptDir "src\EventProp.Python")
-    $built = Get-ChildItem "eventprop\eventprop_cpp*.pyd", "eventprop\eventprop_cpp*.dll", "eventprop\eventprop_cpp*.so" -ErrorAction SilentlyContinue
+    # "A file matches the glob" is not the question - "an extension for THIS interpreter
+    # exists" is. CPython extension filenames carry the ABI tag, so a cp311 .pyd is
+    # invisible to python3.14: a tag-blind check prints "already built", skips the step,
+    # and the run dies later with ModuleNotFoundError: No module named
+    # 'eventprop.eventprop_cpp' - in the test suite, several steps from here.
+    # Not hypothetical on this tree, which carries both
+    # eventprop_cpp.cp311-win_amd64.pyd and eventprop_cpp.cp314-win_amd64.pyd (Get-
+    # ChildItem returns cp311 first, so `-PythonExe python3.14` skipped it).
+    #
+    # The tag is asked of the interpreter as EXT_SUFFIX, deliberately NOT as SOABI the
+    # way build.sh does it: SOABI is None on Windows CPython (measured, python 3.11.9),
+    # which would make the tag test match nothing and rebuild every run. EXT_SUFFIX is
+    # '.cp311-win_amd64.pyd' here and '.cpython-311-darwin.so' on macOS - it contains
+    # the platform's own tag on every platform. An untagged artifact is still accepted,
+    # because some builds emit eventprop_cpp.so / .dll.
+    $extSuffix = ""
+    try {
+        $extSuffix = ((& $PythonExe -c "import sysconfig;print(sysconfig.get_config_var('EXT_SUFFIX') or '')" 2>$null) | Out-String).Trim()
+    } catch { }
+    $allExt = @(Get-ChildItem "eventprop\eventprop_cpp*.pyd", "eventprop\eventprop_cpp*.dll", "eventprop\eventprop_cpp*.so" -ErrorAction SilentlyContinue)
+    $built = @($allExt | Where-Object {
+            (-not $extSuffix) -or $_.Name -like "*$extSuffix*" -or
+            $_.Name -eq "eventprop_cpp.so" -or $_.Name -eq "eventprop_cpp.dll"
+        })
     if ($built) {
-        Write-Host "  -> already built ($($built[0].Name)); rebuild by deleting it" -ForegroundColor Green
+        $tagNote = if ($extSuffix) { "for $extSuffix" } else { "(interpreter tag unknown)" }
+        Write-Host "  -> already built $tagNote ($($built[0].Name)); rebuild by deleting it" -ForegroundColor Green
     } else {
+        if ($allExt) {
+            Write-Host "  existing extension(s) are for a DIFFERENT interpreter (none match '$extSuffix') - rebuilding" -ForegroundColor Yellow
+            foreach ($f in $allExt) { Write-Host "    $($f.Name)" -ForegroundColor DarkGray }
+        }
         Invoke-Step "pip install -e . (EventProp.Python)" {
             & $PythonExe -m pip install -e . --no-build-isolation
         } | Out-Null
+    }
+    Pop-Location
+
+    # The benchmark suite package, into the same interpreter: scripts/bench/run_all.py runs
+    # pytest against it with sys.executable, and the suite's --benchmark-* options come
+    # from [tool.pytest.ini_options] here.
+    #
+    # `.[dev]`, not `.`: pytest and pytest-benchmark are declared under
+    # [project.optional-dependencies] dev, so a bare editable install does NOT install
+    # them, and --no-build-isolation means nothing else does either. Measured on the POSIX
+    # side of this contract: after a clean python step the build reported success and
+    # pytest then died with "unrecognized arguments: --benchmark-min-time=0.05", because
+    # the plugin that owns those options was absent. A green build that leaves the suite
+    # unrunnable is the failure mode this repo calls out everywhere else.
+    #
+    # This step is also where the two scripts stopped being one contract: build.sh grew it
+    # in the Linux branch and build.ps1 never had it, so a clean Windows clone built
+    # "successfully" with the python benchmark suite not installed at all. Verified here
+    # before adding it: resolves and installs with --no-build-isolation on pip 26.1 /
+    # setuptools 65.5, and the editable install adds nothing to sys.path (the project has
+    # no package directory - conftest.py is loaded by pytest via rootdir, not imported).
+    Push-Location (Join-Path $ScriptDir "src\EventProp.Python.Benchmarks")
+    if ((Test-Path "pyproject.toml") -or (Test-Path "setup.py")) {
+        if (Invoke-Step "pip install -e .[dev] (EventProp.Python.Benchmarks)" {
+                & $PythonExe -m pip install -e ".[dev]" --no-build-isolation
+            }) {
+            Write-Host "  -> eventprop-python-benchmarks (+ pytest, pytest-benchmark)" -ForegroundColor Green
+        }
+    } else {
+        Write-Host "  no pyproject.toml / setup.py - benchmarks package not installed" -ForegroundColor Yellow
+        $Skips.Add("EventProp.Python.Benchmarks (no project file)")
     }
     Pop-Location
 }
@@ -363,18 +476,30 @@ if ($SkipPython) {
     # import when that happens), so regenerate whenever the .pyx is newer than the .c.
     $pyx = Join-Path (Get-Location) "eventprop_c\_native.pyx"
     $cfile = Join-Path (Get-Location) "eventprop_c\_native.c"
-    $needCython = -not (Test-Path $cfile)
-    if ((Test-Path $cfile) -and (Test-Path $pyx)) {
-        $needCython = (Get-Item $pyx).LastWriteTime -gt (Get-Item $cfile).LastWriteTime
+    # The check must test CONTENT, not just existence + mtime. A failed extension build
+    # leaves a ZERO-BYTE _native.c (measured on the POSIX side of this same contract:
+    # an interpreter the packages reject truncated it to 0 bytes). An empty file is
+    # "newer" than the .pyx, so an Exists/-nt test skips Cython, and pip then compiles
+    # the empty file into a stub .pyd that dies at import with "dynamic module does not
+    # define module export function (PyInit__native)" - far from this step, in the
+    # suite that consumes it. Length -eq 0 is the same test as build.sh's `-s`.
+    $cfileItem = $null
+    if (Test-Path $cfile) { $cfileItem = Get-Item $cfile }
+    $emptyCfile = ($cfileItem -and $cfileItem.Length -eq 0)
+    $needCython = (-not $cfileItem) -or $emptyCfile
+    if (-not $needCython -and (Test-Path $pyx)) {
+        $needCython = (Get-Item $pyx).LastWriteTime -gt $cfileItem.LastWriteTime
     }
     if ($needCython) {
+        if ($emptyCfile) { Write-Host "  _native.c is EMPTY (a previous Cython run died) - regenerating" -ForegroundColor Yellow }
         Invoke-Step "cython _native.pyx" { & $py -m cython "eventprop_c\_native.pyx" } | Out-Null
     } else {
         Write-Host "  _native.c is newer than _native.pyx - skipping cython" -ForegroundColor DarkGray
     }
 
-    Invoke-Step "pip install -e . (EventProp.Native.Python)" {
-        & $py -m pip install -e . --no-build-isolation
+    Invoke-Step "pip install -e .[dev] (EventProp.Native.Python)" {
+        # [dev] = pytest, for src\EventProp.Native.Python\test (29 tests).
+        & $py -m pip install -e ".[dev]" --no-build-isolation
     } | Out-Null
     Pop-Location
 }
