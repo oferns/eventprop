@@ -390,10 +390,21 @@ else
   # ModuleNotFoundError: No module named 'eventprop.eventprop_cpp' — in the test
   # suite, several steps after the build that declined to produce it.
   #
-  # The tag is asked of the interpreter itself (sysconfig SOABI), not parsed from the
-  # version string, so it matches whatever the platform's naming convention is
-  # (cpython-314-darwin.so, .cp314-win_amd64.pyd, ...).
-  abi_tag="$("$PYTHON" -c 'import sysconfig;print(sysconfig.get_config_var("SOABI"))' 2>/dev/null)"
+  # The tag is asked of the interpreter itself, not parsed from the version string, so it
+  # matches whatever the platform's naming convention is (cpython-314-darwin.so,
+  # .cp314-win_amd64.pyd, ...). EXT_SUFFIX FIRST, SOABI second, and "None" filtered:
+  # SOABI is None on Windows CPython, and print(None) yields the four-character STRING
+  # "None" — not empty — so the -z fail-open below would be skipped, no filename would
+  # ever match, and this step would rebuild every run while blaming a foreign interpreter
+  # ("none match None"). Measured with the exact old expression on python 3.11.9 on
+  # Windows: it returns that "None". Reachable, because build.sh has Windows branches of
+  # its own ($venv_dir/Scripts/python.exe) and AGENTS.md records it running under Git for
+  # Windows bash. EXT_SUFFIX carries the platform tag on every platform this repo builds
+  # on — '.cp311-win_amd64.pyd', '.cpython-311-darwin.so',
+  # '.cpython-311-x86_64-linux-gnu.so' — and it CONTAINS the SOABI value wherever SOABI
+  # was meaningful, so macOS/Linux match exactly what they matched before. build.ps1 asks
+  # the same question; the two scripts must not answer it differently.
+  abi_tag="$("$PYTHON" -c 'import sysconfig;t=sysconfig.get_config_var("EXT_SUFFIX") or sysconfig.get_config_var("SOABI") or "";print("" if t in ("None","none") else t)' 2>/dev/null)"
   built=()
   shopt -s nullglob
   all_ext=(eventprop/eventprop_cpp*.so eventprop/eventprop_cpp*.dylib eventprop/eventprop_cpp*.pyd)
@@ -404,20 +415,20 @@ else
   # "${arr[@]+"${arr[@]}"}" form expands to nothing when unset and is safe on every
   # bash that has nullglob.
   for f in ${all_ext[@]+"${all_ext[@]}"}; do
-    # Match the interpreter's own ABI tag in the filename; a plain .so (no tag) is
-    # accepted, since some builds emit the untagged form.
+    # Match the interpreter's own tag in the filename; an untagged artifact is accepted,
+    # since some builds emit the untagged form (.so on POSIX, .dll on Windows/MSYS).
     base="${f##*/}"
     if [[ -z "$abi_tag" ]]; then
       built+=("$f")
-    elif [[ "$base" == *"$abi_tag"* || "$base" == "eventprop_cpp.so" ]]; then
+    elif [[ "$base" == *"$abi_tag"* || "$base" == "eventprop_cpp.so" || "$base" == "eventprop_cpp.dll" ]]; then
       built+=("$f")
     fi
   done
   if [[ ${#built[@]} -gt 0 ]]; then
-    ok "eventprop.eventprop_cpp already built for $abi_tag (${built[0]})"
+    ok "eventprop.eventprop_cpp already built ${abi_tag:+for $abi_tag }(${built[0]})"
   else
     if [[ ${#all_ext[@]} -gt 0 ]]; then
-      note "existing extension(s) are for a DIFFERENT interpreter (none match $abi_tag) — rebuilding"
+      note "existing extension(s) are for a DIFFERENT interpreter (none match ${abi_tag:-<unknown>}) — rebuilding"
     fi
     if run "pip install -e . (EventProp.Python)" \
       "$PYTHON" -m pip install --break-system-packages -e . --no-build-isolation; then
