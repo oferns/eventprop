@@ -64,6 +64,9 @@ eventprop.net/
 │   ├── EventProp.Native.ParityTests/ # Standalone parity tests (C vs Eigen)
 │   ├── EventProp.Python.Benchmarks/  # pytest-benchmark (pybind11 vs Cython)
 │   └── EventProp.Web/                # Streamlit visualizer
+├── cmake/
+│   ├── EventPropSimd.cmake    # one SIMD level (CPUID+XCR0 probe), shared by 4 projects
+│   └── EventPropPstl.cmake    # what <execution> needs LINKED (probed; empty on Apple/Windows)
 ├── scripts/bench/              # cross-suite benchmark pipeline (see below)
 ├── coverage-report/            # Generated HTML coverage reports (gitignored)
 └── AGENTS.md                   # This file
@@ -139,6 +142,16 @@ artifacts. `results` stops at that boundary: it removes the regenerable measurem
 build output and is never removed.
 
 **A failed step is reported, not swallowed.** The version of `build.sh` this replaced piped the three Python installs to `/dev/null` with `|| true`, and installed the Cython bindings **only if a project `.venv` existed** — while printing `→ eventprop_c (editable install)` unconditionally. On a machine with no venv, nothing was installed and the log said it was; the next thing to touch the missing extension was the benchmark suite, far from the cause. That is the same defect class as the old `build.ps1` (no exit checks at all) and the `patch -p1 … || true` submodule line, and all three are now measured rather than asserted.
+
+**Linux prerequisites — both proved by the first Linux run failing.** `libtbb-dev`
+(Debian/Ubuntu; `tbb-devel` Fedora, `onetbb` Arch): GCC 12+'s libstdc++ implements the C++17
+parallel execution policies over Intel oneTBB, and `eventprop_eigen_core_stripped.cpp` uses
+them, so without the dev package the three C++ consumer projects stop at link — see
+*PSTL: what `<execution>` needs linked*. And **Cython in the interpreter that builds the
+extension**: `setup.py` compiles the generated `_native.c`, and nothing in
+`build-system.requires` fetches Cython, so Cython is a prerequisite of step 8 rather than of
+the package. `build.sh` probes for it and names the interpreter that lacks it — see *Fixed —
+the Cython step reported two failures for one missing package*.
 
 **Windows** — `build.ps1` is the same contract for MSVC: presets, the same dependency order, per-step exit codes, and a failure list that ends in a real exit code.
 
@@ -221,6 +234,17 @@ A plain `git submodule update --init --recursive` silently downgrades pybind11 t
 **Drift test.** `check-patches` applies every patch to a detached worktree at pristine submodule HEAD. On the live tree a foreign-platform patch reads as "blocked" because the active patch owns the same hunks, so only the worktree test separates "not for this platform" from "upstream moved". Run it after any submodule update.
 
 The submodule is read-only — patches must be reapplied after pulling from upstream.
+
+**No `.orig` / `.rej` litter, and that is a `git apply` property worth keeping.** The submodule
+carried `setup.py.orig`, `src/eventprop_cpp.cpp.orig`, `eventprop/loss_layer.py.orig` and
+`src/pybind11.rej` (dated Jun 18) — artifacts of the `patch -p1` era this script left behind.
+`git apply` creates neither backups nor reject files, so nothing regenerates them, and their
+presence is misleading: they read as "a hunk failed here" when the tree is in fact fully
+patched. Removed after verifying each was a subset of the current patched file (the only line
+missing from an `.orig` was the line the patch replaces) and that the `pybind11.rej`'s demanded
+commit — `a2e59f0e`, which the rejected `setup.py` hunk could not apply — is what
+`src/pybind11` actually sits on. `submodule-state.sh verify` and `check-patches` pass after the
+removal, and `verify` is the check that would catch a genuinely lost hunk.
 
 ## Running Tests & Coverage
 
@@ -466,8 +490,16 @@ diagnosed; the number is the finding. Quote timings per platform, never as one n
 
 ### Cross-platform status of the benchmark pipeline
 
-**Validated on macOS/arm64 and Windows/x64. Linux has not been run.** The Windows
-validation is a full run (all three suites, XL included, 46m 40s) producing
+**Validated on macOS/arm64 and Windows/x64. On Linux the builds and every test suite pass;
+the benchmark pipeline itself has still not been run there.** The Linux validation
+(2026-10-20, WSL2, GCC 13.3, cmake 3.28.3, .NET 10.0.112, Python 3.12.3) is
+`./clean.sh -full && ./build.sh release` ending green with C 220/220, parity 105/105, .NET
+382/382 and `eventprop_c` + paper-parity 33 passed / 6 Windows-only skips. It found four
+defects, all under *Fixed Defects*: the missing TBB link input, the Cython step reporting two
+failures for one missing package, the extension with no rpath on Linux, and step 7 printing
+"already built" over an unloadable reference binary.
+
+The Windows validation is a full run (all three suites, XL included, 46m 40s) producing
 `bench-reports/report_windows-amd64.md`; the per-pair geomeans against
 `report_darwin-arm64.md` are in that commit's message. It is also the run that found the
 UTF-8/cp1252 adapter defect (see *Fixed — BenchmarkDotNet adapter*), the relative-`--out`
@@ -494,18 +526,30 @@ defect, and the Python DLL-loading defect (see *Python bindings on Windows*).
   while importing _native`; `os.add_dll_directory` on it imports. The registration lives in
   `eventprop_c/_library_path.py` and runs at package import. The `PATH` entry in
   `run_all.py` is kept for non-Python consumers of that directory (the native benchmark
-  exes, which do honour it) and is not what makes the import work. The extension also
-  embeds an **rpath at build time** (`_native.pyx:21`), which is why the same code is fine
-  on macOS.
+  exes, which do honour it) and is not what makes the import work. The extension embeds an
+  **rpath at build time** (`setup.py`) — on macOS and, since the first Linux run, on Linux
+  too; `_native.pyx`'s comment used to claim the rpath covered every platform, which is what
+  made `import eventprop_c` fail on Linux behind `run_all.py`'s back. See *Linux: finding the
+  C library (rpath, then preload)*.
 - **.NET binary path.** `bin/Release/net10.0/EventProp.Benchmarks.dll` is
   framework-dependent and uses the **same layout on Windows and Linux** — no branch needed.
   Stated here because it looks like the kind of path that would need one.
 
-**Remaining Linux gap (cosmetic):** `from_google_benchmark.py`'s `_cpu_label` uses
-`platform.mac_ver()` and a macOS-only `sysctl` helper. On Linux it falls through to
-`mhz_per_cpu`, so `meta.cpu` reads `"8 cpu @ N MHz"` rather than a brand string. That makes
-`meta.cpu` non-comparable across hosts for the same machine class; `host` and `vcs_rev` are
-unaffected.
+**Linux CPU label: fixed.** `from_google_benchmark.py`'s `_cpu_label` used `platform.mac_ver()`
+and a macOS-only `sysctl` helper, so on Linux `meta.cpu` read `"8 cpu @ M MHz"` instead of a
+brand string — non-comparable with the other two hosts' records for the same machine class.
+`_linux_cpu_brand()` now reads `/proc/cpuinfo` (`model name`, then ARM's `Hardware`), and
+`_cpu_label` dispatches on `platform.system()` rather than on `mac_ver()`. That gate was a
+latent bug, not a style choice: `platform.mac_ver()` returns a populated tuple on some Linux
+distributions, and the old code then ran `sysctl -n machdep.cpu.brand_string` on a Linux
+machine to find nothing. Brand strings do not carry a core count, so the label no longer says
+"N cpu @ M Hz" once a brand is found — which is the point: `Intel(R) Core(TM) i9-9900K CPU @
+3.60GHz` is 1 core at 3.6 GHz as that string reads on macOS, and a count of 16 would have been
+the better label. Windows deliberately gets no new brand reader; it keeps its existing
+`mhz_per_cpu` fallback and its `report_windows-amd64.md` numbers stay comparable to
+themselves. Verified on this box: brand resolves to `12th Gen Intel(R) Core(TM) i7-12700K`,
+and a Linux record generated from the real `bench_c`/`bench_cpp` binaries carries
+`host: linux-x86_64`, that `cpu`, `tool: 1.9.5`.
 
 **Prerequisite on Linux:** the Python suite needs the reference submodule built, which needs
 `scripts/submodule-state.sh apply` (pybind11 `a2e59f0e` / 2.13.6 on Linux, carried inside
@@ -526,18 +570,17 @@ unaffected.
 projects. The benchmark *suites* are portable; the *runner's* path assumptions were not,
 and are what the Windows run fixed.
 
-`build.sh` is the open case: it was rewritten to the `build.ps1` contract (exit checks, the
-two missing projects, Cython regeneration, interpreter targeting). Its mechanics were
+`build.sh` has had its first real Linux run and it ended green. Its mechanics were also
 exercised on Windows — every CMake, .NET and pip step ran through the new reporting, and the
 Python step failed there for Windows reasons (setuptools' vcvars probe under a stale shell
 PATH; MSVC env is `build.ps1`'s job) — which is a demonstration that the reporting works, not
-that the script is right on Linux/macOS. **Its first real run is the Linux leg.**
+that the script is right on Windows. The Linux run is the one that turned "the reporting works"
+into "the build is right here": it named four real defects with exit codes instead of printing
+"Build complete", and they are all fixed (see *Fixed Defects*).
 
-`run_benchmarks.sh` is new, and is in the same state: its prerequisite probes, argument
-mapping, exit-code reporting and the scratch-run guard were all exercised on Windows under
-Git bash (including the failure paths — a missing interpreter reports and exits 1, a
-`--report-only` against an empty `--out` exits 1, a scratch run leaves the committed
-artifacts alone). It has never run on the platform it is for.
+`run_benchmarks.sh` is newer still. Its prerequisite probes were reproduced by hand on Linux —
+every artifact it looks for is present and its `import eventprop_c._native` probe passes — but
+the runner itself has never executed the pipeline on any platform from this script.
 
 **To get benchmarks after cloning on Windows:**
 
@@ -567,15 +610,45 @@ The manual `cd src/EventProp.Native.Benchmarks && cmake --preset release …` an
 binaries and installs both Python layers, and `run_benchmarks.sh` checks for them rather
 than assuming them.
 
-**Not yet done:** (1) run the pipeline on **Linux** and record its per-pair geomeans
-alongside the darwin and windows reports — that is the remaining leg, and no amount of
-code reading substitutes for it. Three things it must check, all found on Windows: the
-`-march=native` **PUBLIC** propagation on `eventprop_eigen_core` changes consumer codegen
-on Linux (it was `PRIVATE`, which is the same aligned-allocator ABI mismatch that produced
-heap corruption on Windows — see *SIMD: one ISA level*), the SIMD probe now decides the
-level by CPUID+XCR0 instead of reading `/proc/cpuinfo`, and `build.sh` itself is new —
-start the Linux run with `./build.sh release` and read its failure list, if any. (2) Linux
-`_cpu_label` fallback.
+**Not yet done:** run the pipeline on **Linux** and record its per-pair geomeans alongside
+the darwin and windows reports. The builds and suites pass there now, but no
+`report_linux-x86_64.md` exists, and no amount of code reading substitutes for the run. One
+question it still has to settle first: whether `bench_cpp`'s Tiny family is dominated by
+one-off TBB task-scheduler spin-up — measured at ~24 ms for a single `ComputeSpikes/Tiny`
+iteration at `--benchmark_min_time=0.01s`, orders of magnitude off the macOS number. **Do not
+quote Linux benchmark numbers until that is measured.** The two Linux items the build/suite run
+*did* settle: the SIMD level came from the CPUID+XCR0 probe (`AVX512F` rejected, `AVX2`
+accepted), and `eventprop_eigen_core`'s `-march=native` PUBLIC propagation is consistent with
+`parity_test`'s `-mavx2` at `EIGEN_MAX_ALIGN_BYTES` 32 — proven end to end by parity 105/105
+rather than by reading compile_commands.json, which is the only reason that check was worth
+listing.
+
+**Both `build.sh` logic fixes are now mirrored in `build.ps1`**, so the two scripts are one
+contract again: an import-probe before the reference library's "already built", and a Cython
+probe + skip-the-doomed-install in the Cython step. `Get-ImportFailure` is the PowerShell form
+of the same question, and takes its `PYTHONPATH` separator from the interpreter (`os.pathsep`
+is `;` on Windows — a hardcoded `:` is the defect recorded under *Fixed — BenchmarkDotNet
+adapter*). The TBB fix needs nothing there: `eventprop_pstl_link_deps()` returns empty on
+`WIN32`.
+
+What that means for the Windows claim, stated as a boundary rather than a pass: validated with
+**PowerShell 7.6 on Linux** — file parses clean; the helper's seven cases (success, unknown
+module, this tree's `eventprop.eventprop_cpp`, Cython present, Cython absent, missing
+interpreter, a package whose import genuinely fails, and `PYTHONPATH` restored afterwards);
+all four step-7 branches (imports → "already built" with no rebuild; fails → reason + rebuild;
+wrong-interpreter tag → different-interpreter note + rebuild; nothing → silent rebuild); the
+step-8 decision table (no Cython + regeneration needed → **one** failure naming the interpreter
++ one skip + install not reached + `_native.c` untouched; Cython present → regenerates for real
+and reaches the install; up to date on a Cython-less interpreter → probe does not fire, install
+runs). Not validated: Windows PowerShell **5.1**, MSVC, and a real `pip` install on Windows —
+the constructs used are 5.1-safe (`$null -eq` comparisons, `@()` arrays, `Env:` drive removal,
+`2>&1` + `$LASTEXITCODE`), but "5.1-safe by construction" is not "5.1-tested". One drive-by
+portability fix fell out of testing: the Cython call passed the cwd-relative literal
+`"eventprop_c\_native.pyx"`; it now passes the absolute `$pyx` the block already computed.
+PowerShell normalises `\` to `/` on Unix, which is why that literal — and step 7's
+`"eventprop\eventprop_cpp*.pyd"` globs — work on both platforms, and why the step-7 branches
+were testable here at all.
+
 ### Coverage Report Generation
 
 ```bash
@@ -835,6 +908,79 @@ This bit two numerical-gradient tests in `src/EventProp.Native.Python/test/test_
 
 While fixing them, a second test-side issue surfaced: `t_eps = 1e-8` is below the conditioning limit for a central difference on O(1) losses. Its absolute noise floor is `~machine_eps / t_eps ≈ 2.2e-8`, which swamps the analytical gradient where that gradient is legitimately **exactly 0** (the last input spike, which no first-spike time depends on), and the assertion used `rtol` with no `atol`. `t_eps = 1e-7` measured the best worst-case agreement (1.0e-9, against 8.1e-9 at 1e-8). When a finite-difference test fails on an entry that is analytically zero, check the noise floor before assuming a gradient bug.
 
+### PSTL: what `<execution>` needs linked — probed, shared by three projects, never on Apple/Windows
+
+`EventProp.Cpp.Wrapper/eventprop_eigen_core_stripped.cpp` sorts and searches with
+`std::execution::par_unseq` (lines 259, 274). libstdc++ 12+ implements those policies over
+Intel oneTBB: `<execution>` inlines task-scheduler calls (`tbb::detail::r1::spawn`,
+`allocate`, `execute_and_wait`, …) and expects a library at link time. Nothing in this repo
+named one — `git grep -i tbb` over the tracked tree: zero hits outside the read-only
+submodule — so the first Linux build lost three projects at link **and** produced a shared
+library that built green and could not be loaded.
+
+`cmake/EventPropPstl.cmake` answers the question once, the way `EventPropSimd.cmake` answers
+the ISA question, and `EventProp.Cpp.Wrapper`, `EventProp.Native.ParityTests` and
+`EventProp.Native.Benchmarks` all call it:
+
+| Call site | Why it has to be stated there |
+|---|---|
+| `eventprop_eigen_core` **PUBLIC** | It is a STATIC library, so "what it needs to link" is a consumer requirement: `eventprop_c_api` links the core into a SHARED library (which on Linux keeps undefined symbols instead of failing), and the in-tree test executables inherit it |
+| ParityTests: `INTERFACE_LINK_LIBRARIES` on the IMPORTED `eventprop_eigen_core` | An `IMPORTED` target carries no usage requirements — the same reason the ISA level is restated in that project |
+| `bench_cpp`, `bench_rootfind` link items | They consume the prebuilt `libeventprop_eigen_core.a` through `find_library`, which carries nothing either |
+
+**The function's first act is returning empty on `APPLE` and `WIN32`, before any probe.** That
+is not a guess about stdlib internals: it is what this repository's own validated builds
+measure — the same source compiles **and links** on macOS and on Windows/x64 (parity 105/105)
+with no TBB anywhere in the tree, because libc++ and the MSVC STL fall back to serial
+execution. Returning before the probe is what makes it true that this file cannot change those
+platforms, which was the constraint the Linux fix was written under. Verified with
+`-DCMAKE_SYSTEM_NAME=Darwin`: zero `Performing Test EVENTPROP_PSTL_*` lines, empty result.
+
+**Everything past that gate is decided by compiling, not by an OS or compiler-version gate**,
+because the question has different answers on the same Linux box — GCC against libstdc++
+(needs TBB) and clang against libc++ (serial, needs nothing). An OS gate would be wrong for
+one of them. The order matters: (1) link with no extra library → nothing needed; (2) else
+`find_library(tbb)` and re-probe with it → return it; (3) else `FATAL_ERROR` naming the
+package to install. `find_library` rather than `find_package(TBB)` because a probe runs in its
+own `try_compile` project that cannot see an imported target created in this one, so the answer
+must be spelled identically in the probe and in the build. `-DEVENTPROP_PSTL_LIBRARY=/path/…`
+overrides the search. Every probe result is `unset` from the cache at entry, because the
+stale-cache failure here is specific and ugly: one configure before `apt install libtbb-dev`
+would otherwise keep reporting TBB missing forever.
+
+Two probe details, both found by measuring and both looking trivial until they bite:
+
+- **`check_cxx_source_compiles` does not accept `CMAKE_FLAGS`** — measured on CMake 3.28:
+  `Unknown argument: CMAKE_FLAGS`. Since the projects' floor is 3.21, the C++ standard travels
+  in `CMAKE_REQUIRED_FLAGS` as `-std=c++17`, reachable only on the non-Apple/non-Windows path
+  so the GNU spelling is safe by construction. Probing at the compiler default instead of the
+  project's standard reports "no `<execution>`" about a project that has it, because
+  `std::execution` is declared at C++17 and later only.
+- **The header probe must not link.** On libstdc++ 13 a TU that merely includes `<execution>`
+  and calls a **serial** `std::sort` fails to link with the same undefined
+  `tbb::detail::r1` symbols as the parallel version — measured. A linking header probe
+  therefore reports "this stdlib has no `<execution>`" about the exact toolchain that has it
+  and needs TBB: the opposite advice, on every Linux machine the module exists to help. It runs
+  with `CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY`, which `check_cxx_source_compiles` does
+  honour.
+
+The signature worth remembering is the quiet failure, not the link error:
+
+```
+[100%] Built target eventprop_c_api        # green
+$ python3 -c "import ctypes; ctypes.CDLL('.../libeventprop_cpp_wrapper.so')"
+OSError: undefined symbol: _ZN3tbb6detail2r15spawnERNS0_2d14taskERNS2_18task_group_contextE
+```
+
+`nm -DC` still lists `U tbb::detail::r1::*` on that library after the fix, correctly: they are
+resolved at load through the new `NEEDED libtbb.so.12`. The load test is the check; `nm` on a
+shared library is not.
+
+Post-mortem: *Fixed — three C++ projects would not link on Linux: `<execution>` needs TBB*.
+Neighbouring platform rule: *SIMD: One ISA Level* — that one is about codegen agreement, this
+one about link inputs, and both are shared modules for the same reason (the parity suite
+compares two builds that must be built the same way).
+
 ### Cross-Suite Benchmark Data Contract
 
 Three suites benchmark the same algorithms — native `bench_main.cpp` (C vs Eigen), .NET `EventProp.Benchmarks` (BenchmarkDotNet, managed vs P/Invoke), and `EventProp.Python.Benchmarks` (pytest-benchmark, pybind11 vs Cython). They share sizes (Tiny 10/5/20, Small 50/20/100, Medium 200/80/500, Large 500/200/1000; native and .NET add XL), taus (0.02 / 0.005), `v_th = 1.0`, and weights U(0.5, 2.0).
@@ -909,10 +1055,37 @@ All wrappers use `__dealloc__` to call the appropriate C free function. Numpy vi
 
 Four Windows-specific facts, all measured:
 
-- **`os.add_dll_directory`, not `PATH`.** `_native.pyd` links `eventprop_c_api.dll`. Since Python 3.8, extension modules are loaded with `LOAD_LIBRARY_SEARCH_DEFAULT_DIRS`, whose search set is the extension's own directory, the process directory, the system directories, and directories registered with `os.add_dll_directory` — **`PATH` is excluded**. Measured on the same directory both times: `PATH` gives `ImportError: DLL load failed while importing _native`; `os.add_dll_directory` imports. `eventprop_c/_library_path.py` registers `EVENTPROP_C_LIB_DIR` (os.pathsep-split) and then the repo layout — `build/`, `build/Release`, `build/Debug` (Release because MSVC is multi-config) — and `__init__.py` calls it **before** `from ._native import`. The handles are kept in a module global, because `os.add_dll_directory`'s handle *removes* the directory when it is finalised. No-op on POSIX, where the extension carries an rpath. Pinned by `test/test_library_path.py`.
+- **`os.add_dll_directory`, not `PATH`.** `_native.pyd` links `eventprop_c_api.dll`. Since Python 3.8, extension modules are loaded with `LOAD_LIBRARY_SEARCH_DEFAULT_DIRS`, whose search set is the extension's own directory, the process directory, the system directories, and directories registered with `os.add_dll_directory` — **`PATH` is excluded**. Measured on the same directory both times: `PATH` gives `ImportError: DLL load failed while importing _native`; `os.add_dll_directory` imports. `eventprop_c/_library_path.py` registers `EVENTPROP_C_LIB_DIR` (os.pathsep-split) and then the repo layout — `build/`, `build/Release`, `build/Debug` (Release because MSVC is multi-config) — and `__init__.py` calls it **before** `from ._native import`. The handles are kept in a module global, because `os.add_dll_directory`'s handle *removes* the directory when it is finalised. The registration is a no-op on macOS, which links an rpath at build time; Linux needs its own mechanism and had none — see *Linux: finding the C library (rpath, then preload)*. Pinned by `test/test_library_path.py`.
 - **The extension needs `/std:c11` *and* `/experimental:c11atomics`.** `_native.c` includes `eventprop_batch.h` → `<stdatomic.h>`. distutils passes `/TC` with no language standard, so `vcruntime_c11_stdatomic.h(16)` `#error`s "C atomics require C11 or later"; MSVC needs the atomics switch on top of that. `setup.py` supplies the pair. Without them the extension cannot be compiled at all.
 - **A stale `.pyd` is a memory-corruption bug, not a staleness nuisance.** Cython compiles the `SpikeOutput` / `MaximaOutput` struct layouts out of `eventprop.h`. An extension built against July's headers and run against October's reads those structs at July offsets: the suite died with `Windows fatal exception: access violation` inside `spikes.py __getitem__` via `loss_layer._find_first_spikes`. **Nothing in the build checked that the extension is newer than the headers** — on any platform. It now does, in three places: `_native.pyx` runs `abi_check()` at import and raises `ImportError` naming both the compiled and the loaded values; `build.ps1` regenerates `_native.c` when `_native.pyx` is newer; and `EventProp.Native` gates its layer constructors and batch entry points on `Api.EnsureAbiMatches()`. See *ABI: One Version Stamp, Checked by Every Consumer*.
 - **`vcvarsall.bat` failing is often the machine, not the repo.** Symptom: `pip install -e .` reports "Microsoft Visual C++ 14.0 or greater is required" with VS installed. Cause on this machine: a machine-PATH entry with an unbalanced quote (`C:\Program Files\WSL"`), which makes vcvars' own batch parsing die (`\NVIDIA was unexpected at this time`). Check the raw value — `(Get-Item 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment').GetValue('Path', $null, 'DoNotExpandEnvironmentNames')` — for a `"` before blaming the toolchain, and never fix it with `setx PATH "%PATH%"` (merges machine+user into one `REG_SZ`, expands every `%placeholder%`, truncates at 1024 chars).
+
+### Linux: finding the C library (rpath, then preload)
+
+`_native*.so`'s `DT_NEEDED` entry is the bare soname `libeventprop_c_api.so`. On Linux the
+loader tries RUNPATH, then `LD_LIBRARY_PATH`, then the system search paths, and none of those
+is the repo's build directory — so a plain `import eventprop_c` after a fully green
+`./build.sh release` died with `ImportError: libeventprop_c_api.so: cannot open shared object
+file: No such file or directory`. It had gone unnoticed because the only consumer, and the
+only person ever importing it, was `scripts/bench/run_all.py`, which exports
+`LD_LIBRARY_PATH` for its own reasons. Two changes, both Linux-only:
+
+- **`setup.py` links an rpath** — `-Wl,-rpath,<abs>/src/EventProp.C/build`, absolute and
+  derived from `__file__` rather than from the CWD, because the loader resolves an rpath at
+  import time in a process that may have started anywhere. This is the mechanism the `darwin`
+  branch of that same file already used; the `else` branch had `extra_link_args = []`.
+- **`_library_path.py` preloads the library on Linux** — `ctypes.CDLL(lib, RTLD_GLOBAL)` for
+  each candidate directory, which is the POSIX counterpart of `os.add_dll_directory`: a library
+  already loaded with `RTLD_GLOBAL` satisfies a later extension's `DT_NEEDED` by soname. It is
+  what makes `EVENTPROP_C_LIB_DIR` mean something on Linux — the documented escape hatch was
+  silently inert there, and a variable that appears to configure the package while doing
+  nothing is its own defect class — and it covers what an absolute rpath cannot: an installed
+  `eventprop_c`, or a checkout moved after the extension was built. macOS still returns `[]`.
+
+`__init__.py` calls `register_c_library_dirs()` before `from ._native import`, which is what
+gives the preload its chance. Pinned by `test/test_library_path.py::LinuxLibraryLookupTest`
+(preload ran, idempotent, repo `build/` among the candidates) next to the cross-platform import
+test — which is the one that had been failing.
 
 ### Layer Chain Flow
 
@@ -1228,10 +1401,184 @@ Verification: `build.ps1 release` → `bin\Release\net10.0\EventProp.Benchmarks.
 inherits it. Enumerate what it sets (`set` after `vcvarsall`), and strip the variables your
 other tools interpret — `Platform` for MSBuild, `PLATFORM`/`VSINSTALLDIR` for CMake.
 
+### Fixed — three C++ projects would not link on Linux: `<execution>` needs TBB, and the shared library linked anyway
+
+`EventProp.Cpp.Wrapper/eventprop_eigen_core_stripped.cpp` uses `std::sort(std::execution::par_unseq, …)`
+and `std::find_if(std::execution::par_unseq, …)`. libstdc++ 12+ implements those policies over
+Intel oneTBB, and nothing in this repo linked it — `git grep -i tbb` over the tracked tree
+returned zero hits outside the read-only submodule. Three executables died at link
+(`eventprop_cpp_tests`, `parity_test`, `bench_cpp`) with `undefined reference to
+tbb::detail::r1::allocate/spawn/execute_and_wait/…`; `bench_c` was fine, because it links only
+the C library.
+
+The link errors were not the problem worth recording. **`libeventprop_cpp_wrapper.so` linked
+successfully** — a shared library on Linux may keep undefined symbols — reported `Built
+target`, and could not be loaded:
+
+```
+OSError: .../libeventprop_cpp_wrapper.so: undefined symbol:
+         _ZN3tbb6detail2r15spawnERNS0_2d14taskERNS2_18task_group_contextE
+```
+
+14 undefined `tbb::` symbols in an artifact a green build step had just handed to its
+consumers. That is this repo's recurring class — a step whose final line is a claim rather
+than a measurement — and the loud failure (the executables) was what pointed at the quiet one.
+
+**Fix**: `cmake/EventPropPstl.cmake`, called by all three projects — PUBLIC on
+`eventprop_eigen_core` (a STATIC library's link requirement is its consumers' requirement, which
+is also what makes the SHARED wrapper resolve instead of deferring), `INTERFACE_LINK_LIBRARIES`
+on the imported stand-in in ParityTests, and explicit link items for `bench_cpp` /
+`bench_rootfind` (see *PSTL: what `<execution>` needs linked*).
+
+**Why not delete the parallel policies instead?** `submodule-linux.patch` does exactly that to
+the reference library's `src/eventprop_cpp.cpp` — which is why the pybind11 build has never
+needed TBB — and porting that edit into the convenience copy would have been one line. It was
+rejected: the wrapper is shared with macOS, where the same source compiles today, so removing
+`<execution>` changes the platform the constraint said not to change, and it would silently
+serialise the benchmarked path on Linux while the C side runs OpenMP-parallel. Adding a link
+input where one is missing is the additive fix; deleting a construct to dodge a missing
+dependency is not.
+
+**Proven by construction, not by reading**: a six-line reproduction of the same two calls fails
+with the identical error class and links cleanly with `-ltbb`; `libtbb-dev` 2021.11.0 was
+already installed; the wrapper `.so` now carries `NEEDED libtbb.so.12`, `dlopen`s, and
+`eventprop_cpp_tests` passes 25/25.
+
+Diagnostic signatures: `undefined reference to tbb::detail::r1::*` on GCC 12+ whenever a TU
+includes `<execution>`; a shared library that builds green and `dlopen`s to `OSError`;
+and `nm -DC` still showing those symbols as undefined **after** the fix, which is correct —
+they resolve at load through the `NEEDED` entry, so the load test is the check and `nm` is not.
+
+Regression guards: the module's three branches are each exercised (finds TBB / `FATAL_ERROR`
+naming `libtbb-dev` / empty with **zero probes** under `-DCMAKE_SYSTEM_NAME=Darwin`), and the
+suites that consume it run — C++ 25/25, parity 105/105, `bench_cpp` executing.
+
+### Fixed — the Cython step reported two failures for one missing package, and would have compiled a stale source
+
+On a Linux interpreter without Cython, `build.sh` step 8 printed `No module named cython`,
+recorded `FAILED (exit 1): cython _native.pyx`, and then ran `pip install -e .[dev]` anyway,
+against a `_native.c` that had never been generated. The summary listed **five** failed steps,
+and **two of them were this one missing package**; the redundant one was a 98-line setuptools
+traceback whose headline — `cc1: fatal error: eventprop_c/_native.c: No such file or directory`
+— named a file, not the cause, several screens below it. Cython is a build prerequisite of this
+step and nothing
+fetches it automatically: `setup.py` compiles the generated `.c`, and `build-system.requires`
+lists only setuptools and numpy, so pip's isolated build env never cythonises anything either.
+
+**Fix**: probe `import Cython` in the interpreter that will build the extension, and on failure
+record **one** failure whose text names the interpreter and gives the command for that
+interpreter. Then gate the install on the source having actually been produced **in this run**:
+
+```bash
+if [[ $cfile_ready -ne 1 ]]; then          # not: [[ ! -s "$cfile" ]]
+  note "$cfile was not regenerated — skipping the editable install rather than"
+  note "compiling a stale or missing source (the cython failure above is the cause)"
+```
+
+The `cfile_ready` flag, rather than a file test, is the part that matters: if regeneration was
+needed and did not happen, a `_native.c` that **is** present is a **stale** one, and compiling
+it is exactly the stale-extension class `_native.pyx`'s ABI check refuses to import on. A
+`-s "$cfile"` test would have skipped the failure and printed a green editable install over
+headers from a previous build.
+
+**Verified, all three states**, by running the step's own text (extracted verbatim from
+`build.sh`, so the harness cannot drift from the script): stale `_native.c` + no Cython → one
+failure, one named skip, no compile; no `_native.c` at all → same; same state with Cython
+present → regenerates 1.76 MB of C and installs, no failures. The skip appears in the summary,
+because a silent skip is the defect this script was rewritten to remove.
+
+Related: the summary printed `Skipped:` only on the failure path, so `--skip-python` on a green
+build claimed "Build complete" while naming neither of the two projects it had not touched.
+Both paths print it now.
+
+### Fixed — `import eventprop_c` failed on Linux after a green build: no rpath, and the escape hatch was inert
+
+`_native*.so`'s `DT_NEEDED` is the bare soname `libeventprop_c_api.so`. `setup.py` gave the
+darwin branch `-Wl,-rpath,…` and the `else` branch `extra_link_args = []`, so on Linux the only
+thing that could find the library was `LD_LIBRARY_PATH` — which the sole consumer,
+`scripts/bench/run_all.py`, happens to export for its own reasons. So the extension imported
+fine inside the benchmark pipeline and failed everywhere else, including immediately after
+`build.sh` printed a green editable install:
+
+```
+ImportError: libeventprop_c_api.so: cannot open shared object file: No such file or directory
+```
+
+`_library_path.py`'s docstring said why nobody had to fix this: *"On POSIX this module does
+nothing: the extension embeds an rpath at build time"* — true on macOS, false on Linux, and
+written confidently enough that the file itself argued against the fix it needed. It also made
+`EVENTPROP_C_LIB_DIR`, the documented escape hatch, silently inert on Linux: a variable that
+appears to configure the package while doing nothing is its own defect class, since the reader
+reasons from it as if it were load-bearing.
+
+**Fix** (both Linux-only; macOS and Windows paths untouched): link the rpath in `setup.py`
+— absolute, derived from `__file__`, because the loader resolves it at import time in a process
+that may have started anywhere — and preload the library in `_library_path.py` via
+`ctypes.CDLL(lib, RTLD_GLOBAL)` per candidate directory, the POSIX counterpart of
+`os.add_dll_directory`. A library already loaded with `RTLD_GLOBAL` satisfies a later
+extension's `DT_NEEDED` by soname, which is what makes `EVENTPROP_C_LIB_DIR` real on Linux and
+covers the case an absolute rpath cannot: an installed `eventprop_c`, or a checkout moved after
+the extension was built.
+
+**Measured in isolation**, because "it imports now" does not say which mechanism did it: the
+bare soname fails to load before the preload and loads after it; repeated registration is
+idempotent; `import eventprop_c` works from `CWD=/` with `LD_LIBRARY_PATH` unset; RUNPATH is
+present in the built extension.
+
+Regression guards: `test/test_library_path.py::LinuxLibraryLookupTest` (3 tests) plus the
+cross-platform `test_extension_imports_and_exposes_the_batch_api`, which is the one that had
+been failing — worth noting, because that test lives in the suite nobody ran on Linux.
+
+### Fixed — "already built" over an unloadable reference binary: step 7 trusted file existence
+
+`build.sh` step 7 decides whether to rebuild `EventProp.Python`'s pybind11 extension from the
+filename's ABI tag. Correct about the interpreter, silent about everything else: the binary in
+this checkout was dated three months earlier, built before `submodule-linux.patch` put
+`-fopenmp` in the link args, so it carried two undefined `omp_*` symbols. Step 7 printed
+`→ eventprop.eventprop_cpp already built (…cpython-312-x86_64-linux-gnu.so)` for a library that
+could not be loaded, and the failure surfaced in `tests/test_paper_parity.py` — the suite that
+compares the two backends on trained checkpoints:
+
+```
+ImportError: …/eventprop_cpp.cpython-312-x86_64-linux-gnu.so: undefined symbol: omp_get_thread_num
+```
+
+The same lesson this file already records for a zero-byte `_native.c` — an existence test cannot
+see an unusable artifact — applied one step earlier, to a bigger file.
+
+**Fix**: ask the interpreter. If a matching-tag extension exists but
+`import eventprop.eventprop_cpp` fails, print the loader's own line and rebuild:
+
+```
+eventprop/eventprop_cpp…so matches this interpreter but does NOT import — rebuilding
+  reason: ImportError: …undefined symbol: omp_get_thread_num
+```
+
+Quoting the loader matters: a missing symbol names the library that was never linked, which is
+the entire diagnosis, and otherwise it is three steps and one test-suite failure away from the
+cause. `PYTHONPATH` for the probe is joined with `os.pathsep` asked of the interpreter, not a
+hardcoded `:` (the `run_all.py` defect on Windows). The check is deliberately **not** a Linux
+special case: an extension that imports is skipped exactly as before on every platform, and one
+that does not is rebuilt with a line saying why; if some platform's in-place extension ever
+fails the probe for a reason the step cannot see, the cost is a rebuild a fresh clone pays
+anyway — never a green "already built" over a binary that cannot load.
+
+Evidence: the rebuilt binary carries `NEEDED libgomp`, and **paper parity is 7/7 on Linux** —
+YinYang TTFS and MNIST VMax checkpoints through both backends, the only suite that exercises
+real trained weights. The probe's **happy path** is what every build since has taken: step 7
+prints `→ eventprop.eventprop_cpp already built …` and does not rebuild, so the check is not a
+tax on incremental builds — that line is now a statement about the interpreter's opinion of the
+binary rather than about the filename.
+
 ## Platform Support
 
 - **macOS** — developed and tested
-- **Linux** — intended support. **Not exercised by the benchmark pipeline yet**, and two things this session changed land there first: the `-march=native` **PUBLIC** propagation on `eventprop_eigen_core` (it was `PRIVATE`, the same aligned-allocator ABI mismatch that produced heap corruption on Windows — see *SIMD: One ISA Level*), and the SIMD level now decided by a CPUID+XCR0 probe instead of by reading `/proc/cpuinfo`.
+- **Linux** — validated end to end 2026-10-20 (WSL2, GCC 13.3, cmake 3.28.3, .NET 10.0.112, Python 3.12.3): `clean.sh -full` → `build.sh release` green, C tests 220/220, parity **105/105**, .NET **382/382**, `eventprop_c` + paper parity 33 passed / 6 Windows-only skips, `bench_c`/`bench_cpp`/`parity_test`/`EventProp.Benchmarks.dll` all present and `run_benchmarks.sh`'s import probe passing; `werror` preset builds the C library with zero warnings on GCC 13.3. **The benchmark pipeline has not been run there** (see *Not yet done*), so there is no `report_linux-x86_64.md` and no Linux timings to quote. Prerequisites beyond the obvious toolchain: `libtbb-dev` and Cython in the interpreter that builds the extension. Two things the earlier Linux-facing work claimed and this run confirmed: the SIMD level comes from the CPUID+XCR0 probe (not `/proc/cpuinfo`), and `eventprop_eigen_core`'s `-march=native` PUBLIC propagation agrees with `parity_test`'s `-mavx2` at `EIGEN_MAX_ALIGN_BYTES` 32 — proven by parity passing, not by reading flags.
+  Linux traps that each cost part of a session:
+  - GCC 12+ implements `std::execution::par_unseq` over TBB, and a **shared** library with those symbols undefined still links — see *PSTL: what `<execution>` needs linked*.
+  - Including `<execution>` breaks the link of even a **serial** `std::sort` TU, so a header probe must be compile-only (`CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY`).
+  - `check_cxx_source_compiles` rejects `CMAKE_FLAGS`; the C++ standard has to travel in `CMAKE_REQUIRED_FLAGS`.
+  - An extension's bare-soname `DT_NEEDED` is invisible to `import` unless an rpath, a preload, or `LD_LIBRARY_PATH` names the directory — and `run_all.py` setting that variable hides the defect from the one consumer that matters.
 - **Windows** — supported via MSVC + CMake; validated end to end 2026-10-16 on MSVC 19.52 / VS 18: C tests 220/220, parity 105/105, .NET 382/382, `eventprop_c` Python 29/29, `werror` preset zero warnings, and a full benchmark run (46m 40s) producing `bench-reports/report_windows-amd64.md`. CMake's VS generator is **multi-config**, so artifacts land in `build\Release\`, not `build\` — every path in the scripts and in `EventProp.Native.csproj` has to say so.
   Windows traps, each of which has already cost a session:
   - `where bash` → `System32\bash.exe` (**WSL**) before Git's; WSL bash cannot see `G:\` as a Windows tree. Resolve Git's bash from `git.exe`'s location and prepend its directory for coreutils.

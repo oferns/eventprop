@@ -22,6 +22,14 @@ if(NOT LIB_EVENTPROP_EIGEN)
     message(FATAL_ERROR "Pre-built Eigen library not found at ${EVENTPROP_CPP_BUILD}. Run build.sh first.")
 endif()
 
+# The pre-built Eigen core's TU uses std::execution::par_unseq, which libstdc++ 12+
+# implements over Intel oneTBB, and a find_library path — like any IMPORTED stand-in —
+# carries no usage requirements, so the link input has to be named here. bench_c links
+# only the C library and is unaffected. Empty on macOS/Windows, where these policies run
+# serially and need nothing; see cmake/EventPropPstl.cmake.
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/EventPropPstl.cmake")
+eventprop_pstl_link_deps(EVENTPROP_PSTL_LIBS)
+
 # ── Boost (header-only: math) ───────────────────────────────────
 find_path(BOOST_INCLUDE_DIR NAMES boost/math/tools/roots.hpp PATHS /opt/homebrew/include /usr/include "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/vcpkg/installed/x64-windows/include" NO_DEFAULT_PATH)
 if(NOT BOOST_INCLUDE_DIR)
@@ -160,6 +168,7 @@ endif()
 
 target_link_libraries(bench_cpp PRIVATE
     ${LIB_EVENTPROP_EIGEN}
+    ${EVENTPROP_PSTL_LIBS}
     benchmark::benchmark_main
 )
 
@@ -210,6 +219,7 @@ endif()
 
 target_link_libraries(bench_rootfind PRIVATE
     ${LIB_EVENTPROP_EIGEN}
+    ${EVENTPROP_PSTL_LIBS}
     benchmark::benchmark_main
 )
 

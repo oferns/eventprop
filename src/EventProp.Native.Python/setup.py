@@ -37,7 +37,21 @@ elif sys.platform == 'darwin':
 else:
     c_lib_dir = c_build_base
     libraries = ['eventprop_c_api']
-    extra_link_args = []
+    # Linux: the extension's DT_NEEDED is the bare soname libeventprop_c_api.so, and the
+    # loader looks for it in RUNPATH, then LD_LIBRARY_PATH, then the system search paths.
+    # None of those is the repo's build directory, so with no rpath the installed package
+    # imports only when someone happens to export LD_LIBRARY_PATH first. Measured on the
+    # first Linux build of this extension, after a fully green build.sh:
+    #   ImportError: libeventprop_c_api.so: cannot open shared object file: No such file
+    #                       or directory
+    # -Wl,-rpath is the mechanism the darwin branch above already uses. Absolute, and
+    # derived from __file__ rather than from the CWD, because an rpath is resolved by the
+    # loader at import time — a relative one would be taken relative to whatever directory
+    # the importing process happened to start in. eventprop_c/_library_path.py preloads the
+    # same library as a fallback for a checkout that has moved since this was built.
+    c_lib_rpath = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               '..', 'EventProp.C', 'build')
+    extra_link_args = ['-Wl,-rpath,' + os.path.normpath(c_lib_rpath)]
     extra_compile_args = []
 
 ext = Extension(

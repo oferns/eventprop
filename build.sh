@@ -390,6 +390,16 @@ else
   # ModuleNotFoundError: No module named 'eventprop.eventprop_cpp' — in the test
   # suite, several steps after the build that declined to produce it.
   #
+  # Nor is "exists for this interpreter" enough: the tag says nothing about whether the
+  # binary can LOAD. The one in this checkout at the first Linux run was three months
+  # old — built before submodule-linux.patch added -fopenmp to the link args — so it had
+  # two undefined omp_* symbols:
+  #   ImportError: eventprop_cpp.cpython-312-x86_64-linux-gnu.so:
+  #                undefined symbol: omp_get_thread_num
+  # The step printed "already built" over it and the failure surfaced in
+  # tests/test_paper_parity.py, the suite that compares the two backends. So the step
+  # asks the interpreter to import it, and rebuilds when that says no.
+  #
   # The tag is asked of the interpreter itself, not parsed from the version string, so it
   # matches whatever the platform's naming convention is (cpython-314-darwin.so,
   # .cp314-win_amd64.pyd, ...). EXT_SUFFIX FIRST, SOABI second, and "None" filtered:
@@ -424,12 +434,30 @@ else
       built+=("$f")
     fi
   done
+  # Separator from the interpreter, not hardcoded: os.pathsep is ';' on Windows, and a
+  # ':' there silently makes the second entry unimportable (the defect AGENTS.md records
+  # for scripts/bench/run_all.py).
+  pathsep="$("$PYTHON" -c 'import os;print(os.pathsep)' 2>/dev/null)"
+  [[ -n "$pathsep" ]] || pathsep=:
+  need_build=1
   if [[ ${#built[@]} -gt 0 ]]; then
-    ok "eventprop.eventprop_cpp already built ${abi_tag:+for $abi_tag }(${built[0]})"
-  else
-    if [[ ${#all_ext[@]} -gt 0 ]]; then
-      note "existing extension(s) are for a DIFFERENT interpreter (none match ${abi_tag:-<unknown>}) — rebuilding"
+    if PYTHONPATH="$PWD${PYTHONPATH:+$pathsep$PYTHONPATH}" \
+        "$PYTHON" -c "import eventprop.eventprop_cpp" >/dev/null 2>&1; then
+      need_build=0
+      ok "eventprop.eventprop_cpp already built ${abi_tag:+for $abi_tag }(${built[0]})"
+    else
+      # Print the loader's own words, because they are the diagnosis (a missing symbol
+      # names the library that was never linked) and are otherwise several steps and one
+      # test-suite failure away from the cause.
+      note "${built[0]} matches this interpreter but does NOT import — rebuilding"
+      note "  reason: $(PYTHONPATH="$PWD${PYTHONPATH:+$pathsep$PYTHONPATH}" \
+        "$PYTHON" -c "import eventprop.eventprop_cpp" 2>&1 | tail -1)"
     fi
+  elif [[ ${#all_ext[@]} -gt 0 ]]; then
+    note "existing extension(s) are for a DIFFERENT interpreter (none match ${abi_tag:-<unknown>}) — rebuilding"
+  fi
+
+  if [[ $need_build -eq 1 ]]; then
     if run "pip install -e . (EventProp.Python)" \
       "$PYTHON" -m pip install --break-system-packages -e . --no-build-isolation; then
       ok "eventprop.eventprop_cpp (editable install)"
@@ -488,15 +516,37 @@ else
   pyx="eventprop_c/_native.pyx"
   cfile="eventprop_c/_native.c"
   need_cython=0
+  # Whether a CURRENT _native.c exists when the install runs. Not the same question as
+  # "does the file exist" — see the gate on it below.
+  cfile_ready=0
   if [[ ! -s "$cfile" ]]; then
     need_cython=1
   elif [[ -f "$pyx" && "$pyx" -nt "$cfile" ]]; then
     need_cython=1
   fi
   if [[ $need_cython -eq 1 ]]; then
-    run "cython _native.pyx" "$PYTHON" -m cython "$pyx"
+    # Cython is a build prerequisite of this step, and the interpreter is not obliged to
+    # have it: setup.py compiles the GENERATED _native.c, so there is nothing in the
+    # project's build-system.requires that would make pip fetch Cython either. Probe for
+    # it rather than letting the step fail twice. Measured on the first Linux run:
+    # `python3 -m cython` printed "No module named cython", the step was recorded FAILED,
+    # and the next step ran pip anyway against a _native.c that had never existed —
+    # 98 lines of setuptools traceback whose headline was "cc1: fatal error:
+    # eventprop_c/_native.c: No such file or directory", and the summary blamed the build
+    # on TWO failures for ONE missing package. The cause named itself in one line first;
+    # the message below makes sure it still does, and names the interpreter that needs it.
+    if "$PYTHON" -c "import Cython" >/dev/null 2>&1; then
+      if run "cython _native.pyx" "$PYTHON" -m cython "$pyx" && [[ -s "$cfile" ]]; then
+        cfile_ready=1
+      fi
+    else
+      note "no Cython in this interpreter ($PYTHON — $("$PYTHON" -c 'import sys;print(sys.executable)' 2>/dev/null))"
+      note "it is needed to generate _native.c: $PYTHON -m pip install --break-system-packages cython"
+      failures+=("cython _native.pyx (Cython is not installed for $PYTHON — see the hint above)")
+    fi
   else
     echo "  _native.c is newer than _native.pyx — skipping cython"
+    cfile_ready=1
   fi
 
   # --no-build-isolation: the build needs the interpreter's numpy (the extension
@@ -505,7 +555,16 @@ else
   # "→ eventprop_c (editable install)" unconditionally, and pip's output went to
   # /dev/null with `|| true` — so a failed extension build was reported as success, and
   # the next thing to touch it was the benchmark suite, 40 minutes later.
-  if run "pip install -e .[dev] (EventProp.Native.Python)" \
+  #
+  # Gate on cfile_ready, not on the file existing: if regeneration was needed and did
+  # not happen, a _native.c that IS present is a STALE one — compiling it is the exact
+  # stale-extension class the ABI check in _native.pyx refuses to import on, and pip
+  # would print a green install for it. Refuse, and say why.
+  if [[ $cfile_ready -ne 1 ]]; then
+    note "$cfile was not regenerated — skipping the editable install rather than"
+    note "compiling a stale or missing source (the cython failure above is the cause)"
+    skips+=("EventProp.Native.Python editable install (_native.c not regenerated)")
+  elif run "pip install -e .[dev] (EventProp.Native.Python)" \
     "$PYTHON" -m pip install --break-system-packages -e ".[dev]" --no-build-isolation; then
     ok "eventprop_c (editable install, + pytest)"
   fi
@@ -544,6 +603,12 @@ if [[ ${#failures[@]} -eq 0 ]]; then
   echo "Run bench C++: cd src/EventProp.Native.Benchmarks/build && ./bench_cpp --benchmark_min_time=0.1s"
   echo "Run report:   python3 scripts/bench/run_all.py --quick"
   echo ""
+  # Print skips here too: --skip-python on a green build used to report nothing, so the
+  # summary claimed a complete build without naming the two projects it never touched.
+  if [[ ${#skips[@]} -gt 0 ]]; then
+    echo "Skipped: ${skips[*]}"
+    echo ""
+  fi
   exit 0
 fi
 

@@ -17,8 +17,9 @@ Example:
 # Windows: register the directory holding eventprop_c_api.dll BEFORE the extension
 # is imported. Python 3.8+ does not search PATH for a pyd's dependencies, so
 # os.add_dll_directory is the only mechanism that works from Python; see
-# _library_path.py for the measured failure this fixes. No-op on POSIX, where the
-# extension carries an rpath (see _native.pyx).
+# _library_path.py for the measured failure this fixes.
+# Linux: the same call preloads libeventprop_c_api.so, which is what makes
+# EVENTPROP_C_LIB_DIR work there. macOS: no-op — setup.py links an rpath.
 from ._library_path import register_c_library_dirs as _register_c_library_dirs
 
 _register_c_library_dirs()

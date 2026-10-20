@@ -19,8 +19,16 @@ from libc.stddef cimport size_t
 cnp.import_array()
 
 
-# The shared library is loaded via rpath embedded in the .so at build time.
-# No manual ctypes.LoadLibrary needed — dynamic linker handles it.
+# The shared library is found by the platform's own mechanism, and they differ:
+#   macOS / Linux  an rpath is embedded in the extension at build time (setup.py);
+#                  on Linux that is RUNPATH, and without it a plain `import` cannot find
+#                  the bare soname unless something exports LD_LIBRARY_PATH
+#   Linux only     eventprop_c/_library_path.py also preloads libeventprop_c_api.so with
+#                  RTLD_GLOBAL, which is what makes EVENTPROP_C_LIB_DIR work and survives a
+#                  moved checkout, where an absolute rpath cannot
+#   Windows        os.add_dll_directory, registered by that same module (PATH is excluded
+#                  from CPython's extension dependency search since 3.8)
+# No manual ctypes.LoadLibrary is needed here beyond that Linux preload.
 
 
 # ---------------------------------------------------------------------------

@@ -62,6 +62,18 @@ set_target_properties(eventprop_eigen_core PROPERTIES
     IMPORTED_LOCATION "${EIGEN_LIBRARY}"
 )
 
+# The pre-built core was compiled from a TU that uses std::execution::par_unseq, which
+# libstdc++ 12+ implements over Intel oneTBB. An IMPORTED target carries no usage
+# requirements — the same reason the ISA level is restated below — so the link input the
+# core really needs has to be spelled here, on the imported stand-in for it.
+# Empty on macOS/Windows (serial PSTL, nothing to add); see cmake/EventPropPstl.cmake.
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/EventPropPstl.cmake")
+eventprop_pstl_link_deps(EVENTPROP_PSTL_LIBS)
+if(EVENTPROP_PSTL_LIBS)
+    set_property(TARGET eventprop_eigen_core APPEND PROPERTY
+                 INTERFACE_LINK_LIBRARIES "${EVENTPROP_PSTL_LIBS}")
+endif()
+
 # ── Parity test executable ─────────────────────────────────────
 find_package(OpenMP QUIET)
 add_executable(parity_test parity_main.cpp)

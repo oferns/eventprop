@@ -15,7 +15,9 @@ The PATH recipe is what scripts/bench/run_all.py used to rely on, which is why
 the python suite could not run on Windows while its prereq check passed.
 """
 
+import ctypes
 import os
+import sys
 import unittest
 from unittest import mock
 
@@ -23,6 +25,7 @@ from eventprop_c import _library_path
 from eventprop_c import _native
 
 _WINDOWS = os.name == "nt"
+_LINUX = sys.platform == "linux"
 
 
 def _extension_dir():
@@ -86,6 +89,40 @@ class WindowsDllDirectoryTest(unittest.TestCase):
         self.assertTrue(any(c.endswith(os.path.join("build", "Release")) for c in candidates),
                         candidates)
         self.assertTrue(any(c.endswith("build") for c in candidates), candidates)
+
+
+@unittest.skipUnless(_LINUX, "the Linux mechanism is the RTLD_GLOBAL preload")
+class LinuxLibraryLookupTest(unittest.TestCase):
+    """Pins what makes _native*.so importable on Linux.
+
+    The failure this guards, measured on the first Linux build: after a build.sh that
+    reported every step green, `import eventprop_c` died with
+        ImportError: libeventprop_c_api.so: cannot open shared object file
+    because the extension's DT_NEEDED is the bare soname, nothing pointed a RUNPATH at
+    src/EventProp.C/build, and nothing had preloaded the library. The cross-platform
+    import test in this file is the one that had been failing.
+    """
+
+    def test_package_import_preloaded_the_c_library(self):
+        preloaded = _library_path.preloaded_libraries()
+        if not preloaded:
+            self.skipTest("no preload happened; the extension's RUNPATH resolved the "
+                          "library on its own — the import test above is the real guard")
+        for path in preloaded:
+            self.assertTrue(os.path.isfile(path), f"preloaded a path that is not a file: {path}")
+
+    def test_preload_is_idempotent(self):
+        first = _library_path.register_c_library_dirs()
+        second = _library_path.register_c_library_dirs()
+        self.assertEqual(first, second)
+
+    def test_repo_layout_candidate_is_the_single_config_build_dir(self):
+        # CMake presets write ${sourceDir}/build on single-config generators, which is
+        # every non-MSVC platform; the multi-config subdirs are yielded as well.
+        with mock.patch.dict(os.environ, {"EVENTPROP_C_LIB_DIR": ""}):
+            candidates = list(_library_path.candidate_directories())
+        self.assertTrue(any(c.endswith(os.path.join("EventProp.C", "build")) for c in candidates),
+                        candidates)
 
 
 if __name__ == "__main__":

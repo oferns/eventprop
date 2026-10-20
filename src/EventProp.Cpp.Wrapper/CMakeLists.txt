@@ -110,6 +110,23 @@ elseif(OpenMP_CXX_FOUND)
     target_link_libraries(eventprop_eigen_core PUBLIC OpenMP::OpenMP_CXX)
 endif()
 
+# ── C++17 parallel execution policies (Linux/libstdc++: TBB) ───
+# PUBLIC for the same reason OpenMP and -march=native are: this is a STATIC library, so
+# "what it needs to link" is a requirement its consumers inherit. eventprop_c_api links
+# the core into a SHARED library, and a shared library on Linux happily keeps undefined
+# symbols — measured before this block existed, libeventprop_cpp_wrapper.so linked green
+# with 14 undefined tbb::detail::r1 symbols and then refused to load:
+#   OSError: undefined symbol: _ZN3tbb6detail2r15spawnERNS0_2d14taskERNS2_18task_group_contextE
+# The two test executables below failed at link instead, which was the loud version of
+# the same missing input. Zero on macOS/Windows: libc++ and the MSVC STL run these
+# policies serially and need nothing extra, and eventprop_pstl_link_deps() returns empty
+# on APPLE/WIN32 before probing, so this cannot change either platform.
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/EventPropPstl.cmake")
+eventprop_pstl_link_deps(EVENTPROP_PSTL_LIBS)
+if(EVENTPROP_PSTL_LIBS)
+    target_link_libraries(eventprop_eigen_core PUBLIC ${EVENTPROP_PSTL_LIBS})
+endif()
+
 # ── C API wrapper as a shared library ───────────────────────────
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 add_library(eventprop_c_api SHARED eventprop_c_api.cpp)

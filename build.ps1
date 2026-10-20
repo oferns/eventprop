@@ -112,6 +112,40 @@ function Invoke-DotNet($proj, $config) {
     }
 }
 
+# Ask an interpreter whether it can import a module, and return its answer as text:
+# $null when the import succeeds, otherwise the interpreter's last non-empty output line.
+# Both Python steps use this to replace "the file exists" with "this interpreter can
+# actually use the file" - see step 7 and step 8.
+#
+# $envDir goes on the front of PYTHONPATH so the probe answers about THIS tree's package
+# rather than a copy already sitting in site-packages. The separator is asked of the
+# interpreter, not hardcoded: os.pathsep is ';' on Windows, and a ':' there silently makes
+# the second entry unimportable - the defect AGENTS.md records for scripts/bench/run_all.py.
+function Get-ImportFailure([string]$exe, [string]$module, [string]$envDir) {
+    $oldPath = $env:PYTHONPATH
+    try {
+        if ($envDir) {
+            $sep = ((& $exe -c "import os;print(os.pathsep)" 2>&1) | Out-String).Trim()
+            if (-not $sep) { $sep = ";" }
+            if ($oldPath) { $env:PYTHONPATH = "$envDir$sep$oldPath" } else { $env:PYTHONPATH = $envDir }
+        }
+        # 2>&1 folds the traceback into the success stream, so the verdict comes from
+        # $LASTEXITCODE and never from "did text arrive on stderr".
+        $out = & $exe -c "import $module" 2>&1 | Out-String
+        if ($LASTEXITCODE -eq 0) { return $null }
+        $lines = @($out -split "`r?`n" | Where-Object { $_.Trim() -ne "" })
+        if ($lines.Count -gt 0) { return $lines[$lines.Count - 1].Trim() }
+        return "import failed with exit $LASTEXITCODE and no output"
+    } catch {
+        # A missing interpreter is an import failure for this purpose: the caller's answer
+        # is "cannot import", and the message says why.
+        return $_.Exception.Message
+    } finally {
+        if ($null -eq $oldPath) { Remove-Item "Env:\PYTHONPATH" -ErrorAction SilentlyContinue }
+        else { $env:PYTHONPATH = $oldPath }
+    }
+}
+
 Write-Host "============================================"
 Write-Host " EventProp Build - $BuildType (preset '$Preset')"
 Write-Host "============================================"
@@ -412,11 +446,36 @@ if ($SkipPython) {
             (-not $extSuffix) -or $_.Name -like "*$extSuffix*" -or
             $_.Name -eq "eventprop_cpp.so" -or $_.Name -eq "eventprop_cpp.dll"
         })
+    # "Matches this interpreter's tag" is still not the whole question - the tag says
+    # nothing about whether the binary can LOAD. Measured on the POSIX side of this same
+    # contract: the extension in the checkout was three months old, built before
+    # submodule-linux.patch put -fopenmp in the link args, so it carried two undefined
+    # omp_* symbols - and this step printed "already built" over it. The failure surfaced
+    # in tests/test_paper_parity.py, the suite that compares the two backends:
+    #   ImportError: eventprop_cpp.cpython-...so: undefined symbol: omp_get_thread_num
+    # An existence test cannot see an unusable artifact; the interpreter can.
+    #
+    # Deliberately not a per-platform special case: an extension that imports is skipped
+    # exactly as it was before, and one that does not is rebuilt with the loader's own line
+    # printed - a missing symbol names the library that was never linked, which is the
+    # entire diagnosis and otherwise arrives a suite away from its cause. If an in-place
+    # extension ever fails this probe for a reason the step cannot see, the cost is a
+    # rebuild a fresh clone pays anyway - never a green "already built".
+    $needBuild = $true
+    $importErr = $null
     if ($built) {
-        $tagNote = if ($extSuffix) { "for $extSuffix" } else { "(interpreter tag unknown)" }
-        Write-Host "  -> already built $tagNote ($($built[0].Name)); rebuild by deleting it" -ForegroundColor Green
-    } else {
-        if ($allExt) {
+        $importErr = Get-ImportFailure $PythonExe "eventprop.eventprop_cpp" (Get-Location).Path
+        if ($null -eq $importErr) {
+            $needBuild = $false
+            $tagNote = if ($extSuffix) { "for $extSuffix" } else { "(interpreter tag unknown)" }
+            Write-Host "  -> already built $tagNote ($($built[0].Name)); rebuild by deleting it" -ForegroundColor Green
+        }
+    }
+    if ($needBuild) {
+        if ($built) {
+            Write-Host "  $($built[0].Name) matches this interpreter but does NOT import - rebuilding" -ForegroundColor Yellow
+            Write-Host "    reason: $importErr" -ForegroundColor Yellow
+        } elseif ($allExt) {
             Write-Host "  existing extension(s) are for a DIFFERENT interpreter (none match '$extSuffix') - rebuilding" -ForegroundColor Yellow
             foreach ($f in $allExt) { Write-Host "    $($f.Name)" -ForegroundColor DarkGray }
         }
@@ -490,17 +549,52 @@ if ($SkipPython) {
     if (-not $needCython -and (Test-Path $pyx)) {
         $needCython = (Get-Item $pyx).LastWriteTime -gt $cfileItem.LastWriteTime
     }
+    # Cython is a build prerequisite of this step and nothing fetches it automatically:
+    # setup.py compiles the GENERATED _native.c, and build-system.requires lists only
+    # setuptools and numpy, so pip's isolated build env never cythonises anything either.
+    # Probe for it, because the alternative is measured on the POSIX side of this contract:
+    # `python -m cython` printed "No module named cython", the step was recorded FAILED,
+    # and the next step ran pip anyway against a _native.c that had never existed - 98
+    # lines of setuptools traceback headlined "cc1: fatal error: eventprop_c/_native.c:
+    # No such file or directory", and the summary blamed the build on TWO failures for ONE
+    # missing package. One failure, naming the interpreter that needs the package.
+    $cfileReady = $false
     if ($needCython) {
         if ($emptyCfile) { Write-Host "  _native.c is EMPTY (a previous Cython run died) - regenerating" -ForegroundColor Yellow }
-        Invoke-Step "cython _native.pyx" { & $py -m cython "eventprop_c\_native.pyx" } | Out-Null
+        if ($null -ne (Get-ImportFailure $py "Cython" $null)) {
+            Write-Host "  no Cython in this interpreter ($py)" -ForegroundColor Yellow
+            Write-Host "  it is needed to generate _native.c: $py -m pip install cython" -ForegroundColor Yellow
+            # A failure, not a skip: the step did not do its job. Only the *downstream*
+            # install is a skip, because its cause is already on the record.
+            $Failures.Add("cython _native.pyx (Cython is not installed for $py - see the hint above)")
+        } elseif (Invoke-Step "cython _native.pyx" { & $py -m cython $pyx }) {
+            # Success means a NON-EMPTY source exists now; the empty-file case above is
+            # proof that "it ran" and "it produced the file" are different claims.
+            # ($pyx is the absolute path resolved above rather than a cwd-relative literal:
+            # same file, and it does not depend on the separator or on the Push-Location
+            # having happened to succeed.)
+            if ((Test-Path $cfile) -and ((Get-Item $cfile).Length -gt 0)) { $cfileReady = $true }
+        }
     } else {
         Write-Host "  _native.c is newer than _native.pyx - skipping cython" -ForegroundColor DarkGray
+        $cfileReady = $true
     }
 
-    Invoke-Step "pip install -e .[dev] (EventProp.Native.Python)" {
-        # [dev] = pytest, for src\EventProp.Native.Python\test (29 tests).
-        & $py -m pip install -e ".[dev]" --no-build-isolation
-    } | Out-Null
+    # Gate on cfileReady, not on the file existing: if regeneration was needed and did not
+    # happen, a _native.c that IS present is a STALE one, and compiling it is the exact
+    # stale-extension class _native.pyx's ABI check refuses to import on - and pip would
+    # print a green editable install for it. The cython failure is already recorded, so say
+    # what is skipped and why instead of manufacturing a second, misleading failure.
+    if (-not $cfileReady) {
+        Write-Host "  _native.c was not regenerated - skipping the editable install rather than" -ForegroundColor Yellow
+        Write-Host "  compiling a stale or missing source (the cython failure above is the cause)" -ForegroundColor Yellow
+        $Skips.Add("EventProp.Native.Python editable install (_native.c not regenerated)")
+    } else {
+        Invoke-Step "pip install -e .[dev] (EventProp.Native.Python)" {
+            # [dev] = pytest, for src\EventProp.Native.Python\test (29 tests).
+            & $py -m pip install -e ".[dev]" --no-build-isolation
+        } | Out-Null
+    }
     Pop-Location
 }
 

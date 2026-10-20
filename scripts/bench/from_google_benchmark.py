@@ -228,13 +228,59 @@ def build_meta(doc, suite, impl):
     return meta
 
 
+def _linux_cpu_brand():
+    """The CPU brand string from /proc/cpuinfo.
+
+    Only x86 (and some ARM vendors) spell it "model name"; older ARM kernels use
+    "Hardware", so that is tried second. "Model" is deliberately NOT tried: on ARM boards
+    it names the *board* ("Raspberry Pi 4 Model B Rev 1.5"), and putting a board
+    identifier in meta.cpu is worse than falling through to the MHz line, because the
+    field exists to let two hosts be compared on CPU. When nothing matches, the caller
+    falls back — an honest "N cpu @ M MHz" beats a wrong brand.
+
+    Split on the first ':' rather than whitespace: /proc/cpuinfo is a kernel proc file, not
+    a config file, and its spacing and value shapes are not stable across kernels.
+    """
+    for key in ("model name", "Hardware"):
+        try:
+            with open("/proc/cpuinfo", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    name, sep, value = line.partition(":")
+                    if sep and name.strip() == key and value.strip():
+                        return value.strip()
+        except OSError:
+            # No /proc (or no permission): there is no second reader to try either.
+            return None
+    return None
+
+
 def _cpu_label(ctx):
     """Google Benchmark's mhz_per_cpu is 0 on Apple Silicon, so it cannot be the label.
-    Prefer the OS CPU brand string; fall back to the MHz figure on x86."""
-    try:
-        brand = platform.mac_ver() and _mac_cpu_brand()
-    except Exception:
-        brand = None
+    Prefer the OS CPU brand string; fall back to the MHz figure on x86.
+
+    The label's whole purpose is letting a reader compare two hosts, so every platform
+    returns the same shape: the bare brand string, exactly what _mac_cpu_brand() has always
+    returned on macOS — core count goes in neither.
+
+    Dispatch on platform.system(), not on platform.mac_ver(): mac_ver() returns an
+    all-empty-but-non-empty TUPLE on Linux, which is truthy, so the previous
+    `platform.mac_ver() and _mac_cpu_brand()` did not gate macOS at all — it called the
+    macOS reader on every platform and relied on sysctl being absent elsewhere to paper
+    over it. Same visible behaviour today, and a silent surprise the day a sysctl binary
+    appears on a Linux box (an empty brand, or worse, a host's answer to the wrong
+    question). macOS keeps its exact reader and its exact output.
+
+    Windows gets no brand reader on purpose: mhz_per_cpu is populated there, and a new
+    label would make fresh Windows records disagree with the committed
+    report_windows-amd64.md's meta.cpu for no measurement benefit.
+    """
+    reader = {"Darwin": _mac_cpu_brand, "Linux": _linux_cpu_brand}.get(platform.system())
+    brand = None
+    if reader:
+        try:
+            brand = reader()
+        except Exception:
+            brand = None
     if brand:
         return brand
     mhz = ctx.get("mhz_per_cpu")
