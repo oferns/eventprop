@@ -15,6 +15,7 @@ This repository implements the **EventProp** algorithm — an event-based backpr
 | **EventProp.Python/** | Python + C++ (Eigen/pybind11) | Reference library (git submodule, read-only) |
 | **EventProp.C/** | C | Pure C reimplementation with a batch-first API (per-sample input arrays) |
 | **EventProp.Cpp.Wrapper/** | C++ (Eigen) | Convenience copy of the C++ core. Used for native benchmarks and parity tests |
+| **EventProp.Cpp.Wrapper/benchmarks/** | C++ (Google Benchmark) | **Deleted.** Was a standalone project (no presets, `project()` of its own) holding `eventprop_benchmarks` + `micro_benchmarks`, configured by nothing — no build script, no preset, no CI (the repo has none), only an AGENTS.md sentence saying "configure it by hand". It duplicated kernels `EventProp.Native.Benchmarks` already measures (and `bench_rootfind` already covers its root-finder micro-benchmarks) while carrying a **fourth** copy of the spike-pattern generators **without `SortTimesSources`**, so its `burst` rows measured unsorted input — which this file's own contract calls a different network, not a comparable workload. By the time it was noticed `eventprop_benchmarks.cpp` no longer compiled (3 calls on the pre-`spike_errors` `eventprop_backward_spikes`) and `micro_benchmarks.cpp` never did (missing `<functional>`, `BrentRootFinder` arity drift). Content last touched 2026-05-27 in a directory-rename commit. Its one measurement nothing else makes — Eigen-core thread scaling — can be ported into `bench_main.cpp` if anyone ever wants it |
 | **EventProp.Native.Python/** | Python + Cython | Python layer using C library via Cython bindings (`eventprop_c/_native.pyx`) |
 | **EventProp.Native/** | C# (.NET 10) | P/Invoke bindings wrapping EventProp.C via `LibraryImport` |
 | **EventProp.Abstractions/** | C# (.NET 10) | Shared `Layer` contract + data carriers, implemented by both backends (no package deps) |
@@ -171,7 +172,7 @@ Two things the script has to do for the Python extension, both measured:
 
 ### CMake Presets
 
-All six first-party CMake projects declare `cmake_minimum_required(VERSION 3.21)`. **Five** ship a `CMakePresets.json` — `EventProp.C`, `EventProp.C.Tests`, `EventProp.Cpp.Wrapper`, `EventProp.Native.ParityTests`, `EventProp.Native.Benchmarks`. The sixth, `EventProp.Cpp.Wrapper/benchmarks/`, is a standalone project with no presets; configure it by hand. Presets are the supported way to drive the other five; the hand-typed `mkdir build && cd build` sequences are kept only as a fallback.
+All five first-party CMake projects declare `cmake_minimum_required(VERSION 3.21)` and **all five ship a `CMakePresets.json`** — `EventProp.C`, `EventProp.C.Tests`, `EventProp.Cpp.Wrapper`, `EventProp.Native.ParityTests`, `EventProp.Native.Benchmarks`. There used to be a sixth — `EventProp.Cpp.Wrapper/benchmarks/`, a standalone project with no presets that nothing configured; it is deleted, with the reasons in the Project Map. Presets are the supported way to drive all five; the hand-typed `mkdir build && cd build` sequences are kept only as a fallback.
 
 Presets live **one per project**, not at the repo root: a configure preset has no `sourceDir` field, so its source directory is always the directory containing its own `CMakePresets.json`. Run preset commands from the project directory, and `cmake --list-presets` there to see what is available.
 
@@ -247,6 +248,7 @@ a pristine worktree and reversed cleanly — macOS, Linux and Windows, all six d
 | recorded by the submodule | `54430436` — 2.6.3.dev1 (2021). **Does not build**: no NumPy 2 support, predates modern Clang/GCC and setuptools |
 | required on macOS | `6079989c` — 3.1.0a0. No patch touches the gitlink, so `PYBIND11_REQUIRED_MACOS` in the script is the only record of it |
 | required on Linux | `a2e59f0e` — 2.13.6. Carried inside `submodule-linux.patch` (it moves the gitlink), so the script reads it out of the patch |
+| required on Windows | `a2e59f0e` — 2.13.6 (the Linux commit). No Windows patch touches the gitlink, so `PYBIND11_REQUIRED_WINDOWS` in the script is the only record of it. Before that constant existed the script's `*` arm returned `PYBIND11_RECORDED` and `apply` **checked out the broken version** — see *Fixed — Windows reference build: pybind11 had no required version, so step 1 checked out the one that cannot compile* |
 
 A plain `git submodule update --init --recursive` silently downgrades pybind11 to 2.6.x and breaks the reference build. `scripts/submodule-state.sh apply` restores it.
 
@@ -320,6 +322,33 @@ cmake --preset release && cmake --build --preset release
 > **Note**: requires the `release` presets of `EventProp.C` (SHARED library) and `EventProp.Cpp.Wrapper` (Eigen core) — both are imported from their `./build` directories at configure time, so configuring before them fails with a `FATAL_ERROR` naming the missing library.
 
 > **Note (Windows)**: the exe lands in `src/EventProp.C/build/Release/Release/` — its `RUNTIME_OUTPUT_DIRECTORY` plus the multi-config generator's config dir, not `ParityTests/build`. It links `eventprop_c_api.dll`, and MSYS bash reports a Windows exe whose DLL cannot be resolved as **"No such file or directory" (exit 127)**, which reads like a missing build product. Run it from a directory containing the DLL, or with that directory on `PATH` (a native process honours `PATH`; a Python extension does not — see *Python bindings on Windows*).
+
+**The runnable Windows command** — verified 105/105, and printed by `build.ps1` at the end of a successful build so it is discoverable where the build left the artifacts (mirroring `build.sh`'s `Run parity:` line). From the repo root:
+
+```powershell
+$env:PATH="$PWD\src\EventProp.C\build\Release;$env:PATH"
+& "src\EventProp.C\build\Release\Release\parity_test.exe"
+```
+
+**The library-path argument is decorative.** `parity_main.cpp` mentions `argv` exactly once — its own `main` signature — because `parity_test` links `eventprop_c_api` as an `IMPORTED SHARED` target, so the *loader* chooses the DLL and `PATH` decides. The `../../EventProp.C/build/libeventprop_c_api.dylib` argument in the macOS command above is ignored for the same reason; it survives from the era before the imported target. `run_parity.bat` is **deleted** for this whole class of reason: three lines that hardcoded `G:\eventprop.net`, were referenced by no script, doc or CI file, passed that dead argument, and never put the DLL directory (one level *above* the exe) on `PATH` — so it could not have worked even on the machine it named.
+
+### Wrapper C++ Tests (`eventprop_cpp_tests`, `eventprop_capi_tests`)
+
+`EventProp.Cpp.Wrapper` builds two Google-Test-free standalone binaries (plain `main`,
+`Results: N/N passed`, exit code = failures). `build.sh`/`build.ps1` build them and do not
+run them, so this is the command:
+
+```bash
+cd src/EventProp.Cpp.Wrapper/build/Release      # macOS/Linux: ./eventprop_cpp_tests etc.
+PATH="/path/to/src/EventProp.C/build/Release:$PATH" ./eventprop_cpp_tests    # 25/25, Eigen core
+PATH="/path/to/src/EventProp.C/build/Release:$PATH" ./eventprop_capi_tests   # 7/7, the C shim
+```
+
+`eventprop_cpp_tests` exercises the Eigen core; `eventprop_capi_tests` exercises
+`eventprop_c_api.cpp`, the flat-array shim over it — **not** the shipped `EventProp.C`
+library, which is a different implementation with its own 220 tests. On Windows both are
+classic `RUNTIME_OUTPUT_DIRECTORY` exes next to their `.lib` outputs, and `PATH` must name
+the directory holding `eventprop_c_api.dll`.
 
 ### Reference Library's Own Tests (read-only submodule)
 
@@ -1666,6 +1695,146 @@ prints `→ eventprop.eventprop_cpp already built …` and does not rebuild, so 
 tax on incremental builds — that line is now a statement about the interpreter's opinion of the
 binary rather than about the filename.
 
+### Fixed — Windows reference build: pybind11 had no required version, so step 1 checked out the one that cannot compile
+
+`build.ps1 release` failed at step 7 on a fully clean tree — `pip install -e .` for
+`EventProp.Python` died inside pybind11:
+
+```
+pybind11/detail/type_caster_base.h(448): error C2027: use of undefined type '_frame'
+pybind11/pybind11.h(2128):               error C2039: 'frame': is not a member of '_ts'
+pybind11/pybind11.h(2132):               error C2660: 'PyDict_GetItem': function does not take 1 arguments
+```
+
+That is pybind11 2.6.3.dev1's pre-3.11 frame C API (`frame->f_code`,
+`PyThreadState_Get()->frame`) compiled against headers that made `struct _frame`
+opaque — Python 3.11.9 on MSVC 14.52 with NumPy 2.4.6.
+
+**Why the version was wrong, and why the script made it wronger.** The macOS row of the
+pybind11 table existed; the Windows row did not. `pybind11_required()`'s `*` arm returned
+`PYBIND11_RECORDED`, and `apply_pybind11()` does `git checkout` when `HEAD != required` —
+so `build.ps1` step 1 was not merely omitting the requirement, it was **actively checking
+out the version that cannot compile**. Measured: with the nested submodule at 2.13.6,
+`submodule-state.sh apply` printed `→ pybind11 v2.13.6 -> v2.6.2-41-g54430436`.
+
+No MSVC flag or setuptools version fixes it — 2.6.3.dev1 predates the interpreter, so the
+only fix is the pybind11 version. `PYBIND11_REQUIRED_WINDOWS=a2e59f0e` (2.13.6, the Linux
+commit; no Windows patch moves the gitlink, so the constant is the record) plus a
+`msys*|cygwin*|mingw*` arm in `pybind11_required()`, using the same OSTYPE spellings as
+the `PATCH_FILE` case above. This file is on the Windows build path — `build.ps1` step 1
+runs it through Git-for-Windows bash (`Get-GitBash`, not `System32\bash.exe`) — so the fix
+lands where the state is owned rather than in a second `git checkout` that step 1 would
+undo on the next run.
+
+**A second platform-blind test in the same script:** `status` globbed only
+`eventprop_cpp.*.so`, so on Windows it printed `reference binary: not built` next to a
+built, importable `eventprop_cpp.cp311-win_amd64.pyd` — the `.so`-only glob defect that
+made `clean.sh python` leave the Windows extension in place, in a different file. It now
+probes `.so`, `.dylib`, `.pyd`, `.dll`. Whether the binary *loads* stays `build.ps1`
+step 7's import probe, which is the right owner of that question.
+
+**Measured after the fix**: downgrade to `54430436` by hand → `apply` restores `a2e59f0e`;
+`verify` and `check-patches` green (all four patches apply to a pristine worktree);
+`build.ps1 release -SkipSubmodule` ends `Build complete`, exit 0; `import
+eventprop.eventprop_cpp` OK; paper parity 7/7 on the trained YinYang and MNIST checkpoints.
+
+**Diagnostic signature**: `error C2027: use of undefined type '_frame'` (or the same class
+of frame/C-API errors on Clang or GCC) inside `type_caster_base.h` or `pybind11.h`. Check
+`./scripts/submodule-state.sh status` and compare `HEAD:` against `required:` before
+blaming the toolchain — the failure is in the reference build, three steps from the cause.
+
+### Fixed — the clean scripts counted paths they had not removed
+
+`clean.ps1 -Full` printed `Clean complete (27 path(s) removed)` and exited 0 while **8 of
+the 10 `.NET` `bin`/`obj` paths were still on disk, files included** — `obj\Debug\net10.0\`
+still held `.cs` and `.cache` files, not merely an empty shell. A second `clean.ps1 dotnet`
+pass removed all 8 and reported 8. No `FAILED` line was ever printed.
+
+`Remove-Tree` treated "`Remove-Item` returned without error" as "removed". On Windows those
+are different claims: a file another process opened with `FILE_SHARE_DELETE` — which is what
+MSBuild's and Roslyn's persistent build nodes do to `obj\` and `bin\` — enters
+**delete-pending**, so the unlink is queued, the call succeeds, and the path stays visible
+until the last handle closes. Five `dotnet.exe` build-server processes were running on this
+machine throughout.
+
+Both scripts now test the post-condition instead of reporting the attempt:
+
+- `clean.ps1` — `Remove-Tree` and `Remove-Matched` re-`Test-Path` after a non-throwing
+  removal; a surviving path goes to `$Failures` (so the run prints `Clean INCOMPLETE` and
+  exits 1), and the file count prints `$gone/$($files.Count)` — removals against matches,
+  not matches dressed as removals.
+- `clean.sh` — the same `[[ -e ]]` post-condition in `rm_tree` and `rm_find`, and
+  `dotnet build-server shutdown` before the `.NET` step in both scripts (best effort: no
+  `dotnet` on PATH must not fail a clean of everything else).
+
+**Honest scope of the POSIX half**: delete-pending is a Windows phenomenon, so on
+Linux/macOS the post-condition is inert and `dotnet build-server shutdown` there is
+**unmeasured** — mirrored for the one-contract rule, and `bash -n clean.sh` plus
+`clean.sh --dry-run` were run here under MINGW, which is not a Linux run. Treat the POSIX
+leg as pending its first macOS/Linux `clean.sh -full`.
+
+The rule: a destructive script needs a post-condition, not a return code — the return code
+is the *attempt*, and on Windows even a successful attempt can leave the tree in place.
+
+### Fixed — the wrapper's C API had no write bound, so its own test binary overran its heap
+
+`eventprop_capi_tests.exe` died with an access violation (exit 139) and, because stdout is
+block-buffered when redirected, **no test output at all** — it read as a build problem,
+not a heap overflow. cdb on a RelWithDebInfo build named it:
+
+```
+eventprop_capi_tests!eventprop_compute_spikes(...)   <-- mov qword ptr [r15+rcx*8+10h],rax  (AV)
+eventprop_capi_tests!test_compute_spikes_very_low_threshold(void)+0x17f
+eventprop_capi_tests!main(void)+0x9b
+```
+
+**Root cause, not a fixture typo.** `eventprop_compute_spikes` in `eventprop_c_api.h` took
+output pointers with **no capacity argument**, so it could not bounds-check, and every
+caller sized its buffer from a bound that does not exist — `max_out = 50*(n_spikes+1)*n_post`
+in `tests_capi.cpp`, and `max_out = n_spikes * n_post` under the comment *"max possible
+spikes = n_spikes * n_post"* in `benchmarks/eventprop_benchmarks.cpp` (that whole project is
+now deleted — see the Project Map — but it held the same wrong assumption). A
+post-synaptic neuron may cross `v_th` any number of times inside one input interval, so the
+output count is unbounded in the inputs. Measured in the fixture's own binary at 50x20
+neurons / 100 input spikes: **24,046** output spikes at `v_th=0.1` and **240,986** at
+`v_th=0.01`, against a 101,000-element buffer — 2.4x past the end, three arrays deep.
+
+**Fix — the API carries the bound now** (`eventprop_c_api.h`): `int max_out` is the last
+argument of `eventprop_compute_spikes`; writes are clamped to it, and the return value is
+the count the call *would* have written, so a caller that cannot bound its output does
+`n = call(cap); if (n > cap) resize(n); call(n);`. `eventprop_backward_spikes` /
+`backward_maxima` / `compute_maxima` need no capacity — their output sizes (`n_pre*n_post`,
+`n_input_spikes`, `n_post`) are already arguments.
+
+Callers updated: `tests_capi.cpp` — 8 sites pass their capacity, each followed by
+`ASSERT_FITS(n, max_out)`, which `return`s, so nothing downstream can read past what was
+written. `eventprop_capi_tests` now reports **7/7 passed, exit 0** (it segfaulted before).
+
+The only other in-tree consumer of the shim was `Cpp.Wrapper/benchmarks/`, which is
+**deleted in the same change** rather than repaired: nothing configured or ran it, its
+generators were a fourth copy without `SortTimesSources`, and it did not compile. Verified
+before the deletion that the repair was sound (`eventprop_benchmarks.exe` built with
+google/benchmark v1.9.1 via FetchContent, clang-cl diagnostics identical to pristine HEAD),
+so the deletion removes dead weight rather than a working alternative — the maintained
+`EventProp.Native.Benchmarks` suite is the one with the data contract, the JSON baselines
+and the cross-suite pipeline.
+
+**Also removed: 13 `fprintf(stderr, "DEBUG_API: …")` calls plus a
+`CaptureStackBackTrace(0, 16, …)` per `eventprop_backward_spikes` invocation**, committed in
+`eventprop_c_api.cpp` with a `tests_capi.cpp` twin of 70 `DEBUG:` lines. Instrumentation from
+one debugging session, left in the hot path of a published wrapper: it wrote to stderr on
+every call, put a stack walk into any measurement taken through the shim, and swallowed the
+process's own output when it crashed.
+
+**Diagnostic signature**: a Windows test exe that exits 139 with no stdout (buffer lost), or
+an AV inside `eventprop_compute_spikes`. `cdb -g -G -c "g; kP 25; q"` on a RelWithDebInfo
+build names the frame in two commands; Release has no PDB and gives offsets only.
+
+**Not wired into any script**: neither `eventprop_cpp_tests` nor `eventprop_capi_tests` is
+run by `build.sh`, `build.ps1`, or the benchmark pipeline — they are built and left. Running
+them is a documented command (see *Wrapper C++ Tests* above); wiring them into the build
+scripts is an open choice, not an existing behaviour to rely on.
+
 ## Platform Support
 
 - **macOS** — developed and tested
@@ -1682,3 +1851,5 @@ binary rather than about the filename.
   - MSYS bash reports an exe whose dependent DLL is missing as "No such file or directory" (127).
   - Python 3.8+ excludes `PATH` from extension-module dependency resolution (`os.add_dll_directory` is the mechanism); `grep arch:AVX2 *.vcxproj` finds nothing because CMake maps the flag to `EnableEnhancedInstructionSet`.
   - `.vscode/` is **gitignored**, so `settings.json` / `tasks.json` are local to each machine, not shared; `tasks.json` on this machine still encodes the pre-presets manual `rm -rf build && mkdir build` sequence and needs modernising to `cmake --preset`
+  - pybind11 has a **platform-specific required version and Windows had none recorded**, so `submodule-state.sh apply` (build.ps1 step 1) checked out 2.6.3.dev1 and step 7 died in pybind11 headers, not in this repo's code. See *Fixed — Windows reference build: pybind11 had no required version*. The `m` in the trap list is not "MSVC is unusual" but "the state script owns a version table and a missing row is a silent downgrade".
+  - `clean.ps1` can report `Clean complete … 27 path(s) removed)` / exit 0 with 8 `.NET` paths still present, because Windows delete-pending makes `Remove-Item` succeed while MSBuild/Roslyn build nodes hold handles. It re-tests the path now; see *Fixed — the clean scripts counted paths they had not removed*.
