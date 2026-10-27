@@ -9,6 +9,10 @@
 #   ./scripts/submodule-state.sh revert          # back to pristine submodule
 #
 # build.sh calls `apply`. Nothing here ever commits to the submodule.
+#
+# Two classes of local modification are owned here:
+#   submodule-<platform>.patch   exactly one active per machine (toolchain fixes)
+#   submodule-tests.patch        applied on every platform (see COMMON_PATCH below)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,6 +52,50 @@ case "${OSTYPE:-}" in
   *)                    PATCH_FILE="" ;;
 esac
 
+# submodule-tests.patch is NOT a platform patch — it is applied on every platform.
+#
+# The three patches above answer a toolchain question, so exactly one of them is
+# active per machine. This one fixes a defect in the reference library's OWN test
+# suite that is identical on every OS, so it cannot belong to any of them: a fix
+# parked in, say, the macOS patch would leave Linux and Windows running the broken
+# test, which is how a per-platform patch file becomes where bugs go to hide.
+#
+# What it fixes: test/test_loss_layer.py::TTFSCrossEntropyLossTest::
+# test_numerical_gradient_vs_error builds a TTFSCrossEntropyLoss with no w_in, so
+# LIFLayer falls back to GaussianDistribution(mean 0, std 1) — and the test seeds
+# nothing. Measured on this checkout: 50 fresh instances, 0 ever emitted a spike, so
+# every first_spike_time was NaN. assert_allclose defaults to equal_nan=True, so the
+# test can only pass when BOTH sides are NaN in the same places; it failed here
+# because the analytical leg is legitimately 0.0 (nothing writes into the errors
+# array when nothing spiked) while the numerical leg is NaN. A gradient test that
+# compares NaN against 0.0, and passes only when both are NaN, measures nothing.
+#
+# The project's own Cython twin of this test
+# (src/EventProp.Native.Python/test/test_loss_layer.py) already carries these five
+# fixes — seed(42), explicit all-to-all w = 2.0, base times at 0.001, t_eps 1e-7,
+# atol 1e-7 — so this patch mirrors them rather than inventing anything: the same
+# defect, the same measured numbers (max |numerical| over the analytically-zero
+# entries = 5.551e-10, worst relative error over the non-zero entries = 3.5e-9).
+#
+# It is still a modification to a read-only submodule, which is why it is owned here
+# and reverted by `revert` alongside the platform patches.
+COMMON_PATCH="$ROOT_DIR/submodule-tests.patch"
+
+# Every patch this machine needs: the platform patch first, then the common one.
+# Paths are emitted one per line; callers read them with `while IFS= read -r`.
+#
+# Both paths are emitted whether or not the file exists, because a patch that is
+# configured but absent is a failure the caller must see: swallowing it here is how a
+# submodule ends up half-patched and the build dies later inside pybind11/Eigen. The
+# old code returned early with "no patch defined" and that was correct only for a
+# platform that genuinely has no patch (PATCH_FILE empty), so emptiness is the sole
+# skip condition; `apply_patch` dies on a named-but-missing file.
+patch_list() {
+  [ -n "${PATCH_FILE:-}" ] && printf '%s\n' "$PATCH_FILE"
+  [ -n "${COMMON_PATCH:-}" ] && printf '%s\n' "$COMMON_PATCH"
+  return 0
+}
+
 # A git-format patch is "applied" when it reverse-applies cleanly, and
 # "applicable" when it forward-applies cleanly. Both checks are non-destructive.
 is_applied()    { (cd "$SUBMODULE" && git apply -R --check "$1") >/dev/null 2>&1; }
@@ -79,11 +127,17 @@ pybind11_required() {
 
 apply_patch() {
   if [ -z "${PATCH_FILE:-}" ]; then
-    note "no patch defined for OSTYPE='${OSTYPE:-unknown}' — skipping"
-    return 0
+    note "no platform patch defined for OSTYPE='${OSTYPE:-unknown}' — skipping"
   fi
-  [ -f "$PATCH_FILE" ] || die "patch not found: $PATCH_FILE"
+  local f
+  while IFS= read -r f; do
+    [ -f "$f" ] || die "patch not found: $f"
+    apply_one_patch "$f"
+  done < <(patch_list)
+}
 
+apply_one_patch() {
+  local PATCH_FILE="$1"
   local state; state="$(patch_state "$PATCH_FILE")"
   case "$state" in
     applied)
@@ -133,6 +187,11 @@ cmd_status() {
     fi
   done
   echo "  active for this platform: $( [ -n "${PATCH_FILE:-}" ] && basename "$PATCH_FILE" || echo "none (OSTYPE=${OSTYPE:-unknown})" )"
+  if [ -f "${COMMON_PATCH:-}" ]; then
+    # Deliberately no "(expected ...)" excuse here: the common patch touches a file no
+    # platform patch touches, so "blocked" can only mean upstream moved that file.
+    printf '  %-24s %s\n' "submodule-tests.patch:" "$(patch_state "$COMMON_PATCH")  (all platforms)"
+  fi
   echo "pybind11 (nested submodule):"
   echo "  HEAD:      $(pybind11_head) $(describe "$PYBIND11_DIR" "$(pybind11_head)")"
   echo "  required:  $(pybind11_required) $(describe "$PYBIND11_DIR" "$(pybind11_required)")"
@@ -149,10 +208,12 @@ cmd_apply() {
 }
 
 cmd_verify() {
-  local ok=true
-  if [ -n "${PATCH_FILE:-}" ] && ! is_applied "$PATCH_FILE"; then
-    echo "NOT BUILDABLE: $(basename "$PATCH_FILE") is not applied" >&2; ok=false
-  fi
+  local ok=true f
+  while IFS= read -r f; do
+    if ! is_applied "$f"; then
+      echo "NOT BUILDABLE: $(basename "$f") is not applied" >&2; ok=false
+    fi
+  done < <(patch_list)
   if [ "$(pybind11_head)" != "$(pybind11_required)" ]; then
     echo "NOT BUILDABLE: pybind11 at $(pybind11_head), required $(pybind11_required)" >&2; ok=false
   fi
@@ -175,13 +236,15 @@ cmd_check_patches() {
   local head; head="$(git -C "$SUBMODULE" rev-parse --short HEAD)"
   echo "checking patches against pristine submodule HEAD $head"
   echo "(gitlink hunks are excluded — nested submodules are not populated in the worktree)"
-  for p in macos linux windows; do
-    f="$ROOT_DIR/submodule-$p.patch"
+  # Every submodule-*.patch at the repo root, so a future patch file is drift-checked
+  # the moment it exists instead of waiting for someone to remember this loop.
+  for f in "$ROOT_DIR"/submodule-*.patch; do
     [ -f "$f" ] || continue
+    p="$(basename "$f")"
     if (cd "$tmp" && git apply --check --exclude=src/pybind11 "$f") >/dev/null 2>&1; then
-      printf '  %-24s %s\n' "submodule-$p.patch:" "applies cleanly"
+      printf '  %-24s %s\n' "$p:" "applies cleanly"
     else
-      printf '  %-24s %s\n' "submodule-$p.patch:" "DOES NOT APPLY — upstream drift, rebase required" >&2
+      printf '  %-24s %s\n' "$p:" "DOES NOT APPLY — upstream drift, rebase required" >&2
       (cd "$tmp" && git apply --check --exclude=src/pybind11 "$f" 2>&1 | sed 's/^/      /') >&2 || true
       ok=false
     fi
@@ -192,12 +255,15 @@ cmd_check_patches() {
 
 cmd_revert() {
   echo "Restoring pristine EventProp.Python submodule..."
-  if [ -n "${PATCH_FILE:-}" ] && is_applied "$PATCH_FILE"; then
-    (cd "$SUBMODULE" && git apply -R "$PATCH_FILE")
-    note "reverted $(basename "$PATCH_FILE")"
-  else
-    note "no patch to revert"
-  fi
+  local reverted=false f
+  while IFS= read -r f; do
+    if is_applied "$f"; then
+      (cd "$SUBMODULE" && git apply -R "$f")
+      note "reverted $(basename "$f")"
+      reverted=true
+    fi
+  done < <(patch_list)
+  $reverted || note "no patch to revert"
   if [ -d "$PYBIND11_DIR" ]; then
     (cd "$SUBMODULE" && git submodule update --init src/pybind11) >/dev/null 2>&1 \
       && note "pybind11 restored to recorded $(describe "$PYBIND11_DIR" "$PYBIND11_RECORDED")" \

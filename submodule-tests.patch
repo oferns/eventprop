@@ -1,0 +1,84 @@
+diff --git a/test/test_loss_layer.py b/test/test_loss_layer.py
+index 5a16dca..3a3ba0e 100644
+--- a/test/test_loss_layer.py
++++ b/test/test_loss_layer.py
+@@ -16,12 +16,29 @@ from test_lif_layer import get_poisson_spikes
+ 
+ class TTFSCrossEntropyLossTest(unittest.TestCase):
+     def test_numerical_gradient_vs_error(self):
++        # Seeded, and with explicit weights, so the loss layer's LIF forward pass
++        # actually fires. TTFSCrossEntropyLoss.forward() runs a real LIF pass, and
++        # the default w_dist is GaussianDistribution(mean 0, std 1): measured on 50
++        # fresh instances, that produced zero output spikes 50 times out of 50, so
++        # every first_spike_time was NaN and the numerical leg of this test compared
++        # NaN against a legitimate analytical 0.0. A comparison that only passes when
++        # both sides are NaN measures nothing.
++        np.random.seed(42)
+         params = TTFSCrossEntropyLossParameters(
+             lif_parameters=LIFLayerParameters(n=5, n_in=5)
+         )
++        # All-to-all weights: with one input spike per pre-synaptic neuron, diagonal
++        # weights never drive a post-synaptic neuron past v_th.
++        w = np.ones((params.lif_parameters.n, params.lif_parameters.n)) * 2.0
+ 
+         def get_artificial_output(t_eps, batch_idx, spike_idx):
+-            times1 = np.arange(params.lif_parameters.n) * 0.001
++            # Start at 0.001, not 0.0: this is a central difference, so spike_idx 0
++            # would otherwise be perturbed to -t_eps. Negative spike times are outside
++            # the model — the forward pass floors its first interval at t = 0 and so
++            # cannot bracket a spike before it. The Eigen reference does not validate
++            # them, so it silently evaluates the extrapolation; the C library rejects
++            # them with EVENTPROP_NEGATIVE_SPIKE_TIME (7).
++            times1 = (np.arange(params.lif_parameters.n) + 1) * 0.001
+             times2 = times1 * 2
+             if batch_idx == 0:
+                 times1[spike_idx] += t_eps
+@@ -44,17 +61,22 @@ class TTFSCrossEntropyLossTest(unittest.TestCase):
+                 ]
+             )
+ 
+-        t_eps = 1e-8
++        # 1e-7, not 1e-8: a central difference on O(1) losses has an absolute noise
++        # floor of ~machine_eps / t_eps, which at 1e-8 is ~2.2e-8 and swamps the
++        # entries that are analytically exactly 0. Measured here at 1e-7: max
++        # |numerical| over the analytically-zero entries = 5.551e-10, worst relative
++        # error over the non-zero entries = 3.5e-9.
++        t_eps = 1e-7
+         for label_neuron in range(params.lif_parameters.n):
+             batch_numerical_grads = list()
+             for batch_idx in range(2):
+                 numerical_grads = list()
+                 for spike_idx in range(params.lif_parameters.n):
+-                    loss = TTFSCrossEntropyLoss(params)
++                    loss = TTFSCrossEntropyLoss(params, w_in=w)
+                     loss.forward(get_artificial_output(t_eps, batch_idx, spike_idx))
+                     loss_plus = loss.get_losses([label_neuron])[batch_idx]
+ 
+-                    loss = TTFSCrossEntropyLoss(params)
++                    loss = TTFSCrossEntropyLoss(params, w_in=w)
+                     loss.forward(get_artificial_output(-t_eps, batch_idx, spike_idx))
+                     loss_minus = loss.get_losses([label_neuron])[batch_idx]
+ 
+@@ -63,7 +85,7 @@ class TTFSCrossEntropyLossTest(unittest.TestCase):
+                     )
+                 batch_numerical_grads.append(numerical_grads)
+ 
+-            loss = TTFSCrossEntropyLoss(params)
++            loss = TTFSCrossEntropyLoss(params, w_in=w)
+             loss.forward(get_artificial_output(0, 0, 0))
+             loss.backward([label_neuron] * 2)
+             for batch_idx in range(2):
+@@ -72,6 +94,13 @@ class TTFSCrossEntropyLossTest(unittest.TestCase):
+                         loss.input_batch[batch_idx].errors[spike_idx],
+                         batch_numerical_grads[batch_idx][spike_idx],
+                         rtol=1e-6,
++                        # atol, because one entry per label is analytically EXACTLY
++                        # 0.0 (the last input spike, which no first-spike time depends
++                        # on) and rtol alone compares 0.0 against the central
++                        # difference's rounding noise. Measured here at t_eps=1e-7:
++                        # max |numerical| over those entries = 5.551e-10. 1e-7 is 180x
++                        # above that noise and 4 orders below the signal.
++                        atol=1e-7,
+                     )
+ 
+ 

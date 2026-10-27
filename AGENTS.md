@@ -213,13 +213,32 @@ The reference submodule is **read-only**, and it needs local modifications to bu
 ./scripts/submodule-state.sh revert          # pristine submodule (reference library will NOT build)
 ```
 
+There are **two classes** of local modification, and the difference is which question the
+patch answers: `submodule-<platform>.patch` answers a *toolchain* question, so exactly one of
+them is active per machine; `submodule-tests.patch` answers a question that has the same answer
+on every OS, so it is applied on all three.
+
 | Patch | Platform | Fixes |
 |-------|----------|-------|
 | `submodule-macos.patch` | macOS (AppleClang + Homebrew) | Homebrew include paths, `-Xpreprocessor -fopenmp`, link args, NumPy deprecation |
 | `submodule-linux.patch` | Linux (GCC/Clang) | Boost include path, `-fopenmp` link arg, remove C++17 `<execution>` parallel policies, NumPy deprecation, pybind11 bump |
 | `submodule-windows.patch` | Windows (MSVC) | `setup.py` link args, `eventprop_cpp.cpp` / `eventprop_cpp.h` adjustments |
+| `submodule-tests.patch` | **All platforms** | `test/test_loss_layer.py` TTFS numerical-gradient test: seed, explicit all-to-all weights, base times at 0.001, `t_eps` 1e-7, `atol` 1e-7 |
 
 Patches are applied with `git apply`, never `patch -p1`, and never behind `|| true`.
+
+**`submodule-tests.patch` is deliberately not parked inside a platform patch.** The defect it
+fixes is identical on Linux and Windows — a reference-library test that compares NaN against a
+legitimate `0.0` — and a per-platform file is where a bug goes to hide: fixing it in the macOS
+patch alone would leave the other two platforms running the broken test while `status` on this
+machine read "applied". See *Fixed — the reference library's own TTFS gradient test compared NaN
+against 0.0* for the measurement, and why the fix is the five changes the project's Cython twin
+already had rather than anything new.
+
+It touches `test/test_loss_layer.py`, which no platform patch touches, so the two classes never
+compete for a hunk. That is verified, not assumed: `check-patches` drift-checks every
+`submodule-*.patch`, and each platform patch was applied **sequentially with** the tests patch in
+a pristine worktree and reversed cleanly — macOS, Linux and Windows, all six directions.
 
 **pybind11 is a nested submodule, and its required version is platform-specific.** It belongs to the same local-modification contract as the patches — it is not accidental drift:
 
@@ -231,7 +250,9 @@ Patches are applied with `git apply`, never `patch -p1`, and never behind `|| tr
 
 A plain `git submodule update --init --recursive` silently downgrades pybind11 to 2.6.x and breaks the reference build. `scripts/submodule-state.sh apply` restores it.
 
-**Drift test.** `check-patches` applies every patch to a detached worktree at pristine submodule HEAD. On the live tree a foreign-platform patch reads as "blocked" because the active patch owns the same hunks, so only the worktree test separates "not for this platform" from "upstream moved". Run it after any submodule update.
+**Drift test.** `check-patches` applies every `submodule-*.patch` (a glob, so a new patch file is
+drift-checked the moment it exists rather than waiting for someone to remember a hardcoded list)
+to a detached worktree at pristine submodule HEAD. On the live tree a foreign-platform patch reads as "blocked" because the active patch owns the same hunks, so only the worktree test separates "not for this platform" from "upstream moved". Run it after any submodule update.
 
 The submodule is read-only — patches must be reapplied after pulling from upstream.
 
@@ -299,6 +320,27 @@ cmake --preset release && cmake --build --preset release
 > **Note**: requires the `release` presets of `EventProp.C` (SHARED library) and `EventProp.Cpp.Wrapper` (Eigen core) — both are imported from their `./build` directories at configure time, so configuring before them fails with a `FATAL_ERROR` naming the missing library.
 
 > **Note (Windows)**: the exe lands in `src/EventProp.C/build/Release/Release/` — its `RUNTIME_OUTPUT_DIRECTORY` plus the multi-config generator's config dir, not `ParityTests/build`. It links `eventprop_c_api.dll`, and MSYS bash reports a Windows exe whose DLL cannot be resolved as **"No such file or directory" (exit 127)**, which reads like a missing build product. Run it from a directory containing the DLL, or with that directory on `PATH` (a native process honours `PATH`; a Python extension does not — see *Python bindings on Windows*).
+
+### Reference Library's Own Tests (read-only submodule)
+
+```bash
+# 14 tests. NOTE the second PYTHONPATH entry — it is not optional.
+cd src/EventProp.Python
+PYTHONPATH="$PWD:$PWD/test" python3 -m pytest test -q
+```
+
+> **Note**: three of the four modules do `from test_lif_layer import ...`, a sibling-module import.
+> `test/__init__.py` exists, so pytest imports them as `test.test_*` and that sibling name is
+> unreachable — every one of them then errors at **collection** with
+> `ModuleNotFoundError: No module named 'test_lif_layer'`. That is an invocation detail of the
+> upstream layout, not a library defect, and it is why `test/` goes on `PYTHONPATH` alongside the
+> package root. Do not "fix" it by editing the read-only submodule or deleting its `__init__.py`.
+
+> **Note**: this suite is the reference implementation's own upstream tests. It is not run by
+> `build.sh`, `run_benchmarks.sh` or `scripts/bench/run_all.py` — it is here because it is the only
+> suite that exercises the pybind11 backend against hand-written expectations, and because one of
+> its tests was silently measuring nothing until `submodule-tests.patch`; see *Fixed — the reference
+> library's own TTFS gradient test compared NaN against 0.0*.
 
 ### Native Benchmarks (C vs C++) — Standard Workflow
 
@@ -1242,9 +1284,63 @@ The patch was truncated mid-hunk. Its `setup.py` hunk header declared `@@ -3,6 +
 
 The patch is regenerated from its intent — apply the intended edits to a detached worktree at pristine submodule HEAD, then `git diff` — which yields correct hunk headers. The regenerated `src/eventprop_cpp.cpp` hashes to the same `c604ff4..45d9ce9` as the original, confirming those hunks were always correct and only `setup.py` was corrupt. The macOS and Windows patches were structurally sound.
 
-Guards: `build.sh` now calls `scripts/submodule-state.sh apply`, which uses `git apply` (atomic, parse-checked), classifies each patch as applied / applicable / blocked, and dies with instructions on `blocked` instead of continuing. `check-patches` applies all three patches to a pristine detached worktree — the only context in which a foreign-platform patch can be told apart from upstream drift.
+Guards: `build.sh` now calls `scripts/submodule-state.sh apply`, which uses `git apply` (atomic, parse-checked), classifies each patch as applied / applicable / blocked, and dies with instructions on `blocked` instead of continuing. `check-patches` applies every `submodule-*.patch` to a pristine detached worktree — the only context in which a foreign-platform patch can be told apart from upstream drift.
 
 Diagnostic signature: a Linux reference-library build failing on `#include <execution>`, a missing `-fopenmp` link symbol, or a pybind11 2.6.x error against NumPy 2. Check `./scripts/submodule-state.sh status` before blaming the compiler.
+
+### Fixed — the reference library's own TTFS gradient test compared NaN against 0.0
+
+`src/EventProp.Python/test/test_loss_layer.py::TTFSCrossEntropyLossTest::test_numerical_gradient_vs_error`
+failed deterministically with a message that reads like a gradient bug and is not one:
+
+```
+nan location mismatch:
+ ACTUAL: array(0.)      # analytical, from loss.backward()
+ DESIRED: array(nan)    # the central difference
+```
+
+The test is **vacuous**. `TTFSCrossEntropyLoss.forward` is not a bookkeeping call — it runs a real
+LIF forward pass — and the test constructs the layer with no `w_in`, so `LIFLayer` falls back to
+`w_dist = GaussianDistribution(w_mean=0, w_std=1)` and the test **seeds nothing**. Measured on this
+checkout: 50 fresh instances, **0 emitted a spike**, so every `first_spike_time` was NaN, and
+`get_losses` on an all-NaN row returns NaN — that is the numerical leg. The analytical leg is
+legitimately `0.0`, because nothing writes into the errors array when nothing spiked.
+
+`numpy.testing.assert_allclose` defaults to **`equal_nan=True`**, so it reports a mismatch only when
+the NaNs are in *different* places. The test therefore goes green when both legs are NaN — a
+gradient test that passes precisely when it measures nothing. It turned red here only because the
+zero-vs-NaN pair happens to differ in NaN-location.
+
+**Fix**: `submodule-tests.patch`, applied on **every** platform, mirroring the five changes the
+project's own Cython twin (`src/EventProp.Native.Python/test/test_loss_layer.py`) already carries —
+nothing was invented: `np.random.seed(42)`; explicit all-to-all `w = ones(n, n) * 2.0` at all three
+construction sites ("diagonal weights don't produce output spikes with single-spike-per-neuron
+input"); base times at `(arange(n) + 1) * 0.001`; `t_eps` 1e-8 → 1e-7; and `atol=1e-7`.
+
+Every number reproduces on the Eigen side, which is why the twin's constants transfer unchanged:
+with seed + `ones*2.0` the layer fires (`first_spike_times` 0.00612 / 0.00993); one entry per label
+is analytically exactly 0 and its central difference is **5.551e-10** — so `atol` is *required*, not
+cosmetic, and `rtol=1e-6` alone fails 0.0 against rounding noise — while the worst relative error on
+the non-zero entries is **3.5e-9**, four orders inside `rtol`.
+
+**Proven causal, not correlated.** With the macOS patch applied and *only* `submodule-tests.patch`
+reversed: `1 failed, 13 passed`. With it applied: **`14 passed`**. (Reverting both patches adds a
+second failure, `test_layer_chain::test_gradient_vs_numerical_random_ttfs`, which is the
+`dtype=np.int` → `dtype=int` NumPy-2 fix the macOS patch owns — a useful reminder that these patches
+are load-bearing together.)
+
+The other two tests in that file were checked for the same vacuity and are **not** affected: both
+supply explicit weights and a seed, and produce real signal (spike errors spanning −9.2 to 10.6,
+weight gradient `max|g| = 0.6669`), asserted with `assert_almost_equal`, whose default `atol=1e-8`
+cannot be satisfied by an all-zero array against a non-zero one.
+
+**The rule.** Any finite-difference test must assert the thing actually *fired* before comparing
+gradients, and must not rely on NaN semantics to pass: `equal_nan=True` is the default, so a
+scenario that produces no spikes makes both legs NaN and the assertion green. The same reasoning is
+already applied to the .NET `LayerContractTests` ("with a firing guard so the check is
+non-vacuous") — this is that rule, seen from the test-data side. When a numerical-gradient test
+fails, check for a vacuous scenario *before* suspecting the adjoint sweep, and check the noise floor
+(`machine_eps / t_eps`) before suspecting the math.
 
 ### Fixed — .NET: pointers taken from managed memory outlived their `fixed` pin (SIMD + P/Invoke)
 
