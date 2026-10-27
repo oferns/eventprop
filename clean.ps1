@@ -104,6 +104,17 @@ function Should-Run($component) {
 
 # Remove a path, record a failure, keep going. -ErrorAction Stop + try/catch is the
 # point: a locked directory must land in the failure list, not scroll past.
+#
+# Removing and REMOVED are different claims, and on Windows only the second one is a
+# measurement. Remove-Item can return without error while the directory is still
+# there: a file another process opened with FILE_SHARE_DELETE — which is what the
+# MSBuild/Roslyn build nodes do to obj\ and bin\ — enters Windows delete-pending, so
+# the unlink is queued, the call succeeds, and the path stays visible until the last
+# handle closes. Measured on this machine: `clean.ps1 -Full` printed
+# "Clean complete (27 path(s) removed)" and exited 0 with 8 .NET bin/obj paths still
+# on disk (files included, not just empty shells); a second pass removed all 8. An
+# unverified post-condition in a destructive script is the defect this script was
+# rewritten to remove, so the path is re-tested after every removal.
 function Remove-Tree($path) {
     if (-not (Test-Path $path)) { return }
     if ($DryRun) {
@@ -112,18 +123,27 @@ function Remove-Tree($path) {
     }
     try {
         Remove-Item -Recurse -Force -ErrorAction Stop $path
-        $script:Removed++
     } catch {
-        Write-Host "  FAILED to remove $path" -ForegroundColor Red
+        Write-Host "  FAILED to remove $path : $($_.Exception.Message)" -ForegroundColor Red
         $Failures.Add("rm $path")
+        return
     }
+    if (Test-Path -LiteralPath $path) {
+        Write-Host "  FAILED to remove $path (still present - a process holds a handle)" -ForegroundColor Red
+        $Failures.Add("rm $path (delete pending: path still present)")
+        return
+    }
+    $script:Removed++
 }
 
-# Remove files matching -Path patterns under $dir, printing the count.
+# Remove files matching -Path patterns under $dir. Same post-condition as Remove-Tree,
+# and the count now reports removals against matches rather than matches dressed up
+# as removals.
 function Remove-Matched($dir, [string[]]$patterns) {
     if (-not (Test-Path $dir)) { return }
     $files = @(Get-ChildItem -Path (Join-Path $dir "*") -Include $patterns -File -ErrorAction SilentlyContinue)
     if ($files.Count -eq 0) { return }
+    $gone = 0
     foreach ($f in $files) {
         if ($DryRun) {
             Write-Host "  [dry-run] would remove $($f.Name)"
@@ -131,13 +151,20 @@ function Remove-Matched($dir, [string[]]$patterns) {
         }
         try {
             Remove-Item -Force -ErrorAction Stop $f.FullName
-            $script:Removed++
         } catch {
-            Write-Host "  FAILED to remove $($f.FullName)" -ForegroundColor Red
+            Write-Host "  FAILED to remove $($f.FullName) : $($_.Exception.Message)" -ForegroundColor Red
             $Failures.Add("rm $($f.Name)")
+            continue
         }
+        if (Test-Path -LiteralPath $f.FullName) {
+            Write-Host "  FAILED to remove $($f.Name) (still present - a process holds a handle)" -ForegroundColor Red
+            $Failures.Add("rm $($f.Name) (delete pending: file still present)")
+            continue
+        }
+        $gone++
     }
-    Write-Host "  $($files.Count) file(s) $(if ($DryRun) { 'matched' } else { 'removed' })"
+    if ($DryRun) { Write-Host "  $($files.Count) file(s) matched" }
+    else { Write-Host "  $gone/$($files.Count) file(s) removed" }
 }
 
 function Clean-PyCache($dir) {
@@ -226,6 +253,20 @@ if (Should-Run "python") {
 # ── 6. .NET ──────────────────────────────────────────────────────────────────
 if (Should-Run "dotnet") {
     Write-Host ""; Write-Host "[6/9] .NET"
+    # The handles that cause the delete-pending case above belong to MSBuild's and
+    # Roslyn's persistent build nodes (`dotnet build-server`, plus whatever Visual
+    # Studio is holding open). Releasing them first is what makes the FIRST pass
+    # sufficient instead of requiring a second clean run; the next build pays one
+    # node start-up. Best effort — a machine without dotnet on PATH must still clean
+    # everything else, so a failure here is a note, never an exit.
+    if (Get-Command dotnet -ErrorAction SilentlyContinue) {
+        & dotnet build-server shutdown 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  build servers shut down (they hold handles in bin\ and obj\)" -ForegroundColor DarkGray
+        } else {
+            Write-Host "  note: dotnet build-server shutdown exited $LASTEXITCODE; a locked bin\ or obj\ may need a second pass" -ForegroundColor DarkGray
+        }
+    }
     Push-Location (Join-Path $ScriptDir "src")
     # EventProp.Abstractions is a real project (shared Layer contract) with real bin/obj.
     # EventProp.Cpp.Native is not a project and never was.

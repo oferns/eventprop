@@ -95,8 +95,17 @@ rm_tree() {
     printf '  [dry-run] would remove %s\n' "${p#"$SCRIPT_DIR"/}"
     return 0
   fi
+  # rm returning 0 is not the post-condition — the path being gone is. Same reason as
+  # clean.ps1: on Windows a file held with FILE_SHARE_DELETE enters delete-pending and
+  # the unlink "succeeds" while the path stays visible, and the two scripts are one
+  # contract, so the check lives in both rather than only where it has bitten yet.
   if rm -rf -- "$p"; then
-    removed=$((removed + 1))
+    if [[ -e "$p" ]]; then
+      printf '  \033[31mFAILED to remove %s (still present — a process holds a handle)\033[0m\n' "$p" >&2
+      failures+=("rm $p (delete pending: path still present)")
+    else
+      removed=$((removed + 1))
+    fi
   else
     printf '  \033[31mFAILED to remove %s\033[0m\n' "$p" >&2
     failures+=("rm $p")
@@ -115,7 +124,12 @@ rm_find() {
     if [[ $DRY_RUN == true ]]; then
       printf '  [dry-run] would remove %s\n' "${m#"$SCRIPT_DIR"/}"
     elif rm -f -- "$m"; then
-      removed=$((removed + 1))
+      if [[ -e "$m" ]]; then
+        printf '  \033[31mFAILED to remove %s (still present — a process holds a handle)\033[0m\n' "$m" >&2
+        failures+=("rm $m (delete pending: file still present)")
+      else
+        removed=$((removed + 1))
+      fi
     else
       printf '  \033[31mFAILED to remove %s\033[0m\n' "$m" >&2
       failures+=("rm $m")
@@ -226,6 +240,18 @@ fi
 # ── .NET projects ────────────────────────────────────────────────────────────
 if has dotnet; then
   printf '\n[6/9] .NET\n'
+  # The handles behind the delete-pending case belong to MSBuild's and Roslyn's
+  # persistent build nodes (dotnet build-server, plus whatever the IDE holds open).
+  # Releasing them first makes the FIRST pass sufficient. Best effort: a machine
+  # without dotnet on PATH still cleans everything else, so this is a note, never a
+  # failure. Mirrored in clean.ps1, which is where it was measured.
+  if command -v dotnet >/dev/null 2>&1; then
+    if dotnet build-server shutdown >/dev/null 2>&1; then
+      printf '  \033[2mbuild servers shut down (they hold handles in bin/ and obj/)\033[0m\n'
+    else
+      printf '  note: dotnet build-server shutdown failed; a locked bin/ or obj/ may need a second pass\n'
+    fi
+  fi
   cd "$SCRIPT_DIR/src" || exit 1
   # EventProp.Abstractions is a real project (shared Layer contract) with real bin/obj.
   # EventProp.Cpp.Native is NOT a project and never was — the PowerShell script listed
