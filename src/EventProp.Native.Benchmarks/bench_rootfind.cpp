@@ -89,12 +89,74 @@ double toms748_boost(const VoltageCtx& ctx, double a, double b) {
 
 struct TestCase { VoltageCtx ctx; double bracket_a; double bracket_b; };
 
-static std::vector<TestCase> gen(int n_pre, int n_post, int n_spikes) {
+// A bracket stated WITHOUT pointers: (i, nrn) index into the cumulative-sum rows owned by
+// SumRows. Keeping raw pointers out of the type gen() returns is the whole point.
+struct Bracket { int i; int nrn; double a; double b; };
+
+// Owns the storage every VoltageCtx here borrows from.
+//
+// This type exists because of a use-after-free that made this binary segfault on its first
+// benchmark (measured: SIGSEGV, exit 139, at HEAD — not a build-flag regression). gen()
+// used to return std::vector<TestCase> whose VoltageCtx carried raw sum0 / sum1 /
+// post_spike_times pointers into std::vector storage LOCAL TO gen(). Those three vectors
+// were freed the moment gen() returned, so every benchmark iteration dereferenced dead
+// 16 KB blocks and the surviving "cases" were whatever the allocator had reused them for.
+// A post-synaptic neuron may fire any number of times, so nothing about the workload made
+// that crash deterministic — it just happened to be immediate here.
+//
+// The rule this restores: a borrowed pointer must not outlive the function that borrowed
+// it. gen() now returns only ownership plus index-based problems; the ctx is built by
+// make_cases() from a fixture the CALLER holds, in the caller's own scope, and never
+// escapes it. (Deliberately not "return the fixture and hope the vector move preserves
+// the buffers" — that works on every real implementation but is not what the standard
+// promises, and a silent reliance on it is exactly how this file got here.)
+struct SumRows {
+    std::vector<double> sum0, sum1, post_times;
+    std::vector<Bracket> brackets;
+    // The VoltageCtx fields that are constant across every bracket of one fixture.
+    int n_post = 0;
+    double k_prefactor = 0.0, tau_mem_inv = 0.0, tau_syn_inv = 0.0, v_th = 0.0;
+};
+
+// One VoltageCtx per bracket, borrowed from a fixture that is alive in the caller's frame.
+// sum0/sum1/post_times are never resized after make_cases() is called, so .data() is
+// stable for the lifetime of the returned cases.
+static std::vector<TestCase> make_cases(const SumRows& rows) {
     std::vector<TestCase> cases;
+    cases.reserve(rows.brackets.size());
+    for (const Bracket& br : rows.brackets) {
+        VoltageCtx ctx{ rows.sum0.data(), rows.sum1.data(), br.i, 0, rows.n_post, br.nrn,
+                        rows.post_times.data(), rows.k_prefactor, rows.tau_mem_inv,
+                        rows.tau_syn_inv, rows.v_th };
+        cases.push_back({ ctx, br.a, br.b });
+    }
+    return cases;
+}
+
+static SumRows gen(int n_pre, int n_post, int n_spikes) {
+    SumRows out;
     double tau_mem = 0.02, tau_syn = 0.005, v_th = 1.0;
     std::mt19937 rng(42);
     std::uniform_real_distribution<double> t_dist(0.0, 1.0);
-    RowMatrixXd w = RowMatrixXd::Random(n_pre, n_post).array() * 0.5;
+    // Weights come from the SAME mt19937 as everything else in this generator, at the
+    // cross-suite range U[0.5, 2.0) — see bench_main.cpp's w_dist and the data contract in
+    // AGENTS.md. The previous line was
+    //     RowMatrixXd w = RowMatrixXd::Random(n_pre, n_post).array() * 0.5;
+    // and Random() is not the local RNG: Eigen::random_impl<double> is
+    //     x + (y - x) * std::rand() / RAND_MAX      (Eigen/src/Core/MathFunctions.h:812)
+    // so the weights came off the global std::rand() stream. Two measured consequences:
+    //   • not reproducible — a row's data depended on how many draws earlier benchmarks in
+    //     the same process had consumed, so the same row found 2 brackets in a full run and
+    //     0 when run through --benchmark_filter;
+    //   • wrong range — Random() is U[-1,1], scaled to U[-0.5,0.5], i.e. negative weights
+    //     far outside the contract, which is why the 100-spike (Small) fixtures crossed
+    //     v_th never and timed an empty loop.
+    // Row-major fill, matching bench_main.cpp's flat w[i] loop over a row-major matrix.
+    std::uniform_real_distribution<double> w_dist(0.5, 2.0);
+    RowMatrixXd w(n_pre, n_post);
+    for (int r = 0; r < n_pre; r++)
+        for (int c = 0; c < n_post; c++)
+            w(r, c) = w_dist(rng);
     std::vector<double> times(n_spikes);
     std::vector<int> sources(n_spikes);
     for (int i = 0; i < n_spikes; i++) {
@@ -114,17 +176,30 @@ static std::vector<TestCase> gen(int n_pre, int n_post, int n_spikes) {
         }
     }
     std::vector<double> post_times(1024, 0.0);
-    for (int nrn = 0; nrn < n_post && (int)cases.size() < 100; nrn++) {
-        double kp = tau_mem / std::abs(tau_mem - tau_syn);
-        for (int i = 1; i <= n_spikes && (int)cases.size() < 100; i++) {
+    double kp = tau_mem / std::abs(tau_mem - tau_syn);
+    for (int nrn = 0; nrn < n_post && (int)out.brackets.size() < 100; nrn++) {
+        for (int i = 1; i <= n_spikes && (int)out.brackets.size() < 100; i++) {
+            // A throwaway ctx, built and consumed entirely inside this loop — nothing here
+            // hands a pointer to storage the loop does not own.
             VoltageCtx ctx{sum0.data(), sum1.data(), i, 0, n_post, nrn, post_times.data(), kp, tau_mem_inv, tau_syn_inv, v_th};
             double va = compute_v(ctx, times[i-1]);
             double vb = compute_v(ctx, (i < n_spikes) ? times[i] : 1.0);
             if ((va - v_th) * (vb - v_th) < 0)
-                cases.push_back({ctx, times[i-1], (i < n_spikes) ? times[i] : 1.0});
+                out.brackets.push_back({i, nrn, times[i-1], (i < n_spikes) ? times[i] : 1.0});
         }
     }
-    return cases;
+    // Hand over the storage together with the problems that index into it, and with the
+    // per-fixture constants make_cases() needs. The move here transfers ownership of whole
+    // buffers; it does not publish any pointer out of gen().
+    out.sum0 = std::move(sum0);
+    out.sum1 = std::move(sum1);
+    out.post_times = std::move(post_times);
+    out.n_post = n_post;
+    out.k_prefactor = kp;
+    out.tau_mem_inv = tau_mem_inv;
+    out.tau_syn_inv = tau_syn_inv;
+    out.v_th = v_th;
+    return out;
 }
 
 static void BM_RootFind_C(benchmark::State& state) {
@@ -133,10 +208,16 @@ static void BM_RootFind_C(benchmark::State& state) {
         if (state.name().find("Medium") != std::string::npos) return {200, 80, 500};
         return {500, 200, 1000};
     }();
-    auto cases = gen(n_pre, n_post, n_spikes);
+    const SumRows rows = gen(n_pre, n_post, n_spikes);
+    const std::vector<TestCase> cases = make_cases(rows);   // borrows from `rows`: same scope, both outlive the loop
+    // An empty bracket list is a legitimate outcome of the scan (nothing crossed v_th in
+    // this regime) but it times an empty loop, and google benchmark then reports 0.000 ns
+    // with an absurd iteration count — which reads as "the C root finder is infinitely
+    // fast". Publish the work each row actually did, exactly as bench_main.cpp publishes
+    // c_error / c_fwd_error for the same reason. Exclude rows with cases=0 from any ratio.
+    state.counters["cases"] = static_cast<double>(cases.size());
     for (auto _ : state) {
-        double sum = 0;
-        for (auto& tc : cases) { double r = toms748_c(tc.ctx, tc.bracket_a, tc.bracket_b); benchmark::DoNotOptimize(r); }
+        for (const TestCase& tc : cases) { double r = toms748_c(tc.ctx, tc.bracket_a, tc.bracket_b); benchmark::DoNotOptimize(r); }
     }
 }
 
@@ -146,10 +227,11 @@ static void BM_RootFind_Boost(benchmark::State& state) {
         if (state.name().find("Medium") != std::string::npos) return {200, 80, 500};
         return {500, 200, 1000};
     }();
-    auto cases = gen(n_pre, n_post, n_spikes);
+    const SumRows rows = gen(n_pre, n_post, n_spikes);
+    const std::vector<TestCase> cases = make_cases(rows);   // borrows from `rows`: same scope, both outlive the loop
+    state.counters["cases"] = static_cast<double>(cases.size());   // see BM_RootFind_C
     for (auto _ : state) {
-        double sum = 0;
-        for (auto& tc : cases) { double r = toms748_boost(tc.ctx, tc.bracket_a, tc.bracket_b); benchmark::DoNotOptimize(r); }
+        for (const TestCase& tc : cases) { double r = toms748_boost(tc.ctx, tc.bracket_a, tc.bracket_b); benchmark::DoNotOptimize(r); }
     }
 }
 
