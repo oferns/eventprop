@@ -1,6 +1,20 @@
 cmake_minimum_required(VERSION 3.21)
 project(EventPropCTests LANGUAGES CXX)
 
+# The configure presets set CMAKE_BUILD_TYPE, and on a multi-config generator (MSVC,
+# Xcode) nothing consumes it — so CMake prints "Manually-specified variables were not
+# used by the project: CMAKE_BUILD_TYPE" on every Windows configure. The presets cannot
+# simply stop setting it: single-config generators (Unix Makefiles, Ninja — Linux and
+# macOS) take their optimisation level from it, so dropping it there would silently
+# build -O0 and poison every benchmark number. Reading it here is what tells CMake the
+# variable is used; the default is the honest counterpart of that reading, because a
+# single-config generator with no build type is an unoptimised build nobody chose.
+# Same block in every preset-driven project (EventPropSimd.cmake answers the ISA
+# question once for the same reason).
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type (single-config generators only)" FORCE)
+endif()
+
 # C++20, not 17: the C-API fixtures use designated initializers
 # (BackwardsBatch{ .error_no = ..., .batch_size = ... }), which are standard only from
 # C++20. Clang and GCC accepted them as an extension at 17; MSVC makes it a hard error
