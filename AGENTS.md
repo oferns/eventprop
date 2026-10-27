@@ -489,6 +489,19 @@ not start.
 runner; `src/EventProp.Native.Benchmarks/run_benchmarks.sh` runs the native C-vs-C++ suite
 alone and calls Google Benchmark's `compare.py`. Same name, two scopes, two directories.
 
+**A third one existed and is deleted.** `src/EventProp.Python.Benchmarks/run_benchmarks.sh`
+(added 2026-06-22) predated `scripts/bench/` completely: it invoked bare `python` — which
+on macOS is frequently an interpreter without the built `eventprop_c` extension, so it died
+at import — ran only `test_benchmarks.py`, never `test_kernel_benchmarks.py` whose
+`impl: "C"` kernel records close the cross-suite chain, wrote its own
+`benchmark_report.html` and **no `records_*.json`**, so no measurement it produced could
+reach `merge.py`, and ran none of the prerequisite probes this runner performs. Nothing
+tracked referenced it except its own README section, which now points here. Deleted rather
+than renamed because a stale entry point with the same name as the real one is how a
+measurement gets made that nobody consumes and everybody assumes is current.
+`generate_report.py` survives it — the README invokes that directly, and
+`BENCHMARK_SCHEMA.md` says what it is and is not.
+
 **A subset run rewrites the committed report at the same path.** `--suites native` (or
 `--report-only`) merges whatever records are in `--out` and writes
 `bench-reports/report_<tag>.md` **and** `BENCHMARKS.md` from that subset — a one-suite

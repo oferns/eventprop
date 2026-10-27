@@ -80,30 +80,61 @@ After running Python benchmarks, compare results against:
 
 ```
 EventProp.Python.Benchmarks/
-├── conftest.py          # Shared fixtures: sizes, patterns, helpers
-├── test_benchmarks.py   # All benchmark classes (pybind11 vs ctypes)
-└── README.md            # This file
+├── conftest.py               # Shared fixtures: sizes, patterns, helpers
+├── test_benchmarks.py        # All benchmark classes (pybind11 vs ctypes)
+├── test_kernel_benchmarks.py # Raw C kernels, no layer — isolates binding overhead and
+│                             # publishes the impl: "C" records that close the chain
+├── generate_report.py        # Standalone HTML over existing JSON (local only)
+└── README.md                 # This file
 ```
 
 Both libraries are imported simultaneously via `sys.path` manipulation — no reinstall needed.
 
-## Unified Benchmark Report (Python + .NET)
+## Running these benchmarks
 
-Generate a single HTML report combining **pytest-benchmark** (Python) and **BenchmarkDotNet** (.NET) results:
+The supported entry point is the cross-suite pipeline at the **repo root**. It runs both
+Python suites (including `test_kernel_benchmarks.py`), adapts the records, merges them with
+the native and .NET data, and writes `bench-reports/report_<tag>.md` plus `BENCHMARKS.md`:
 
 ```bash
 cd src/EventProp.Python.Benchmarks
 
-# Option 1: Run all benchmarks and generate report in one step
-./run_benchmarks.sh all
+../../run_benchmarks.sh                # quick (Tiny/Small, skips XL)
+../../run_benchmarks.sh --full         # includes XL
+../../run_benchmarks.sh --suites python --no-reports --no-benchmarks-md
+                                       # a scratch subset: the two flags stop it
+                                       # rewriting the committed reports in place
+```
 
-# Option 2: Run separately, then combine
-./run_benchmarks.sh python    # → results_py.json
-./run_benchmarks.sh dotnet    # → BenchmarkDotNet.Artifacts/results/*.json
-./run_benchmarks.sh report    # → benchmark_report.html
+This suite alone, no pipeline and no merge — pytest-benchmark JSON only:
 
-# Option 3: Manual generation from existing JSON files
-python generate_report.py \
+```bash
+cd src/EventProp.Python.Benchmarks
+PYTHONPATH=../EventProp.Python:../EventProp.Native.Python \
+  python3.14 -m pytest test_benchmarks.py test_kernel_benchmarks.py \
+    --benchmark-only --benchmark-json=results_py.json
+```
+
+Name the interpreter that actually has the built `eventprop_c` extension. A bare `python`
+or `python3` on macOS is frequently Xcode's (3.9.6 on the reference machine), which cannot
+import the `cpython-314` extension — the suite then fails at import, not at the measurement.
+
+> **`run_benchmarks.sh` no longer lives in this directory.** It predated
+> `scripts/bench/` entirely, invoked bare `python`, ran only `test_benchmarks.py` (never
+> `test_kernel_benchmarks.py`, whose `impl: "C"` kernel records close the cross-suite
+> chain), emitted no `records_*.json` for the pipeline to merge, and shared its name with
+> two other scripts of different scope. See the `run_benchmarks.sh` name-collision note in
+> the repo-root `AGENTS.md`.
+
+## Standalone HTML report
+
+`generate_report.py` renders pytest-benchmark JSON plus BenchmarkDotNet JSON into one local
+HTML file. **Nothing in the pipeline reads it, and it is not the committed report** —
+`BENCHMARKS.md` and `bench-reports/report_<tag>.md` come from `scripts/bench/run_all.py`:
+
+```bash
+cd src/EventProp.Python.Benchmarks
+python3.14 generate_report.py \
     .benchmarks/*/0002_baseline.json \
     ../EventProp.Benchmarks/BenchmarkDotNet.Artifacts/results/*.json
 ```

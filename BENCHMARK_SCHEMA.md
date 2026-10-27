@@ -265,8 +265,12 @@ discarding the JSON that already has `output_spikes` and provenance. Those four 
 **deleted**, along with the committed result JSONs that fed them (`results_sweep.json`,
 `lif_results.json`, `sweep_results.json`, `results_training_step.json`).
 
-`generate_report.py` is **kept**: `run_benchmarks.sh` and the suite README use it, so it
-is the suite's own documented workflow, not a superseded one-off.
+`generate_report.py` is **kept**: the suite README documents invoking it directly over
+JSON you already have, so it is a supported local workflow rather than a superseded
+one-off — but what it writes (`benchmark_report.html`) is not read by the pipeline and is
+not the committed report. Its other former caller,
+`EventProp.Python.Benchmarks/run_benchmarks.sh`, is **deleted**; see the
+`run_benchmarks.sh` name-collision note in `AGENTS.md` for why.
 
 ### Provenance: what each tool supplies
 
