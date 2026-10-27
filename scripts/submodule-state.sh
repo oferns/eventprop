@@ -26,6 +26,7 @@ PYBIND11_DIR="$SUBMODULE/src/pybind11"
 #   recorded by the submodule : 54430436  pybind11 2.6.3.dev1 (2021)
 #   required on macOS         : 6079989c  pybind11 3.1.0a0  (v3.0.2-48)
 #   required on Linux         : a2e59f0e  pybind11 2.13.6   (encoded in the linux patch)
+#   required on Windows       : a2e59f0e  pybind11 2.13.6   (constant below, same as Linux)
 #
 # The recorded 2.6.3.dev1 cannot build the reference library on a current
 # toolchain — no NumPy 2 support, and it predates modern Clang/GCC and
@@ -33,11 +34,30 @@ PYBIND11_DIR="$SUBMODULE/src/pybind11"
 # (it moves the gitlink), so the patch is the source of truth there. On macOS no
 # patch touches the gitlink, so the constant below is the only record of it.
 #
+# Windows had no constant here, and the `*` arm of pybind11_required() returned
+# PYBIND11_RECORDED — so `apply` did not merely omit the requirement, it CHECKED
+# OUT the version that cannot compile. Measured on MSVC 14.52 / Python 3.11.9 /
+# NumPy 2.4.6, build.ps1 step 7:
+#
+#   pybind11/detail/type_caster_base.h(448): error C2027: use of undefined type '_frame'
+#   pybind11/pybind11.h(2128):  error C2039: 'frame': is not a member of '_ts'
+#   pybind11/pybind11.h(2132):  error C2660: 'PyDict_GetItem': function does not take 1 arguments
+#
+# Those are the pre-3.11 frame C API (frame->f_code, PyThreadState_Get()->frame)
+# being compiled against headers that made struct _frame opaque. It is the same
+# defect class AGENTS.md records for macOS, arriving one platform later and one
+# Python version further ahead: 2.6.3.dev1 predates Python 3.11, so no MSVC flag
+# or setuptools version fixes it — only the pybind11 version does. 2.13.6 is the
+# Linux answer, it needs no patch on Windows (no Windows patch touches the
+# gitlink), and it is proven here end to end: step 7 goes green and
+# tests/test_paper_parity.py is 7/7 on the trained YinYang and MNIST checkpoints.
+#
 # This is a required local modification, in the same class as the platform
 # patches. A plain `git submodule update --init --recursive` silently downgrades
 # it and breaks the reference build.
 PYBIND11_RECORDED=54430436fee2afc4f8443691075a6208f9ea8eba
 PYBIND11_REQUIRED_MACOS=6079989cf70555d213add249cfb36dad14519791
+PYBIND11_REQUIRED_WINDOWS=a2e59f0e7065404b44dfe92a28aca47ba1378dc4
 
 die()  { echo "ERROR: $*" >&2; exit 1; }
 note() { echo "  → $*"; }
@@ -119,9 +139,12 @@ pybind11_required() {
     from_patch="$(sed -n 's/^+Subproject commit //p' "$PATCH_FILE" | head -1)"
   fi
   if [ -n "$from_patch" ]; then echo "$from_patch"; return; fi
+  # Same platform spellings as the PATCH_FILE case above: Git bash / MSYS2 report
+  # OSTYPE=cygwin or msys, MSYS2 MinGW shells report mingw*.
   case "${OSTYPE:-}" in
-    darwin*) echo "$PYBIND11_REQUIRED_MACOS" ;;
-    *)       echo "$PYBIND11_RECORDED" ;;
+    darwin*)              echo "$PYBIND11_REQUIRED_MACOS" ;;
+    msys*|cygwin*|mingw*) echo "$PYBIND11_REQUIRED_WINDOWS" ;;
+    *)                    echo "$PYBIND11_RECORDED" ;;
   esac
 }
 
@@ -195,9 +218,18 @@ cmd_status() {
   echo "pybind11 (nested submodule):"
   echo "  HEAD:      $(pybind11_head) $(describe "$PYBIND11_DIR" "$(pybind11_head)")"
   echo "  required:  $(pybind11_required) $(describe "$PYBIND11_DIR" "$(pybind11_required)")"
-  echo "  recorded:  $PYBIND11_RECORDED (2.6.3.dev1 — does not build on macOS)"
+  echo "  recorded:  $PYBIND11_RECORDED (2.6.3.dev1 — does not build: no NumPy 2, pre-3.11 frame API)"
   echo "reference binary:"
-  local so; so=$(ls "$SUBMODULE"/eventprop/eventprop_cpp.*.so 2>/dev/null | head -1 || true)
+  # Every platform suffix, not just the POSIX ones: the reference extension is
+  # eventprop_cpp.cp311-win_amd64.pyd on Windows, and a `.so`-only glob reported
+  # "not built" on a machine that had a built, importable .pyd — the same
+  # platform-blind-existence-test class that made clean.sh leave the Windows
+  # extension in place (0 .so matched, 2 .pyd present).
+  local so=""
+  for ext in so dylib pyd dll; do
+    so="$(ls "$SUBMODULE"/eventprop/eventprop_cpp.*.$ext 2>/dev/null | head -1 || true)"
+    [ -n "$so" ] && break
+  done
   echo "  ${so:-not built}"
 }
 
