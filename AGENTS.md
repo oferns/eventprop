@@ -365,6 +365,16 @@ PYTHONPATH="$PWD:$PWD/test" python3 -m pytest test -q
 > upstream layout, not a library defect, and it is why `test/` goes on `PYTHONPATH` alongside the
 > package root. Do not "fix" it by editing the read-only submodule or deleting its `__init__.py`.
 
+> **Note**: this is invocation, not platform — it behaves identically on macOS and Linux. Verified
+> here: no `pytest.ini` / `pyproject.toml` / `setup.cfg` / `conftest.py` exists in
+> `EventProp.Python`, so pytest's default `prepend` import mode applies everywhere; the import is
+> present in the **pristine** submodule (`git -C src/EventProp.Python show HEAD:test/test_li_layer.py`,
+> line 8); and the only patch touching `test/` (`submodule-tests.patch`) edits `test_loss_layer.py`
+> and leaves it alone. Only the *spelling* changes: `;` separates `PYTHONPATH` entries on Windows
+> (`$env:PYTHONPATH="$PWD;$PWD\test"` in PowerShell), and `--import-mode=importlib` — the reflex fix,
+> because it skips `sys.path` insertion — does **not** help, since it never adds `test/` either.
+> Measured: 3 collection errors before, 14 passed after, 3 errors with `importlib`.
+
 > **Note**: this suite is the reference implementation's own upstream tests. It is not run by
 > `build.sh`, `run_benchmarks.sh` or `scripts/bench/run_all.py` — it is here because it is the only
 > suite that exercises the pybind11 backend against hand-written expectations, and because one of
