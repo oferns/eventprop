@@ -22,16 +22,27 @@ namespace CW.EventProp.Tests;
 /// show, and a 34-million-iteration single-test probe did NOT reproduce it, so
 /// do not expect these to fail on their own if the pinning regresses — treat
 /// them as cheap tripwires and keep the AGENTS.md post-mortem as the real record.
+///
+/// The window starts when the hammers start — there is no warm-up delay. Measured here
+/// (8 cores, each variant in its own process): the 600 ms window already takes 347–472
+/// gen0 collections with no warm-up, so a delay does not spin the hammers up; it only
+/// ate ~15–20% of the iterations (2.5M against 3.1M), and iterations are the whole point.
 /// </summary>
 public class PinningStressTests
 {
-    /// <summary>Allocation hammers: force frequent GCs, including relocations.</summary>
-    private static Task[] StartPressure(int threads, CancellationTokenSource stop)
+    /// <summary>
+    /// Allocation hammers: force frequent GCs, including relocations.
+    ///
+    /// Takes a token, not a CancellationTokenSource: the caller owns and disposes the
+    /// source, and a source handed to these tasks could be disposed while they still
+    /// read it (the .Token getter throws ObjectDisposedException on a disposed source).
+    /// </summary>
+    private static Task[] StartPressure(int threads, CancellationToken stop)
         => Enumerable.Range(0, threads).Select(_ => Task.Run(() =>
         {
             var rng = new Random();
             long sink = 0;
-            while (!stop.Token.IsCancellationRequested)
+            while (!stop.IsCancellationRequested)
                 for (int k = 0; k < 32; k++)
                 {
                     var a = new double[2000]; a[0] = rng.NextDouble(); sink += (long)a[0];
@@ -42,7 +53,7 @@ public class PinningStressTests
 
     [Test]
     [Timeout(30_000)]
-    public async Task FmaRow_WritesLandUnderConcurrentGcPressure()
+    public async Task FmaRow_WritesLandUnderConcurrentGcPressure(CancellationToken timeout)
     {
         // nPost = 5 >= Vector256<double>.Count (4), so FmaRow takes the SIMD path.
         const int nPost = 5;
@@ -53,12 +64,12 @@ public class PinningStressTests
         var expected = new double[nPost];
         for (int j = 0; j < nPost; j++) expected[j] = src[j] + w[j] * scalar;
 
-        var stop = new CancellationTokenSource(TimeSpan.FromMilliseconds(600));
-        var pressure = StartPressure(4, stop);
-        await Task.Delay(100);
+        using var stop = new CancellationTokenSource(TimeSpan.FromMilliseconds(600));
+        using var cancel = CancellationTokenSource.CreateLinkedTokenSource([timeout, stop.Token]);
+        var pressure = StartPressure(4, cancel.Token);
 
         int lost = 0, iters = 0;
-        while (!stop.Token.IsCancellationRequested)
+        while (!cancel.Token.IsCancellationRequested)
         {
             var dest = new double[nPost];          // fresh gen0 array, zero-initialised
             SimdAlgorithms.FmaRow(dest, src, w, scalar);
@@ -74,7 +85,7 @@ public class PinningStressTests
 
     [Test]
     [Timeout(60_000)]
-    public async Task NativeForward_IsBitIdenticalUnderConcurrentGcPressure()
+    public async Task NativeForward_IsBitIdenticalUnderConcurrentGcPressure(CancellationToken timeout)
     {
         const int nPre = 50, nPost = 20, n = 200;
         var w = new double[nPre * nPost];
@@ -91,12 +102,15 @@ public class PinningStressTests
 
         var reference = Reference();
 
-        var stop = new CancellationTokenSource(TimeSpan.FromMilliseconds(600));
-        var pressure = StartPressure(4, stop);
-        await Task.Delay(100);
+        using var stop = new CancellationTokenSource(TimeSpan.FromMilliseconds(600));
+        using var cancel = CancellationTokenSource.CreateLinkedTokenSource([timeout, stop.Token]);
+        // cancel.Token, not stop.Token: on a test timeout the hammers have to stop with
+        // the test, or their gen0 churn leaks into whichever test runs next — the exact
+        // interference these GC-sensitive guards cannot tolerate.
+        var pressure = StartPressure(4, cancel.Token);
 
         int drift = 0, iters = 0;
-        while (!stop.Token.IsCancellationRequested)
+        while (!cancel.Token.IsCancellationRequested)
         {
             // Fresh gen0 input arrays: the ones a relocating GC will move.
             var lw = (double[])w.Clone();
