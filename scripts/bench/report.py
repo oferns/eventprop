@@ -227,7 +227,44 @@ def main():
                      "managed .NET implementation. P/Invoke marshalling cost sits on the "
                      "left side. The Tiny/Small kernel rows are absent from this pair "
                      "because the .NET suite no longer defines them, and sub-10us rows are "
-                     "excluded by `below_min_work`. From Medium up, C wins every valid cell.")
+                     "excluded by `below_min_work`.")
+            # The Medium-and-above split is COMPUTED from the cells below it, never
+            # asserted. What this replaces read "From Medium up, C wins every valid
+            # cell", written against one early run - and it is false in every committed
+            # report: 11 of 22 valid Medium+ cells go the other way on linux, 10 of 22 on
+            # windows (ComputeMaxima/Large/uniform is 3,129 us through P/Invoke against
+            # 1,179 us managed). The split is by algorithm AND pattern, not by size, and
+            # it is not even stable across hosts: at ComputeMaxima/Medium the C path wins
+            # two of three patterns on windows (1.32 / 0.96 / 1.33) while managed wins all
+            # three on linux (0.81 / 0.44 / 0.97). The table and the geomeans were always
+            # right; a narrative that names a winner its own table contradicts is worse
+            # than no narrative, because the sentence is what gets quoted.
+            big = [c for c in pair_cells
+                   if c["valid"] and c["size"] in ("Medium", "Large", "XL")
+                   and ratio(c, a, b)]
+            if big:
+                # ratio = time(Managed) / time(PInvoke), so >1 means the C path is faster.
+                tally = {}
+                for c in big:
+                    win = tally.setdefault(c["benchmark"], [0, 0])
+                    win[0 if ratio(c, a, b) > 1 else 1] += 1
+                n_c = sum(v[0] for v in tally.values())
+                n_m = sum(v[1] for v in tally.values())
+                all_c = sorted(k for k, v in tally.items() if not v[1])
+                all_m = sorted(k for k, v in tally.items() if not v[0])
+                both = sorted(k for k, v in tally.items() if v[0] and v[1])
+                parts = []
+                if all_c:
+                    parts.append(f"{a} (the C path) takes every valid cell of "
+                                 f"{', '.join(all_c)}")
+                if all_m:
+                    parts.append(f"{b} takes every valid cell of {', '.join(all_m)}")
+                if both:
+                    parts.append(f"size-dependent: {', '.join(both)}")
+                L.append("")
+                L.append(f"Across the {len(big)} valid cells at Medium and above, "
+                         f"**{a} wins {n_c} and {b} wins {n_m}**"
+                         + (f" - {'; '.join(parts)}." if parts else "."))
             L.append("")
         L.append("| benchmark | size | pattern | " + a + " (us) | " + b + " (us) | ratio | valid |")
         L.append("|---|---|---|---:|---:|---:|:--|")
