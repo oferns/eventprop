@@ -29,13 +29,26 @@ void eventprop_compute_sums(
     double* sum0, double* sum1);
 
 // --- compute_spikes ---
-// Writes output spike times, sources, and currents.
-// Returns the number of output spikes (0 if none).
+// Writes output spike times, sources, and currents into three caller-owned buffers of
+// max_out elements each, and returns the number of spikes PRODUCED (0 if none).
+//
+// max_out is not advisory — it is the write bound. A post-synaptic neuron may cross
+// v_th any number of times inside one input interval, so the output count is not
+// bounded by any function of the input count, and every caller that assumed otherwise
+// wrote past its own heap. Measured here: 50x20 neurons, 100 input spikes, v_th = 0.01
+// produce roughly 241k output spikes into a 101,000-element buffer, which is how
+// eventprop_capi_tests died (Access violation inside eventprop_compute_spikes, called
+// from test_compute_spikes_very_low_threshold).
+//
+// Writes are clamped to max_out. If the return value is greater than max_out the output
+// was truncated: resize the buffers to the returned count and call again. max_out <= 0
+// means "count only" — nothing is written.
 int eventprop_compute_spikes(
     const double* w, int n_pre, int n_post,
     const double* times, const int32_t* sources, int n_spikes,
     double v_th, double tau_mem, double tau_syn,
-    double* out_times, int32_t* out_sources, double* out_currents);
+    double* out_times, int32_t* out_sources, double* out_currents,
+    int max_out);
 
 // --- compute_maxima ---
 // Writes maxima times and values (one per post-synaptic neuron).

@@ -22,6 +22,17 @@ static int tests_run = 0, tests_passed = 0, tests_failed = 0;
 #define ASSERT_NEAR(a, b, tol) \
     if (fabs((a) - (b)) > (tol)) { printf("FAIL [%g vs %g]\n", (double)(a), (double)(b)); tests_failed++; return; }
 
+/* The C shim clamps its writes to the capacity it is handed and returns the count it
+   WOULD have written (see eventprop_c_api.h), because the output spike count has no
+   upper bound in terms of the inputs — a neuron may cross v_th repeatedly inside one
+   input interval. So every max_out in this file is a choice, not a theorem, and a
+   fixture whose count exceeds its capacity measured a truncated spike train: fail it
+   loudly. ASSERT returns, so nothing downstream reads past what was written — which is
+   what the missing bound used to be (heap overflow, caught by cdb inside
+   eventprop_compute_spikes called from test_compute_spikes_very_low_threshold). */
+#define ASSERT_FITS(n, cap) \
+    if ((n) > (cap)) { printf("FAIL [output truncated: wrote %d of %d spikes — raise max_out]\n", (int)(cap), (int)(n)); tests_failed++; return; }
+
 #define TEST_END \
     do { printf("PASS\n"); tests_passed++; } while (0)
 
@@ -52,27 +63,18 @@ static void sort_spikes(double* times, int32_t* sources, int n) {
 /* ── Tests ───────────────────────────────────────────────────── */
 
 static void test_compute_sums(void) {
-    fprintf(stderr, "DEBUG: entering test_compute_sums\n"); fflush(stderr);
     TEST("ComputeSums Tiny (10×5, 20 spikes)");
     int n_pre = 10, n_post = 5, n_spikes = 20;
     double* w = (double*)malloc(n_pre * n_post * sizeof(double));
     double* times = (double*)malloc(n_spikes * sizeof(double));
     int32_t* sources = (int32_t*)malloc(n_spikes * sizeof(int32_t));
     gen_uniform(n_pre, n_post, n_spikes, w, times, sources); sort_spikes(times, sources, n_spikes);
-    fprintf(stderr, "DEBUG: after gen_uniform\n"); fflush(stderr);
     int sum_rows = n_spikes + 1; double* sum0 = (double*)calloc(sum_rows * n_post, sizeof(double)); double* sum1 = (double*)calloc(sum_rows * n_post, sizeof(double));
-    fprintf(stderr, "DEBUG: before eventprop_compute_sums\n"); fflush(stderr);
     eventprop_compute_sums(w, n_pre, n_post, times, sources, n_spikes, 0.02, 0.005, sum0, sum1);
-    fprintf(stderr, "DEBUG: after eventprop_compute_sums\n"); fflush(stderr);
-    fprintf(stderr, "DEBUG: checking ASSERT sum0[0]=%f sum1[0]=%f\n", sum0[0], sum1[0]); fflush(stderr);
     ASSERT(sum0[0] == 0.0 && sum1[0] == 0.0, "initial sums should be zero");
-    fprintf(stderr, "DEBUG: after first ASSERT\n"); fflush(stderr);
     double total = 0; for (int i = 0; i < sum_rows * n_post; i++) total += fabs(sum0[i]);
-    fprintf(stderr, "DEBUG: total=%f\n", total); fflush(stderr);
     ASSERT(total > 0, "sums should have non-zero values");
-    fprintf(stderr, "DEBUG: after second ASSERT\n"); fflush(stderr);
     free(w); free(times); free(sources); free(sum0); free(sum1); TEST_END;
-    fprintf(stderr, "DEBUG: test_compute_sums done\n"); fflush(stderr);
 }
 
 static void test_compute_spikes(void) {
@@ -83,7 +85,8 @@ static void test_compute_spikes(void) {
     int32_t* sources = (int32_t*)malloc(n_spikes * sizeof(int32_t));
     gen_uniform(n_pre, n_post, n_spikes, w, times, sources); sort_spikes(times, sources, n_spikes);
     int max_out = 10 * (n_spikes + 1) * n_post; double* out_times = (double*)malloc(max_out * sizeof(double)); int32_t* out_sources = (int32_t*)malloc(max_out * sizeof(int32_t)); double* out_currents = (double*)malloc(max_out * sizeof(double));
-    int n_out = eventprop_compute_spikes(w, n_pre, n_post, times, sources, n_spikes, 1.0, 0.02, 0.005, out_times, out_sources, out_currents);
+    int n_out = eventprop_compute_spikes(w, n_pre, n_post, times, sources, n_spikes, 1.0, 0.02, 0.005, out_times, out_sources, out_currents, max_out);
+    ASSERT_FITS(n_out, max_out);
     ASSERT(n_out >= 0, "should return non-negative spike count");
     if (n_out > 0) { for (int i = 1; i < n_out; i++) ASSERT(out_times[i] >= out_times[i-1], "output times should be sorted"); }
     free(w); free(times); free(sources); free(out_times); free(out_sources); free(out_currents); TEST_END;
@@ -98,7 +101,8 @@ static void test_backward_spikes(void) {
     gen_uniform(n_pre, n_post, n_spikes, w, times, sources); sort_spikes(times, sources, n_spikes);
     int max_out = 10 *
 (n_spikes + 1) * n_post; double* fwd_times = (double*)malloc(max_out * sizeof(double)); int32_t* fwd_sources = (int32_t*)malloc(max_out * sizeof(int32_t)); double* fwd_currents = (double*)malloc(max_out * sizeof(double));
-    int n_fwd = eventprop_compute_spikes(w, n_pre, n_post, times, sources, n_spikes, 1.0, 0.02, 0.005, fwd_times, fwd_sources, fwd_currents);
+    int n_fwd = eventprop_compute_spikes(w, n_pre, n_post, times, sources, n_spikes, 1.0, 0.02, 0.005, fwd_times, fwd_sources, fwd_currents, max_out);
+    ASSERT_FITS(n_fwd, max_out);
     if (n_fwd == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); free(fwd_times); free(fwd_sources); free(fwd_currents); return; }
     double* post_errors = (double*)calloc(n_fwd, sizeof(double)); for (int i = 0; i < n_fwd; i++) post_errors[i] = 1.0;
     double* grad = (double*)calloc(n_pre * n_post, sizeof(double)); double* spike_errors = (double*)malloc(n_spikes * sizeof(double));
@@ -122,85 +126,45 @@ static void test_compute_maxima(void) {
 }
 
 static void test_backward_maxima(void) {
-    fprintf(stderr, "DEBUG: entering test_backward_maxima\n"); fflush(stderr);
     TEST("BackwardMaxima Tiny (10×5, 20 spikes)");
     int n_pre = 10, n_post = 5, n_spikes = 20;
-    fprintf(stderr, "DEBUG: allocating memory\n"); fflush(stderr);
     double* w = (double*)malloc(n_pre * n_post * sizeof(double));
-    fprintf(stderr, "DEBUG: w=%p\n", (void*)w); fflush(stderr);
     double* times = (double*)malloc(n_spikes * sizeof(double));
     int32_t* sources = (int32_t*)malloc(n_spikes * sizeof(int32_t));
     gen_uniform(n_pre, n_post, n_spikes, w, times, sources); sort_spikes(times, sources, n_spikes);
-    fprintf(stderr, "DEBUG: after gen_uniform\n"); fflush(stderr);
     double* max_times = (double*)malloc(n_post * sizeof(double)); double* max_values = (double*)malloc(n_post * sizeof(double));
-    fprintf(stderr, "DEBUG: allocated maxima buffers\n"); fflush(stderr);
-    fprintf(stderr, "DEBUG: calling eventprop_compute_maxima\n"); fflush(stderr);
     eventprop_compute_maxima(w, n_pre, n_post, times, sources, n_spikes, 0.02, 0.005, max_times, max_values);
-    fprintf(stderr, "DEBUG: returned from compute_maxima\n"); fflush(stderr);
     double* max_errors = (double*)malloc(n_post * sizeof(double)); for (int i = 0; i < n_post; i++) max_errors[i] = 1.0;
     double* grad = (double*)calloc(n_pre * n_post, sizeof(double)); double* spike_errors = (double*)malloc(n_spikes * sizeof(double));
-    fprintf(stderr, "DEBUG: calling eventprop_backward_maxima\n"); fflush(stderr);
     eventprop_backward_maxima(times, sources, n_spikes, max_times, max_values, max_errors, n_post, w, n_pre, n_post, 0.02, 0.005, grad, spike_errors);
-    fprintf(stderr, "DEBUG: returned from backward_maxima\n"); fflush(stderr);
     double gsum = 0; for (int i = 0; i < n_pre * n_post; i++) gsum += fabs(grad[i]);
-    fprintf(stderr, "DEBUG: gsum=%f\n", gsum); fflush(stderr);
     ASSERT(gsum > 0, "gradient should be non-zero");
-    fprintf(stderr, "DEBUG: before frees\n"); fflush(stderr);
     free(w); free(times); free(sources); free(max_times); free(max_values); free(max_errors); free(grad); free(spike_errors);
-    fprintf(stderr, "DEBUG: after frees\n"); fflush(stderr);
     TEST_END;
-    fprintf(stderr, "DEBUG: test_backward_maxima done\n"); fflush(stderr);
 }
 
 static void test_backward_maxima_zero_weights(void) {
-    fprintf(stderr, "DEBUG: entered test_backward_maxima_zero_weights\n"); fflush(stderr);
     TEST("BackwardMaxima ZeroWeights -> ZeroGradients");
-    fprintf(stderr, "DEBUG: after TEST macro\n"); fflush(stderr);
     int n_pre = 10, n_post = 5, n_spikes = 20;
-    fprintf(stderr, "DEBUG: before calloc w\n"); fflush(stderr);
     double* w = (double*)calloc(n_pre * n_post, sizeof(double)); // zero weights
-    fprintf(stderr, "DEBUG: after calloc w=%p\n", (void*)w); fflush(stderr);
     double* times = (double*)malloc(n_spikes * sizeof(double));
-    fprintf(stderr, "DEBUG: after malloc times=%p\n", (void*)times); fflush(stderr);
     int32_t* sources = (int32_t*)malloc(n_spikes * sizeof(int32_t));
-    fprintf(stderr, "DEBUG: after malloc sources=%p\n", (void*)sources); fflush(stderr);
-    fprintf(stderr, "DEBUG: before gen_uniform\n"); fflush(stderr);
     gen_uniform(n_pre, n_post, n_spikes, w, times, sources);
-    fprintf(stderr, "DEBUG: after gen_uniform\n"); fflush(stderr);
     sort_spikes(times, sources, n_spikes);
-    fprintf(stderr, "DEBUG: after sort_spikes\n"); fflush(stderr);
-    fprintf(stderr, "DEBUG: before zeroing weights\n"); fflush(stderr);
     for (int i = 0; i < n_pre * n_post; i++) w[i] = 0.0; // reset to zero after gen_uniform overwrites
-    fprintf(stderr, "DEBUG: after zeroing weights\n"); fflush(stderr);
     double* max_times = (double*)malloc(n_post * sizeof(double));
-    fprintf(stderr, "DEBUG: after malloc max_times=%p\n", (void*)max_times); fflush(stderr);
     double* max_values = (double*)malloc(n_post * sizeof(double));
-    fprintf(stderr, "DEBUG: after malloc max_values=%p\n", (void*)max_values); fflush(stderr);
-    fprintf(stderr, "DEBUG: before eventprop_compute_maxima\n"); fflush(stderr);
     eventprop_compute_maxima(w, n_pre, n_post, times, sources, n_spikes, 0.02, 0.005, max_times, max_values);
-    fprintf(stderr, "DEBUG: after eventprop_compute_maxima\n"); fflush(stderr);
     double* max_errors = (double*)malloc(n_post * sizeof(double));
-    fprintf(stderr, "DEBUG: after malloc max_errors=%p\n", (void*)max_errors); fflush(stderr);
     for (int i = 0; i < n_post; i++) max_errors[i] = 1.0;
-    fprintf(stderr, "DEBUG: after setting max_errors\n"); fflush(stderr);
     double* grad = (double*)calloc(n_pre * n_post, sizeof(double));
-    fprintf(stderr, "DEBUG: after calloc grad=%p\n", (void*)grad); fflush(stderr);
     double* spike_errors = (double*)malloc(n_spikes * sizeof(double));
-    fprintf(stderr, "DEBUG: after malloc spike_errors=%p\n", (void*)spike_errors); fflush(stderr);
-    fprintf(stderr, "DEBUG: before eventprop_backward_maxima\n"); fflush(stderr);
     eventprop_backward_maxima(times, sources, n_spikes, max_times, max_values, max_errors, n_post, w, n_pre, n_post, 0.02, 0.005, grad, spike_errors);
-    fprintf(stderr, "DEBUG: after eventprop_backward_maxima\n"); fflush(stderr);
     double gsum = 0;
     for (int i = 0; i < n_pre * n_post; i++) gsum += fabs(grad[i]);
-    fprintf(stderr, "DEBUG: gsum=%f\n", gsum); fflush(stderr);
-    fprintf(stderr, "DEBUG: before ASSERT\n"); fflush(stderr);
     ASSERT(gsum < EPSILON, "zero weights -> zero gradients");
-    fprintf(stderr, "DEBUG: after ASSERT\n"); fflush(stderr);
-    fprintf(stderr, "DEBUG: before frees\n"); fflush(stderr);
     free(w); free(times); free(sources); free(max_times); free(max_values); free(max_errors); free(grad); free(spike_errors);
-    fprintf(stderr, "DEBUG: after frees\n"); fflush(stderr);
     TEST_END;
-    fprintf(stderr, "DEBUG: test_backward_maxima_zero_weights done\n"); fflush(stderr);
 }
 
 static void test_backward_maxima_linear_scale(void) {
@@ -227,7 +191,8 @@ static void test_zero_spikes(void) {
     int sum_rows = n_spikes + 1; double* sum0 = (double*)calloc(sum_rows * n_post, sizeof(double)); double* sum1 = (double*)calloc(sum_rows * n_post, sizeof(double));
     eventprop_compute_sums(w, n_pre, n_post, nullptr, nullptr, n_spikes, 0.02, 0.005, sum0, sum1); ASSERT(sum0[0] == 0.0 && sum1[0] == 0.0, "sums should be zero");
     int max_out = 1; double* out_times = (double*)malloc(max_out * sizeof(double)); int32_t* out_sources = (int32_t*)malloc(max_out * sizeof(int32_t)); double* out_currents = (double*)malloc(max_out * sizeof(double));
-    int n_out = eventprop_compute_spikes(w, n_pre, n_post, nullptr, nullptr, n_spikes, 1.0, 0.02, 0.005, out_times, out_sources, out_currents); ASSERT(n_out == 0, "no input spikes → no output spikes");
+    int n_out = eventprop_compute_spikes(w, n_pre, n_post, nullptr, nullptr, n_spikes, 1.0, 0.02, 0.005, out_times, out_sources, out_currents, max_out); ASSERT(n_out == 0, "no input spikes → no output spikes");
+    ASSERT_FITS(n_out, max_out);
     double* max_times = (double*)malloc(n_post * sizeof(double)); double* max_values = (double*)malloc(n_post * sizeof(double)); eventprop_compute_maxima(w, n_pre, n_post, nullptr, nullptr, n_spikes, 0.02, 0.005, max_times, max_values);
     free(w); free(sum0); free(sum1); free(out_times); free(out_sources); free(out_currents); free(max_times); free(max_values); TEST_END;
 }
@@ -238,57 +203,40 @@ static void test_negative_weights(void) {
     double* times = (double*)malloc(n_spikes * sizeof(double)); int32_t* sources = (int32_t*)malloc(n_spikes * sizeof(int32_t)); gen_uniform(n_pre, n_post, n_spikes, w, times, sources); sort_spikes(times, sources, n_spikes);
     for (int i = 0; i < n_pre * n_post; i++) w[i] = -1.0;
     int max_out = 10 * (n_spikes + 1) * n_post; double* out_times = (double*)malloc(max_out * sizeof(double)); int32_t* out_sources = (int32_t*)malloc(max_out * sizeof(int32_t)); double* out_currents = (double*)malloc(max_out * sizeof(double));
-    int n_out = eventprop_compute_spikes(w, n_pre, n_post, times, sources, n_spikes, 1.0, 0.02, 0.005, out_times, out_sources, out_currents); ASSERT(n_out == 0, "negative weights → no spikes");
+    int n_out = eventprop_compute_spikes(w, n_pre, n_post, times, sources, n_spikes, 1.0, 0.02, 0.005, out_times, out_sources, out_currents, max_out); ASSERT(n_out == 0, "negative weights → no spikes");
+    ASSERT_FITS(n_out, max_out);
     free(w); free(times); free(sources); free(out_times); free(out_sources); free(out_currents); TEST_END;
 }
 
 static void test_backward_spikes_linear_scale(void) {
-    fprintf(stderr, "DEBUG: entered test_backward_spikes_linear_scale\n"); fflush(stderr);
     TEST("BackwardSpikes GradientScalesLinearly");
-    fprintf(stderr, "DEBUG: after TEST macro in linear_scale\n"); fflush(stderr);
     int n_pre = 10, n_post = 5, n_spikes = 20;
     double* w = (double*)malloc(n_pre * n_post * sizeof(double));
-    fprintf(stderr, "DEBUG: after malloc w=%p\n", (void*)w); fflush(stderr);
     double* times = (double*)malloc(n_spikes * sizeof(double));
     int32_t* sources = (int32_t*)malloc(n_spikes * sizeof(int32_t));
-    fprintf(stderr, "DEBUG: after malloc times/sources\n"); fflush(stderr);
     gen_uniform(n_pre, n_post, n_spikes, w, times, sources); sort_spikes(times, sources, n_spikes);
-    fprintf(stderr, "DEBUG: after gen_uniform/sort\n"); fflush(stderr);
     int max_out = 10 * (n_spikes + 1) * n_post;
     double* fwd_times = (double*)malloc(max_out * sizeof(double));
     int32_t* fwd_sources = (int32_t*)malloc(max_out * sizeof(int32_t));
     double* fwd_currents = (double*)malloc(max_out * sizeof(double));
-    fprintf(stderr, "DEBUG: after malloc fwd buffers\n"); fflush(stderr);
-    fprintf(stderr, "DEBUG: before eventprop_compute_spikes\n"); fflush(stderr);
-    int n_fwd = eventprop_compute_spikes(w, n_pre, n_post, times, sources, n_spikes, 1.0, 0.02, 0.005, fwd_times, fwd_sources, fwd_currents);
-    fprintf(stderr, "DEBUG: after eventprop_compute_spikes, n_fwd=%d\n", n_fwd); fflush(stderr);
+    int n_fwd = eventprop_compute_spikes(w, n_pre, n_post, times, sources, n_spikes, 1.0, 0.02, 0.005, fwd_times, fwd_sources, fwd_currents, max_out);
+    ASSERT_FITS(n_fwd, max_out);
     if (n_fwd == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); free(fwd_times); free(fwd_sources); free(fwd_currents); return; }
-    fprintf(stderr, "DEBUG: before calloc err1\n"); fflush(stderr);
     double* err1 = (double*)calloc(n_fwd, sizeof(double));
     for (int i = 0; i < n_fwd; i++) err1[i] = 1.0;
-    fprintf(stderr, "DEBUG: after setting err1\n"); fflush(stderr);
     double* grad1 = (double*)calloc(n_pre * n_post, sizeof(double));
     double* se1 = (double*)malloc(n_spikes * sizeof(double));
-    fprintf(stderr, "DEBUG: after calloc grad1/malloc se1\n"); fflush(stderr);
-    fprintf(stderr, "DEBUG: before eventprop_backward_spikes\n"); fflush(stderr);
     eventprop_backward_spikes(times, sources, n_spikes, fwd_times, fwd_sources, fwd_currents, err1, n_fwd, w, n_pre, n_post, 1.0, 0.02, 0.005, grad1, se1);
-    fprintf(stderr, "DEBUG: after eventprop_backward_spikes\n"); fflush(stderr);
     // Force a memory allocation to check for deferred heap corruption
     double* test_alloc = (double*)malloc(64 * sizeof(double));
     if (test_alloc) {
         test_alloc[0] = 1.0;
-        fprintf(stderr, "DEBUG: test alloc ok\n"); fflush(stderr);
         free(test_alloc);
     }
-    fprintf(stderr, "DEBUG: after test alloc/free\n"); fflush(stderr);
-    fprintf(stderr, "DEBUG: before calloc err2\n"); fflush(stderr);
     double* err2 = (double*)calloc(n_fwd, sizeof(double));
     for (int i = 0; i < n_fwd; i++) err2[i] = 2.0;
-    fprintf(stderr, "DEBUG: after setting err2\n"); fflush(stderr);
     double* grad2 = (double*)calloc(n_pre * n_post, sizeof(double));
     double* se2 = (double*)malloc(n_spikes * sizeof(double));
-    fprintf(stderr, "DEBUG: after calloc grad2/malloc se2\n"); fflush(stderr);
-    fprintf(stderr, "DEBUG: before eventprop_backward_spikes #2\n"); fflush(stderr);
     eventprop_backward_spikes(times, sources, n_spikes, fwd_times, fwd_sources, fwd_currents, err2, n_fwd, w, n_pre, n_post, 1.0, 0.02, 0.005, grad2, se2
 ); for (int i = 0; i < n_pre * n_post; i++) ASSERT_NEAR(grad2[i], grad1[i] * 2.0, EPSILON);
     free(w); free(times); free(sources); free(fwd_times); free(fwd_sources); free(fwd_currents); free(err1); free(grad1); free(se1); free(err2); free(grad2); free(se2); TEST_END;
@@ -313,7 +261,8 @@ static void test_backward_spikes_large(void) {
     double* times = (double*)malloc(n_spikes * sizeof(double)); int32_t* sources = (int32_t*)malloc(n_spikes * sizeof(int32_t));
     for (int i = 0; i < n_spikes; i++) { times[i] = 0.01 + (i + 1.0) / 501.0 * 0.09; sources[i] = i % n_pre; }
     int max_out = 10 * (n_spikes + 1) * n_post; double* fwd_times = (double*)malloc(max_out * sizeof(double)); int32_t* fwd_sources = (int32_t*)malloc(max_out * sizeof(int32_t)); double* fwd_currents = (double*)malloc(max_out * sizeof(double));
-    int n_fwd = eventprop_compute_spikes(w, n_pre, n_post, times, sources, n_spikes, 1.0, 0.02, 0.005, fwd_times, fwd_sources, fwd_currents);
+    int n_fwd = eventprop_compute_spikes(w, n_pre, n_post, times, sources, n_spikes, 1.0, 0.02, 0.005, fwd_times, fwd_sources, fwd_currents, max_out);
+    ASSERT_FITS(n_fwd, max_out);
     if (n_fwd == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); free(fwd_times); free(fwd_sources); free(fwd_currents); return; }
     double* post_errors = (double*)calloc(n_fwd, sizeof(double)); for (int i = 0; i < n_fwd; i++) post_errors[i] = 1.0;
     double* grad = (double*)calloc(n_pre * n_post, sizeof(double)); double* spike_errors = (double*)malloc(n_spikes * sizeof(double));
@@ -362,7 +311,15 @@ static void test_compute_spikes_low_threshold(void) {
 
     /* Low threshold — should produce many output spikes */
     double v_th = 0.1;
-    int max_out = 50 * (n_spikes + 1) * n_post;
+    /* A low v_th breaks the "output is bounded by the input" assumption: 50x20 neurons
+       with 100 input spikes, and this line used to allocate
+       50 * (n_spikes + 1) * n_post = 101,000 elements. Measured in this binary the
+       count is 24,046 output spikes at v_th=0.1, so the capacity below is generous and
+       ASSERT_FITS after the call guards it. Without a bound the shim wrote past this
+       buffer - the heap overflow that used to kill eventprop_capi_tests. The real count
+       prints on every run, so growth in it is visible rather than fatal. */
+
+    int max_out = 1000000;
     double* out_times = (double*)malloc(max_out * sizeof(double));
     int32_t* out_sources = (int32_t*)malloc(max_out * sizeof(int32_t));
     double* out_currents = (double*)malloc(max_out * sizeof(double));
@@ -370,7 +327,8 @@ static void test_compute_spikes_low_threshold(void) {
     int n_post_spikes = eventprop_compute_spikes(w, n_pre, n_post,
                                                   times, sources, n_spikes,
                                                   v_th, 0.02, 0.005,
-                                                  out_times, out_sources, out_currents);
+                                                  out_times, out_sources, out_currents, max_out);
+    ASSERT_FITS(n_post_spikes, max_out);
 
     printf("     Low threshold v_th=%.1f: %d output spikes\n", v_th, n_post_spikes);
     ASSERT(n_post_spikes > 0, "should produce spikes with low threshold");
@@ -398,7 +356,14 @@ static void test_compute_spikes_very_low_threshold(void) {
     /* Very low threshold — Eigen's Toms748 root-finder should fail */
     double v_th = 0.01;
 
-    int max_out = 50 * (n_spikes + 1) * n_post;
+    /* Same assumption, taken further: this fixture is the one that crashed. Measured in
+       this binary it produces 240,986 output spikes - 2.4x the 101,000 elements this
+       line used to allocate (50 * (n_spikes + 1) * n_post) - so the shim's writes ran
+       past the end of out_times/out_sources/out_currents into the heap. The capacity is
+       generous and ASSERT_FITS after the call fails the fixture instead of trusting a
+       bound that does not exist. */
+
+    int max_out = 1000000;
     double* out_times = (double*)malloc(max_out * sizeof(double));
     int32_t* out_sources = (int32_t*)malloc(max_out * sizeof(int32_t));
     double* out_currents = (double*)malloc(max_out * sizeof(double));
@@ -406,7 +371,8 @@ static void test_compute_spikes_very_low_threshold(void) {
     int n_post_spikes = eventprop_compute_spikes(w, n_pre, n_post,
                                                   times, sources, n_spikes,
                                                   v_th, 0.02, 0.005,
-                                                  out_times, out_sources, out_currents);
+                                                  out_times, out_sources, out_currents, max_out);
+    ASSERT_FITS(n_post_spikes, max_out);
     printf("     Very low threshold v_th=%.2f: %d output spikes\n", v_th, n_post_spikes);
     free(out_times); free(out_sources); free(out_currents);
 
@@ -418,7 +384,6 @@ static void test_compute_spikes_very_low_threshold(void) {
 }
 
 int main(void) {
-    fprintf(stderr, "DEBUG: entering main()\n"); fflush(stderr);
     printf("EventProp C API Wrapper Tests (C++ → Eigen)\n"); printf("=========================================\n\n");
     // TEMPORARY: Run only one test to isolate heap corruption
     // test_compute_sums();
@@ -430,7 +395,6 @@ int main(void) {
     // test_backward_maxima_linear_scale();
     // test_zero_spikes();
     // test_negative_weights();
-    fprintf(stderr, "DEBUG: calling test_backward_spikes_linear_scale\n"); fflush(stderr);
     test_backward_spikes_linear_scale();
     test_compute_sums_large(); test_backward_spikes_large(); test_compute_maxima_large(); test_backward_maxima_large();
 
