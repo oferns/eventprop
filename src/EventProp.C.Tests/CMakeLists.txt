@@ -81,6 +81,30 @@ FetchContent_Declare(
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
+# googletest's own source emits one warning under clang/AppleClang:
+#   googletest/include/gtest/gtest-printers.h:524:35: implicit conversion from 'char8_t' to
+#   'char32_t' may change the meaning of the represented code unit [-Wcharacter-conversion]
+# It appears only while compiling googletest's sources: the test TUs include those headers as
+# SYSTEM includes and are warning-free, so marking includes SYSTEM cannot reach this one —
+# there is no consumer involved. Suppressed by name on the googletest targets alone, so the
+# repository's zero-warning rule keeps meaning what it is meant to mean: first-party code.
+# The other lever is a googletest version bump, which changes a dependency for every platform
+# at once, so the scoped suppression is the cheaper one.
+#
+# The probe tests the POSITIVE flag on purpose. Compilers accept an unknown `-Wno-…` spelling
+# without failing, so probing the negated form would report "supported" for a compiler that has
+# never heard of the warning: GCC has no -Wcharacter-conversion, and MSVC takes no -W flags at
+# all — both get nothing from this block.
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("-Wcharacter-conversion" EVENTPROP_CXX_WARN_CHARACTER_CONVERSION)
+if(EVENTPROP_CXX_WARN_CHARACTER_CONVERSION)
+    foreach(_gtest_target IN ITEMS gtest gtest_main gmock gmock_main)
+        if(TARGET ${_gtest_target})
+            target_compile_options(${_gtest_target} PRIVATE -Wno-character-conversion)
+        endif()
+    endforeach()
+endif()
+
 # -- Test executable ------------------------------------------
 enable_testing()
 add_executable(eventprop_tests

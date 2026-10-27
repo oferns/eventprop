@@ -111,7 +111,15 @@ eventprop.net/
   flags, and `Directory.Build.props` sets `TreatWarningsAsErrors` for every .NET project
   (including analyzer diagnostics such as TUnit's). When a warning must be tolerated, scope it
   (`WarningsNotAsErrors`, `/wdNNNN`, `-Wno-…` on one target) — never drop the rule.
-  Third-party code compiled from a dependency is outside these gates.
+  Third-party code is not held to the rule, but a warning from it is silenced **by name on that
+  target** rather than left to dirty the build: googletest's own source emits one
+  `-Wcharacter-conversion` under clang/AppleClang, suppressed on the `gtest`/`gtest_main`/
+  `gmock` targets in `src/EventProp.C.Tests/CMakeLists.txt` behind a `check_cxx_compiler_flag`
+  probe. Probe the **positive** flag — compilers accept unknown `-Wno-…` spellings, so probing
+  the negated form reports "supported" on a compiler that has never heard of the warning (GCC
+  has none; MSVC takes no `-W` flags, so both get nothing). `SYSTEM` includes cannot reach it:
+  it fires while googletest compiles its own source, where there is no consumer involved. A full
+  nine-step build therefore emits zero warnings.
 - **CMake floor 3.21**, one `CMakePresets.json` per project (never at the repo root — a
   configure preset's source dir is always its own directory). Presets are the supported way to
   drive the build; `mkdir build && cmake ..` survives only as a documented fallback. One

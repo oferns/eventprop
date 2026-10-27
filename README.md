@@ -23,7 +23,7 @@ eventprop.net/
 │   │                           # Python + C++ (Eigen/pybind11) — source of truth
 │   ├── EventProp.C/            # Pure C implementation (libeventprop_c_api)
 │   │                           # Batch API, flat-array FFI, strict warnings, ASan support
-│   ├── EventProp.C.Tests/      # Google Test v1.15.2 suite for C library (176 tests)
+│   ├── EventProp.C.Tests/      # Google Test suite for the C library
 │   ├── EventProp.Cpp.Wrapper/  # C++ Eigen core (convenience copy, no pybind11)
 │   │                           # Used for native benchmarks and parity tests
 │   ├── EventProp.Native/       # .NET P/Invoke bindings → C library
@@ -46,13 +46,16 @@ eventprop.net/
 # Build everything — Debug mode
 ./build.sh debug
 
-# Clean all build outputs
-clean.sh              # removes everything (all targets)
-clean.sh c            # only C library
-clean.sh cpp          # only C++ wrapper
-clean.sh python       # only Python package
-clean.sh dotnet       # only .NET projects
+# Clean build outputs (targets compose; nothing here touches bench-reports/ or BENCHMARKS.md)
+./clean.sh                        # everything
+./clean.sh c cpp parity           # only these targets
+./clean.sh --dry-run -full        # show what -full would remove, remove nothing
 ```
+
+Both scripts share one contract with their PowerShell twins (`build.ps1`, `clean.ps1`) and
+print their full interface: `./build.sh --help`, `./clean.sh --help`. The Python layers are
+built for one interpreter — pass `--python` / `-PythonExe` to pick the one that will run the
+suites.
 
 ## Quick Start (.NET)
 
@@ -128,7 +131,9 @@ Two Python binding layers are available:
 - **`EventProp.Python/`** — pybind11-based bindings (git submodule). The reference implementation with a complete Python layer.
 - **`EventProp.Native.Python/`** — Cython bindings to the C library. Zero-copy numpy views, managed memory wrappers, and flat-array FFI variants for maximum efficiency.
 
-**Install Cython bindings**:
+**Install Cython bindings** — or let `./build.sh release` do it, including regenerating
+`_native.c` from `_native.pyx` (Cython is a build prerequisite of that step, not something
+the package fetches):
 ```bash
 cd src/EventProp.Native.Python && pip install -e .
 ```
@@ -146,40 +151,68 @@ cd src/EventProp.Tests && dotnet run -c Release -- --no-progress
 ### C Library Unit Tests (Google Test)
 
 ```bash
-cd src/EventProp.C.Tests && rm -rf build && mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
-./eventprop_tests  # 176 tests
+cd src/EventProp.C.Tests
+cmake --preset release && cmake --build --preset release
+ctest --preset release            # or: ./build/eventprop_tests
 ```
 
-**With AddressSanitizer** (Debug builds only):
+**With AddressSanitizer** (Debug presets only — ASan needs a clean cache):
+
 ```bash
-cd src/EventProp.C/build && rm -rf * && cmake .. -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=ON && cmake --build .
-cd ../EventProp.C.Tests/build && rm -rf * && cmake .. -DENABLE_ASAN=ON && cmake --build .
-./eventprop_tests  # detects use-after-free, buffer overflows
+cd src/EventProp.C        && cmake --preset asan && cmake --build --preset asan
+cd ../EventProp.C.Tests   && cmake --preset asan && cmake --build --preset asan
+ctest --preset asan
 ```
+
+> On macOS ASan builds a **static** library (an AppleClang linker limitation) — which is why the
+> ASan presets `cleanFirst`: the library flips SHARED→STATIC inside the same `build/` directory
+> the test project reads. On Linux, add leak detection at run time with
+> `ASAN_OPTIONS=detect_leaks=1 ctest --preset asan`; it is not in the presets because test
+> discovery runs the binary at build time and macOS ASan refuses `detect_leaks`.
 
 ### C/C++ Parity Tests (C vs Eigen)
 
+This project imports a **pre-built** library from two siblings, so build those first:
+
 ```bash
-cd src/EventProp.Native.ParityTests && rm -rf build && mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
-./parity_test /path/to/libeventprop_c_api.dylib
+cd src/EventProp.C                 && cmake --preset release && cmake --build --preset release
+cd ../EventProp.Cpp.Wrapper        && cmake --preset release && cmake --build --preset release
+cd ../EventProp.Native.ParityTests && cmake --preset release && cmake --build --preset release
+./build/parity_test ../../EventProp.C/build/libeventprop_c_api.dylib
 ```
+
+> The library-path argument is **decorative**: `parity_test` links the library and never reads
+> `argv`, so which implementation it exercises is fixed at link time.
 
 ### Native Benchmarks (C vs C++)
 
 ```bash
-cd src/EventProp.Native.Benchmarks && rm -rf build && mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .
-./bench_c --benchmark_min_time=0.1s
-./bench_cpp --benchmark_min_time=0.1s
+cd src/EventProp.Native.Benchmarks
+cmake --preset release && cmake --build --preset release
+./build/bench_c   --benchmark_min_time=0.1s
+./build/bench_cpp --benchmark_min_time=0.1s
 ```
+
+On Windows the executables land in `build/Release/` (multi-config generator), not `build/`.
+
+> For anything you intend to publish, use the cross-suite runner instead —
+> `./run_benchmarks.sh` (macOS/Linux) or `./run_benchmarks.ps1` (Windows). It is slow by
+> design, and **a subset run rewrites the committed `BENCHMARKS.md` and
+> `bench-reports/report_<tag>.md` at the same path**: pass `--no-reports
+> --no-benchmarks-md` for an exploratory run.
 
 ### Python Benchmarks (pytest-benchmark)
 
 ```bash
-cd src/EventProp.Python.Benchmarks && pytest test_benchmarks.py -v
+cd src/EventProp.Python.Benchmarks
+PYTHONPATH=../EventProp.Python:../EventProp.Native.Python \
+  python3 -m pytest test_benchmarks.py --benchmark-only -v
 ```
+
+Two suites live here: `test_benchmarks.py` (layers, pybind11 vs Cython) and
+`test_kernel_benchmarks.py` (raw C kernels with no layer, which isolates binding overhead).
+Name the interpreter that has the built `eventprop_c` extension; the cross-suite workflow is
+in that directory's `README.md`.
 
 ## Coverage
 
@@ -226,6 +259,13 @@ All hot-path functions are **allocation-free** when `ScratchBuffers` is provided
 
 ## Platform Support
 
-- **macOS** — developed and tested
-- **Linux** — intended support
-- **Windows** — supported via MSVC + CMake
+- **macOS (arm64)** — AppleClang + Homebrew toolchain
+- **Linux (x86_64)** — GCC/Clang; needs `libtbb-dev` for the Eigen core, and Cython in the
+  interpreter that builds the Python extension
+- **Windows (x86_64)** — MSVC + CMake; `build.ps1` imports the vcvars environment for you
+
+All three are supported and driven by one contract shared between the shell and PowerShell
+scripts. There is no CI, so platform status is established by running `./build.sh release`
+(`.\build.ps1 release` on Windows) plus the suites **on that machine** — say which platform a
+claim was measured on. `./scripts/submodule-state.sh status` reports the reference
+submodule's local state, which is expected to be dirty on every platform.
