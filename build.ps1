@@ -52,9 +52,9 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ScriptDir
 
 if ($BuildType -ieq "debug") {
-    $Preset = "debug"; $DotNetConfig = "Debug"
+    $Preset = "debug"; $DotNetConfig = "Debug"; $MsvcConfig = "Debug"
 } elseif ($BuildType -ieq "release") {
-    $Preset = "release"; $DotNetConfig = "Release"
+    $Preset = "release"; $DotNetConfig = "Release"; $MsvcConfig = "Release"
 } else {
     Write-Host "Usage: .\build.ps1 [debug|release]   (or -BuildType debug)"
     exit 1
@@ -630,7 +630,20 @@ if ($Skips.Count -gt 0) {
     foreach ($s in $Skips) { Write-Host "   - $s" -ForegroundColor Yellow }
 }
 Write-Host "============================================"
-Write-Host "MSVC is multi-config: artifacts land in build\$Preset\, not build\." -ForegroundColor DarkGray
-Write-Host "The parity test exe lands in src\EventProp.C\build\$Preset\$Preset\ (its" -ForegroundColor DarkGray
-Write-Host "RUNTIME_OUTPUT_DIRECTORY plus the generator's config dir)." -ForegroundColor DarkGray
+Write-Host "MSVC is multi-config: artifacts land in build\$MsvcConfig\, not build\." -ForegroundColor DarkGray
+# MSVC's config directory is capitalised: the generator writes build\Release\ while the
+# CMake preset that selects it is named 'release'. Printed paths use the real casing.
+# build.sh prints runnable commands at this point ("Run parity: cd ... && ./build/parity_test
+# ..."). This is that line for MSVC, and it replaces run_parity.bat, which is deleted: three
+# lines with G:\eventprop.net hardcoded, referenced by no script or doc, and incapable of
+# working even on the machine it names - parity_test.exe lands in
+# build\$MsvcConfig\$MsvcConfig\ (its RUNTIME_OUTPUT_DIRECTORY plus the generator's config
+# directory) with eventprop_c_api.dll one level up, and the .bat put neither on PATH. Passing
+# the DLL as argv[1] is no help: parity_main.cpp never reads argv (its one occurrence is the
+# main signature), because parity_test links eventprop_c_api as an IMPORTED SHARED target -
+# the loader decides, so PATH decides. Verified from the repo root: 105/105.
+$parityExe = "src\EventProp.C\build\$MsvcConfig\$MsvcConfig\parity_test.exe"
+$clibDir   = "src\EventProp.C\build\$MsvcConfig"
+Write-Host "Run parity:   `$env:PATH=`"`$PWD\$clibDir;`"`$env:PATH`"" -ForegroundColor DarkGray
+Write-Host "              & `"$parityExe`"" -ForegroundColor DarkGray
 exit $(if ($Failures.Count -eq 0) { 0 } else { 1 })
