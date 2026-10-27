@@ -15,7 +15,7 @@ This repository implements the **EventProp** algorithm — an event-based backpr
 | **EventProp.Python/** | Python + C++ (Eigen/pybind11) | Reference library (git submodule, read-only) |
 | **EventProp.C/** | C | Pure C reimplementation with a batch-first API (per-sample input arrays) |
 | **EventProp.Cpp.Wrapper/** | C++ (Eigen) | Convenience copy of the C++ core. Used for native benchmarks and parity tests |
-| **EventProp.Cpp.Wrapper/benchmarks/** | C++ (Google Benchmark) | **Deleted.** Was a standalone project (no presets, `project()` of its own) holding `eventprop_benchmarks` + `micro_benchmarks`, configured by nothing — no build script, no preset, no CI (the repo has none), only an AGENTS.md sentence saying "configure it by hand". It duplicated kernels `EventProp.Native.Benchmarks` already measures (and `bench_rootfind` already covers its root-finder micro-benchmarks) while carrying a **fourth** copy of the spike-pattern generators **without `SortTimesSources`**, so its `burst` rows measured unsorted input — which this file's own contract calls a different network, not a comparable workload. By the time it was noticed `eventprop_benchmarks.cpp` no longer compiled (3 calls on the pre-`spike_errors` `eventprop_backward_spikes`) and `micro_benchmarks.cpp` never did (missing `<functional>`, `BrentRootFinder` arity drift). Content last touched 2026-05-27 in a directory-rename commit. Its one measurement nothing else makes — Eigen-core thread scaling — can be ported into `bench_main.cpp` if anyone ever wants it |
+| **EventProp.Cpp.Wrapper/benchmarks/** | C++ (Google Benchmark) | **Deleted.** Was a standalone project (no presets, `project()` of its own) holding `eventprop_benchmarks` + `micro_benchmarks`, configured by nothing — no build script, no preset, no CI (the repo has none), only an AGENTS.md sentence saying "configure it by hand". It duplicated kernels `EventProp.Native.Benchmarks` already measures (and `bench_rootfind` already covers its root-finder micro-benchmarks — though `bench_rootfind` itself segfaulted until it was fixed, see *Fixed — `bench_rootfind`: the bracket list outlived the spike rows it pointed into*) while carrying a **fourth** copy of the spike-pattern generators **without `SortTimesSources`**, so its `burst` rows measured unsorted input — which this file's own contract calls a different network, not a comparable workload. By the time it was noticed `eventprop_benchmarks.cpp` no longer compiled (3 calls on the pre-`spike_errors` `eventprop_backward_spikes`) and `micro_benchmarks.cpp` never did (missing `<functional>`, `BrentRootFinder` arity drift). Content last touched 2026-05-27 in a directory-rename commit. Its one measurement nothing else makes — Eigen-core thread scaling — can be ported into `bench_main.cpp` if anyone ever wants it |
 | **EventProp.Native.Python/** | Python + Cython | Python layer using C library via Cython bindings (`eventprop_c/_native.pyx`) |
 | **EventProp.Native/** | C# (.NET 10) | P/Invoke bindings wrapping EventProp.C via `LibraryImport` |
 | **EventProp.Abstractions/** | C# (.NET 10) | Shared `Layer` contract + data carriers, implemented by both backends (no package deps) |
@@ -1091,6 +1091,7 @@ Every generator upholds, and the Python suite asserts it at generation time (`va
 - **exactly `n_spikes` are produced, none left unwritten** — a fixed per-neuron burst offset saturates at a handful of bursting neurons, and the remaining slots keep their zero-initialised value: thousands of simultaneous spikes at t = 0. That inflated XL burst to 771k output spikes and made `BackwardSpikes/XL/burst` cost 15.6 s per iteration; the canonical generator uses a computed stagger and yields 757k spikes in 7.9 s.
 
 - **weights are U[0.5, 2.0) in all three suites** — `w_dist(0.5, 2.0)` in `bench_main.cpp`, `0.5 + rng.NextDouble() * 1.5` in `SpikePatterns.cs`, `0.5 + 1.5 * rng.random(...)` in `conftest.py`. The Python suite used to be `0.5 + rng.random(...)`, i.e. U[0.5, 1.5) — **half the intended range, under a docstring claiming .NET parity**. Measured at Medium/uniform: **7768 output spikes vs 10308 (−24.6%)**, so Python-vs-native ratios were comparing materially different workloads, not just different RNGs. Fixed; every Python benchmark number re-baselines.
+- **weights come from the generator's own `mt19937`, never from `Eigen::Random()`** — Eigen's `random_impl<double>` is `x + (y - x) * std::rand() / RAND_MAX` (`Eigen/src/Core/MathFunctions.h:812`), so `Matrix::Random()` reads the **global `std::rand()` stream that no generator in this repo seeds**. Two ways that lies, both measured in `bench_rootfind.cpp` before it was fixed (see *Fixed — `bench_rootfind`: the bracket list outlived the spike rows it pointed into*): a row's data depends on how many draws earlier benchmarks in the same process consumed, so the same `Small` row found 2 brackets in a full run and 0 under `--benchmark_filter`; and `Random()` is U[-1, 1], so `Random() * 0.5` is U[-0.5, 0.5] — negative weights, outside the range above, which is why those 100-spike fixtures never crossed `v_th` and timed an empty loop. Fill the matrix from the local `rng` with `w_dist`.
 - **Tiny and Small/uniform produce 0 output spikes** for both the old and the corrected weight range, so those Python rows time an empty forward pass — the same regime already flagged for native `BackwardSpikes/Tiny|Small/uniform`. Exclude them from any geomean.
 
 Burst is deterministic (no RNG in times/sources), so Python and native produce **bit-identical** burst data. Uniform times are identical by construction (only `sources` differ, since `std::mt19937`, `System.Random` and PCG64 cannot agree). Poisson uses the same inverse-CDF form in all three (`-log(1-u)/rate` plus a strictly-increasing fix), so it is distributionally identical. Cross-suite numbers are therefore statistical, not exact — compare ratios, not absolute counts.
@@ -1834,6 +1835,63 @@ build names the frame in two commands; Release has no PDB and gives offsets only
 run by `build.sh`, `build.ps1`, or the benchmark pipeline — they are built and left. Running
 them is a documented command (see *Wrapper C++ Tests* above); wiring them into the build
 scripts is an open choice, not an existing behaviour to rely on.
+
+### Fixed — `bench_rootfind`: the bracket list outlived the spike rows it pointed into
+
+`./build/bench_rootfind` exited **139** on its first benchmark, after printing
+`RootFind/C/Small 0.000 ns 0.000 ns 1000000000000 iterations` and nothing else. Nothing runs
+that binary — `run_benchmarks.sh`, `run_benchmarks.ps1` and `run_all.py` execute `bench_c` and
+`bench_cpp` only — so it had never been executed since it was written. The Project Map's
+"`bench_rootfind` already covers its root-finder micro-benchmarks" is exactly the sentence that
+lets a binary go unrun.
+
+**Root cause, not a fixture typo.** `gen()` returned `std::vector<TestCase>`, and each `TestCase`
+held a `VoltageCtx` **by value** whose `sum0` / `sum1` / `post_spike_times` members were `.data()`
+pointers into `std::vector` storage **local to `gen()`**. All three were freed the moment `gen()`
+returned, so every benchmark iteration dereferenced dead memory. AddressSanitizer on the pre-fix
+source, first iteration:
+
+```
+ERROR: AddressSanitizer: heap-use-after-free on address 0x7ffff72c0c00
+READ of size 8 at ... thread T0
+SUMMARY: AddressSanitizer: heap-use-after-free bench_rootfind.cpp:21 in compute_v
+```
+
+**The rule** is the one `eventprop_c`'s zero-copy views already obey: *a borrowed pointer must not
+outlive the function that borrowed it.* `gen()` now returns a `SumRows` that owns `sum0` / `sum1` /
+`post_times` together with an **index-based** `Bracket` list (`i`, `nrn`, `a`, `b`) and the
+per-fixture constants, and `make_cases()` builds each `VoltageCtx` from a fixture the caller holds,
+in the caller's own scope. Deliberately **not** "return the fixture and rely on the vector move
+preserving the buffers": every real implementation preserves them, the standard does not promise
+it, and silent reliance on that is how the file got here.
+
+**A second defect sat on the same line** — `RowMatrixXd::Random(n_pre, n_post).array() * 0.5`.
+`Eigen::Random()` is not the generator's RNG: it reads the global `std::rand()` stream (see the
+benchmark data contract above), so the weights were neither reproducible nor in the documented
+U[0.5, 2.0) range. That is covered there; both are fixed together.
+
+**An empty row must be visible, not fast.** Each row now publishes `state.counters["cases"]`. An
+empty bracket list is a legitimate outcome of the scan, but it times an empty loop, and google
+benchmark then reports `0.000 ns` with an absurd iteration count — which reads as "the C root finder
+is infinitely fast". Same reason `bench_main.cpp` publishes `c_error` / `c_fwd_error`. Exclude
+`cases=0` rows from any ratio.
+
+**Measured before/after.** Before: `C/Small` was `cases=0` at 0.28 ns (nothing measured) and
+`Boost/Small` was 2 brackets in one invocation, 0 in another. After: `C 100/80/100` and
+`Boost 100/80/100`, identical across consecutive runs, so a C-vs-Boost row pair solves the *same*
+bracket set — the minimum for that comparison to mean anything. ASan on the fixed source reports no
+error on any of the six rows; exit 139 became exit 0.
+
+**Guard, and its limit.** `bench_rootfind` is now the one target in the repo compiled with
+`-Wall -Wextra` (`/W4` on MSVC): for a binary outside the pipeline the compiler is the only
+mechanical guard it can have. It is scoped to that target on purpose — `bench_main.cpp` has 6 of
+*our own* warnings under those flags (`-Wunused-parameter`, `-Wunused-variable`) and enabling it
+there means fixing them first, which is a separate change. Eigen remains a plain `-I` include:
+measured across all seven Eigen-including TUs in the repo, **zero** warnings even with
+`-Wall -Wextra` here, so a `SYSTEM` include would be decorative config. Add `SYSTEM` at the point
+Eigen's own templates actually warn (v3.3.90 in the read-only submodule trips GCC 13's default-on
+`-Wdeprecated-enum-enum-conversion` at `CoreEvaluators.h:738` — it did, until the `Random()` call
+above was removed), and do not reach for `-Wno-`, which would mute that diagnostic in our code too.
 
 ## Platform Support
 
