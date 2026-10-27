@@ -203,6 +203,22 @@ endif()
 # ============================================================
 
 add_executable(bench_rootfind bench_rootfind.cpp)
+# bench_rootfind is not part of the benchmark pipeline (no script runs it), so a defect in
+# it reaches nobody until someone executes it by hand — which is how a use-after-free in
+# gen() survived until it was found segfaulting. Ask the compiler instead.
+#
+# Eigen is deliberately NOT marked SYSTEM here. Measured across every Eigen-including TU
+# in the repo (bench_main, bench_rootfind, parity_main, and the four in Cpp.Wrapper), none
+# emits a warning — with -Wall -Wextra on this target and Eigen on a plain -I — so a
+# suppression would be decorative. If one ever does appear from Eigen's own templates
+# (v3.3.90 in the read-only submodule trips GCC 13's default-on
+# -Wdeprecated-enum-enum-conversion at CoreEvaluators.h:738), mark the include SYSTEM at
+# that point rather than adding -Wno-, which would mute the same diagnostic in our code.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(bench_rootfind PRIVATE -Wall -Wextra)
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+    target_compile_options(bench_rootfind PRIVATE /W4)
+endif()
 target_include_directories(bench_rootfind PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../EventProp.Cpp.Wrapper
     ${EIGEN_DIR}
