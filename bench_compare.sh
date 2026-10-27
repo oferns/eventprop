@@ -29,7 +29,7 @@ fi
 mkdir -p "$OUT_DIR"
 
 # Filter to Tiny|Small — C segfaults on Medium+ due to OpenMP contention
-# (see AGENTS.md historical notes). Both backends have 36 benchmarks at this scale.
+# (measured on the native suite; not a data bug). Both backends have 36 benchmarks here.
 FILTER="Tiny|Small"
 
 echo "Running $NUM_RUNS iterations of C vs C++ benchmarks (min_time=${MIN_TIME}s, filter=$FILTER)"

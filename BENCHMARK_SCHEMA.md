@@ -86,7 +86,7 @@ One JSON document per suite run: a `meta` object plus a list of `records`.
 | Field | Why it is mandatory |
 |---|---|
 | `suite` | `native` \| `dotnet` \| `python`. The join key across files. |
-| `tool`, `tool_version` | AGENTS.md: BDN 0.15.8 → 0.16.0-preview.2 moved `ComputeSpikes_Tiny` Managed +9.8% and the Ratio −10%. **A version change invalidates historical .NET comparisons.** Without `tool_version` in the record, that is undetectable after the fact. |
+| `tool`, `tool_version` | Measured: BDN 0.15.8 → 0.16.0-preview.2 moved `ComputeSpikes_Tiny` Managed +9.8% and the Ratio −10%. **A version change invalidates historical .NET comparisons.** Without `tool_version` in the record, that is undetectable after the fact. |
 | `host`, `cpu` | Cross-suite absolute times are only comparable on the same machine. |
 | `date` | ISO-8601, from the tool where available (Google Benchmark emits `context.date`). |
 | `vcs_rev`, `vcs_dirty` | A number from a modified tracked tree is not reproducible. `vcs_dirty` is **tracked modifications only** — see the two fields below for what it deliberately excludes. |
@@ -146,7 +146,7 @@ hand-written in a source file.
 |---|---|---|
 | `zero_output_spikes` | `output_spikes == 0` | `BackwardSpikes/Tiny\|Small/uniform` — AGENTS.md: "time an empty loop… exclude from any geomean" |
 | `native_error` | `error_code != 0` | unsorted burst: C returns 0 spikes in ~0 ns, reported 36 ns vs Eigen's 83 µs |
-| `overhead_dominated` | FFI/marshalling cost exceeds kernel cost at this size | `ComputeSums_Tiny` P/Invoke; AGENTS.md: "managed ahead at Tiny where P/Invoke marshalling dominates" |
+| `overhead_dominated` | FFI/marshalling cost exceeds kernel cost at this size | `ComputeSums_Tiny` P/Invoke — managed ahead at Tiny where P/Invoke marshalling dominates |
 | `not_like_for_like` | the two `impl`s are not the same operation | `Dropout` 8.17x — "C batch API vs C++ shim — API-shape artifact" |
 | `slow_excluded` | excluded from quick runs by policy | XL rows — see the measured XL cost below |
 

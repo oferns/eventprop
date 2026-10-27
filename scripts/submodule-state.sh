@@ -45,7 +45,7 @@ PYBIND11_DIR="$SUBMODULE/src/pybind11"
 #
 # Those are the pre-3.11 frame C API (frame->f_code, PyThreadState_Get()->frame)
 # being compiled against headers that made struct _frame opaque. It is the same
-# defect class AGENTS.md records for macOS, arriving one platform later and one
+# defect class recorded in docs/POSTMORTEMS.md, arriving one platform later and one
 # Python version further ahead: 2.6.3.dev1 predates Python 3.11, so no MSVC flag
 # or setuptools version fixes it — only the pybind11 version does. 2.13.6 is the
 # Linux answer, it needs no patch on Windows (no Windows patch touches the

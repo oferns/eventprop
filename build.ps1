@@ -120,7 +120,7 @@ function Invoke-DotNet($proj, $config) {
 # $envDir goes on the front of PYTHONPATH so the probe answers about THIS tree's package
 # rather than a copy already sitting in site-packages. The separator is asked of the
 # interpreter, not hardcoded: os.pathsep is ';' on Windows, and a ':' there silently makes
-# the second entry unimportable - the defect AGENTS.md records for scripts/bench/run_all.py.
+# the second entry unimportable - the defect docs/POSTMORTEMS.md records for scripts/bench/run_all.py.
 function Get-ImportFailure([string]$exe, [string]$module, [string]$envDir) {
     $oldPath = $env:PYTHONPATH
     try {

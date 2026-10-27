@@ -408,7 +408,7 @@ else
   # ever match, and this step would rebuild every run while blaming a foreign interpreter
   # ("none match None"). Measured with the exact old expression on python 3.11.9 on
   # Windows: it returns that "None". Reachable, because build.sh has Windows branches of
-  # its own ($venv_dir/Scripts/python.exe) and AGENTS.md records it running under Git for
+  # its own ($venv_dir/Scripts/python.exe) and docs/POSTMORTEMS.md records it running under Git for
   # Windows bash. EXT_SUFFIX carries the platform tag on every platform this repo builds
   # on — '.cp311-win_amd64.pyd', '.cpython-311-darwin.so',
   # '.cpython-311-x86_64-linux-gnu.so' — and it CONTAINS the SOABI value wherever SOABI
@@ -435,8 +435,8 @@ else
     fi
   done
   # Separator from the interpreter, not hardcoded: os.pathsep is ';' on Windows, and a
-  # ':' there silently makes the second entry unimportable (the defect AGENTS.md records
-  # for scripts/bench/run_all.py).
+  # ':' there silently makes the second entry unimportable (the defect docs/POSTMORTEMS.md
+  # records for scripts/bench/run_all.py).
   pathsep="$("$PYTHON" -c 'import os;print(os.pathsep)' 2>/dev/null)"
   [[ -n "$pathsep" ]] || pathsep=:
   need_build=1
@@ -503,8 +503,8 @@ else
   # The extension compiles _native.c, Cython generates it from _native.pyx, and
   # _native.c is NOT tracked — a fresh clone has none, and an edited .pyx silently does
   # not rebuild. The second is the stale-extension class the ABI check in _native.pyx
-  # now refuses to import on (AGENTS.md: "ABI: One Version Stamp, Checked by Every
-  # Consumer"), so regenerate when the .pyx is newer than the .c.
+  # now refuses to import on (AGENTS.md §7, "ABI"), so regenerate when the .pyx is newer
+  # than the .c.
   #
   # The check must test CONTENT, not just mtime. A failed build under an unsupported
   # interpreter leaves a ZERO-BYTE _native.c (measured: a 3.9.6 run, which the

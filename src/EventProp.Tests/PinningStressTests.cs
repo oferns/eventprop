@@ -21,7 +21,17 @@ namespace CW.EventProp.Tests;
 /// defect needed ~30% of full-suite runs under TUnit's parallel scheduler to
 /// show, and a 34-million-iteration single-test probe did NOT reproduce it, so
 /// do not expect these to fail on their own if the pinning regresses — treat
-/// them as cheap tripwires and keep the AGENTS.md post-mortem as the real record.
+/// them as cheap tripwires.
+///
+/// The tool that makes this deterministic is DOTNET_GCStress=0x4 — the compacting GC, which
+/// forces relocations on nearly every allocation. It turned a flake that needed ~30% of
+/// full-suite runs into a failure on the first attempt:
+///   DOTNET_GCStress=0x4 dotnet run -c Release -- --treenode-filter "/*/*/PinningStressTests/*"
+/// It takes ~15s for the whole suite against ~2s normally, so run it ad hoc rather than in CI.
+/// The failure shape when a pin is lost is deliberately worth knowing: it does not crash. It
+/// returns plausible-but-wrong numbers — MANAGED=0 against NATIVE=2.65…, spike counts off by
+/// one, or "Invalid source neuron index" from C reading a relocated array — every one of which
+/// reads like a math bug. See docs/POSTMORTEMS.md.
 ///
 /// The window starts when the hammers start — there is no warm-up delay. Measured here
 /// (8 cores, each variant in its own process): the 600 ms window already takes 347–472

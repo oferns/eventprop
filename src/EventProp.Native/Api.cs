@@ -251,7 +251,7 @@ public static unsafe partial class Api
     // time and invisible at the call site: the marshalling reads the offsets this
     // assembly compiled, against a library whose fields moved, and returns
     // plausible-looking garbage. The Cython layer measured exactly that failure
-    // (AGENTS.md, "Python bindings on Windows": a .pyd built against July headers,
+    // (docs/POSTMORTEMS.md: a .pyd built against July headers,
     // loaded against an October library, faulted 40 minutes later inside
     // spikes.py __getitem__). The P/Invoke layer has the same exposure, so it gets
     // the same guard.

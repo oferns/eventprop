@@ -23,7 +23,7 @@
 #   and `eventprop_cpp.*.so/.dylib` only: measured on this machine, that matches ZERO
 #   files (2 .pyd present, 0 .so), so `clean.sh python` left the compiled extension in
 #   place and `-full` printed "→ Deleted reference binary" having deleted nothing —
-#   while AGENTS.md claims -full forces a rebuild. Each script was right on the platform
+#   while the usage text promised -full forces a rebuild. Each script was right on the platform
 #   the other one covers; both now list all four suffixes.
 #
 # Why _native.c is removed

@@ -9,7 +9,7 @@ Usage:
     merge.py records_*.json --out merged.json [--allow-mixed-hosts]
 
 Validity is DERIVED here, never authored in a source file. The rules encode facts
-that AGENTS.md currently keeps as prose footnotes:
+that AGENTS.md §7 and docs/POSTMORTEMS.md record as prose:
 
   zero_output_spikes   output_spikes == 0  -> the row times an empty loop
                          (BackwardSpikes/Tiny|Small/uniform; ComputeSpikes/Tiny/uniform)
@@ -56,7 +56,7 @@ EXCLUSION_POLICY = {
     "Dropout": "not_like_for_like",
 }
 
-# Rows the schema keeps out of quick runs by policy (AGENTS.md: XL costs seconds
+# Rows the schema keeps out of quick runs by policy (AGENTS.md §6: XL costs seconds
 # per iteration; XL burst ~16 s/iteration for BackwardSpikes). Report-side: this is
 # a run-selection policy, not a per-row validity verdict.
 SLOW_FAMILIES = {"BackwardSpikes", "FullTrainingStep"}

@@ -183,8 +183,8 @@ def parse_filename(path):
         return None, stale
 
     if pattern is None:
-        # The .NET single-kernel benchmarks are uniform-only (AGENTS.md: "Poisson
-        # cells exist only in suite 1"). Defaulting to uniform states that fact.
+        # The .NET single-kernel benchmarks are uniform-only: the poisson cells exist
+        # only in the layer suite. Defaulting to uniform states that fact.
         pattern = "uniform"
     return (benchmark, size, pattern, axis), stale
 

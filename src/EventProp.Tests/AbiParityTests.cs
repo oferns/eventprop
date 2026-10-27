@@ -11,7 +11,7 @@ namespace CW.EventProp.Tests;
 /// offsets this assembly compiled, against a library whose fields moved, and returns
 /// plausible-looking garbage.
 ///
-/// The Cython layer measured that failure (AGENTS.md, "Python bindings on Windows"): a
+/// The Cython layer measured that failure (docs/POSTMORTEMS.md): a
 /// <c>_native.cp311-win_amd64.pyd</c> built against July headers, loaded against a
 /// library rebuilt from October headers, produced an access violation inside
 /// <c>spikes.py __getitem__</c> 40 minutes into a benchmark run, in a frame with no hint
