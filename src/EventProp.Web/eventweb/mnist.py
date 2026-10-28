@@ -70,24 +70,45 @@ def have_test_set() -> bool:
 
 
 def fetch_test_set() -> Path:
-    """Download the two t10k files (~1.6 MB total). Raises on any network failure.
+    """Download the two t10k files (~1.65 MB total). Raises on any network failure.
 
     Explicit, not implicit: a page that silently reaches the network on first paint is a
     page that hangs on an air-gapped machine, and this repository ships to three
     platforms, at least one of which will be behind a proxy.
+
+    No checksum is verified, because there is nothing to verify against: this mirror sends
+    no digest in `Content-Disposition`, and the reference's `get_file_hash("mnist")`
+    returns `{}` — its download loop looks up the digest, finds none, and skips the check.
+    Both were measured here rather than assumed, and pinning a hash of whatever this mirror
+    served today would be dressing a local observation up as an authority.
+
+    What does catch a bad file, in order:
+
+    * gzip's own CRC32 trailer — flipping one byte of the cached `.gz` makes `load_test()`
+      die in `zlib` rather than return wrong pixels;
+    * the IDX magic and exact item count asserted in `_read_idx`;
+    * `selfcheck.py` step 12's accuracy assertion, which requires the published accuracy
+      to be reproduced. Measured, not assumed: blanking 2 000 of the 10 000 digits keeps
+      the file a valid gzip with a valid IDX header and exactly 10 000 items, and the
+      encoder-vs-reference check *still passes* — it compares two encoders over the same
+      pixels, so it cannot see wrong pixels. Accuracy drops to 0.7981 against a recorded
+      0.9740, and that is the check that fails. A wrong corpus therefore fails loudly
+      instead of quietly drawing a wrong page, but only because of that one assertion.
     """
     d = cache_dir()
     d.mkdir(parents=True, exist_ok=True)
     for name in (_TEST_IMAGES, _TEST_LABELS):
         dest = d / name
-        if not dest.exists():
-            try:
-                urllib.request.urlretrieve(URL_BASE + name, dest)
-            except OSError as exc:
-                raise RuntimeError(
-                    f"could not download {URL_BASE + name}: {exc}. The MNIST files are "
-                    f"not vendored in this repository; place them in {d} manually to use "
-                    f"the digits page.") from None
+        url = URL_BASE + name
+        if dest.exists():
+            continue
+        try:
+            urllib.request.urlretrieve(url, dest)  # noqa: S310 (fixed mirror URL)
+        except OSError as exc:
+            raise RuntimeError(
+                f"could not download {url}: {exc}. The MNIST files are not vendored in "
+                f"this repository; place them in {d} manually to use the digits "
+                f"page.") from None
     return d
 
 
