@@ -69,6 +69,11 @@ def main() -> int:
     checks = [
         ("Yin-Yang, live", lambda a: a.radio[0].set_value("Eigen reference (pybind11)").run(),
          "live page on the Eigen backend (traces path)"),
+        # The C backend grew trace methods, so its traces are now a reachable UI path rather
+        # than a hidden branch — and a binding that returns the wrong shape renders an empty
+        # plot rather than an error, which is exactly what this check is for.
+        ("Yin-Yang, live", lambda a: a.radio[0].set_value("C library (Cython)").run(),
+         "live page back on the C backend (C traces path)"),
         ("Yin-Yang, live", lambda a: a.radio[1].set_value("a test-set sample").run(),
          "live page picking a real test point"),
         ("Yin-Yang, live", lambda a: a.selectbox[1].set_value(5).run(),
