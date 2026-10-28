@@ -27,7 +27,7 @@
 #   number.
 #
 # What it builds that the previous version did not
-#   - EventProp.C.Tests (the 220-test Google Test suite)
+#   - EventProp.C.Tests (the Google Test suite)
 #   - EventProp.Benchmarks (the .NET benchmark dll)
 #   The second is a prerequisite run_benchmarks.ps1 checks for, so `-Build` could
 #   never satisfy the check its own script performs.
@@ -367,8 +367,9 @@ Invoke-CMakePreset "src\EventProp.Cpp.Wrapper" $Preset "eventprop_eigen_core + e
 # --- 4. C unit tests ----------------------------------------------------------
 # EventProp.C.Tests ships `release` and `asan` presets only, so there is nothing to
 # do in debug. Say so: the previous version did not build this project at all, and a
-# silent omission reads as "tests passed".
-Write-Step "4/9" "C unit tests (EventProp.C.Tests, 220 tests)"
+# silent omission reads as "tests passed". The suite size is ctest's to report; a count
+# baked into this label goes stale the first time a test is added.
+Write-Step "4/9" "C unit tests (EventProp.C.Tests)"
 if ($Preset -eq "release") {
     Invoke-CMakePreset "src\EventProp.C.Tests" "release" "eventprop_tests.exe  (ctest --preset release)" | Out-Null
 } else {
@@ -591,7 +592,7 @@ if ($SkipPython) {
         $Skips.Add("EventProp.Native.Python editable install (_native.c not regenerated)")
     } else {
         Invoke-Step "pip install -e .[dev] (EventProp.Native.Python)" {
-            # [dev] = pytest, for src\EventProp.Native.Python\test (29 tests).
+            # [dev] = pytest, for src\EventProp.Native.Python\test.
             & $py -m pip install -e ".[dev]" --no-build-isolation
         } | Out-Null
     }

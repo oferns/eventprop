@@ -39,7 +39,7 @@
 #   claim rather than a measurement is how a compile failure reaches a benchmark number.
 #
 # What it builds that the previous version did not
-#   - EventProp.C.Tests (the 220-test Google Test suite)
+#   - EventProp.C.Tests (the Google Test suite)
 #   - EventProp.Benchmarks (the .NET benchmark dll) — a prerequisite run_all.py and
 #     run_benchmarks.ps1 check for, so a build script that omits it can never satisfy
 #     its own check.
@@ -320,8 +320,10 @@ build_cmake EventProp.Cpp.Wrapper "$PRESET" "eventprop_eigen_core + eventprop_cp
 
 # ── 4. C unit tests ──────────────────────────────────────────────────────────
 # EventProp.C.Tests ships `release` and `asan` presets only, so there is nothing to do
-# in debug. Say so: silently omitting a 220-test suite reads as "tests passed".
-step "4/9" "C unit tests (EventProp.C.Tests, 220 tests)"
+# in debug. Say so: silently omitting the C suite reads as "tests passed". The suite size
+# is ctest's to report — a count baked into this label goes stale the first time a test is
+# added, which is what happened to the one that used to sit here.
+step "4/9" "C unit tests (EventProp.C.Tests)"
 if [[ "$PRESET" == "release" ]]; then
   build_cmake EventProp.C.Tests "release" "eventprop_tests.exe (ctest --preset release)"
 else
