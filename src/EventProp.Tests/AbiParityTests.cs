@@ -50,6 +50,9 @@ public class AbiParityTests
         "LambdaITraceInput",
         "LambdaITraceOutput",
         "LambdaIAtTimeOutput",
+        "MaximaRegressionInput",
+        "MaximaRegressionOutput",
+        "MaximaRegressionResult",
     ];
 
     [Test]

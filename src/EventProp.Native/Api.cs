@@ -266,7 +266,7 @@ public static unsafe partial class Api
     /// is not silent: the version half of the check below fails and names both numbers,
     /// which is what surfaced a public struct layout change that this assembly had to
     /// follow (the LambdaITraceInput rewrite).</remarks>
-    public const int CompiledAbiVersion = 2;
+    public const int CompiledAbiVersion = 3;
 
     [LibraryImport(Lib)]
     private static partial int eventprop_abi_version();
@@ -317,6 +317,9 @@ public static unsafe partial class Api
         ["LambdaITraceInput"] = sizeof(Diag.LambdaITraceInput),
         ["LambdaITraceOutput"] = sizeof(Diag.LambdaITraceOutput),
         ["LambdaIAtTimeOutput"] = sizeof(Diag.LambdaIAtTimeOutput),
+        ["MaximaRegressionInput"] = sizeof(Loss.MaximaRegressionInput),
+        ["MaximaRegressionOutput"] = sizeof(Loss.MaximaRegressionOutput),
+        ["MaximaRegressionResult"] = sizeof(Loss.MaximaRegressionResult),
     };
 
     /// <summary>Compare this assembly's compiled layouts against the loaded library. Never throws.</summary>
