@@ -49,6 +49,7 @@ public class AbiParityTests
         "VoltageTraceOutput",
         "LambdaITraceInput",
         "LambdaITraceOutput",
+        "LambdaIAtTimeOutput",
     ];
 
     [Test]

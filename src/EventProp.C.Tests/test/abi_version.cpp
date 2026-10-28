@@ -57,6 +57,7 @@ TEST(AbiStructSize, EveryPublicStructHasANonZeroEntry) {
         "VoltageTraceOutput",
         "LambdaITraceInput",
         "LambdaITraceOutput",
+        "LambdaIAtTimeOutput",
     };
 
     for (const auto& name : names) {
@@ -88,6 +89,7 @@ TEST(AbiStructSize, MatchesSizeofInTheConsumersTranslationUnit) {
     EXPECT_EQ(eventprop_abi_struct_size("VoltageTraceOutput"), sizeof(VoltageTraceOutput));
     EXPECT_EQ(eventprop_abi_struct_size("LambdaITraceInput"), sizeof(LambdaITraceInput));
     EXPECT_EQ(eventprop_abi_struct_size("LambdaITraceOutput"), sizeof(LambdaITraceOutput));
+    EXPECT_EQ(eventprop_abi_struct_size("LambdaIAtTimeOutput"), sizeof(LambdaIAtTimeOutput));
 }
 
 TEST(AbiStructSize, UnknownNameReturnsZero) {
@@ -110,6 +112,7 @@ TEST(AbiStructSize, TableKeysAreUnique) {
         "SpikesBatch", "MaximaBatch", "BackwardsBatch", "GradientOutput",
         "DropoutOutput", "DropoutBatch", "AccumulatedBackwardResult",
         "VoltageTraceInput", "VoltageTraceOutput", "LambdaITraceInput", "LambdaITraceOutput",
+        "LambdaIAtTimeOutput",
     };
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
         for (size_t j = i + 1; j < sizeof(names) / sizeof(names[0]); ++j) {

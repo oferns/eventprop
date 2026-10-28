@@ -37,6 +37,40 @@ def check(name: str, ok: bool, detail: str = "") -> None:
         FAILURES.append(name)
 
 
+TRACE_DT = 1e-3
+
+
+def _set_post_errors(spikes, values: list[float]) -> None:
+    """Write the post-spike error signal through whichever setter this binding exposes.
+
+    The two bindings expose this differently on purpose; the error arrays are what the
+    backward pass reads, so writing them here means the adjoint is driven by the same
+    signal a training step would use.
+    """
+    for j, val in enumerate(values):
+        if hasattr(spikes, "set_error"):
+            spikes.set_error(j, float(val))
+        else:
+            spikes.errors[j] = float(val)
+
+
+def _trace_probe(net, split) -> tuple[np.ndarray, int] | None:
+    """First test point whose output layer fires, with a traced neuron that spiked.
+
+    A silent output neuron has an all-zero adjoint on every backend, so tracing one and
+    calling the agreement a parity result would be comparing zeros.
+    """
+    for i in range(min(20, split.n)):
+        coords_i = split.coords[i:i + 1]
+        vec = net.spikes_for(coords_i)
+        post = net.output.post_batch[0]
+        sources = np.asarray(post.sources).ravel()
+        if len(sources) == 0:
+            continue
+        return coords_i, int(sources[0])
+    return None
+
+
 def main() -> int:
     root = runtime.ROOT
     data_dir = root / "src/EventProp.Python/eventprop/yin_yang_data_set/publication_data"
@@ -118,7 +152,8 @@ def main() -> int:
     print("6. backend agreement")
     be_py = BACKENDS["eigen"]
     pred_c, _, _ = net.predict(test.coords)
-    pred_e = network.Net(be_py, *ckpt.weights_at(-1)).predict(test.coords)[0]
+    net_e = network.Net(be_py, *ckpt.weights_at(-1))
+    pred_e = net_e.predict(test.coords)[0]
     agree = float((pred_c == pred_e).mean())
     check("C and Eigen predict identically on all 1000 test samples", agree == 1.0,
           f"agreement={agree:.3%}")
@@ -145,10 +180,47 @@ def main() -> int:
     check("exact gradient matches central differences", 0.0 <= worst < 1e-6,
           f"max relative error {worst:.2e}")
 
-    print("8. trace capability (informational)")
+    print("8. trace parity (C vs Eigen)")
+    # Traces are the visible half of the adjoint: the Gradient page plots lambda_i(t) as the
+    # exact gradient's mechanism, so a backend that spikes identically and traces differently
+    # would still mislead a reader. Errors are set on both sides because lambda_i is
+    # loss-driven — zero errors make both traces zero and the comparison vacuous.
+    probe = _trace_probe(net_e, test)
+    if probe is None:
+        check("found a probe point where the output layer fires", False,
+              "no spiking sample in the first 20 test points")
+    else:
+        coords_i, target = probe
+        got = {}
+        for key in ("c", "eigen"):
+            n = network.Net(BACKENDS[key], *ckpt.weights_at(-1))
+            n.spikes_for(coords_i)
+            post = n.output.post_batch[0]
+            _set_post_errors(post, [1.0 + 0.5 * j for j in range(len(post.times))])
+            _, v = n.hidden.get_voltage_trace_for_neuron(
+                0, target, t_max=n.t_max, dt=TRACE_DT)
+            _, lam = n.output.get_lambda_i_trace_for_neuron(
+                0, target, t_max=n.t_max, dt=TRACE_DT)
+            got[key] = (v, lam, n)
+        vc, lc, net_probe = got["c"]
+        ve, le, _ = got["eigen"]
+        check("voltage traces match across backends",
+              bool(np.allclose(vc, ve, rtol=1e-6, atol=1e-8)),
+              f"max |delta| {np.abs(vc - ve).max():.2e}")
+        check("adjoint traces match across backends",
+              bool(np.allclose(lc, le, rtol=1e-6, atol=1e-8)),
+              f"max |delta| {np.abs(lc - le).max():.2e}, peak |lambda| {np.abs(lc).max():.4g}")
+        # The pointwise query and the grid share one sweep in C, so they should agree exactly.
+        half = int(round((net_probe.t_max / 2) / TRACE_DT))
+        one = net_probe.output.get_lambda_i_for_neuron(0, target, half * TRACE_DT)
+        check("pointwise adjoint equals the trace it samples",
+              one == lc[half], f"{one:.10g} vs {lc[half]:.10g} at t={half * TRACE_DT:.4f}")
+
+    print("9. trace capability")
     for key, be in BACKENDS.items():
-        print(f"        {be.short}: voltage/lambda traces from Python: "
-              f"{'yes' if be.supports_traces() else 'no'}")
+        supports = be.supports_traces()
+        check(f"{be.short} backend exposes traces from Python", supports,
+              "yes" if supports else "no — the views hide any trace panel for this backend")
 
     print()
     if FAILURES:

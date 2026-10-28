@@ -65,12 +65,19 @@ def render() -> None:
     st.markdown(f"| capability | C library (Cython) | Eigen reference (pybind11) |\n"
                 f"|---|:---:|:---:|\n{cap_rows}")
     st.markdown(
-        "The C library *does* implement both traces — `eventprop_diag.h` exports "
-        "`eventprop_compute_voltage_trace` and `eventprop_compute_lambda_i_trace`, and "
-        "`_native.pyx` declares both in its extern block. What it does not have is a "
-        "Python-level wrapper, so the capability is real in the library and unreachable "
-        "from the binding. The table reports the binding, because that is what this app "
-        "can actually use."
+        "Both traces come from both bindings, and `selfcheck.py` compares them: voltage "
+        "agrees to machine precision, the adjoint to ~1e-13 on a shipped network. The rows "
+        "are still a *probe* rather than a constant because a declared `extern` is not a "
+        "reachable Python function — the C library exported both traces long before the "
+        "Cython layer wrapped either, and a table that read the header would have said "
+        "\"yes\" while the app had nothing to show.\n\n"
+        "The adjoint row has a history worth knowing. The C voltage trace has had a "
+        "C-vs-Eigen parity test from the start; the λ trace had a test with that name which "
+        "never called the Eigen side. The C implementation predated the correct adjoint jump "
+        "rule in the backward pass and computed a different, loss-independent quantity — "
+        "plausible-looking, and green. It now follows the reference "
+        "`1/(i - v_th) · (v_th · λ_v + error)`, and the parity test is known to bite: it "
+        "fails if the error term is removed."
     )
 
     st.divider()

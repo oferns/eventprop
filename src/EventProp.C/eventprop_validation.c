@@ -201,6 +201,7 @@ const char* eventprop_error_string(const int error_no)
         case EVENTPROP_ALLOC_DIAG_CUR_SUM:      return "Allocation failed: lambda-I running synaptic sum";
         case EVENTPROP_ALLOC_DIAG_LAMBDA_V:     return "Allocation failed: lambda-I membrane adjoint array";
         case EVENTPROP_ALLOC_DIAG_LAMBDA_JUMPS: return "Allocation failed: lambda-I jump arrays";
+        case EVENTPROP_DIAG_QUERY_TIME_INVALID: return "Invalid lambda-I query time (negative or non-finite)";
         case EVENTPROP_ALLOC_BWD_CURRENTS:      return "Allocation failed: backward-pass post-spike currents";
         default:                                return "Unknown error";
     }

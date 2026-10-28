@@ -97,11 +97,17 @@ test sets differ only by RNG seed, so re-drawing them overlaps the test set.
 
 ## Two things worth knowing before you trust a plot
 
-**Voltage and adjoint traces only exist on the Eigen binding.** The C library implements
-both (`src/EventProp.C/eventprop_diag.h`) and `_native.pyx` declares them, but the Cython
-layer wraps no Python entry point, so the capability is real in the library and
-unreachable from here. The app probes rather than assumes
-(`Backend.supports_traces()`) and says so in the UI.
+**λ(t) is loss-driven, so an all-zero λ trace is not necessarily a bug.** The adjoint jumps
+by `1/(i - v_th) · (v_th · λ_v + error)` at each output spike: with no error signal on those
+spikes the correct answer is zero everywhere. The trace pages set an error before asking, and
+`selfcheck.py` asserts the traced adjoint is non-trivial before it compares anything —
+otherwise a comparison of two zero traces looks like agreement.
+
+Both bindings produce both traces, and `selfcheck.py` compares them (voltage to machine
+precision, adjoint to ~1e-13 on a shipped network). Availability is still *probed*
+(`Backend.supports_traces()`) rather than hard-coded, because the C library exported these
+functions long before the Cython layer wrapped them — a table that read the header would
+promise a plot the binding could not deliver.
 
 **`compute_lambda_i` segfaults on a neuron that never spiked.**
 `post_spikes.times[post_spikes.n_spikes - 1]` is unguarded, so `n_spikes == 0` reads

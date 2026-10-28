@@ -107,7 +107,8 @@ typedef enum EventPropError {
     EVENTPROP_ALLOC_DIAG_CURRENTS     = 64,  /* lambda-I rebuilt post-spike current array */
     EVENTPROP_ALLOC_DIAG_CUR_SUM      = 65,  /* lambda-I running synaptic sum row */
     EVENTPROP_ALLOC_DIAG_LAMBDA_V     = 66,  /* lambda-I per-neuron membrane adjoint array */
-    EVENTPROP_ALLOC_DIAG_LAMBDA_JUMPS = 67   /* lambda-I jump time/magnitude arrays */
+    EVENTPROP_ALLOC_DIAG_LAMBDA_JUMPS = 67,  /* lambda-I jump time/magnitude arrays */
+    EVENTPROP_DIAG_QUERY_TIME_INVALID = 68   /* pointwise lambda-I query time is negative or non-finite */
 } EventPropError;
 
 /** ── Validation limits ──────────────────────────────────────────────── */

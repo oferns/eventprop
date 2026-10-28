@@ -49,6 +49,7 @@ STRUCT_NAMES = {
     "VoltageTraceOutput",
     "LambdaITraceInput",
     "LambdaITraceOutput",
+    "LambdaIAtTimeOutput",
 }
 
 _LIB_NAMES = ("eventprop_c_api.dll",

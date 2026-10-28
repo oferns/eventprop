@@ -258,6 +258,12 @@ cdef extern from "eventprop_diag.h":
 
     LambdaITraceOutput eventprop_compute_lambda_i_trace(const LambdaITraceInput input)
 
+    ctypedef struct LambdaIAtTimeOutput:
+        double lambda_i
+        int error_no
+
+    LambdaIAtTimeOutput eventprop_compute_lambda_i_at_time(const LambdaITraceInput input, double t)
+
 
 # ---------------------------------------------------------------------------
 # 3c. ABI self-check — refuse to import on a header/binary layout mismatch
@@ -300,6 +306,7 @@ def abi_struct_sizes():
         "VoltageTraceOutput": <Py_ssize_t>sizeof(VoltageTraceOutput),
         "LambdaITraceInput": <Py_ssize_t>sizeof(LambdaITraceInput),
         "LambdaITraceOutput": <Py_ssize_t>sizeof(LambdaITraceOutput),
+        "LambdaIAtTimeOutput": <Py_ssize_t>sizeof(LambdaIAtTimeOutput),
     }
 
 
@@ -932,3 +939,155 @@ def dropout_spikes_batch(
         batch_size, p_drop, seed)
     check_dropout_batch_error(result)
     return _DropoutBatchOutput.from_c_result(result)
+
+
+# ---------------------------------------------------------------------------
+# 8. Diagnostic entry points — voltage trace, adjoint trace, pointwise adjoint
+#
+# These COPY instead of handing out zero-copy views. The C buffers are freed before the
+# call returns, and holding them open the way the batch outputs do would mean a wrapper
+# class per trace — for arrays whose only purpose is to be plotted. The batch paths stay
+# zero-copy because there the copies would happen every forward pass, not every click.
+# ---------------------------------------------------------------------------
+
+cdef inline EventPropInput _single_input(
+        double[::1] times, int[::1] sources,
+        double[:, ::1] w, int n_pre, int n_post,
+        double tau_mem, double tau_syn, double v_th):
+    """EventPropInput pointing into the caller's arrays.
+
+    Valid because the C call retains nothing and the memoryviews keep the caller's arrays
+    alive for the duration of it. The [::1] declarations are load-bearing rather than
+    decorative: a strided buffer would leave &times[0] the start of an array whose
+    elements are not adjacent, and the C cursor would read across the gaps with nothing
+    to report.
+    """
+    cdef EventPropInput inp
+    inp.w = &w[0, 0]
+    inp.n_pre = n_pre
+    inp.n_post = n_post
+    inp.n_spikes = times.shape[0]
+    inp.tau_mem = tau_mem
+    inp.tau_syn = tau_syn
+    inp.v_th = v_th
+    if times.shape[0] > 0:
+        inp.times = &times[0]
+        inp.sources = &sources[0]
+    else:
+        inp.times = NULL
+        inp.sources = NULL
+    return inp
+
+
+cdef inline void _check_diag_error(int error_no, str what):
+    if error_no != 0:
+        raise RuntimeError(f"EventProp {what} failed: error {error_no} "
+                           f"({eventprop_error_string(error_no).decode('utf-8')})")
+
+
+def compute_voltage_trace(
+        double[::1] times, int[::1] sources,
+        double[:, ::1] w, int n_pre, int n_post,
+        double tau_mem, double tau_syn, double v_th,
+        double[::1] fwd_times, int[::1] fwd_sources,
+        double t_max, double dt, int target_nrn_idx):
+    """Membrane-potential trace for one neuron of one sample.
+
+    fwd_times / fwd_sources are that sample's OUTPUT spikes. Pass the layer's own forward
+    result rather than recomputing it — a trace built from a second forward pass describes
+    a network state the layer does not have.
+
+    Returns (ts, v_trace), both float64 of length int(t_max / dt).
+    """
+    cdef VoltageTraceInput vin
+    vin.input = _single_input(times, sources, w, n_pre, n_post, tau_mem, tau_syn, v_th)
+    vin.target_nrn_idx = target_nrn_idx
+    vin.n_post_spikes = fwd_times.shape[0]
+    vin.t_max = t_max
+    vin.dt = dt
+    if fwd_times.shape[0] > 0:
+        vin.fwd_times = &fwd_times[0]
+        vin.fwd_sources = &fwd_sources[0]
+    else:
+        vin.fwd_times = NULL
+        vin.fwd_sources = NULL
+
+    cdef VoltageTraceOutput out = eventprop_compute_voltage_trace(vin)
+    _check_diag_error(out.error_no, "voltage trace")
+    try:
+        ts = _double_view(out.ts, out.n_t).copy()
+        v_trace = _double_view(out.v_trace, out.n_t).copy()
+    finally:
+        eventprop_free_voltage_trace_output(out)
+    return ts, v_trace
+
+
+def compute_lambda_i_trace(
+        double[::1] times, int[::1] sources,
+        double[:, ::1] w, int n_pre, int n_post,
+        double tau_mem, double tau_syn, double v_th,
+        double[::1] fwd_times, int[::1] fwd_sources, double[::1] post_errors,
+        double t_max, double dt, int target_nrn_idx):
+    """Synaptic adjoint (lambda_i) trace for one neuron of one sample.
+
+    fwd_times, fwd_sources and post_errors must cover EVERY post-synaptic neuron's spikes
+    for that sample, not only the traced neuron's: the adjoint decays lambda_v for all
+    neurons at every spike, so a pre-filtered list yields a trace of the right shape and
+    wrong values. post_errors is the loss-driven error signal at each of those spikes —
+    all-zero errors give an all-zero adjoint, which is why the backward pass has to have
+    run before this is interesting.
+
+    Returns (ts, lambda_trace), both float64 of length int(t_max / dt).
+    """
+    cdef LambdaITraceInput lin
+    lin.input = _single_input(times, sources, w, n_pre, n_post, tau_mem, tau_syn, v_th)
+    lin.target_nrn_idx = target_nrn_idx
+    lin.n_post_spikes = fwd_times.shape[0]
+    lin.t_max = t_max
+    lin.dt = dt
+    if fwd_times.shape[0] > 0:
+        lin.fwd_times = &fwd_times[0]
+        lin.fwd_sources = &fwd_sources[0]
+    else:
+        lin.fwd_times = NULL
+        lin.fwd_sources = NULL
+    lin.post_errors = &post_errors[0] if post_errors.shape[0] > 0 else NULL
+
+    cdef LambdaITraceOutput out = eventprop_compute_lambda_i_trace(lin)
+    _check_diag_error(out.error_no, "lambda-I trace")
+    try:
+        ts = _double_view(out.ts, out.n_t).copy()
+        lambda_trace = _double_view(out.lambda_trace, out.n_t).copy()
+    finally:
+        eventprop_free_lambda_i_trace_output(out)
+    return ts, lambda_trace
+
+
+def compute_lambda_i_at_time(
+        double[::1] times, int[::1] sources,
+        double[:, ::1] w, int n_pre, int n_post,
+        double tau_mem, double tau_syn, double v_th,
+        double[::1] fwd_times, int[::1] fwd_sources, double[::1] post_errors,
+        double t, int target_nrn_idx):
+    """Synaptic adjoint for one neuron at one time — the figure-1 style query.
+
+    The same sweep compute_lambda_i_trace samples on a grid, evaluated at a single t, so
+    the two agree by construction. Cheaper than a trace when a handful of values is wanted.
+    """
+    cdef LambdaITraceInput lin
+    lin.input = _single_input(times, sources, w, n_pre, n_post, tau_mem, tau_syn, v_th)
+    lin.target_nrn_idx = target_nrn_idx
+    lin.n_post_spikes = fwd_times.shape[0]
+    lin.t_max = 0.0   # unused by the pointwise query
+    lin.dt = 0.0      # unused by the pointwise query
+    if fwd_times.shape[0] > 0:
+        lin.fwd_times = &fwd_times[0]
+        lin.fwd_sources = &fwd_sources[0]
+    else:
+        lin.fwd_times = NULL
+        lin.fwd_sources = NULL
+    lin.post_errors = &post_errors[0] if post_errors.shape[0] > 0 else NULL
+
+    cdef LambdaIAtTimeOutput out = eventprop_compute_lambda_i_at_time(lin, t)
+    _check_diag_error(out.error_no, "lambda-I query")
+    return out.lambda_i

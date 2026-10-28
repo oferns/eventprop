@@ -600,6 +600,118 @@ TEST(DiagLambdaITrace, ExcessiveSampleCountReturnsError) {
     eventprop_free_lambda_i_trace_output(trace);
 }
 
+// ──────────────────────────────────────────────────────────────
+// compute_lambda_i_at_time — the pointwise query
+//
+// The grid trace and this entry point call the same sweep, so the interesting assertion is
+// not "is it a number" but "is it the SAME number the grid produces". That equivalence is
+// what keeps the two from drifting the way the trace drifted from the backward pass.
+// ──────────────────────────────────────────────────────────────
+
+TEST(DiagLambdaIAtTime, PointwiseMatchesTraceAtEverySample) {
+    std::vector<double> w;
+    std::vector<double> fwd_times = {0.02, 0.035, 0.06, 0.08};
+    std::vector<int>    fwd_sources = {0, 1, 0, 1};
+    std::vector<double> post_errors = {1.0, 0.5, 2.0, 1.5};
+    const double dt = 0.001;
+
+    LambdaITraceInput input{make_empty_forward(w), 0, fwd_times.data(), fwd_sources.data(),
+                            post_errors.data(), 4, 0.1, dt};
+
+    LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
+    ASSERT_EQ(trace.error_no, EVENTPROP_OK);
+
+    for (int i = 0; i < trace.n_t; ++i) {
+        LambdaIAtTimeOutput one = eventprop_compute_lambda_i_at_time(input, i * dt);
+        ASSERT_EQ(one.error_no, EVENTPROP_OK) << "at t=" << i * dt;
+        // Identical by construction, not within a tolerance: same code path, same inputs.
+        EXPECT_EQ(one.lambda_i, trace.lambda_trace[i]) << "at t=" << i * dt;
+    }
+
+    eventprop_free_lambda_i_trace_output(trace);
+}
+
+TEST(DiagLambdaIAtTime, PointwiseMatchesAnalyticAdjoint) {
+    std::vector<double> w;
+    const double tau = 0.05;
+    const double error = 2.0;
+    std::vector<double> fwd_times = {tau};
+    std::vector<int>    fwd_sources = {0};
+    std::vector<double> post_errors = {error};
+
+    LambdaITraceInput input{make_empty_forward(w), 0, fwd_times.data(), fwd_sources.data(),
+                            post_errors.data(), 1, 0.1, 0.001};
+
+    const double jump = -error / kVTh;
+    for (const double t : {0.0, 0.01, 0.049}) {
+        LambdaIAtTimeOutput one = eventprop_compute_lambda_i_at_time(input, t);
+        ASSERT_EQ(one.error_no, EVENTPROP_OK);
+        EXPECT_NEAR(one.lambda_i, jump * expected_k_bwd(tau - t), 1e-12) << "at t=" << t;
+    }
+
+    // At and after the spike there is nothing left to sum.
+    LambdaIAtTimeOutput after = eventprop_compute_lambda_i_at_time(input, 0.07);
+    ASSERT_EQ(after.error_no, EVENTPROP_OK);
+    EXPECT_DOUBLE_EQ(after.lambda_i, 0.0);
+}
+
+TEST(DiagLambdaIAtTime, PointwiseZeroSpikesIsZeroAndOk) {
+    std::vector<double> w;
+    LambdaITraceInput input{make_empty_forward(w), 0, nullptr, nullptr, nullptr, 0, 0.1, 0.001};
+
+    LambdaIAtTimeOutput one = eventprop_compute_lambda_i_at_time(input, 0.03);
+    EXPECT_EQ(one.error_no, EVENTPROP_OK);
+    EXPECT_DOUBLE_EQ(one.lambda_i, 0.0);
+}
+
+TEST(DiagLambdaIAtTime, PointwiseRejectsInvalidQueryTime) {
+    std::vector<double> w;
+    std::vector<double> fwd_times = {0.03};
+    std::vector<int>    fwd_sources = {0};
+    std::vector<double> post_errors = {1.0};
+    LambdaITraceInput input{make_empty_forward(w), 0, fwd_times.data(), fwd_sources.data(),
+                            post_errors.data(), 1, 0.1, 0.001};
+
+    /* Built at runtime rather than from the INFINITY/NAN macros: the deliberate /wd4756
+     * suppression lives on the library target, so a constant-folded infinity in a test would
+     * be an error under MSVC. The volatile keeps both divisions out of the constant folder. */
+    volatile double zero = 0.0;
+    const double bad_times[] = {-0.001, -1.0, 1.0 / zero, zero / zero};
+    for (const double t : bad_times) {
+        LambdaIAtTimeOutput one = eventprop_compute_lambda_i_at_time(input, t);
+        EXPECT_EQ(one.error_no, EVENTPROP_DIAG_QUERY_TIME_INVALID) << "t=" << t;
+        EXPECT_DOUBLE_EQ(one.lambda_i, 0.0);
+    }
+    // t = 0 is a legitimate query, not a sentinel.
+    EXPECT_EQ(eventprop_compute_lambda_i_at_time(input, 0.0).error_no, EVENTPROP_OK);
+}
+
+// The two entry points validate through one routine, so a rejected input reads identically on
+// both. This is the drift the shared preparation exists to prevent.
+TEST(DiagLambdaIAtTime, PointwiseSharesTraceValidation) {
+    std::vector<double> w;
+    std::vector<double> unsorted = {0.06, 0.03};
+    std::vector<int>    sources = {0, 0};
+    std::vector<double> errors = {1.0, 1.0};
+
+    LambdaITraceInput input{make_empty_forward(w), 0, unsorted.data(), sources.data(),
+                            errors.data(), 2, 0.1, 0.001};
+
+    LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
+    LambdaIAtTimeOutput one = eventprop_compute_lambda_i_at_time(input, 0.01);
+    EXPECT_EQ(trace.error_no, EVENTPROP_UNSORTED_SPIKE_TIMES);
+    EXPECT_EQ(one.error_no, trace.error_no);
+
+    input.target_nrn_idx = 7;
+    EXPECT_EQ(eventprop_compute_lambda_i_at_time(input, 0.01).error_no,
+              EVENTPROP_DIAG_TARGET_OUT_OF_RANGE);
+    input.target_nrn_idx = 0;
+    input.post_errors = nullptr;
+    EXPECT_EQ(eventprop_compute_lambda_i_at_time(input, 0.01).error_no, EVENTPROP_NULL_POINTER);
+
+    eventprop_free_lambda_i_trace_output(trace);
+}
+
 TEST(DiagVoltageTrace, ExcessiveSampleCountReturnsError) {
     std::vector<double> w = {1.0, 2.0};
     EventPropInput input{w.data(), 1, 2, nullptr, nullptr, 0, kTauMem, kTauSyn, kVTh};

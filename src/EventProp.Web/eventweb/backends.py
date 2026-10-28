@@ -82,13 +82,21 @@ class Backend:
     def supports_traces(self) -> bool:
         """Can this backend produce membrane-voltage / adjoint traces from Python?
 
-        Probed, not asserted: the C library *does* export
-        `eventprop_compute_voltage_trace` (see `src/EventProp.C/eventprop_diag.h`), and
-        `_native.pyx` declares it — but the Cython layer currently wraps no Python-level
-        entry point for it, so it is unreachable from here. Reporting it as available
-        would be a claim about a header, not about the binding in use.
+        Probed, not asserted. The C library has exported
+        `eventprop_compute_voltage_trace` for a long time (see
+        `src/EventProp.C/eventprop_diag.h`) and `_native.pyx` declared it — while wrapping
+        no Python-level entry point, so it was unreachable from here. Reporting it as
+        available would have been a claim about a header rather than about the binding in
+        use, which is the difference this probe exists to keep.
         """
-        return hasattr(self.LIFLayer, "get_voltage_trace_for_neuron")
+        return all(
+            hasattr(self.LIFLayer, name)
+            for name in (
+                "get_voltage_trace_for_neuron",
+                "get_lambda_i_trace_for_neuron",
+                "get_lambda_i_for_neuron",
+            )
+        )
 
 
 BACKENDS: dict[str, Backend] = {

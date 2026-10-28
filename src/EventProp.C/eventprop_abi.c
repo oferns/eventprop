@@ -67,6 +67,7 @@ size_t eventprop_abi_struct_size(const char* struct_name) {
         EVENTPROP_SIZE_ENTRY(VoltageTraceOutput),
         EVENTPROP_SIZE_ENTRY(LambdaITraceInput),
         EVENTPROP_SIZE_ENTRY(LambdaITraceOutput),
+        EVENTPROP_SIZE_ENTRY(LambdaIAtTimeOutput),
     };
     const size_t count = sizeof(sizes) / sizeof(sizes[0]);
 

@@ -66,6 +66,12 @@ typedef struct LambdaITraceOutput {
     EventPropError error_no;           /* Error code (EVENTPROP_OK on success) */
 } LambdaITraceOutput;
 
+/** Output of the pointwise adjoint query. Holds no heap memory, so it has no free function. */
+typedef struct LambdaIAtTimeOutput {
+    double lambda_i;                 /* lambda_i at the queried time (0.0 on error) */
+    EventPropError error_no;         /* Error code (EVENTPROP_OK on success) */
+} LambdaIAtTimeOutput;
+
 void eventprop_free_voltage_trace_output(VoltageTraceOutput output);
 void eventprop_free_lambda_i_trace_output(LambdaITraceOutput output);
 
@@ -87,6 +93,19 @@ VoltageTraceOutput eventprop_compute_voltage_trace(VoltageTraceInput input);
  * correct limit (no jumps to sum).
  */
 LambdaITraceOutput eventprop_compute_lambda_i_trace(LambdaITraceInput input);
+
+/**
+ * Compute the synaptic adjoint (lambda_i) for one neuron at one time.
+ *
+ * The same sweep eventprop_compute_lambda_i_trace samples on a grid, evaluated at a single t,
+ * so the two entry points agree by construction rather than by review. Use it when a handful
+ * of values is wanted: the reference's figure-1 style queries ask for lambda_i at chosen times
+ * rather than on a uniform grid.
+ *
+ * input.t_max and input.dt are ignored — the sweep and t fully determine the answer. The
+ * zero-post-spikes case is lambda_i = 0 with EVENTPROP_OK.
+ */
+LambdaIAtTimeOutput eventprop_compute_lambda_i_at_time(LambdaITraceInput input, double t);
 
 #ifdef __cplusplus
 }

@@ -316,6 +316,7 @@ public static unsafe partial class Api
         ["VoltageTraceOutput"] = sizeof(Diag.VoltageTraceOutput),
         ["LambdaITraceInput"] = sizeof(Diag.LambdaITraceInput),
         ["LambdaITraceOutput"] = sizeof(Diag.LambdaITraceOutput),
+        ["LambdaIAtTimeOutput"] = sizeof(Diag.LambdaIAtTimeOutput),
     };
 
     /// <summary>Compare this assembly's compiled layouts against the loaded library. Never throws.</summary>

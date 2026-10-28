@@ -143,6 +143,14 @@ public static unsafe partial class Diag
         }
     }
 
+    /// <summary>Pointwise lambda-I output — holds no heap memory, so there is nothing to dispose.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct LambdaIAtTimeOutput
+    {
+        public double LambdaI;
+        public Api.EventPropError ErrorNo;
+    }
+
     /// <summary>Owned lambda-I trace output — freed via Dispose (<c>using</c>). Zero boxing: compiler calls Dispose directly.</summary>
     [StructLayout(LayoutKind.Sequential)]
     public readonly ref struct LambdaITraceOutput : IDisposable
@@ -167,6 +175,9 @@ public static unsafe partial class Diag
 
     [LibraryImport(Lib)]
     public static partial LambdaITraceOutput eventprop_compute_lambda_i_trace(LambdaITraceInput input);
+
+    [LibraryImport(Lib)]
+    public static partial LambdaIAtTimeOutput eventprop_compute_lambda_i_at_time(LambdaITraceInput input, double t);
 
     // ── Free functions (public for manual lifetime management) ─────
 
