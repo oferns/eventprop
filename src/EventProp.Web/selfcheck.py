@@ -19,6 +19,7 @@ Exit code is non-zero on any failure, with the failing check named.
 
 from __future__ import annotations
 
+import pickle
 import sys
 import types
 from pathlib import Path
@@ -262,17 +263,37 @@ def main() -> int:
     check("named dict with first-spike times parses", cp_fs.has_first_spikes,
           f"first_spikes {cp_fs.first_spikes.shape}")
 
-    # The published layout, rebuilt from its documented field order.
+    # The published TTFS layout, rebuilt from its documented field order.
     published = ([], [], accs, losses, first_spikes, [], [], [], weights2)
-    check("published 9-field tuple still parses",
-          network.parse_checkpoint(published, seed=0, source="<published>").has_first_spikes,
-          "the immutable paper/*.pkl layout stays readable")
+    check("published 9-field TTFS tuple still parses",
+          network.parse_checkpoint(published, seed=0, source="<ttfs>").has_first_spikes,
+          "the immutable paper/yinyang_*.pkl layout stays readable")
 
-    # The layout both trainers in this tree write: weights at index 6, no first spikes.
-    trainers = (losses, accs, accs, losses, [], [], weights2)
-    detail = expect_error(lambda: network.parse_checkpoint(trainers, seed=0, source="<7-tuple>"),
-                          "7", "index 6", "first-spike")
-    check("trainer 7-field tuple is rejected by name, not misread", not detail, detail)
+    # The 7-field layout is not a mistake to be refused: the paper's ten mnist_vmax_*.pkl
+    # are written in it. What matters is reading it at ITS offsets, so the tuple below puts
+    # a decoy at index 4 — a shape that would pass for (epochs, samples, neurons) — and a
+    # different weight set at index 6, the VMax slot. Applying the TTFS indices here yields
+    # the decoy as the first-spike times and no weights at all, so this fails either way.
+    decoy_spikes = np.zeros((2, 3, 4))
+    vmax = (losses, accs, accs, losses, decoy_spikes, [], weights2)
+    try:
+        parsed = network.parse_checkpoint(vmax, seed=0, source="<vmax>")
+    except ValueError as exc:
+        # A misread layout usually surfaces here as a validation error rather than as wrong
+        # values. Record it as this step's failure: letting it escape would skip every
+        # remaining check, which turns one bad assertion into a lost afternoon.
+        check("7-field VMax tuple reads its own offsets, not the TTFS ones", False, str(exc))
+    else:
+        offsets_ok = (not parsed.has_first_spikes and len(parsed.weights) == len(weights2)
+                      and all(np.array_equal(parsed.weights[i][j], weights2[i][j])
+                              for i in range(len(weights2)) for j in (0, 1)))
+        check("7-field VMax tuple reads its own offsets, not the TTFS ones", offsets_ok,
+              f"weights from index 6, index-4 decoy ignored; {parsed.origin}")
+
+    detail = expect_error(
+        lambda: network.parse_checkpoint((losses, accs, accs, losses, [], [], weights2, []),
+                                         seed=0, source="<8-field>"), "8", "9-field", "7-field")
+    check("an unknown tuple length is refused, naming both layouts", not detail, detail)
 
     detail = expect_error(
         lambda: network.parse_checkpoint({"test_accuracies": accs, "test_losses": losses},
@@ -326,6 +347,94 @@ def main() -> int:
         check("a fresh TTFS run reaches the reader complete",
               ttfs.has_first_spikes and CHECKPOINT_FORMAT in ttfs.origin,
               f"{ttfs.origin}, first_spikes {ttfs.first_spikes.shape}")
+
+    print("11. the published MNIST/VMax runs — the other real task in this checkout")
+    # `paper/mnist_vmax_*.pkl` are ten trained 784->350->10 networks in the 7-field layout.
+    # The MNIST pixel files are NOT in this checkout (the reference downloads them), so
+    # nothing here can reproduce their accuracy: these checks establish that the runs load,
+    # that their topology is what figure3.py declares, and that the shipped weights drive
+    # both backends identically. The accuracy figures are read FROM the checkpoints.
+    MN_IN, MN_HIDDEN, MN_OUT = 784, 350, 10
+    finals, firsts = [], []
+    for seed in range(10):
+        try:
+            m = network.load_checkpoint(ckpt_dir, seed, prefix="mnist_vmax")
+        except Exception as exc:  # a layout refusal must name itself, not stack-trace
+            check(f"mnist_vmax_{seed} parses", False, f"{type(exc).__name__}: {exc}")
+            continue
+        wh, wo = m.weights_at(-1)
+        # Pin the series offsets against the raw tuple, because shape checks cannot do it:
+        # fields 2-5 of these files are all length-100, and field 4 is the VALIDATION curve.
+        # Reading it instead of field 2 reports 0.9754 where the run recorded 0.974 — a
+        # plausible number, from the wrong column, and nothing downstream would notice.
+        with open(ckpt_dir / f"mnist_vmax_{seed}.pkl", "rb") as fh:
+            raw = pickle.load(fh)
+        offsets_ok = (np.array_equal(m.accuracies, np.asarray(raw[2], np.float64))
+                      and np.array_equal(m.losses, np.asarray(raw[3], np.float64)))
+        ok = (not m.has_first_spikes and "VMax" in m.origin
+              and wh.shape == (MN_IN, MN_HIDDEN) and wo.shape == (MN_HIDDEN, MN_OUT)
+              and m.accuracies.shape == (100,) and m.losses.shape == (100,)
+              and offsets_ok and len(m.weights) == 1)
+        check(f"mnist_vmax_{seed} parses with figure3's topology", ok,
+              f"wh {wh.shape} wo {wo.shape}, final acc {m.accuracies[-1]:.3f}")
+        finals.append(float(m.accuracies[-1]))
+        firsts.append(float(m.accuracies[0]))
+    if finals:
+        raw0 = pickle.load(open(ckpt_dir / "mnist_vmax_0.pkl", "rb"))
+        f2 = np.asarray(raw0[2], np.float64)
+        f4 = np.asarray(raw0[4], np.float64)
+        check("the offset assertion above is not vacuous", f2.size == f4.size
+              and not np.array_equal(f2, f4),
+              f"field 2 (test) ends {f2[-1]:.4f}, field 4 (valid) ends {f4[-1]:.4f}; "
+              f"max |diff| {float(np.max(np.abs(f2 - f4))):.4f}")
+        fin, fir = np.asarray(finals), np.asarray(firsts)
+        check("every MNIST run reports having learned", bool((fin > fir).all() and (fin > 0.95).all()),
+              f"final test accuracy mean {fin.mean():.4f} (range {fin.min():.3f}–{fin.max():.3f}, "
+              f"from {fir.mean():.3f} at epoch 1) — read from the file, not re-derived")
+
+        # The last published run's weights (seed 9), one synthetic drive, both backends.
+        # Values are copied out while the layers owning them stay referenced: the bindings
+        # hand out zero-copy views, and reading one after its owner is gone yields
+        # uninitialised memory rather than an error — a first draft of this check did
+        # precisely that and reported spike times near 1e262. The finiteness assertion
+        # below is what makes that failure mode loud.
+        rng = np.random.default_rng(0)
+        drive_t, drive_s = [], []
+        for _ in range(32):
+            live = np.flatnonzero(rng.random(MN_IN) < 0.2)  # sparse, like digit pixels
+            drive_t.append(np.sort(rng.uniform(0.0, 0.9 * dataset.T_MAX, size=live.size)))
+            drive_s.append(live.astype(np.int32))
+        times = np.array(drive_t, dtype=object)
+        sources = np.array(drive_s, dtype=object)
+
+        def mnist_forward(backend):
+            hidden = backend.layer(n=MN_HIDDEN, n_in=MN_IN,
+                                   w_in=np.ascontiguousarray(wh, np.float64), **network.LIF)
+            out_layer = backend.layer(n=MN_OUT, n_in=MN_HIDDEN,
+                                      w_in=np.ascontiguousarray(wo, np.float64), **network.LIF)
+            hidden.forward(backend.make_vector(times, sources))
+            spikes = out_layer.forward(hidden.post_batch)
+            t = [np.array(s.times, np.float64, copy=True) for s in spikes]
+            r = [np.array(s.sources, np.int32, copy=True) for s in spikes]
+            return t, r, hidden, out_layer
+
+        t_c, r_c, keep_c1, keep_c2 = mnist_forward(BACKENDS["c"])
+        t_e, r_e, keep_e1, keep_e2 = mnist_forward(BACKENDS["eigen"])
+        n_c = sum(len(t) for t in t_c)
+        n_e = sum(len(t) for t in t_e)
+        counts_equal = all(len(a) == len(b) for a, b in zip(t_c, t_e))
+        max_dt = max((float(np.max(np.abs(a - b))) for a, b in zip(t_c, t_e)
+                      if len(a) and len(a) == len(b)), default=0.0)
+        check("the MNIST weights drive both backends to the same spikes",
+              n_c == n_e and counts_equal
+              and all(np.array_equal(a, b) for a, b in zip(r_c, r_e)) and max_dt < 1e-9,
+              f"{n_c} output spikes each, sources identical, max |dt| {max_dt:.2e}")
+        check("the driven samples are not silent (no first-spike path exercised blind)",
+              all(len(t) for t in t_c), f"{n_c} spikes across 32 samples")
+        check("output times are finite",
+              all(np.isfinite(t).all() for t in t_c),
+              f"max output time "
+              f"{max((t.max() for t in t_c if len(t)), default=float('nan')):.5f} s")
 
     print()
     if FAILURES:

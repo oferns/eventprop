@@ -50,25 +50,31 @@ SNAPSHOT_EPOCHS = (1, 11, 21, 31, 41, 51, 61, 71, 81, 91, 100)
 
 # ── Checkpoint file formats ─────────────────────────────────────────────────
 #
-# `paper/yinyang_*.pkl` are plain pickled tuples written before the fields had names, so
-# every field is positional and the file itself says which layout it holds. Two layouts
-# are live in this tree:
+# `paper/*.pkl` are plain pickled tuples written before the fields had names, so every
+# field is positional and the file itself says nothing about which layout it holds. Three
+# layouts are live in this tree, and — the point of listing all three — `paper/` holds
+# published artifacts in TWO of them:
 #
-#   published / TTFS — 9 fields. What `paper/*.pkl` contain. The order is not a guess:
-#     it is exactly what `TTFSMixin.get_data_for_pickling()` returns in this tree, and the
-#     same method in the read-only reference submodule — `paper/figure2.py` unpacks it as
-#     `_, _, accs, losses, first_spikes, _, _, _, _`, and the shipped files match: field 4
-#     is `(100, 1000, 3)` first-spike times, field 8 the 11 weight snapshots.
+#   TTFS — 9 fields. What `paper/yinyang_*.pkl` contain. The order is not a guess: it is
+#     exactly what `TTFSMixin.get_data_for_pickling()` returns in this tree and in the
+#     read-only reference submodule, and `paper/figure2.py` unpacks it as
+#     `_, _, accs, losses, first_spikes, _, _, _, _`. Field 4 is `(100, 1000, 3)`
+#     first-spike times, field 8 the 11 weight snapshots.
 #
-#   base trainer — 7 fields. What the non-TTFS `AbstractTraining` writes in both trees, the
-#     reference's included. Weights land at index 6 and there are no first-spike times at
-#     all. Read with the published indices, field 4 is `valid_accuracies` — empty, so every
-#     neuron looks merely silent — and field 8 then raises IndexError. Two failure modes
-#     from one cause, the first of them silent.
+#   VMax — 7 fields. What `paper/mnist_vmax_*.pkl` (ten of them) contain, and what the
+#     base `AbstractTraining` writes in both trees. `paper/figure3.py` unpacks it as
+#     `_, _, accs, losses, _, _, weights`: field 2 test accuracies, field 3 test losses,
+#     field 6 the weight snapshots, and no first-spike times anywhere — VMax decodes from
+#     voltage maxima rather than first spikes, so those runs never recorded any.
 #
-# Our trainer writes named keys now (`eventprop_c.training.checkpoint_payload`). The
-# reference submodule cannot be edited, so its 7-tuple remains a thing that can turn up:
-# the loader identifies what it was handed instead of trusting a length.
+#   named dict. What our trainers write now (`eventprop_c.training.checkpoint_payload`).
+#
+# The 7-field layout used to be refused outright, on the reasoning that a file shaped like
+# that must be a trainer output the Visualizer cannot serve. Wrong twice: ten published
+# runs are sitting in it, and refusal was never what made the misread safe. Reading field 4
+# as first-spike times was the defect; reading field 6 as the weights and declaring
+# `has_first_spikes=False` is the fix. Unknown shapes still raise — but every layout that
+# exists is parsed at its own offsets.
 
 PUBLISHED_TUPLE_LEN = 9
 #: The 9-field order, named. Identical in our `ttfs_training.py` and the reference
@@ -76,7 +82,11 @@ PUBLISHED_TUPLE_LEN = 9
 PUBLISHED_FIELDS = ("losses", "accuracies", "test_accuracies", "test_losses",
                     "test_first_spikes", "valid_accuracies", "valid_losses",
                     "valid_first_spikes", "weights")
-TRAINERS_TUPLE_LEN = 7
+VMAX_TUPLE_LEN = 7
+#: The 7-field order, from `AbstractTraining.get_data_for_pickling()` in both trees, and
+#: corroborated by the positional unpack in `paper/figure3.py`.
+VMAX_FIELDS = ("losses", "accuracies", "test_accuracies", "test_losses",
+               "valid_accuracies", "valid_losses", "weights")
 
 #: Keys a named-dict checkpoint must carry. `test_first_spikes` is optional: neither
 #: trainer in this tree records first-spike times, so a fresh run legitimately has none.
@@ -112,21 +122,21 @@ def parse_checkpoint(data, *, seed: int, source: str) -> Checkpoint:
     elif isinstance(data, tuple) and len(data) == PUBLISHED_TUPLE_LEN:
         acc, los, fs = data[2], data[3], data[4]
         weights = _weight_pairs(data[8], source)
-        origin = f"published {PUBLISHED_TUPLE_LEN}-field tuple"
-    elif isinstance(data, tuple) and len(data) == TRAINERS_TUPLE_LEN:
-        raise ValueError(
-            f"{source}: this is the {TRAINERS_TUPLE_LEN}-field tuple the base (non-TTFS) "
-            f"trainer writes — (losses, accuracies, test_accuracies, test_losses, "
-            f"valid_accuracies, valid_losses, weights), with weights at index 6 and no "
-            f"first-spike times at all. The Visualizer cannot read it as a published run. "
-            f"Train with eventprop_c.ttfs_training (which records first spikes and saves "
-            f"named keys), or point ckpt_dir at the published paper/*.pkl.")
+        origin = f"published {PUBLISHED_TUPLE_LEN}-field TTFS tuple"
+    elif isinstance(data, tuple) and len(data) == VMAX_TUPLE_LEN:
+        # Field 6 for the weights, not 8: this layout has no first-spike fields, so the
+        # two weight-bearing offsets sit two apart. Using the TTFS indices here is the
+        # misread that made this layout look unreadable — see the format notes above.
+        acc, los, fs = data[2], data[3], []
+        weights = _weight_pairs(data[6], source)
+        origin = (f"published {VMAX_TUPLE_LEN}-field VMax tuple "
+                  f"(no first-spike times)")
     else:
         shape = f" of length {len(data)}" if isinstance(data, (tuple, list)) else ""
         raise ValueError(
             f"{source}: unrecognised checkpoint payload {type(data).__name__}{shape}; "
-            f"expected a {PUBLISHED_TUPLE_LEN}-field published tuple, or a dict with "
-            f"{list(REQUIRED_KEYS)}")
+            f"expected a {PUBLISHED_TUPLE_LEN}-field TTFS tuple, a "
+            f"{VMAX_TUPLE_LEN}-field VMax tuple, or a dict with {list(REQUIRED_KEYS)}")
 
     accuracies = np.asarray(acc, dtype=np.float64)
     losses = np.asarray(los, dtype=np.float64)
@@ -170,8 +180,8 @@ class Checkpoint:
     seed: int
     accuracies: np.ndarray  # (100,) test accuracy after epoch i
     losses: np.ndarray  # (100,) test loss after epoch i
-    first_spikes: np.ndarray  # (100, 1000, 3) first-spike times per epoch, empty if not recorded
-    weights: list  # 11 x (wh, wo)
+    first_spikes: np.ndarray  # (epochs, samples, neurons); empty when the run recorded none
+    weights: list  # (wh, wo) snapshots — 11 for the Yin-Yang runs, final-only for VMax
     snapshot_epochs: tuple = SNAPSHOT_EPOCHS
     has_first_spikes: bool = True
     origin: str = ""  # which on-disk layout this came from; see parse_checkpoint
@@ -181,8 +191,14 @@ class Checkpoint:
         return np.asarray(wh, dtype=np.float64), np.asarray(wo, dtype=np.float64)
 
 
-def load_checkpoint(ckpt_dir: Path, seed: int) -> Checkpoint:
-    path = ckpt_dir / f"yinyang_{seed}.pkl"
+def load_checkpoint(ckpt_dir: Path, seed: int, prefix: str = "yinyang") -> Checkpoint:
+    """Read one published run.
+
+    `prefix` selects the family: `yinyang_*` are the TTFS runs, `mnist_vmax_*` the VMax
+    ones. They differ in on-disk layout *and* in topology, so `parse_checkpoint` reports
+    which it found via `Checkpoint.origin`.
+    """
+    path = ckpt_dir / f"{prefix}_{seed}.pkl"
     with open(path, "rb") as f:
         data = pickle_load(f)
     return parse_checkpoint(data, seed=seed, source=path.name)

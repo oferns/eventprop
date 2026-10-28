@@ -7,6 +7,12 @@ It does not train anything while you wait. Ten finished, published Yin-Yang netw
 in this checkout (`src/EventProp.Python/paper/yinyang_{0..9}.pkl`), so every page renders
 in milliseconds and shows a result that was actually measured rather than a partial run.
 
+The same directory holds ten published **MNIST** runs (`mnist_vmax_{0..9}.pkl` — VMax loss,
+784→350→10, a different on-disk layout). `load_checkpoint` reads them and `selfcheck.py`
+verifies all ten, but no page renders them yet: `eventweb.network.Net` pins the Yin-Yang
+topology, the encoder is the Yin-Yang one, and the MNIST pixel files are downloaded by the
+reference library rather than vendored here.
+
 ## Pages
 
 | Page | What it shows |
@@ -80,7 +86,8 @@ Two headless checks. Both exit non-zero on failure and neither needs a browser.
 .venv/bin/python selfcheck.py    # the numbers: dataset integrity, C library vs the
                                  # accuracy the reference recorded for the same weights,
                                  # snapshot/epoch alignment, C-vs-Eigen agreement,
-                                 # exact gradient vs finite differences
+                                 # exact gradient vs finite differences, checkpoint-layout
+                                 # identification, the ten published MNIST runs
 .venv/bin/python smoketest.py    # the pages: renders every view and several widget
                                  # interactions through streamlit.testing.v1.AppTest
 ```
@@ -116,6 +123,7 @@ can be recomputed and checked from a plain Python prompt.
 |---|---|
 | `src/EventProp.Python/eventprop/yin_yang_data_set/publication_data/` | nested submodule — the published dataset (Kriener, Göltz, Petrovici, arXiv:2102.08211), MIT. Frozen 5000/1000/1000 split. |
 | `src/EventProp.Python/paper/yinyang_{0..9}.pkl` | reference library's training artefacts: per-epoch accuracy/loss, per-epoch first-spike times, 11 weight snapshots. |
+| `src/EventProp.Python/paper/mnist_vmax_{0..9}.pkl` | ten published MNIST runs (VMax loss, 784→350→10), 7-field layout, final weights only. Loaded and verified by `selfcheck.py`; not rendered by any page. |
 | `src/EventProp.C/` | the C library, via the Cython binding. |
 | `src/EventProp.Python/` | read-only reference library, via pybind11. |
 
