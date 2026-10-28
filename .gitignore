@@ -112,6 +112,9 @@ __pycache__/
 src/EventProp.C/.cache/
 src/EventProp.C/.clangd
 
+# Visualizer downloads (MNIST pixel files are fetched on first use, never vendored)
+src/EventProp.Web/.cache/
+
 # Benchmark pipeline output (scripts/bench/run_all.py).
 # Ignored, not committed: these are machine-specific measurements, and merge.py
 # refuses to merge records from different hosts, so a committed record file is a

@@ -36,7 +36,8 @@ st.caption(
 
 page = st.sidebar.radio(
     "Explore",
-    ["Yin-Yang, live", "How it learns", "Exact gradients", "Under the hood"],
+    ["Yin-Yang, live", "How it learns", "Exact gradients", "Digits (MNIST)",
+     "Under the hood"],
     label_visibility="collapsed",
 )
 
@@ -59,6 +60,10 @@ elif page == "Exact gradients":
     from views import gradient
 
     gradient.render()
+elif page == "Digits (MNIST)":
+    from views import digits
+
+    digits.render()
 else:
     from views import internals
 

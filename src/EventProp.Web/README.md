@@ -8,10 +8,10 @@ in this checkout (`src/EventProp.Python/paper/yinyang_{0..9}.pkl`), so every pag
 in milliseconds and shows a result that was actually measured rather than a partial run.
 
 The same directory holds ten published **MNIST** runs (`mnist_vmax_{0..9}.pkl` — VMax loss,
-784→350→10, a different on-disk layout). `load_checkpoint` reads them and `selfcheck.py`
-verifies all ten, but no page renders them yet: `eventweb.network.Net` pins the Yin-Yang
-topology, the encoder is the Yin-Yang one, and the MNIST pixel files are downloaded by the
-reference library rather than vendored here.
+784→350→10, written in a different on-disk layout). The **Digits** page runs those weights
+over the real 10 000-digit test set, which makes it the one page that is not synthetic —
+and the one that needs a download, because the pixel files are not vendored here (see
+Verify below).
 
 ## Pages
 
@@ -20,6 +20,7 @@ reference library rather than vendored here.
 | **Yin-Yang, live** | A point in the plane → four spikes → 200 LIF neurons → the class is whichever output neuron fires first. Decision boundary computed by the C library, plus the membrane potential of any hidden neuron. |
 | **How it learns** | Why this dataset exists (64% shallow ceiling vs 98% deep), ten published learning curves, the boundary at each saved weight snapshot, and where the mistakes land. |
 | **Exact gradients** | The adjoint: membrane potential and its root-found crossings, λ(t) on both neurons, and the exact gradient beside a central finite difference. They agree to ~1e-7 relative. |
+| **Digits (MNIST)** | The published VMax networks on the real 10 000-digit test set — the maxima read-out instead of first spikes, one digit followed end to end, and the reproduced accuracy beside the one recorded in the file. Needs a one-time ~1.6 MB download. |
 | **Under the hood** | Interpreter/ABI status, what each backend can do from Python, C-vs-Eigen agreement on identical inputs, crude wall-clock, and one live defect report. |
 
 ## Setup
@@ -97,6 +98,12 @@ the C library and requires the accuracy to match what the reference training run
 for those exact weights, so a change that breaks encoding, the TTFS read-out or the weight
 plumbing fails there instead of quietly drawing a wrong picture.
 
+The MNIST steps **skip rather than fail** when `.cache/mnist/` is empty, so the script stays
+runnable on a machine with no network. Open the Digits page once, or drop the two t10k files
+into that directory, and step 12 runs: it asserts the encoder is byte-identical to the
+reference's, that both backends produce identical predictions, and that the recorded
+accuracy is reproduced over all 10 000 digits to within 0.002.
+
 ## Layout
 
 ```
@@ -123,7 +130,8 @@ can be recomputed and checked from a plain Python prompt.
 |---|---|
 | `src/EventProp.Python/eventprop/yin_yang_data_set/publication_data/` | nested submodule — the published dataset (Kriener, Göltz, Petrovici, arXiv:2102.08211), MIT. Frozen 5000/1000/1000 split. |
 | `src/EventProp.Python/paper/yinyang_{0..9}.pkl` | reference library's training artefacts: per-epoch accuracy/loss, per-epoch first-spike times, 11 weight snapshots. |
-| `src/EventProp.Python/paper/mnist_vmax_{0..9}.pkl` | ten published MNIST runs (VMax loss, 784→350→10), 7-field layout, final weights only. Loaded and verified by `selfcheck.py`; not rendered by any page. |
+| `src/EventProp.Python/paper/mnist_vmax_{0..9}.pkl` | ten published MNIST runs (VMax loss, 784→350→10), 7-field layout, final weights only. Loaded and verified by `selfcheck.py`; rendered by the Digits page. |
+| `.cache/mnist/` (created on demand, gitignored) | the t10k pixel files, fetched from the same mirror the reference library's loader uses. Not vendored: redistribution terms for the corpus should be checked by whoever ships it, not assumed by this repository. |
 | `src/EventProp.C/` | the C library, via the Cython binding. |
 | `src/EventProp.Python/` | read-only reference library, via pybind11. |
 

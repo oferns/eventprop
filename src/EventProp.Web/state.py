@@ -14,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 import streamlit as st
 
-from eventweb import analysis, dataset, network, runtime
+from eventweb import analysis, dataset, mnist, network, runtime
 from eventweb.backends import BACKENDS
 
 ROOT = runtime.ROOT
@@ -82,3 +82,49 @@ def backend_agreement(seed: int, snapshot: int, split_name: str, n: int = 300) -
 @st.cache_data(show_spinner="Computing the adjoint…")
 def gradient_demo(backend_key: str, coords_key: tuple[float, ...], seed: int):
     return analysis.gradient_demo(backend(backend_key), np.asarray(coords_key), seed=seed)
+
+
+# --- Digits (MNIST / VMax) ------------------------------------------------------------
+
+
+def mnist_ready() -> bool:
+    """Whether the test set is on disk. Not cached: it is a stat call, and the answer
+    changes the moment the visitor clicks the download button."""
+    return mnist.have_test_set()
+
+
+@st.cache_data(show_spinner="Fetching the MNIST test set (~1.6 MB)…")
+def mnist_test() -> tuple[np.ndarray, np.ndarray]:
+    mnist.fetch_test_set()
+    return mnist.load_test()
+
+
+@st.cache_resource(show_spinner=False)
+def mnist_run(seed: int) -> network.Checkpoint:
+    """A published VMax run. Final weights only — these files hold one snapshot."""
+    return network.load_checkpoint(CKPT_DIR, seed, prefix="mnist_vmax")
+
+
+@st.cache_data(show_spinner="Running 10 000 test digits…")
+def mnist_evaluated(backend_key: str, seed: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """`(predictions, margins, labels)` for the whole test set, from the given backend."""
+    images, labels = mnist_test()
+    wh, wo = mnist_run(seed).weights_at(-1)
+    pred, margin = mnist.predict(backend_key, wh, wo, images)
+    return pred, margin, labels
+
+
+@st.cache_data(show_spinner="Reading out the maxima…")
+def mnist_maxima(backend_key: str, seed: int, index: int) -> np.ndarray:
+    """The ten output maxima behind one digit's prediction."""
+    images, _ = mnist_test()
+    wh, wo = mnist_run(seed).weights_at(-1)
+    values, _ = mnist.forward_maxima(backend_key, wh, wo, images[index:index + 1])
+    return values[0]
+
+
+@st.cache_data(show_spinner="Watching the hidden layer…")
+def mnist_hidden(backend_key: str, seed: int, index: int) -> tuple[np.ndarray, np.ndarray]:
+    images, _ = mnist_test()
+    wh, _ = mnist_run(seed).weights_at(-1)
+    return mnist.hidden_spikes(backend_key, wh, images[index])

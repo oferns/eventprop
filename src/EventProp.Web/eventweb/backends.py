@@ -36,6 +36,7 @@ class Backend:
     module_prefix: str
     spikes_module: str
     lif_module: str
+    li_module: str
     _modules: dict = field(default_factory=dict, repr=False, compare=False)
 
     def load(self) -> None:
@@ -67,17 +68,74 @@ class Backend:
         self.load()
         return self._modules["lif"].LIFLayerParameters
 
-    def make_vector(self, times: np.ndarray, sources: np.ndarray):
-        """Build a `SpikesVector` from per-sample, time-sorted `(n, k)` arrays."""
-        return self.SpikesVector(
-            [self.Spikes(t, s) for t, s in zip(times, sources)]
-        )
+    def make_vector(self, times, sources):
+        """Build a `SpikesVector` from per-sample, time-sorted `(k,)` arrays.
+
+        Each sample's arrays are coerced to the dtype the bindings demand — float64 times,
+        int32 sources — because the pybind11 constructor is typed (`[m, 1]` annotations) and
+        will refuse an object-dtype array outright. That is not hypothetical: `np.array
+        ([one_array], dtype=object)` produces a 2-D object array rather than a 1-D array of
+        objects, so a one-sample batch handed straight through arrives as object rows. A
+        batch of one is exactly what a single-digit page request is.
+
+        For callers that already pass typed contiguous arrays this is a no-op — `asarray`
+        does not copy when the dtype already matches.
+        """
+        return self.SpikesVector([
+            self.Spikes(np.asarray(t, dtype=np.float64), np.asarray(s, dtype=np.int32))
+            for t, s in zip(times, sources)
+        ])
 
     def params(self, n: int, n_in: int, **kw):
         return self.LIFLayerParameters(n=n, n_in=n_in, **kw)
 
     def layer(self, n: int, n_in: int, w_in: np.ndarray, **kw):
         return self.LIFLayer(self.params(n=n, n_in=n_in, **kw), w_in=np.ascontiguousarray(w_in))
+
+    # --- The maxima read-out --------------------------------------------------------
+    #
+    # Loaded lazily and separately from `load()`: an LI layer is only needed by the digits
+    # page, and importing its module eagerly would put a VMax-path import failure in the
+    # way of every other page.
+
+    @property
+    def LILayer(self):
+        if "li" not in self._modules:
+            runtime.add_backend_paths()
+            from importlib import import_module
+
+            self._modules["li"] = import_module(self.li_module)
+        return self._modules["li"].LILayer
+
+    @property
+    def LILayerParameters(self):
+        if "li" not in self._modules:
+            runtime.add_backend_paths()
+            from importlib import import_module
+
+            self._modules["li"] = import_module(self.li_module)
+        return self._modules["li"].LILayerParameters
+
+    def li_layer(self, n: int, n_in: int, w_in: np.ndarray, **kw):
+        """An integrate-and-fire read-out layer: its `forward` returns voltage maxima.
+
+        Takes no `v_th`, and that is not an oversight — the maxima path never reads it (see
+        the validator split described in `src/EventProp.C/eventprop.h`: `v_th` is not
+        checked on entry points that do not use it).
+        """
+        return self.LILayer(self.LILayerParameters(n=n, n_in=n_in, **kw),
+                            w_in=np.ascontiguousarray(w_in))
+
+    def supports_maxima(self) -> bool:
+        """Can this backend produce voltage maxima from Python? Probed, not asserted."""
+        try:
+            runtime.add_backend_paths()
+            from importlib import import_module
+
+            mod = import_module(self.li_module)
+        except Exception:
+            return False
+        return hasattr(mod, "LILayer") and hasattr(mod, "LILayerParameters")
 
     def supports_traces(self) -> bool:
         """Can this backend produce membrane-voltage / adjoint traces from Python?
@@ -108,6 +166,7 @@ BACKENDS: dict[str, Backend] = {
         module_prefix="eventprop_c",
         spikes_module="eventprop_c.spikes",
         lif_module="eventprop_c.lif_layer",
+        li_module="eventprop_c.li_layer",
     ),
     "eigen": Backend(
         key="eigen",
@@ -117,6 +176,7 @@ BACKENDS: dict[str, Backend] = {
         module_prefix="eventprop",
         spikes_module="eventprop.eventprop_cpp",
         lif_module="eventprop.lif_layer",
+        li_module="eventprop.li_layer",
     ),
 }
 

@@ -60,6 +60,10 @@ def render() -> None:
             ("backward pass (gradients)", lambda b: True),
             ("membrane voltage trace", lambda b: b.supports_traces()),
             ("adjoint λ(t) trace", lambda b: b.supports_traces()),
+            # The maxima pass is the other read-out the library offers, and the only one
+            # the digits page can use: it is reached through `li_layer`, a module neither
+            # page used before, so it is probed on the same basis as the traces.
+            ("voltage maxima (VMax read-out)", lambda b: b.supports_maxima()),
         )
     )
     st.markdown(f"| capability | C library (Cython) | Eigen reference (pybind11) |\n"

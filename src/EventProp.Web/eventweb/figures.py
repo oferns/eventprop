@@ -304,3 +304,70 @@ def timing_bars(rows: list[tuple[str, float, float]], title: str, height: int = 
     fig.update_yaxes(title="median ms per batch", gridcolor="rgba(128,128,128,0.18)")
     fig.update_layout(barmode="group", legend=dict(orientation="h", y=1.12, x=0, xanchor="left"))
     return fig
+
+
+# --- The digits page (MNIST / VMax) ---------------------------------------------------
+
+
+def digit_image(image: np.ndarray, title: str, height: int = 250) -> go.Figure:
+    """One 28x28 digit, as the network sees it: intensity becomes spike latency.
+
+    A `Heatmap`, not `go.Image`: with a float 2-D `z`, `go.Image` treats `zmin`/`zmax` as
+    four-element info arrays and raises, which the smoketest caught before this page could
+    throw on a visitor's first paint. Reversing `Greys` gives the MNIST look — black
+    background, white stroke — and pinning 0..255 keeps the contrast comparable between
+    digits instead of rescaling each one to its own brightest pixel.
+    """
+    fig = _fig(title, height=height)
+    fig.add_trace(go.Heatmap(z=np.asarray(image, dtype=np.float64).reshape(28, 28),
+                             colorscale="Greys", reversescale=True, zmin=0.0, zmax=255.0,
+                             showscale=False, xgap=0, ygap=0, hoverongaps=False,
+                             hovertemplate="pixel %{x},%{y}<br>intensity %{z:.0f}"
+                                           "<extra></extra>"))
+    fig.update_xaxes(**_AXIS)
+    fig.update_yaxes(**_AXIS, autorange="reversed")
+    return fig
+
+
+def maxima_bars(values: np.ndarray, true_class: int | None, title: str,
+                height: int = 280) -> go.Figure:
+    """Voltage maxima per output neuron. The tallest bar IS the prediction (VMax read-out).
+
+    Amber = what the network chose, red = the class that should have won (only when it
+    differs), indigo = the rest. No threshold line and no vline on the true class: the
+    maxima path does not read `v_th`, so a threshold guide would misdescribe what decides
+    the class here, and Plotly's axis-spanning-shape annotation cannot be placed on a
+    categorical axis at all.
+    """
+    fig = _fig(title, height=height)
+    values = np.asarray(values, dtype=np.float64)
+    pred = int(np.argmax(values))
+    colors = []
+    for i in range(values.size):
+        if i == pred:
+            colors.append("#f59e0b")
+        elif true_class is not None and i == int(true_class):
+            colors.append("#ef4444")
+        else:
+            colors.append("#6366f1")
+    fig.add_trace(go.Bar(x=[str(i) for i in range(values.size)], y=values, marker_color=colors))
+    fig.update_xaxes(title="output neuron (digit)")
+    fig.update_yaxes(title="voltage maximum", gridcolor="rgba(128,128,128,0.18)")
+    return fig
+
+
+def hidden_latencies(neurons: np.ndarray, times: np.ndarray, n_hidden: int, title: str,
+                     height: int = 300) -> go.Figure:
+    """First spike of every hidden neuron that fired — the 350-wide middle layer, in time."""
+    fig = _fig(title, height=height)
+    fig.add_trace(go.Scatter(
+        x=np.asarray(times, dtype=np.float64) * 1e3,
+        y=np.asarray(neurons, dtype=np.int32),
+        mode="markers",
+        marker=dict(size=3, color="#22c55e", opacity=0.7),
+        hovertemplate="neuron %{y}<br>%{x:.2f} ms<extra></extra>",
+        showlegend=False,
+    ))
+    fig.update_xaxes(title="first spike (ms)", gridcolor="rgba(128,128,128,0.18)")
+    fig.update_yaxes(title="hidden neuron", range=[n_hidden - 0.5, -0.5])
+    return fig

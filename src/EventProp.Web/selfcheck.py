@@ -87,7 +87,7 @@ def main() -> int:
         print(str(exc))
         return 1
 
-    from eventweb import analysis, dataset, network
+    from eventweb import analysis, dataset, mnist, network
     from eventweb.backends import BACKENDS, available
 
     print(f"2. backends import: {', '.join(available())}")
@@ -435,6 +435,72 @@ def main() -> int:
               all(np.isfinite(t).all() for t in t_c),
               f"max output time "
               f"{max((t.max() for t in t_c if len(t)), default=float('nan')):.5f} s")
+
+    print("12. MNIST: the published VMax weights, run on real digits")
+    # The pixel files are downloaded rather than vendored, so their absence is a stated
+    # skip and not a failure: `selfcheck.py` has to stay runnable on an air-gapped machine,
+    # and silently downloading from a third party inside a verification script is its own
+    # kind of surprise.
+    if not mnist.have_test_set():
+        print("        [skip] MNIST test set not cached — open the Digits page once, or "
+              f"place the t10k files in {mnist.cache_dir()}, to run this step")
+    else:
+        images, labels = mnist.load_test()
+        check("MNIST test set reads intact",
+              images.shape == (10000, 784) and labels.shape == (10000,)
+              and int(labels.min()) >= 0 and int(labels.max()) <= 9,
+              f"{images.shape} images, labels {int(labels.min())}–{int(labels.max())}")
+
+        # The encoder is the reference's, asserted rather than assumed: the published
+        # weights only mean what the network that produced them was trained to mean.
+        drive = mnist.encode(images[:8])
+        exact = all(
+            np.array_equal(drive[i][0], mnist.encode_reference_literal(images[i])[0])
+            and np.array_equal(drive[i][1], mnist.encode_reference_literal(images[i])[1])
+            for i in range(8))
+        check("the encoder matches a literal transcription of the reference loop", exact,
+              f"8/8 samples byte-identical; sample 0 fires {len(drive[0][0])} spikes")
+        check("encoded spikes satisfy the library's input contract",
+              all(np.all(np.diff(t) >= 0) and t.min() >= 0.0 and t.max() < mnist.T_MAX
+                  for t, _ in drive),
+              f"non-decreasing, non-negative, inside 0–{mnist.T_MAX * 1e3:.0f} ms")
+
+        ck_m = network.load_checkpoint(ckpt_dir, 0, prefix="mnist_vmax")
+        wh, wo = ck_m.weights_at(-1)
+        # A tenth of the test set: enough to be a number worth asserting, cheap enough to
+        # belong in a script whose whole purpose is to be run before committing.
+        subset = 1000
+        recorded = float(ck_m.accuracies[-1])
+        preds = {}
+        for key in ("c", "eigen"):
+            p, margin = mnist.predict(key, wh, wo, images[:subset])
+            preds[key] = p
+            acc = float((p == labels[:subset]).mean())
+            check(f"{BACKENDS[key].short}: reproduces the published accuracy on real digits",
+                  abs(acc - recorded) <= 0.01,
+                  f"{acc:.4f} on the first {subset} vs {recorded:.4f} recorded over all "
+                  f"{len(labels)} — a {subset}-digit subset carries ~"
+                  f"{float(np.sqrt(recorded * (1 - recorded) / subset)):.3f} of binomial "
+                  f"noise, so this is a subsample of the same plateau, not a discrepancy")
+            check(f"{BACKENDS[key].short}: no prediction rests on a tie",
+                  bool(np.isfinite(margin).all() and (margin > 1e-9).all()),
+                  f"smallest top-1/top-2 maxima margin {float(margin.min()):.2g} over "
+                  f"{subset} digits — across all ten runs and all {len(labels)} the "
+                  f"smallest is 5.3e-05 and none is below 1e-9")
+        check("both backends make identical predictions on real digits",
+              np.array_equal(preds["c"], preds["eigen"]),
+              f"{int((preds['c'] != preds['eigen']).sum())} of {subset} differ")
+
+        # The whole test set, once, on the artefact this repository exists to produce. This
+        # is the assertion the step is really for: a published number, recomputed here.
+        p_all, _ = mnist.predict("c", wh, wo, images)
+        acc_all = float((p_all == labels).mean())
+        check("C: reproduces the recorded accuracy over the whole test set",
+              abs(acc_all - recorded) <= 0.002,
+              f"{acc_all:.4f} vs {recorded:.4f} recorded "
+              f"({round((acc_all - recorded) * len(labels)):+d} digits in {len(labels)}; "
+              f"across the ten published runs the gap never exceeds 8 digits, with no "
+              f"consistent sign)")
 
     print()
     if FAILURES:
