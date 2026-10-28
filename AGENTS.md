@@ -223,6 +223,11 @@ cd src/EventProp.Web && .venv/bin/python selfcheck.py && .venv/bin/python smoket
   interpreter must match the ABI tag they carry — the same question `build.sh` asks before
   deciding to rebuild. `.python-version` pins the interpreter and
   `src/EventProp.Web/eventweb/runtime.py` refuses a mismatch with a readable message.
+  **How to build and start it is owned by `src/EventProp.Web/README.md`** (Setup / Run, both
+  POSIX and PowerShell): the app is not a step in `build.sh`/`build.ps1`, so building the
+  libraries and installing the app are two separate commands, and `build.ps1 -PythonExe`
+  / `build.sh --python` must name the app's interpreter or step 7 installs the Cython
+  layer somewhere the app cannot see.
   `selfcheck.py` is the only thing that checks the app's *science* (C library vs the
   accuracy the reference recorded for the same weights, exact gradient vs finite
   differences); nothing else in the repo touches `EventProp.Web`.

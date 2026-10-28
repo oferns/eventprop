@@ -92,6 +92,34 @@ def _matches(filename: str, tag: str) -> bool:
     return tag in stem
 
 
+def _fix_hint() -> str:
+    """The two commands that exist on THIS platform.
+
+    Naming `./build.sh` on Windows sends the reader to a file that is not there, and
+    `.venv/bin/python` to a directory the Windows venv does not use (it is
+    `.venv\\Scripts\\python.exe`). A fix-it hint that cannot be run is worse than none,
+    because it reads as the diagnosis being wrong.
+
+    The Windows branch is derived from `build.ps1`'s own `-PythonExe` parameter and has
+    not been exercised on that platform from here; the POSIX text is what the app has
+    always printed.
+    """
+    if os.name == "nt":
+        return (
+            "Fix: create the venv with an interpreter whose tag matches, e.g.\n"
+            "  py -3.14 -m venv .venv && .venv\\Scripts\\python.exe -m pip install "
+            "-r requirements.txt\n"
+            "...or rebuild the extensions for THIS interpreter (from the repository root):\n"
+            f"  .\\build.ps1 -PythonExe '{sys.executable}'"
+        )
+    return (
+        "Fix: create the venv with an interpreter whose tag matches, e.g.\n"
+        "  python3.14 -m venv .venv && .venv/bin/python -m pip install -r requirements.txt\n"
+        "...or rebuild the extensions for THIS interpreter:\n"
+        f"  ./build.sh --python {Path(sys.executable).name}"
+    )
+
+
 def ensure_native_abi() -> str:
     """Raise unless *this* interpreter can load both pre-built backends.
 
@@ -114,12 +142,7 @@ def ensure_native_abi() -> str:
     for name in missing:
         present = found[name] or ["<none built yet>"]
         lines.append(f"  {name}: found {', '.join(present)}")
-    lines.append(
-        f"Fix: create the venv with an interpreter whose tag matches, e.g.\n"
-        f"  python3.14 -m venv .venv && .venv/bin/python -m pip install -r requirements.txt\n"
-        f"...or rebuild the extensions for THIS interpreter:\n"
-        f"  ./build.sh --python {Path(sys.executable).name}"
-    )
+    lines.append(_fix_hint())
     raise RuntimeError("\n".join(lines))
 
 

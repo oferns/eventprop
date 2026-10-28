@@ -22,17 +22,39 @@ The app loads two **pre-built** extension modules from sibling projects, and CPy
 extension filenames carry their ABI tag. The interpreter is therefore not a preference:
 it must match the built extensions, or the app cannot see them at all.
 
+macOS / Linux:
+
 ```bash
 cd src/EventProp.Web
 python3.14 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
-If the extensions were not built for that interpreter, build them:
+Windows (PowerShell) — a Windows venv keeps its interpreter in `Scripts\`, not `bin\`:
+
+```powershell
+cd src\EventProp.Web
+py -3.14 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+If the extensions were not built for that interpreter, build them from the repository
+root, naming the interpreter that will run the app:
 
 ```bash
-./build.sh --python python3.14     # from the repository root
+./build.sh --python python3.14
 ```
+
+```powershell
+.\build.ps1 -PythonExe (Resolve-Path .\src\EventProp.Web\.venv\Scripts\python.exe).Path
+```
+
+Steps 7–8 pip-install the two Python layers **for the interpreter you named only**, so
+the flag is not cosmetic: build with the default `python` and the app's venv still cannot
+import them. On Windows the C library lands in `src\EventProp.C\build\Release\` because
+MSVC's generator is multi-config; `eventprop_c/_library_path.py` probes `build\Release`,
+`build\Debug` and `build`, and registers the directory with `os.add_dll_directory`, so
+there is nothing to add to `PATH` (the loader ignores it for extension modules anyway).
 
 `.python-version` pins 3.14 for pyenv/uv users. `eventweb/runtime.py` performs the ABI
 check at startup and fails with a message naming the interpreter, the tag it wants and
@@ -43,6 +65,12 @@ the tags it found — rather than a `ModuleNotFoundError` from three frames deep
 ```bash
 .venv/bin/python -m streamlit run streamlit_app.py
 ```
+
+```powershell
+.venv\Scripts\python.exe -m streamlit run streamlit_app.py
+```
+
+Below, `.venv/bin/python` stands for `.venv\Scripts\python.exe` on Windows.
 
 ## Verify
 
