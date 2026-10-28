@@ -149,8 +149,22 @@ there, and the Under-the-hood page says so out loud.
 Built and verified on **macOS (darwin-arm64)**, CPython 3.14.10, streamlit 1.66.1,
 plotly 7.1.0, numpy 2.5.4.
 
-**Linux and Windows are unverified by this work.** Nothing here is platform-specific
-except the interpreter-version requirement, which is a property of the built extensions
-and applies everywhere; but the instructions above are only known-good on macOS, and the
-app is wired into neither `build.sh` nor `build.ps1`, so no build step and no CI checks
-that it still starts.
+Confirmed on **Linux (x86_64, GCC)** with CPython 3.12.3, streamlit 1.66.1, plotly 7.1.0,
+numpy 2.5.4: the server answers, `smoketest.py` renders every page, and `selfcheck.py`
+passes end to end — exact gradient vs finite differences and C-vs-Eigen trace agreement
+included. Note it ran on **3.12, not the pinned 3.14**: `eventweb/runtime.py` compares the
+running interpreter's tag against the extension files actually present, so `.python-version`
+records the interpreter this app was *verified* on rather than one the guard enforces. Any
+interpreter runs the app once the extensions carry its tag — but `./build.sh --python <that
+interpreter>` re-tags **both** modules, and the interpreter it replaces can then no longer
+import them.
+
+On Linux the Cython layer resolves `libeventprop_c_api.so` through a baked **absolute**
+`RUNPATH` pointing at `src/EventProp.C/build` (verify with `readelf -d`), so nothing goes in
+`LD_LIBRARY_PATH` — and `clean.sh c` takes the app down with it, because the directory in
+that RUNPATH is what disappears.
+
+**Windows is unverified by this work.** Nothing here is platform-specific except the
+interpreter/ABI requirement above, which is a property of the built extensions and applies
+everywhere; the app is wired into neither `build.sh` nor `build.ps1`, so no build step and no
+CI checks that it still starts.

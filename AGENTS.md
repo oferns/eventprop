@@ -221,8 +221,14 @@ cd src/EventProp.Web && .venv/bin/python selfcheck.py && .venv/bin/python smoket
 ```
 - The Visualizer imports the **pre-built** extensions of two sibling projects, so its
   interpreter must match the ABI tag they carry — the same question `build.sh` asks before
-  deciding to rebuild. `.python-version` pins the interpreter and
-  `src/EventProp.Web/eventweb/runtime.py` refuses a mismatch with a readable message.
+  deciding to rebuild. The guard in `src/EventProp.Web/eventweb/runtime.py` compares the
+  running interpreter's `EXT_SUFFIX` tag against the extension files **present on disk**, and
+  refuses a mismatch naming the tag it wants and the tags it found. So `.python-version`
+  records the *verified* interpreter, not a version the guard enforces: any interpreter runs
+  the app once `build.sh --python` / `build.ps1 -PythonExe` has built both extensions for it —
+  and that flag re-tags **both**, leaving the interpreter it replaces unable to import them.
+  Which platforms this app is confirmed on is owned by `src/EventProp.Web/README.md`
+  (§Platform status), not by this file.
   **How to build and start it is owned by `src/EventProp.Web/README.md`** (Setup / Run, both
   POSIX and PowerShell): the app is not a step in `build.sh`/`build.ps1`, so building the
   libraries and installing the app are two separate commands, and `build.ps1 -PythonExe`
