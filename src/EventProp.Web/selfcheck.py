@@ -159,26 +159,31 @@ def main() -> int:
           f"agreement={agree:.3%}")
 
     print("7. exact gradient vs finite differences")
-    # The headline claim of the 'Exact gradients' page. Checked on several samples because
-    # a single agreeable sample proves little and a silent one proves the wrong thing.
-    worst = 0.0
-    compared = 0
-    skipped = 0
-    for idx in (0, 42, 101, 555, 888):
-        demo = analysis.gradient_demo(BACKENDS["eigen"], test.coords[idx])
-        if not demo.fired:
-            check(f"sample {idx} fired", False, "scenario produced no output spike")
-            continue
-        valid = demo.fd_valid.ravel()
-        skipped += int((~valid).sum())
-        picked = demo.rel_error.ravel()[valid & np.isfinite(demo.rel_error.ravel())]
-        if picked.size:
-            worst = max(worst, float(picked.max()))
-            compared += int(picked.size)
-    check("finite differences were compared on every usable synapse", compared > 15,
-          f"{compared} synapses compared, {skipped} skipped as discontinuous")
-    check("exact gradient matches central differences", 0.0 <= worst < 1e-6,
-          f"max relative error {worst:.2e}")
+    # The headline claim of the 'Exact gradients' page. That page now has a backend picker,
+    # so the claim is asserted on both bindings rather than only on the one that used to be
+    # the only way to get traces. Several samples, because a single agreeable sample proves
+    # little and a silent one proves the wrong thing.
+    for be_key in ("c", "eigen"):
+        short = BACKENDS[be_key].short
+        worst = 0.0
+        compared = 0
+        skipped = 0
+        for idx in (0, 42, 101, 555, 888):
+            demo = analysis.gradient_demo(BACKENDS[be_key], test.coords[idx])
+            if not demo.fired:
+                check(f"{short}: sample {idx} fired", False,
+                      "scenario produced no output spike")
+                continue
+            valid = demo.fd_valid.ravel()
+            skipped += int((~valid).sum())
+            picked = demo.rel_error.ravel()[valid & np.isfinite(demo.rel_error.ravel())]
+            if picked.size:
+                worst = max(worst, float(picked.max()))
+                compared += int(picked.size)
+        check(f"{short}: finite differences compared on every usable synapse", compared > 15,
+              f"{compared} synapses compared, {skipped} skipped as discontinuous")
+        check(f"{short}: exact gradient matches central differences", 0.0 <= worst < 1e-6,
+              f"max relative error {worst:.2e}")
 
     print("8. trace parity (C vs Eigen)")
     # Traces are the visible half of the adjoint: the Gradient page plots lambda_i(t) as the

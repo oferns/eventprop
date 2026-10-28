@@ -86,6 +86,8 @@ def main() -> int:
          "boundary at 81x81"),
         ("Exact gradients", lambda a: a.selectbox[0].set_value(7).run(),
          "a different input sample"),
+        ("Exact gradients", lambda a: a.radio[0].set_value("Eigen reference (pybind11)").run(),
+         "gradient page on the other backend (the picker's other half)"),
         ("Exact gradients", lambda a: a.slider[0].set_value(5).run(),
          "a different weight draw"),
         ("Under the hood", lambda a: a.selectbox[0].set_value(1000).run(),

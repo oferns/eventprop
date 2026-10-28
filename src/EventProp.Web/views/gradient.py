@@ -7,7 +7,11 @@ picked off a grid, and a time-reversed adjoint sweep differentiates that root ex
 The demonstration is deliberately small — 5 inputs, 1 hidden neuron, 1 output neuron —
 and the objective is the sum of the output spike times, so the gradient literally means
 "how far does this spike move if I move this synapse". A central finite difference is
-plotted next to it, and the two agree to about a part in a billion.
+plotted next to it, and the page prints the largest relative error it actually measured —
+normally a part in a billion, and never a claim the figure has to live up to.
+
+Both bindings produce the figure — the picker says which one drew it. Same weights, same
+encoder, two independent implementations of the adjoint.
 """
 
 from __future__ import annotations
@@ -30,8 +34,17 @@ def render() -> None:
         seed = st.slider("Weight draw", 0, 9, 0,
                          help="The toy 5-1-1 network's random hidden weights. Agreement "
                               "should not depend on the draw, so try a few.")
+        backend_key = st.radio(
+            "Backend",
+            ["c", "eigen"],
+            format_func=lambda k: {"c": "C library (Cython)",
+                                   "eigen": "Eigen reference (pybind11)"}[k],
+            help="The exact gradient, the finite differences and every trace below all come "
+                 "from the backend you pick. They are independent implementations of the "
+                 "same control theory, and selfcheck.py asserts they agree to ~1e-13.",
+        )
     coords = tuple(float(v) for v in te.coords[idx])
-    demo = state.gradient_demo("eigen", coords, seed)
+    demo = state.gradient_demo(backend_key, coords, seed)
 
     if not demo.fired:
         st.warning(
@@ -46,6 +59,7 @@ def render() -> None:
         f"{'s' if demo.n_output_spikes != 1 else ''} at "
         f"{np.round(demo.output_spike_times * 1e3, 2).tolist()} ms."
     )
+    st.caption(f"Computed by **{state.backend(backend_key).label}**.")
 
     st.plotly_chart(
         F.spike_raster(demo.input_spike_times, demo.input_spike_sources, dataset.N_CHANNELS,

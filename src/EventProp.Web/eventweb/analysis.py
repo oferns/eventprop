@@ -192,8 +192,9 @@ def gradient_demo(
 ) -> GradientDemo:
     """Analytic vs central-difference `d(sum of output spike times)/dw` on a 5-1-1 net.
 
-    Uses the Eigen backend, which is the only binding that exposes voltage and adjoint
-    traces to Python today (see `Backend.supports_traces`).
+    Works on either binding — it needs voltage and adjoint traces, which both now expose
+    (see `Backend.supports_traces`). The guard below is what keeps a binding that lacks them
+    from producing a half-populated figure instead of an error.
     """
     if not backend.supports_traces():
         raise ValueError(f"{backend.short} backend cannot produce the traces this view needs")
@@ -262,9 +263,11 @@ def gradient_demo(
         hs_tim = np.asarray(h.post_batch[0].times, dtype=np.float64)
         hidden_spike_times = hs_tim[hs_src == 0]
         out_spike_times = np.asarray(o.post_batch[0].times, dtype=np.float64)
-        # Guarded: the Eigen core reads `times[n_spikes - 1]` unguarded in
-        # compute_lambda_i, so requesting the adjoint of a silent neuron is an
-        # out-of-bounds read rather than a zero. The C library returns a zero trace.
+        # Guarded because the Eigen core reads `times[n_spikes - 1]` unguarded in
+        # compute_lambda_i, so asking for the adjoint of a silent neuron is an
+        # out-of-bounds read rather than a zero. The C library returns a zero trace, but the
+        # plot would then differ between backends for a reason that has nothing to do with
+        # the maths, so neither backend is asked.
         lam_t, lam = o.get_lambda_i_trace_for_neuron(0, 0, t_max=t_max, dt=dt)
         if hidden_spike_times.size:
             hidden_lambda_t, hidden_lambda = h.get_lambda_i_trace_for_neuron(
