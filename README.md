@@ -11,7 +11,7 @@ A local AI model (Qwen) was used to help with most aspects of these libraries. A
 EventProp is an event-based backpropagation method that computes **exact gradients** through spike times in spiking neural networks. Unlike surrogate gradient approaches, EventProp analytically differentiates through the threshold-crossing event itself using the adjoint method from control theory — enabling precise weight updates without approximation.
 
 This repository contains implementations in:
-- **C** — high-performance native library with OpenMP parallelization and SIMD helpers
+- **C** — native library with OpenMP parallelization and SIMD helpers
 - **C++ (Eigen)** — reference core from the original EventProp.Python library
 - **Python** — bindings via pybind11 (reference) and Cython → C library
 - **C# (.NET 10)** — fully managed implementation + P/Invoke bindings to the C library
