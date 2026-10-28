@@ -50,6 +50,9 @@ STRUCT_NAMES = {
     "LambdaITraceInput",
     "LambdaITraceOutput",
     "LambdaIAtTimeOutput",
+    "MaximaRegressionInput",
+    "MaximaRegressionOutput",
+    "MaximaRegressionResult",
 }
 
 _LIB_NAMES = ("eventprop_c_api.dll",

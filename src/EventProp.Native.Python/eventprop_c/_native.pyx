@@ -265,6 +265,54 @@ cdef extern from "eventprop_diag.h":
     LambdaIAtTimeOutput eventprop_compute_lambda_i_at_time(const LambdaITraceInput input, double t)
 
 
+
+# ---------------------------------------------------------------------------
+# 3b2. eventprop_loss.h — continuous readout and regression losses
+# ---------------------------------------------------------------------------
+
+cdef extern from "eventprop_loss.h":
+    # --- eventprop_loss.h: continuous readout and regression losses -----------------
+
+    ctypedef struct MaximaRegressionInput:
+        const double* maxima_values
+        const double* decoder
+        double bias
+        double target
+        double huber_delta
+        int n_post
+
+    ctypedef struct MaximaRegressionOutput:
+        int error_no
+        double prediction
+        double loss
+        double residual_derivative
+        double* errors
+        double* decoder_grad
+        double bias_grad
+        int n_post
+        int n_skipped
+
+    ctypedef struct MaximaRegressionResult:
+        int error_no
+        double prediction
+        double loss
+        double residual_derivative
+        int n_skipped
+
+    void eventprop_free_maxima_regression_output(MaximaRegressionOutput output)
+
+    MaximaRegressionOutput eventprop_maxima_regression(MaximaRegressionInput input)
+
+    MaximaRegressionResult eventprop_maxima_regression_into(
+        MaximaOutput maxima, const double* decoder, double bias, double target,
+        double huber_delta)
+
+    int eventprop_maxima_regression_batch(
+        MaximaBatch maxima_batch, const double* decoder, double bias, const double* targets,
+        double huber_delta, double* predictions, double* losses, int* n_skipped,
+        double* decoder_grad_accum, double* bias_grad_accum)
+
+
 # ---------------------------------------------------------------------------
 # 3c. ABI self-check — refuse to import on a header/binary layout mismatch
 # ---------------------------------------------------------------------------
@@ -307,6 +355,9 @@ def abi_struct_sizes():
         "LambdaITraceInput": <Py_ssize_t>sizeof(LambdaITraceInput),
         "LambdaITraceOutput": <Py_ssize_t>sizeof(LambdaITraceOutput),
         "LambdaIAtTimeOutput": <Py_ssize_t>sizeof(LambdaIAtTimeOutput),
+        "MaximaRegressionInput": <Py_ssize_t>sizeof(MaximaRegressionInput),
+        "MaximaRegressionOutput": <Py_ssize_t>sizeof(MaximaRegressionOutput),
+        "MaximaRegressionResult": <Py_ssize_t>sizeof(MaximaRegressionResult),
     }
 
 
@@ -534,6 +585,67 @@ cdef class _MaximaBatchOutput:
         if self._inputs == NULL:
             return 0
         return self._inputs[0].n_post
+
+    def regress(self, double[::1] decoder, double bias, double[::1] targets,
+                double huber_delta, decoder_grad=None, bias_grad=None):
+        """Write this batch's regression errors into the maxima outputs, in place.
+
+        This is the training-loop path: zero allocation on the C side, because the errors
+        land in the `errors` arrays compute_maxima_batch already allocated and the readout
+        gradients accumulate into caller-owned buffers. `backward_maxima_batch()` then reads
+        the errors written here, which is the whole backward pass for a continuous target.
+
+        `decoder_grad` and `bias_grad` are ACCUMULATED into when supplied (float64 buffers of
+        length n_post and 1), matching the library's accumulate-never-zero gradient rule; pass
+        the same buffers across steps to sum them, or omit them for one step's gradient.
+
+        `huber_delta`: non-finite (numpy.inf) for least squares, a positive scale for the
+        smooth Huber loss. Samples whose neurons never peaked contribute zero gradient and are
+        reported per sample in `n_skipped` — they are not failures.
+        """
+        if self._maxima == NULL:
+            raise RuntimeError("MaximaBatchOutput has been freed")
+        cdef int n = self._maxima.batch_size
+        cdef int n_post = self.n_post
+        if decoder.shape[0] != n_post:
+            raise ValueError(f"decoder has {decoder.shape[0]} entries, the layer has {n_post}")
+        if targets.shape[0] != n:
+            raise ValueError(f"targets has {targets.shape[0]} entries, the batch has {n}")
+
+        cdef double[::1] grad_a
+        if decoder_grad is None:
+            grad_a = np.zeros(n_post if n_post > 0 else 1, dtype=np.float64)
+        else:
+            grad_a = decoder_grad
+            if grad_a.shape[0] != n_post:
+                raise ValueError(f"decoder_grad has {grad_a.shape[0]} entries, the layer "
+                                 f"has {n_post}")
+        cdef double[::1] grad_b
+        if bias_grad is None:
+            grad_b = np.zeros(1, dtype=np.float64)
+        else:
+            grad_b = bias_grad
+            if grad_b.shape[0] != 1:
+                raise ValueError("bias_grad must be a length-1 float64 buffer")
+
+        cdef double[::1] preds = np.empty(n, dtype=np.float64)
+        cdef double[::1] lossv = np.empty(n, dtype=np.float64)
+        cdef int[::1] skipped = np.empty(n, dtype=np.int32)
+        cdef int err = 0
+
+        if n > 0:
+            err = eventprop_maxima_regression_batch(
+                self._maxima[0], &decoder[0], bias, &targets[0], huber_delta,
+                &preds[0], &lossv[0], &skipped[0], &grad_a[0], &grad_b[0])
+            _check_diag_error(err, "maxima regression batch")
+
+        return {
+            "predictions": np.asarray(preds),
+            "losses": np.asarray(lossv),
+            "n_skipped": np.asarray(skipped),
+            "decoder_grad": np.asarray(grad_a),
+            "bias_grad": np.asarray(grad_b),
+        }
 
     def __getitem__(self, int idx):
         """Return (times, values) as zero-copy numpy views for sample idx.
@@ -1091,3 +1203,51 @@ def compute_lambda_i_at_time(
     cdef LambdaIAtTimeOutput out = eventprop_compute_lambda_i_at_time(lin, t)
     _check_diag_error(out.error_no, "lambda-I query")
     return out.lambda_i
+
+
+def maxima_regression(double[::1] maxima_values, double[::1] decoder,
+                      double bias, double target, double huber_delta):
+    """Continuous readout and regression loss for one sample.
+
+        y_hat = bias + Σ decoder[n] · maxima_values[n]
+
+    The returned `errors` is dL/dmaxima, laid out exactly as eventprop_backward_maxima wants
+    its maxima_errors argument, so compute_maxima → maxima_regression → backward_maxima is a
+    whole regression step with no per-binding loss arithmetic anywhere.
+
+    `huber_delta`: non-finite (numpy.inf) for least squares, a positive scale for the smooth
+    Huber loss; NaN is refused. A non-finite `maxima_values` entry means that neuron never
+    peaked — it is excluded from y_hat, given zero error, and counted in `n_skipped` instead
+    of failing the call.
+    """
+    cdef Py_ssize_t n = maxima_values.shape[0]
+    if decoder.shape[0] != n:
+        raise ValueError(f"decoder has {decoder.shape[0]} entries, maxima_values has {n}")
+
+    cdef MaximaRegressionInput inp
+    inp.maxima_values = &maxima_values[0] if n > 0 else NULL
+    inp.decoder = &decoder[0] if n > 0 else NULL
+    inp.bias = bias
+    inp.target = target
+    inp.huber_delta = huber_delta
+    inp.n_post = <int>n
+
+    cdef MaximaRegressionOutput out = eventprop_maxima_regression(inp)
+    _check_diag_error(out.error_no, "maxima regression")
+    # Copied before freeing: these are one-off gradients rather than a batch a caller wants
+    # to hold a view into, and the C arrays are freed on the way out.
+    try:
+        errors = _double_view(out.errors, out.n_post).copy()
+        decoder_grad = _double_view(out.decoder_grad, out.n_post).copy()
+    finally:
+        eventprop_free_maxima_regression_output(out)
+
+    return {
+        "prediction": out.prediction,
+        "loss": out.loss,
+        "residual_derivative": out.residual_derivative,
+        "bias_grad": out.bias_grad,
+        "n_skipped": out.n_skipped,
+        "errors": errors,
+        "decoder_grad": decoder_grad,
+    }
