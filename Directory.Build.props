@@ -26,4 +26,30 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
 
+  <!--
+    One C# language version for every project in the tree, for the same drift reason as
+    the rule above.
+
+    This is a no-op while every project targets net10.0: that TFM already implies 14.0.
+    It earns its keep the moment a project lowers or multi-targets its TFM, because
+    LangVersion is *derived* from TargetFramework and the derived level is not the one
+    this source was written against. Measured on macOS/arm64 with a netstandard2.1 leg:
+    the derived level is C# 8, and the tree fails with CS8400 on every file-scoped
+    namespace plus on the SDK-generated GlobalUsings.g.cs — i.e. <ImplicitUsings> breaks
+    too, which is the non-obvious half. Pinning the language level here decouples it from
+    the framework target, so a TFM change is a deliberate decision rather than a
+    wholesale re-parse of the tree at a language level nobody chose.
+
+    `latest` is the compiler's newest *released* major (not `preview`): a preview language
+    version would let a feature land that the other two platforms' toolchains may not
+    support for the same TFM. BDN's generated project opts out of this file entirely
+    (see the scope note above), so a benchmark run is unaffected by this property too.
+
+    Deliberately NOT set here: <Nullable> and <ImplicitUsings>, which are per-project
+    decisions and are already stated in each csproj.
+  -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
 </Project>

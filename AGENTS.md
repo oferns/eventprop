@@ -104,7 +104,10 @@ eventprop.net/
 
 ## 5. Conventions
 
-- **C#**: `net10.0`, root namespace `CW.EventProp`, nullable + implicit usings on. Tests use
+- **C#**: `net10.0`, root namespace `CW.EventProp`, nullable + implicit usings on. `LangVersion`
+  is pinned once in `Directory.Build.props` — never per csproj — because it is derived from the
+  TFM, so a lowered or multi-targeted TFM silently changes the language level. That file also
+  owns warnings-as-errors. Tests use
   **TUnit** on Microsoft Testing Platform — `dotnet run`, never `dotnet test`, and do not
   re-add `Microsoft.NET.Test.Sdk` to "fix" discovery.
 - **Warnings are errors everywhere.** C: the `werror` preset. C++/.NET: `werror`-equivalent
