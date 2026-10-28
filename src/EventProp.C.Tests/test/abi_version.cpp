@@ -22,6 +22,7 @@
 #include <gtest/gtest.h>
 #include "eventprop.h"
 #include "eventprop_batch.h"
+#include "eventprop_diag.h"
 
 #include <cstring>
 #include <string>
@@ -37,8 +38,8 @@ TEST(AbiVersion, ExportedAndMatchesHeaderMacro) {
 
 TEST(AbiStructSize, EveryPublicStructHasANonZeroEntry) {
     // The list is the public surface a consumer embeds by value. Adding a struct to
-    // eventprop.h / eventprop_batch.h without adding it to the table in
-    // eventprop_abi.c fails here, which is the drift this test exists to catch.
+    // eventprop.h / eventprop_batch.h / eventprop_diag.h without adding it to the table
+    // in eventprop_abi.c fails here, which is the drift this test exists to catch.
     const std::vector<std::string> names = {
         "EventPropInput",
         "SpikeOutput",
@@ -52,6 +53,10 @@ TEST(AbiStructSize, EveryPublicStructHasANonZeroEntry) {
         "DropoutOutput",
         "DropoutBatch",
         "AccumulatedBackwardResult",
+        "VoltageTraceInput",
+        "VoltageTraceOutput",
+        "LambdaITraceInput",
+        "LambdaITraceOutput",
     };
 
     for (const auto& name : names) {
@@ -79,6 +84,10 @@ TEST(AbiStructSize, MatchesSizeofInTheConsumersTranslationUnit) {
     EXPECT_EQ(eventprop_abi_struct_size("DropoutBatch"), sizeof(DropoutBatch));
     EXPECT_EQ(eventprop_abi_struct_size("AccumulatedBackwardResult"),
               sizeof(AccumulatedBackwardResult));
+    EXPECT_EQ(eventprop_abi_struct_size("VoltageTraceInput"), sizeof(VoltageTraceInput));
+    EXPECT_EQ(eventprop_abi_struct_size("VoltageTraceOutput"), sizeof(VoltageTraceOutput));
+    EXPECT_EQ(eventprop_abi_struct_size("LambdaITraceInput"), sizeof(LambdaITraceInput));
+    EXPECT_EQ(eventprop_abi_struct_size("LambdaITraceOutput"), sizeof(LambdaITraceOutput));
 }
 
 TEST(AbiStructSize, UnknownNameReturnsZero) {
@@ -100,6 +109,7 @@ TEST(AbiStructSize, TableKeysAreUnique) {
         "EventPropInput", "SpikeOutput", "SumsOutput", "MaximaOutput", "BackwardOutput",
         "SpikesBatch", "MaximaBatch", "BackwardsBatch", "GradientOutput",
         "DropoutOutput", "DropoutBatch", "AccumulatedBackwardResult",
+        "VoltageTraceInput", "VoltageTraceOutput", "LambdaITraceInput", "LambdaITraceOutput",
     };
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
         for (size_t j = i + 1; j < sizeof(names) / sizeof(names[0]); ++j) {

@@ -24,7 +24,7 @@ namespace CW.EventProp.Tests;
 ///
 /// These tests assert the guard passes, and that it COVERS every public struct — a
 /// struct added to the headers without an entry is the drift that reintroduces the bug.
-/// The same 12-name list is asserted in <c>eventprop_abi.c</c>'s C++ test and in
+/// The same list is asserted in <c>eventprop_abi.c</c>'s C++ test and in
 /// <c>EventProp.Native.Python/test/test_abi.py</c>, on purpose: adding a struct must
 /// fail in every consumer.
 /// </summary>
@@ -45,6 +45,10 @@ public class AbiParityTests
         "AccumulatedBackwardResult",
         "DropoutOutput",
         "DropoutBatch",
+        "VoltageTraceInput",
+        "VoltageTraceOutput",
+        "LambdaITraceInput",
+        "LambdaITraceOutput",
     ];
 
     [Test]

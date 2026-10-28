@@ -197,6 +197,10 @@ const char* eventprop_error_string(const int error_no)
         case EVENTPROP_UNSORTED_SPIKE_TIMES:    return "Spike times are not sorted in ascending order";
         case EVENTPROP_ALLOC_THREAD_SCRATCH:    return "Allocation failed: forward-pass thread scratch";
         case EVENTPROP_ALLOC_BWD_CUR_SUM:       return "Allocation failed: backward-pass running current";
+        case EVENTPROP_ALLOC_DIAG_CURRENTS:     return "Allocation failed: lambda-I post-spike currents";
+        case EVENTPROP_ALLOC_DIAG_CUR_SUM:      return "Allocation failed: lambda-I running synaptic sum";
+        case EVENTPROP_ALLOC_DIAG_LAMBDA_V:     return "Allocation failed: lambda-I membrane adjoint array";
+        case EVENTPROP_ALLOC_DIAG_LAMBDA_JUMPS: return "Allocation failed: lambda-I jump arrays";
         case EVENTPROP_ALLOC_BWD_CURRENTS:      return "Allocation failed: backward-pass post-spike currents";
         default:                                return "Unknown error";
     }

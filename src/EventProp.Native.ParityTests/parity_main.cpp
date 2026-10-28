@@ -314,34 +314,53 @@ static void test_lambda_i_trace(const TestCase& tc) {
     double* w; double* times; int* sources;
     gen_data(tc.pattern, tc.n_pre, tc.n_post, tc.n_spikes, w, times, sources);
 
+    /* Both sides get the SAME post-synaptic spike list — the Eigen one — so the only thing
+     * they can disagree about is the adjoint maths, not which times the root-finder found.
+     * compute_spikes fills `currents`, which the jump condition 1/(i - v_th) needs. */
     EventPropInput fi_spikes = {w, tc.n_pre, tc.n_post, times, sources, tc.n_spikes, tc.tau_mem, tc.tau_syn, tc.v_th};
-    SpikeOutput fwd_c = eventprop_compute_spikes(fi_spikes);
-    SKIP_C_ERROR(fwd_c);
-    if (fwd_c.n_spikes == 0) { printf("SKIP (no forward spikes)\n"); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
-
-    int target_nrn = 0;
-    double t_max = 1.0, dt = 0.005;
-
-    LambdaITraceInput lii = {fwd_c.times, fwd_c.n_spikes, target_nrn, tc.v_th, tc.tau_mem, tc.tau_syn, t_max, dt};
-    LambdaITraceOutput trace_c = eventprop_compute_lambda_i_trace(lii);
-    if (trace_c.error_no != EVENTPROP_OK) { printf("SKIP (C validation: %s)\n", eventprop_error_string(trace_c.error_no)); tests_passed++; free(w); free(times); free(sources); eventprop_free_spike_output(fwd_c); return; }
-
-    int expected_nt = (int)(t_max / dt);
-    ASSERT_EQ(trace_c.n_t, expected_nt, "trace length mismatch");
-    for (int i = 0; i < trace_c.n_t; i++) {
-        double expected_t = dt * i;
-        if (fabs(trace_c.ts[i] - expected_t) > ABS_TOLERANCE) {
-            printf("FAIL [ts[%d]: %.6f vs %.6f]\n", i, trace_c.ts[i], expected_t);
-            tests_failed++;
-            free(w); free(times); free(sources);
-            eventprop_free_spike_output(fwd_c);
-            eventprop_free_lambda_i_trace_output(trace_c);
-            return;
-        }
+    Spikes post_eig = compute_spikes(make_w_mat(w, tc.n_pre, tc.n_post),
+                                     make_eigen_spikes(times, sources, tc.n_spikes),
+                                     tc.v_th, tc.tau_mem, tc.tau_syn);
+    if (post_eig.n_spikes == 0) {
+        printf("SKIP (no post spikes)\n");
+        tests_passed++; free(w); free(times); free(sources);
+        return;
     }
 
+    /* Non-uniform errors: a spike/error misalignment then shows up as a mismatch instead of
+     * hiding behind a constant. All-zero errors would make both sides identically zero, which
+     * is a comparison of nothing. */
+    for (int i = 0; i < post_eig.n_spikes; i++) post_eig.set_error(i, 1.0 + 0.25 * i);
+
+    /* Trace a neuron that actually fired. A silent neuron is legitimately all zero on both
+     * sides, and matching zeros would prove nothing. */
+    int target_nrn = post_eig.sources(0);
+    double t_max = 1.0, dt = 0.005;
+
+    auto [ts_eig, lam_eig] = compute_lambda_i_trace(t_max, dt, target_nrn, post_eig,
+                                                    tc.v_th, tc.tau_mem, tc.tau_syn);
+    if (lam_eig.abs().maxCoeff() == 0.0) {
+        printf("FAIL [eigen trace identically zero - vacuous comparison]\n");
+        tests_failed++; free(w); free(times); free(sources);
+        return;
+    }
+
+    LambdaITraceInput lii = {fi_spikes, target_nrn, post_eig.times.data(), post_eig.sources.data(),
+                             post_eig.errors.data(), post_eig.n_spikes, t_max, dt};
+    LambdaITraceOutput trace_c = eventprop_compute_lambda_i_trace(lii);
+    if (trace_c.error_no != EVENTPROP_OK) {
+        printf("FAIL [C rejected valid input: %s]\n", eventprop_error_string(trace_c.error_no));
+        tests_failed++; free(w); free(times); free(sources);
+        return;
+    }
+
+    ASSERT_EQ(trace_c.n_t, (int)ts_eig.size(), "trace length mismatch");
+    ASSERT_ARRAY_NEAR(trace_c.ts, ts_eig.data(), trace_c.n_t, ABS_TOLERANCE, REL_TOLERANCE, "time array");
+    /* Loose value tolerance, as for the voltage trace: the library is built with fast-math, and
+     * differences of exp() terms of similar magnitude lose digits no algorithm choice recovers. */
+    ASSERT_ARRAY_NEAR(trace_c.lambda_trace, lam_eig.data(), trace_c.n_t, 1e-8, 1e-6, "lambda values");
+
     free(w); free(times); free(sources);
-    eventprop_free_spike_output(fwd_c);
     eventprop_free_lambda_i_trace_output(trace_c);
     TEST_END;
 }

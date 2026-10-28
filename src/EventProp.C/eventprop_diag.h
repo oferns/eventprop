@@ -34,13 +34,26 @@ typedef struct VoltageTraceOutput {
     EventPropError error_no;           /* Error code (EVENTPROP_OK on success) */
 } VoltageTraceOutput;
 
+/** Input for the synaptic adjoint (lambda-I) trace.
+ *
+ *  Mirrors VoltageTraceInput so one forward-pass spike list serves both diagnostics, and
+ *  adds the error signal the adjoint is driven by.
+ *
+ *  fwd_times / fwd_sources must be the spikes of EVERY post-synaptic neuron, not just the
+ *  target's. The adjoint decays lambda_v for all neurons at every spike of any neuron, and
+ *  measures spike positions against the last spike in the whole list, so a pre-filtered
+ *  single-neuron list yields a trace of the right shape with subtly wrong values. The
+ *  target index selects which neuron's jumps are summed, nothing else.
+ */
 typedef struct LambdaITraceInput {
-    const double* fwd_times;           /* Forward-pass spike times (borrowed) */
-    int n_post_spikes;                 /* Number of forward-pass spikes */
+    EventPropInput input;              /* Forward pass parameters; the synaptic current at
+                                        * each post spike is rebuilt from these rather than
+                                        * handed over, as in the backward pass */
     int target_nrn_idx;                /* Post-synaptic neuron to trace */
-    double v_th;                       /* Spike threshold voltage */
-    double tau_mem;                    /* Membrane time constant (seconds) */
-    double tau_syn;                    /* Synaptic time constant (seconds) */
+    const double* fwd_times;           /* Forward-pass spike times, all neurons (borrowed) */
+    const int* fwd_sources;            /* Forward-pass spike sources, all neurons (borrowed) */
+    const double* post_errors;         /* Error signal at each post spike (borrowed) */
+    int n_post_spikes;                 /* Number of forward-pass spikes */
     double t_max;                      /* Simulation end time (seconds) */
     double dt;                         /* Time step (seconds) */
 } LambdaITraceInput;
@@ -64,7 +77,14 @@ VoltageTraceOutput eventprop_compute_voltage_trace(VoltageTraceInput input);
 
 /**
  * Compute the synaptic adjoint (lambda_i) trace for a single neuron.
- * Useful for debugging the backward pass.
+ *
+ * Follows the reference jump condition: at each post-synaptic spike the adjoint jumps by
+ * 1/(current - v_th) * (v_th * lambda_v + error), where current is the synaptic current
+ * rebuilt at that spike (see eventprop_rebuild_post_currents). The error term makes this a
+ * loss-driven quantity: with post_errors all zero the trace is identically zero.
+ *
+ * Returns an all-zero trace with EVENTPROP_OK when there are no post spikes, which is the
+ * correct limit (no jumps to sum).
  */
 LambdaITraceOutput eventprop_compute_lambda_i_trace(LambdaITraceInput input);
 

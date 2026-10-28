@@ -35,7 +35,7 @@ extern "C" {
  *  every struct it embeds by value. Both are checked on import by the Cython layer
  *  and at layer construction by `EventProp.Native`.
  */
-#define EVENTPROP_ABI_VERSION 1
+#define EVENTPROP_ABI_VERSION 2
 
 /** Error codes returned by EventProp functions.
  *  Set via the `error_no` field on output structs when validation is enabled */
@@ -103,7 +103,11 @@ typedef enum EventPropError {
     EVENTPROP_UNSORTED_SPIKE_TIMES    = 60,  /* times[i] < times[i-1] (algorithms require ascending order) */
     EVENTPROP_ALLOC_THREAD_SCRATCH    = 61,  /* per-thread forward-pass scratch row failed */
     EVENTPROP_ALLOC_BWD_CUR_SUM       = 62,  /* backward-pass running current sum failed */
-    EVENTPROP_ALLOC_BWD_CURRENTS      = 63   /* backward-pass per-post-spike current array failed */
+    EVENTPROP_ALLOC_BWD_CURRENTS      = 63,  /* backward-pass per-post-spike current array failed */
+    EVENTPROP_ALLOC_DIAG_CURRENTS     = 64,  /* lambda-I rebuilt post-spike current array */
+    EVENTPROP_ALLOC_DIAG_CUR_SUM      = 65,  /* lambda-I running synaptic sum row */
+    EVENTPROP_ALLOC_DIAG_LAMBDA_V     = 66,  /* lambda-I per-neuron membrane adjoint array */
+    EVENTPROP_ALLOC_DIAG_LAMBDA_JUMPS = 67   /* lambda-I jump time/magnitude arrays */
 } EventPropError;
 
 /** ── Validation limits ──────────────────────────────────────────────── */

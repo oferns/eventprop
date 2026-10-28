@@ -303,7 +303,7 @@ Each line is a rule you cannot see from the file it governs. Detail and evidence
   `EventProp.Native` checks in layer constructors and at `Batch.ValidateFlat`, the shared
   choke point for the six friendly batch entry points.
   **Bump `EVENTPROP_ABI_VERSION` on any public struct layout change** — including appends,
-  which change `sizeof`. The 12-name list is duplicated in four consumers on purpose: adding a
+  which change `sizeof`. The name list is duplicated in four consumers on purpose: adding a
   struct must fail a test in every consumer, so no consumer silently stops covering it. Pinned by
   `src/EventProp.Tests/AbiParityTests.cs`, `src/EventProp.Native.Python/test/test_abi.py` —
   which ctypes-loads the library and so compares offsets across binaries rather than

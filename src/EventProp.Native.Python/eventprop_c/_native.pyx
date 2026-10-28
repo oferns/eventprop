@@ -239,12 +239,12 @@ cdef extern from "eventprop_diag.h":
     VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput input)
 
     ctypedef struct LambdaITraceInput:
-        const double* fwd_times
-        int n_post_spikes
+        EventPropInput input
         int target_nrn_idx
-        double v_th
-        double tau_mem
-        double tau_syn
+        const double* fwd_times
+        const int* fwd_sources
+        const double* post_errors
+        int n_post_spikes
         double t_max
         double dt
 
@@ -296,6 +296,10 @@ def abi_struct_sizes():
         "DropoutOutput": <Py_ssize_t>sizeof(DropoutOutput),
         "DropoutBatch": <Py_ssize_t>sizeof(DropoutBatch),
         "AccumulatedBackwardResult": <Py_ssize_t>sizeof(AccumulatedBackwardResult),
+        "VoltageTraceInput": <Py_ssize_t>sizeof(VoltageTraceInput),
+        "VoltageTraceOutput": <Py_ssize_t>sizeof(VoltageTraceOutput),
+        "LambdaITraceInput": <Py_ssize_t>sizeof(LambdaITraceInput),
+        "LambdaITraceOutput": <Py_ssize_t>sizeof(LambdaITraceOutput),
     }
 
 

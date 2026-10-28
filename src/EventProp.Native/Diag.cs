@@ -84,42 +84,62 @@ public static unsafe partial class Diag
         public void Dispose() => eventprop_free_voltage_trace_output(this);
     }
 
-    /// <summary>lambda-I trace input — plain data, no ownership.</summary>
+    /// <summary>lambda-I trace input — plain data, no ownership.
+    /// Mirrors <see cref="VoltageTraceInput"/> plus the error signal the adjoint is driven by.
+    /// fwdTimes/fwdSources must hold the spikes of EVERY post-synaptic neuron, not only the
+    /// traced one: the adjoint decays lambda_v for all neurons at every spike.</summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct LambdaITraceInput
     {
-        public IntPtr FwdTimes;    // const double*
-        public int NPostSpikes;
+        public Api.EventPropInput Input;
         public int TargetNrnIdx;
-        public double VTh;
-        public double TauMem;
-        public double TauSyn;
+        public IntPtr FwdTimes;             // const double*
+        public IntPtr FwdSources;           // const int*
+        public IntPtr PostErrors;           // const double*
+        public int NPostSpikes;
         public double TMax;
         public double Dt;
 
         /// <summary>Build from raw pointers.</summary>
-        public static LambdaITraceInput Create(double* fwdTimes, int nPostSpikes, int targetNrnIdx,
-            double vTh, double tauMem, double tauSyn, double tMax, double dt)
+        public static LambdaITraceInput Create(Api.EventPropInput input,
+            int targetNrnIdx, double* fwdTimes, int* fwdSources, double* postErrors,
+            int nPostSpikes, double tMax, double dt)
         {
             return new LambdaITraceInput
             {
-                FwdTimes = (IntPtr)fwdTimes,
-                NPostSpikes = nPostSpikes,
+                Input = input,
                 TargetNrnIdx = targetNrnIdx,
-                VTh = vTh,
-                TauMem = tauMem,
-                TauSyn = tauSyn,
+                FwdTimes = (IntPtr)fwdTimes,
+                FwdSources = (IntPtr)fwdSources,
+                PostErrors = (IntPtr)postErrors,
+                NPostSpikes = nPostSpikes,
                 TMax = tMax,
                 Dt = dt,
             };
         }
 
         /// <summary>Build from managed arrays (pins via fixed).</summary>
-        public static LambdaITraceInput Create(ReadOnlySpan<double> fwdTimes, int targetNrnIdx,
-            double vTh, double tauMem, double tauSyn, double tMax, double dt)
+        /// <remarks>The pointers this hands back are UNPINNED by contract, as for the
+        /// <c>EventPropInput</c> span overloads: the caller owns the pin and must keep the
+        /// managed arrays fixed for the whole native call.</remarks>
+        public static LambdaITraceInput Create(ReadOnlySpan<double> w, int nPre, int nPost,
+            ReadOnlySpan<double> times, ReadOnlySpan<int> sources,
+            ReadOnlySpan<double> fwdTimes, ReadOnlySpan<int> fwdSources,
+            ReadOnlySpan<double> postErrors,
+            int targetNrnIdx, double tMax, double dt,
+            double vTh, double tauMem, double tauSyn)
         {
+            fixed (double* pw = w)
+            fixed (double* pt = times)
+            fixed (int* ps = sources)
             fixed (double* pft = fwdTimes)
-                return Create(pft, fwdTimes.Length, targetNrnIdx, vTh, tauMem, tauSyn, tMax, dt);
+            fixed (int* pfs = fwdSources)
+            fixed (double* pe = postErrors)
+            {
+                var epInput = Api.EventPropInput.Create(pw, nPre, nPost, pt, ps, times.Length, vTh, tauMem, tauSyn);
+
+                return Create(epInput, targetNrnIdx, pft, pfs, pe, fwdTimes.Length, tMax, dt);
+            }
         }
     }
 

@@ -30,7 +30,9 @@ constexpr double kTauSyn = 0.005;
 constexpr double kVTh    = 1.0;
 
 bool IsAllocErrorCode(EventPropError e) {
-    return e >= EVENTPROP_ALLOC_SUM0 && e <= EVENTPROP_ALLOC_BWD_CURRENTS;
+    /* Upper bound is the last allocation code in the enum; extend it when a new allocation
+     * site is added, or a genuine allocation failure reads as an unexpected code. */
+    return e >= EVENTPROP_ALLOC_SUM0 && e <= EVENTPROP_ALLOC_DIAG_LAMBDA_JUMPS;
 }
 
 /** Codes that are legitimate alongside allocation failures: a failed sample is
@@ -351,6 +353,8 @@ TEST_F(AllocFaultInjection, DiagEntryPointsFailCleanly) {
     static const EventPropError expected[] = {
         EVENTPROP_ALLOC_DIAG_V_TRACE, EVENTPROP_ALLOC_DIAG_TS,
         EVENTPROP_ALLOC_DIAG_LAMBDA,
+        EVENTPROP_ALLOC_DIAG_CURRENTS, EVENTPROP_ALLOC_DIAG_CUR_SUM,
+        EVENTPROP_ALLOC_DIAG_LAMBDA_V, EVENTPROP_ALLOC_DIAG_LAMBDA_JUMPS,
     };
     std::set<int> observed;
 
@@ -361,7 +365,9 @@ TEST_F(AllocFaultInjection, DiagEntryPointsFailCleanly) {
     eventprop_test_alloc_fail_nth(0);
     SpikeOutput fwd = eventprop_compute_spikes(input);
     VoltageTraceInput vin{input, 0, fwd.times, fwd.sources, fwd.n_spikes, 0.5, 0.05};
-    LambdaITraceInput lin{fwd.times, fwd.n_spikes, 0, kVTh, kTauMem, kTauSyn, 0.5, 0.05};
+    const std::vector<double> post_err(fwd.n_spikes > 0 ? fwd.n_spikes : 1, 1.0);
+    LambdaITraceInput lin{input, 0, fwd.times, fwd.sources, post_err.data(),
+                          fwd.n_spikes, 0.5, 0.05};
 
     for (int nth = 1; nth <= 32; ++nth) {
         eventprop_test_alloc_reset();

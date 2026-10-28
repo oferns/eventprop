@@ -261,7 +261,12 @@ public static unsafe partial class Api
     // needs no such discipline, which is why both halves exist.
 
     /// <summary>The ABI version these struct declarations were written against. Keep in step with EVENTPROP_ABI_VERSION in eventprop.h.</summary>
-    public const int CompiledAbiVersion = 1;
+    /// <remarks>This is a hand-maintained second source — unlike the Cython layer, which
+    /// reads the macro out of the header it was compiled from. Forgetting to bump it here
+    /// is not silent: the version half of the check below fails and names both numbers,
+    /// which is what surfaced a public struct layout change that this assembly had to
+    /// follow (the LambdaITraceInput rewrite).</remarks>
+    public const int CompiledAbiVersion = 2;
 
     [LibraryImport(Lib)]
     private static partial int eventprop_abi_version();
@@ -307,6 +312,10 @@ public static unsafe partial class Api
         ["AccumulatedBackwardResult"] = sizeof(Batch.AccumulatedBackwardResult),
         ["DropoutOutput"] = sizeof(Batch.DropoutOutput),
         ["DropoutBatch"] = sizeof(Batch.DropoutBatch),
+        ["VoltageTraceInput"] = sizeof(Diag.VoltageTraceInput),
+        ["VoltageTraceOutput"] = sizeof(Diag.VoltageTraceOutput),
+        ["LambdaITraceInput"] = sizeof(Diag.LambdaITraceInput),
+        ["LambdaITraceOutput"] = sizeof(Diag.LambdaITraceOutput),
     };
 
     /// <summary>Compare this assembly's compiled layouts against the loaded library. Never throws.</summary>

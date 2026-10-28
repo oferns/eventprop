@@ -31,6 +31,7 @@
 
 #include "eventprop.h"
 #include "eventprop_batch.h"
+#include "eventprop_diag.h"
 
 #include <string.h>
 
@@ -39,9 +40,10 @@ int eventprop_abi_version(void) {
 }
 
 /* name/size pairs for every public struct a consumer embeds by value: the five
- * output structs in eventprop.h, the input struct, and the batch types in
- * eventprop_batch.h. Stringified with #name so the table cannot drift from the
- * types it measures — renaming a typedef renames its key. */
+ * output structs in eventprop.h, the input struct, the batch types in
+ * eventprop_batch.h and the diagnostic types in eventprop_diag.h. Stringified with
+ * #name so the table cannot drift from the types it measures — renaming a typedef
+ * renames its key. */
 #define EVENTPROP_SIZE_ENTRY(name) { #name, sizeof(name) }
 
 size_t eventprop_abi_struct_size(const char* struct_name) {
@@ -61,6 +63,10 @@ size_t eventprop_abi_struct_size(const char* struct_name) {
         EVENTPROP_SIZE_ENTRY(DropoutOutput),
         EVENTPROP_SIZE_ENTRY(DropoutBatch),
         EVENTPROP_SIZE_ENTRY(AccumulatedBackwardResult),
+        EVENTPROP_SIZE_ENTRY(VoltageTraceInput),
+        EVENTPROP_SIZE_ENTRY(VoltageTraceOutput),
+        EVENTPROP_SIZE_ENTRY(LambdaITraceInput),
+        EVENTPROP_SIZE_ENTRY(LambdaITraceOutput),
     };
     const size_t count = sizeof(sizes) / sizeof(sizes[0]);
 

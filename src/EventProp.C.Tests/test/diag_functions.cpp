@@ -205,28 +205,50 @@ TEST(DiagVoltageTrace, OutOfBoundsTargetNeuronReturnsError) {
 
 // ──────────────────────────────────────────────────────────────
 // compute_lambda_i_trace
+//
+// These traces are adjoints, so they are driven by the error signal: the jump at a
+// post-synaptic spike is 1/(current - v_th) * (v_th * lambda_v + error). The tests below keep
+// the forward pass empty (n_spikes = 0) wherever an exact number is asserted, because then the
+// rebuilt post-spike current is exactly zero and the jump collapses to -error / v_th.
+// Multi-spike recursion, where lambda_v carries from spike to spike, is pinned against the
+// Eigen core by the LambdaITrace cases in src/EventProp.Native.ParityTests instead.
 // ──────────────────────────────────────────────────────────────
 
+/** Forward-pass input with no input spikes, so every rebuilt post-spike current is zero. */
+static EventPropInput make_empty_forward(std::vector<double>& w) {
+    w = {0.5, 0.5};
+    return EventPropInput{w.data(), 1, 2, nullptr, nullptr, 0, kTauMem, kTauSyn, kVTh};
+}
+
+/** k_bwd of the reference backward kernel, spelled out so expectations are analytic. */
+static double expected_k_bwd(double elapsed) {
+    return kTauMem / (kTauMem - kTauSyn) *
+           (std::exp(-elapsed / kTauMem) - std::exp(-elapsed / kTauSyn));
+}
+
 TEST(DiagLambdaITrace, BasicTraceHasCorrectLength) {
+    std::vector<double> w;
     std::vector<double> fwd_times = {0.015, 0.025};
-    std::vector<int> fwd_sources = {0, 1};
+    std::vector<int>    fwd_sources = {0, 1};
+    std::vector<double> post_errors = {1.0, 1.0};
 
     double t_max = 0.1;
     double dt = 0.001;
 
     LambdaITraceInput input{
-        fwd_times.data(),   // fwd_times
-        2,                  // n_post_spikes
-        0,                  // target_nrn_idx
-        kVTh,               // v_th
-        kTauMem,            // tau_mem
-        kTauSyn,            // tau_syn
-        t_max,              // t_max
-        dt                  // dt
+        make_empty_forward(w),
+        0,                    // target_nrn_idx
+        fwd_times.data(),
+        fwd_sources.data(),
+        post_errors.data(),
+        2,                    // n_post_spikes
+        t_max,
+        dt
     };
 
     LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
 
+    EXPECT_EQ(trace.error_no, EVENTPROP_OK);
     EXPECT_EQ(trace.n_t, (int)(t_max / dt));
     EXPECT_NE(trace.lambda_trace, nullptr);
     EXPECT_NE(trace.ts, nullptr);
@@ -238,35 +260,120 @@ TEST(DiagLambdaITrace, BasicTraceHasCorrectLength) {
     eventprop_free_lambda_i_trace_output(trace);
 }
 
-TEST(DiagLambdaITrace, LambdaGrowsNearSpike) {
-    std::vector<double> fwd_times = {0.05};
-    std::vector<int> fwd_sources = {0};
+// The whole trace, computed from the formula rather than from the implementation: one spike of
+// the target neuron at tau, no input spikes, so lambda(t) = -(error / v_th) * k_bwd(tau - t)
+// before the spike and zero at and after it. This is what pins the jump amplitude, the kernel,
+// and the fact that kernel elapsed time is measured from the query time.
+TEST(DiagLambdaITrace, SingleSpikeMatchesAnalyticAdjoint) {
+    std::vector<double> w;
+    const double tau = 0.05;
+    const double error = 2.0;
+    std::vector<double> fwd_times = {tau};
+    std::vector<int>    fwd_sources = {0};
+    std::vector<double> post_errors = {error};
 
+    const double dt = 0.001;
     LambdaITraceInput input{
-        fwd_times.data(), 1, 0, kVTh, kTauMem, kTauSyn, 0.1, 0.001
+        make_empty_forward(w), 0, fwd_times.data(), fwd_sources.data(),
+        post_errors.data(), 1, 0.1, dt
     };
 
     LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
+    ASSERT_EQ(trace.error_no, EVENTPROP_OK);
 
-    // The lambda-I trace computes adjoints from the last forward spike backward.
-    // As t approaches the spike time, dt_jump → 0 and the exponential terms grow,
-    // so lambda should be larger near the spike than far from it.
-    double early_lambda = std::abs(trace.lambda_trace[10]);   // t=0.01
-    double late_lambda  = std::abs(trace.lambda_trace[45]);   // t=0.045 (near spike)
-    EXPECT_GT(late_lambda, early_lambda);
+    const double jump = -error / kVTh;
+    for (int i = 0; i < trace.n_t; ++i) {
+        const double t = i * dt;
+        const double expected = (t < tau) ? jump * expected_k_bwd(tau - t) : 0.0;
+        EXPECT_NEAR(trace.lambda_trace[i], expected, 1e-12) << "at t=" << t;
+    }
+
+    eventprop_free_lambda_i_trace_output(trace);
+}
+
+// The reason the diagnostic is loss-driven: doubling the error signal doubles the adjoint.
+// An implementation that ignores post_errors cannot pass this, and passes the old suite.
+TEST(DiagLambdaITrace, ScalesLinearlyWithPostSpikeError) {
+    std::vector<double> w;
+    std::vector<double> fwd_times = {0.03, 0.06};
+    std::vector<int>    fwd_sources = {0, 1};
+    std::vector<double> err_one = {1.0, 1.0};
+    std::vector<double> err_two = {2.0, 2.0};
+
+    LambdaITraceInput in1{make_empty_forward(w), 0, fwd_times.data(), fwd_sources.data(),
+                          err_one.data(), 2, 0.1, 0.001};
+    LambdaITraceInput in2{in1};
+    in2.post_errors = err_two.data();
+
+    LambdaITraceOutput t1 = eventprop_compute_lambda_i_trace(in1);
+    LambdaITraceOutput t2 = eventprop_compute_lambda_i_trace(in2);
+    ASSERT_EQ(t1.error_no, EVENTPROP_OK);
+    ASSERT_EQ(t2.error_no, EVENTPROP_OK);
+
+    bool any_nonzero = false;
+    for (int i = 0; i < t1.n_t; ++i) {
+        EXPECT_NEAR(t2.lambda_trace[i], 2.0 * t1.lambda_trace[i], 1e-12)
+            << "at t=" << t1.ts[i];
+        if (std::abs(t1.lambda_trace[i]) > 1e-9) any_nonzero = true;
+    }
+    // Without a nonzero reference the doubling above is a comparison of zeros.
+    EXPECT_TRUE(any_nonzero);
+
+    eventprop_free_lambda_i_trace_output(t1);
+    eventprop_free_lambda_i_trace_output(t2);
+}
+
+// A silent target neuron has no jumps to sum, so its adjoint is exactly zero. This is the case
+// the reference C++ core reads out of bounds on, and what the Visualizer guards against.
+TEST(DiagLambdaITrace, SilentTargetNeuronYieldsZeroTrace) {
+    std::vector<double> w;
+    std::vector<double> fwd_times = {0.02, 0.05};
+    std::vector<int>    fwd_sources = {1, 1};   // neuron 0 never fires
+    std::vector<double> post_errors = {1.0, 1.0};
+
+    LambdaITraceInput input{make_empty_forward(w), 0, fwd_times.data(), fwd_sources.data(),
+                            post_errors.data(), 2, 0.1, 0.001};
+
+    LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
+    ASSERT_EQ(trace.error_no, EVENTPROP_OK);
+
+    for (int i = 0; i < trace.n_t; ++i) {
+        EXPECT_DOUBLE_EQ(trace.lambda_trace[i], 0.0) << "at t=" << trace.ts[i];
+    }
+
+    eventprop_free_lambda_i_trace_output(trace);
+}
+
+TEST(DiagLambdaITrace, ZeroErrorsYieldZeroTrace) {
+    std::vector<double> w;
+    std::vector<double> fwd_times = {0.02, 0.05};
+    std::vector<int>    fwd_sources = {0, 1};
+    std::vector<double> post_errors = {0.0, 0.0};
+
+    LambdaITraceInput input{make_empty_forward(w), 0, fwd_times.data(), fwd_sources.data(),
+                            post_errors.data(), 2, 0.1, 0.001};
+
+    LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
+    ASSERT_EQ(trace.error_no, EVENTPROP_OK);
+
+    for (int i = 0; i < trace.n_t; ++i) {
+        EXPECT_DOUBLE_EQ(trace.lambda_trace[i], 0.0);
+    }
 
     eventprop_free_lambda_i_trace_output(trace);
 }
 
 TEST(DiagLambdaITrace, LambdaIsFiniteEverywhere) {
+    std::vector<double> w;
     std::vector<double> fwd_times = {0.03, 0.06};
-    std::vector<int> fwd_sources = {0, 1};
+    std::vector<int>    fwd_sources = {0, 1};
+    std::vector<double> post_errors = {1.0, 0.5};
 
-    LambdaITraceInput input{
-        fwd_times.data(), 2, 0, kVTh, kTauMem, kTauSyn, 0.1, 0.001
-    };
+    LambdaITraceInput input{make_empty_forward(w), 0, fwd_times.data(), fwd_sources.data(),
+                            post_errors.data(), 2, 0.1, 0.001};
 
     LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
+    ASSERT_EQ(trace.error_no, EVENTPROP_OK);
 
     for (int i = 0; i < trace.n_t; ++i) {
         EXPECT_TRUE(std::isfinite(trace.lambda_trace[i]))
@@ -277,15 +384,15 @@ TEST(DiagLambdaITrace, LambdaIsFiniteEverywhere) {
 }
 
 TEST(DiagLambdaITrace, ZeroForwardSpikesProducesZeroTrace) {
-    std::vector<double> fwd_times; // empty
-    std::vector<int> fwd_sources;  // empty
+    std::vector<double> w;
+    EventPropInput fwd = make_empty_forward(w);
 
-    LambdaITraceInput input{
-        nullptr, 0, 0, kVTh, kTauMem, kTauSyn, 0.1, 0.001
-    };
+    LambdaITraceInput input{fwd, 0, nullptr, nullptr, nullptr, 0, 0.1, 0.001};
 
     LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
 
+    // No spikes means no jumps, which is a legitimate empty trace, not an error.
+    EXPECT_EQ(trace.error_no, EVENTPROP_OK);
     for (int i = 0; i < trace.n_t; ++i) {
         EXPECT_NEAR(trace.lambda_trace[i], 0.0, 1e-9);
     }
@@ -294,16 +401,17 @@ TEST(DiagLambdaITrace, ZeroForwardSpikesProducesZeroTrace) {
 }
 
 TEST(DiagLambdaITrace, MultipleForwardSpikesAccumulateEffect) {
+    std::vector<double> w;
     std::vector<double> fwd_times = {0.03, 0.06};
-    std::vector<int> fwd_sources = {0, 1};
+    std::vector<int>    fwd_sources = {0, 0};   // both belong to the traced neuron
+    std::vector<double> post_errors = {1.0, 1.0};
 
-    LambdaITraceInput input{
-        fwd_times.data(), 2, 0, kVTh, kTauMem, kTauSyn, 0.1, 0.001
-    };
+    LambdaITraceInput input{make_empty_forward(w), 0, fwd_times.data(), fwd_sources.data(),
+                            post_errors.data(), 2, 0.1, 0.001};
 
     LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
+    ASSERT_EQ(trace.error_no, EVENTPROP_OK);
 
-    // After both spikes, lambda should be nonzero and finite
     bool found_nonzero = false;
     for (int i = 0; i < trace.n_t; ++i) {
         if (!std::isfinite(trace.lambda_trace[i])) {
@@ -318,10 +426,117 @@ TEST(DiagLambdaITrace, MultipleForwardSpikesAccumulateEffect) {
     eventprop_free_lambda_i_trace_output(trace);
 }
 
+// The sweep walks the spike list backwards and stops at the first spike earlier than the query
+// time, so an unsorted list silently under-counts. The Eigen reference has the same requirement
+// and checks neither — C is the diagnostic.
+TEST(DiagLambdaITrace, UnsortedPostSpikeTimesRejected) {
+    std::vector<double> w;
+    std::vector<double> fwd_times = {0.06, 0.03};
+    std::vector<int>    fwd_sources = {0, 0};
+    std::vector<double> post_errors = {1.0, 1.0};
+
+    LambdaITraceInput input{make_empty_forward(w), 0, fwd_times.data(), fwd_sources.data(),
+                            post_errors.data(), 2, 0.1, 0.001};
+
+    LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
+    EXPECT_EQ(trace.error_no, EVENTPROP_UNSORTED_SPIKE_TIMES);
+
+    eventprop_free_lambda_i_trace_output(trace);
+}
+
+// Equal times are the legitimate simultaneous-spike case and must stay accepted.
+TEST(DiagLambdaITrace, EqualPostSpikeTimesAccepted) {
+    std::vector<double> w;
+    std::vector<double> fwd_times = {0.04, 0.04};
+    std::vector<int>    fwd_sources = {0, 0};
+    std::vector<double> post_errors = {1.0, 1.0};
+
+    LambdaITraceInput input{make_empty_forward(w), 0, fwd_times.data(), fwd_sources.data(),
+                            post_errors.data(), 2, 0.1, 0.001};
+
+    LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
+    EXPECT_EQ(trace.error_no, EVENTPROP_OK);
+
+    eventprop_free_lambda_i_trace_output(trace);
+}
+
+// fwd_sources indexes the per-neuron lambda_v array, so an out-of-range index would write past
+// it rather than merely producing a wrong number.
+TEST(DiagLambdaITrace, SourceOutOfRangeRejected) {
+    std::vector<double> w;
+    std::vector<double> fwd_times = {0.03};
+    std::vector<int>    fwd_sources = {2};   // n_post is 2, so valid indices are 0 and 1
+    std::vector<double> post_errors = {1.0};
+
+    LambdaITraceInput input{make_empty_forward(w), 0, fwd_times.data(), fwd_sources.data(),
+                            post_errors.data(), 1, 0.1, 0.001};
+
+    LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
+    EXPECT_EQ(trace.error_no, EVENTPROP_INVALID_SOURCE);
+
+    eventprop_free_lambda_i_trace_output(trace);
+}
+
+TEST(DiagLambdaITrace, TargetOutOfRangeRejected) {
+    std::vector<double> w;
+    std::vector<double> fwd_times = {0.03};
+    std::vector<int>    fwd_sources = {0};
+    std::vector<double> post_errors = {1.0};
+
+    LambdaITraceInput input{make_empty_forward(w), 5, fwd_times.data(), fwd_sources.data(),
+                            post_errors.data(), 1, 0.1, 0.001};
+
+    LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
+    EXPECT_EQ(trace.error_no, EVENTPROP_DIAG_TARGET_OUT_OF_RANGE);
+
+    eventprop_free_lambda_i_trace_output(trace);
+}
+
+// An empty spike list needs no spike arrays; a non-empty one needs all three.
+TEST(DiagLambdaITrace, NullPostErrorsRejected) {
+    std::vector<double> w;
+    std::vector<double> fwd_times = {0.03};
+    std::vector<int>    fwd_sources = {0};
+
+    LambdaITraceInput input{make_empty_forward(w), 0, fwd_times.data(), fwd_sources.data(),
+                            nullptr, 1, 0.1, 0.001};
+
+    LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
+    EXPECT_EQ(trace.error_no, EVENTPROP_NULL_POINTER);
+
+    eventprop_free_lambda_i_trace_output(trace);
+}
+
+// current == v_th zeroes the jump denominator. The backward pass rejects it with
+// EVENTPROP_INVALID_CURRENT rather than emitting an infinite jump; the diagnostic matches.
+// An input spike and the post spike both at t = 0 make the current exactly the weight, because
+// exp(0) is exactly 1, so the equality is exact and not a tolerance question.
+TEST(DiagLambdaITrace, CurrentEqualToVThRejected) {
+    std::vector<double> w = {kVTh, 0.5};
+    std::vector<double> in_times = {0.0};
+    std::vector<int>    in_sources = {0};
+    EventPropInput fwd{w.data(), 1, 2, in_times.data(), in_sources.data(), 1,
+                       kTauMem, kTauSyn, kVTh};
+
+    std::vector<double> post_times = {0.0};
+    std::vector<int>    post_sources = {0};
+    std::vector<double> post_errors = {1.0};
+
+    LambdaITraceInput input{fwd, 0, post_times.data(), post_sources.data(),
+                            post_errors.data(), 1, 0.1, 0.001};
+
+    LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
+    EXPECT_EQ(trace.error_no, EVENTPROP_INVALID_CURRENT);
+    EXPECT_EQ(trace.lambda_trace, nullptr);
+
+    eventprop_free_lambda_i_trace_output(trace);
+}
+
 TEST(DiagLambdaITrace, ZeroDtReturnsError) {
-    LambdaITraceInput input{
-        nullptr, 0, 0, kVTh, kTauMem, kTauSyn, 0.1, 0.0
-    };
+    std::vector<double> w;
+    EventPropInput fwd = make_empty_forward(w);
+
+    LambdaITraceInput input{fwd, 0, nullptr, nullptr, nullptr, 0, 0.1, 0.0};
 
     LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
     EXPECT_EQ(trace.error_no, EVENTPROP_DIAG_TIMESTEP_INVALID);
@@ -333,9 +548,10 @@ TEST(DiagLambdaITrace, ZeroDtReturnsError) {
 }
 
 TEST(DiagLambdaITrace, EqualTausReturnsError) {
-    LambdaITraceInput input{
-        nullptr, 0, 0, kVTh, kTauMem, kTauMem, 0.1, 0.001 // tau_mem == tau_syn
-    };
+    std::vector<double> w = {0.5, 0.5};
+    EventPropInput fwd{w.data(), 1, 2, nullptr, nullptr, 0, kTauMem, kTauMem, kVTh};
+
+    LambdaITraceInput input{fwd, 0, nullptr, nullptr, nullptr, 0, 0.1, 0.001};
 
     LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
     EXPECT_EQ(trace.error_no, EVENTPROP_INVALID_TAU);
@@ -344,9 +560,10 @@ TEST(DiagLambdaITrace, EqualTausReturnsError) {
 }
 
 TEST(DiagLambdaITrace, ZeroVThReturnsError) {
-    LambdaITraceInput input{
-        nullptr, 0, 0, 0.0, kTauMem, kTauSyn, 0.1, 0.001 // v_th = 0
-    };
+    std::vector<double> w = {0.5, 0.5};
+    EventPropInput fwd{w.data(), 1, 2, nullptr, nullptr, 0, kTauMem, kTauSyn, 0.0};
+
+    LambdaITraceInput input{fwd, 0, nullptr, nullptr, nullptr, 0, 0.1, 0.001};
 
     LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
     EXPECT_EQ(trace.error_no, EVENTPROP_INVALID_VTH);
@@ -355,9 +572,11 @@ TEST(DiagLambdaITrace, ZeroVThReturnsError) {
 }
 
 TEST(DiagLambdaITrace, NullFwdTimesWithSpikesReturnsError) {
-    LambdaITraceInput input{
-        nullptr, 1, 0, kVTh, kTauMem, kTauSyn, 0.1, 0.001 // n_post_spikes=1 but fwd_times=NULL
-    };
+    std::vector<double> w;
+    EventPropInput fwd = make_empty_forward(w);
+
+    // n_post_spikes = 1 but the spike arrays are NULL
+    LambdaITraceInput input{fwd, 0, nullptr, nullptr, nullptr, 1, 0.1, 0.001};
 
     LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
     EXPECT_EQ(trace.error_no, EVENTPROP_NULL_POINTER);
@@ -366,10 +585,11 @@ TEST(DiagLambdaITrace, NullFwdTimesWithSpikesReturnsError) {
 }
 
 TEST(DiagLambdaITrace, ExcessiveSampleCountReturnsError) {
+    std::vector<double> w;
+    EventPropInput fwd = make_empty_forward(w);
+
     // t_max / dt = 1e9 samples — exceeds EVENTPROP_MAX_DIAG_SAMPLES
-    LambdaITraceInput input{
-        nullptr, 0, 0, kVTh, kTauMem, kTauSyn, 1e6, 1e-3
-    };
+    LambdaITraceInput input{fwd, 0, nullptr, nullptr, nullptr, 0, 1e6, 1e-3};
 
     LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
     EXPECT_EQ(trace.error_no, EVENTPROP_DIAG_TRACE_TOO_LONG);

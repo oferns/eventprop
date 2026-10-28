@@ -45,6 +45,10 @@ STRUCT_NAMES = {
     "DropoutOutput",
     "DropoutBatch",
     "AccumulatedBackwardResult",
+    "VoltageTraceInput",
+    "VoltageTraceOutput",
+    "LambdaITraceInput",
+    "LambdaITraceOutput",
 }
 
 _LIB_NAMES = ("eventprop_c_api.dll",
