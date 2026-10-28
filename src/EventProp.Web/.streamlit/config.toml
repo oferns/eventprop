@@ -1,0 +1,7 @@
+# Project-level Streamlit config for the EventProp Visualizer.
+
+[browser]
+# A demo app that phones home from every visitor's machine is a bad default.
+# (Everything else is left at Streamlit's own defaults on purpose — including
+# server.maxMessageSize, which is 200 MB and nowhere near what these figures use.)
+gatherUsageStats = false

@@ -216,7 +216,16 @@ cd src/EventProp.Tests && dotnet run -c Release --
 # Python: Cython layer + paper parity, then the reference library's own suite
 cd src/EventProp.Native.Python && PYTHONPATH="$PWD/../EventProp.Python:$PWD" python3 -m pytest test tests test_backward.py
 cd src/EventProp.Python && PYTHONPATH="$PWD:$PWD/test" python3 -m pytest test   # the second entry is required: sibling-module import
+# Visualizer, headless (no browser): numbers, then pages
+cd src/EventProp.Web && .venv/bin/python selfcheck.py && .venv/bin/python smoketest.py
 ```
+- The Visualizer imports the **pre-built** extensions of two sibling projects, so its
+  interpreter must match the ABI tag they carry — the same question `build.sh` asks before
+  deciding to rebuild. `.python-version` pins the interpreter and
+  `src/EventProp.Web/eventweb/runtime.py` refuses a mismatch with a readable message.
+  `selfcheck.py` is the only thing that checks the app's *science* (C library vs the
+  accuracy the reference recorded for the same weights, exact gradient vs finite
+  differences); nothing else in the repo touches `EventProp.Web`.
 - `parity_test`'s library-path argument is **decorative** — the target links the library and
   never reads `argv`. Passing a different `.dylib`/`.so` proves nothing.
 - On Windows the parity exe lands in `src/EventProp.C/build/Release/Release/` (its

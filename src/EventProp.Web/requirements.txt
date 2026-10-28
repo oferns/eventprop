@@ -1,4 +1,27 @@
-streamlit>=1.30
+# EventProp Visualizer — Python dependencies.
+#
+# Interpreter: CPython 3.14 (pinned in .python-version). This is not a preference — the
+# app loads two PRE-BUILT extension modules from sibling projects, and CPython extension
+# filenames carry the ABI tag (eventprop_cpp.cpython-314-darwin.so). An interpreter whose
+# tag differs cannot see them at all, and the app refuses to start rather than failing
+# later with a ModuleNotFoundError. `eventweb/runtime.py` owns that check; `selfcheck.py`
+# proves both backends import.
+#
+# Build the extensions for the same interpreter you run this with:
+#   ./build.sh --python python3.14
+#
+# numpy is deliberately NOT upper-bounded and NOT pinned to 2.x: the interpreter that
+# builds the extensions decides the numpy ABI, and a module built against numpy 2 will not
+# import under numpy 1. Letting pip resolve it per platform keeps 3.11/3.12 users on a
+# 1.x build if that is what their extension was compiled against.
+
+# Verified on: streamlit 1.66.1, plotly 7.1.0, numpy 2.5.4 (CPython 3.14, darwin-arm64).
+#
+# streamlit is floored at 1.66 on purpose: the views use the `width="stretch"` argument,
+# which is what replaces `use_container_width` (deprecated in 1.66, removed after
+# 2025-12-31). Pinning the floor is the honest option — `use_container_width` would work
+# on a wider range but starts emitting deprecation noise on the version actually installed.
+
+streamlit>=1.66
 plotly>=5.18
-numpy>=1.24,<2
-matplotlib>=3.7
+numpy>=1.24
