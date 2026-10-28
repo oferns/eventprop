@@ -62,6 +62,32 @@ typedef struct BackwardSpikesCtx {
     int n_post_alloc;     // how many per-neuron arrays were actually allocated
 } BackwardSpikesCtx;
 
+/**
+ * Rebuild the synaptic current at each post-synaptic spike.
+ *
+ * Shared by the backward sweep and the lambda-I diagnostic on purpose: the jump amplitude
+ * in the adjoint is 1/(current - v_th) * (v_th * lambda_v + error), so any consumer of the
+ * adjoint needs the same current the training kernel computes.
+ *
+ * @param input         forward-pass parameters (weights, input spikes, taus, v_th)
+ * @param post_times    post-synaptic spike times, ascending (borrowed)
+ * @param post_sources  post-synaptic spike sources, same length (borrowed)
+ * @param n_post_spikes length of post_times / post_sources / currents
+ * @param currents      out, n_post_spikes doubles, caller-owned
+ * @param row_scratch   one n_post-row of doubles, ZERO-initialised by the caller and
+ *                      left in an unspecified state; it is the running synaptic sum
+ *
+ * Requires input->w, input->times, input->sources to be non-NULL and the post-spike times
+ * ascending — the cursor only ever moves forward, so unsorted input silently under-counts.
+ * See eventprop_currents.c for why the accumulation direction is not interchangeable.
+ */
+void eventprop_rebuild_post_currents(const EventPropInput* input,
+                                     const double* post_times,
+                                     const int* post_sources,
+                                     int n_post_spikes,
+                                     double* currents,
+                                     double* row_scratch);
+
 /** Per-thread scratch during spike detection.
  *  One row is reused across neurons and grown x3 through the injection shim
  *  when a neuron needs more entries than it currently holds, and each thread

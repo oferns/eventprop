@@ -155,6 +155,7 @@ add_library(eventprop_c_api ${LIB_TYPE}
     eventprop_maxima.c
     eventprop_spikes.c
     eventprop_backward.c
+    eventprop_currents.c
     eventprop_diag.c
     eventprop_batch.c
 )

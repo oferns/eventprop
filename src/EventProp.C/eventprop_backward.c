@@ -214,29 +214,11 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input,
     MatrixView w           = mv(input.w, input.n_pre, input.n_post);
 
     /* ── Post-synaptic currents ──────────────────────────────────────────── */
-    /* The current at a post-spike is exactly sum0[k][nrn] * exp(-t / tau_syn), */
-    /* k the number of input spikes at or before t, so the array the forward */
-    /* pass used to hand over is redundant: one cursor over both spike lists */
-    /* rebuilds it for n_post bytes of scratch plus one double per output spike. */
-    /* Accumulated ascending and scaled once at the end, which is how the */
-    /* reference gets it. The sweep itself runs time-reversed, and a row kept */
-    /* rebased at the sweep time would look tempting — every term stays under */
-    /* its weight — but dropping a spike that dominates the row takes six of */
-    /* the row's digits away at the benchmark sizes, and the gradient then */
-    /* drifts 1e-5 relative. Ascending is the only stable direction. */
-    {
-        double* row = ctx.cur_sum;
-        double* currents = ctx.currents;
-        int k = 0;
-        for (int i = 0; i < spike.n_spikes; i++) {
-            while (k < input.n_spikes && input.times[k] <= spike.times[i]) {
-                fma_row_simd(row, row, mv_row(w, input.sources[k]),
-                             exp(input.times[k] / input.tau_syn), input.n_post);
-                k++;
-            }
-            currents[i] = row[spike.sources[i]] * exp(-spike.times[i] / input.tau_syn);
-        }
-    }
+    /* Rebuilt with one ascending cursor over both spike lists; the rule, and the
+     * reason ascending is the only stable direction, live in eventprop_currents.c
+     * so the lambda-I diagnostic cannot drift from this kernel. */
+    eventprop_rebuild_post_currents(&input, spike.times, spike.sources, spike.n_spikes,
+                                    ctx.currents, ctx.cur_sum);
 
     const double largest_time = ctx.merged[0].time;
     double previous_t = largest_time;
