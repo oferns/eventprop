@@ -17,6 +17,7 @@
 #include "eventprop.h"
 #include "eventprop_batch.h"
 #include "eventprop_diag.h"
+#include "eventprop_loss.h"
 
 #include <vector>
 #include <set>
@@ -32,7 +33,7 @@ constexpr double kVTh    = 1.0;
 bool IsAllocErrorCode(EventPropError e) {
     /* Upper bound is the last allocation code in the enum; extend it when a new allocation
      * site is added, or a genuine allocation failure reads as an unexpected code. */
-    return e >= EVENTPROP_ALLOC_SUM0 && e <= EVENTPROP_ALLOC_DIAG_LAMBDA_JUMPS;
+    return e >= EVENTPROP_ALLOC_SUM0 && e <= EVENTPROP_ALLOC_LOSS_DECODER_GRAD;
 }
 
 /** Codes that are legitimate alongside allocation failures: a failed sample is
@@ -390,4 +391,53 @@ TEST_F(AllocFaultInjection, DiagEntryPointsFailCleanly) {
     eventprop_free_spike_output(fwd);
 
     ExpectCodesReached(observed, expected, std::size(expected), "diagnostics");
+}
+
+TEST_F(AllocFaultInjection, LossEntryPointsFailCleanly) {
+    static const EventPropError expected[] = {
+        EVENTPROP_ALLOC_LOSS_ERRORS, EVENTPROP_ALLOC_LOSS_DECODER_GRAD,
+    };
+    std::set<int> observed;
+
+    SmallInput data;
+    const EventPropInput input = make_input(data);
+
+    eventprop_test_alloc_reset();
+    eventprop_test_alloc_fail_nth(0);
+    MaximaOutput maxima = eventprop_compute_maxima(input);
+    ASSERT_EQ(maxima.error_no, EVENTPROP_OK);
+    const std::vector<double> decoder(maxima.n_post > 0 ? maxima.n_post : 1, 0.5);
+    /* Built at runtime, not from INFINITY: /wd4756 lives on the library target only. */
+    const double least_squares = [] { volatile double zero = 0.0; return 1.0 / zero; }();
+
+    for (int nth = 1; nth <= 8; ++nth) {
+        eventprop_test_alloc_reset();
+        eventprop_test_alloc_fail_nth(nth);
+        MaximaRegressionOutput out = eventprop_maxima_regression(
+            {maxima.values, decoder.data(), 0.0, 1.0, least_squares, maxima.n_post});
+        EXPECT_TRUE(out.error_no == EVENTPROP_OK || IsAllocErrorCode(out.error_no))
+            << "nth=" << nth << " returned " << eventprop_error_string(out.error_no);
+        if (out.error_no != EVENTPROP_OK) {
+            /* A refused call must not hand back an array a caller would read as a gradient.
+             * Handing the struct to its free function is safe either way — that is the
+             * contract every output in this library keeps. */
+            EXPECT_EQ(out.errors, nullptr) << "nth=" << nth;
+            EXPECT_EQ(out.decoder_grad, nullptr) << "nth=" << nth;
+        }
+        observed.insert(out.error_no);
+        eventprop_free_maxima_regression_output(out);
+
+        /* The in-place entry point promises zero allocation, so it has to survive the first
+         * allocation being forced to fail. If a hidden malloc ever creeps in, this is where
+         * it shows up — the promise is the reason the training loop can call it per step. */
+        eventprop_test_alloc_reset();
+        eventprop_test_alloc_fail_nth(1);
+        MaximaRegressionResult in_place =
+            eventprop_maxima_regression_into(maxima, decoder.data(), 0.0, 1.0, least_squares);
+        EXPECT_EQ(in_place.error_no, EVENTPROP_OK)
+            << "the in-place path allocated something with allocation disabled";
+    }
+
+    ExpectCodesReached(observed, expected, std::size(expected), "loss");
+    eventprop_free_maxima_output(maxima);
 }

@@ -121,6 +121,7 @@ add_executable(eventprop_tests
     test/free_functions.cpp
     test/alloc_fault_injection.cpp
     test/diag_functions.cpp
+    test/maxima_regression_loss.cpp
     test/matrix_view.cpp
 )
 target_compile_definitions(eventprop_tests PRIVATE EVENTPROP_VALIDATE_INPUTS)

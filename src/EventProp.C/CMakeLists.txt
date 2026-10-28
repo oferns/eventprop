@@ -157,6 +157,7 @@ add_library(eventprop_c_api ${LIB_TYPE}
     eventprop_backward.c
     eventprop_currents.c
     eventprop_diag.c
+    eventprop_loss.c
     eventprop_batch.c
 )
 
@@ -223,6 +224,6 @@ target_include_directories(eventprop_c_api PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Install
 install(TARGETS eventprop_c_api LIBRARY DESTINATION lib)
-install(FILES eventprop.h eventprop_diag.h eventprop_batch.h DESTINATION include)
+install(FILES eventprop.h eventprop_diag.h eventprop_batch.h eventprop_loss.h DESTINATION include)
 
 # Unit tests (see EventProp.C.Tests for Google Test suite)

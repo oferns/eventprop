@@ -35,7 +35,7 @@ extern "C" {
  *  every struct it embeds by value. Both are checked on import by the Cython layer
  *  and at layer construction by `EventProp.Native`.
  */
-#define EVENTPROP_ABI_VERSION 2
+#define EVENTPROP_ABI_VERSION 3
 
 /** Error codes returned by EventProp functions.
  *  Set via the `error_no` field on output structs when validation is enabled */
@@ -108,7 +108,13 @@ typedef enum EventPropError {
     EVENTPROP_ALLOC_DIAG_CUR_SUM      = 65,  /* lambda-I running synaptic sum row */
     EVENTPROP_ALLOC_DIAG_LAMBDA_V     = 66,  /* lambda-I per-neuron membrane adjoint array */
     EVENTPROP_ALLOC_DIAG_LAMBDA_JUMPS = 67,  /* lambda-I jump time/magnitude arrays */
-    EVENTPROP_DIAG_QUERY_TIME_INVALID = 68   /* pointwise lambda-I query time is negative or non-finite */
+    EVENTPROP_DIAG_QUERY_TIME_INVALID = 68,  /* pointwise lambda-I query time is negative or non-finite */
+    EVENTPROP_ALLOC_LOSS_ERRORS       = 69,  /* maxima-regression dL/dmaxima array */
+    EVENTPROP_ALLOC_LOSS_DECODER_GRAD = 70,  /* maxima-regression dL/da array */
+    EVENTPROP_INVALID_HUBER_DELTA     = 71,  /* huber_delta is NaN or <= 0 (non-finite means least squares) */
+    EVENTPROP_NONFINITE_TARGET        = 72,  /* regression target is NaN or +-Inf */
+    EVENTPROP_NONFINITE_DECODER       = 73,  /* a readout weight or bias is NaN or +-Inf */
+    EVENTPROP_NONFINITE_PREDICTION    = 74   /* readout summed to a non-finite value: parameters overflowed */
 } EventPropError;
 
 /** ── Validation limits ──────────────────────────────────────────────── */

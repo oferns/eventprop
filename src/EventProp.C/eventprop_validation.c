@@ -255,6 +255,12 @@ const char* eventprop_error_string(const int error_no)
         case EVENTPROP_ALLOC_DIAG_LAMBDA_JUMPS: return "Allocation failed: lambda-I jump arrays";
         case EVENTPROP_DIAG_QUERY_TIME_INVALID: return "Invalid lambda-I query time (negative or non-finite)";
         case EVENTPROP_ALLOC_BWD_CURRENTS:      return "Allocation failed: backward-pass post-spike currents";
+        case EVENTPROP_ALLOC_LOSS_ERRORS:       return "Allocation failed: regression dL/dmaxima array";
+        case EVENTPROP_ALLOC_LOSS_DECODER_GRAD: return "Allocation failed: regression dL/da array";
+        case EVENTPROP_INVALID_HUBER_DELTA:     return "Invalid Huber scale: huber_delta must be positive, or non-finite for least squares";
+        case EVENTPROP_NONFINITE_TARGET:        return "Regression target is NaN or infinite";
+        case EVENTPROP_NONFINITE_DECODER:       return "Readout parameter is NaN or infinite (decoder weight or bias)";
+        case EVENTPROP_NONFINITE_PREDICTION:    return "Readout overflowed to a non-finite value (weights, bias or maxima too large)";
         default:                                return "Unknown error";
     }
 }

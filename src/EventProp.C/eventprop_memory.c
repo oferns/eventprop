@@ -6,6 +6,7 @@
  * - Core single-sample outputs (eventprop.h)
  * - Batch results (eventprop_batch.h)
  * - Diagnostic traces (eventprop_diag.h)
+ * - Loss readouts (eventprop_loss.h)
  *
  * Also hosts the allocation-fault-injection shim used to exercise error paths
  * in tests (see eventprop_test_alloc_fail_nth).
@@ -15,6 +16,7 @@
 #include "eventprop.h"
 #include "eventprop_batch.h"
 #include "eventprop_diag.h"
+#include "eventprop_loss.h"
 #include <stdlib.h>
 
 /* ------------------------------------------------------------------ */
@@ -172,4 +174,14 @@ void eventprop_free_voltage_trace_output(const VoltageTraceOutput output)
 {
     free(output.v_trace);
     free(output.ts);
+}
+
+/* ------------------------------------------------------------------ */
+/* Loss readouts                                                       */
+/* ------------------------------------------------------------------ */
+
+void eventprop_free_maxima_regression_output(const MaximaRegressionOutput output)
+{
+    free(output.errors);
+    free(output.decoder_grad);
 }

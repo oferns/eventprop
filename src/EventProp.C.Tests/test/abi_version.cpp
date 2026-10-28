@@ -23,6 +23,7 @@
 #include "eventprop.h"
 #include "eventprop_batch.h"
 #include "eventprop_diag.h"
+#include "eventprop_loss.h"
 
 #include <cstring>
 #include <string>
@@ -58,6 +59,9 @@ TEST(AbiStructSize, EveryPublicStructHasANonZeroEntry) {
         "LambdaITraceInput",
         "LambdaITraceOutput",
         "LambdaIAtTimeOutput",
+        "MaximaRegressionInput",
+        "MaximaRegressionOutput",
+        "MaximaRegressionResult",
     };
 
     for (const auto& name : names) {
@@ -90,6 +94,11 @@ TEST(AbiStructSize, MatchesSizeofInTheConsumersTranslationUnit) {
     EXPECT_EQ(eventprop_abi_struct_size("LambdaITraceInput"), sizeof(LambdaITraceInput));
     EXPECT_EQ(eventprop_abi_struct_size("LambdaITraceOutput"), sizeof(LambdaITraceOutput));
     EXPECT_EQ(eventprop_abi_struct_size("LambdaIAtTimeOutput"), sizeof(LambdaIAtTimeOutput));
+    /* The regression readout. A consumer that skips these lines keeps reading its own offsets
+     * in peace — which is exactly the silence this test exists to break. */
+    EXPECT_EQ(eventprop_abi_struct_size("MaximaRegressionInput"), sizeof(MaximaRegressionInput));
+    EXPECT_EQ(eventprop_abi_struct_size("MaximaRegressionOutput"), sizeof(MaximaRegressionOutput));
+    EXPECT_EQ(eventprop_abi_struct_size("MaximaRegressionResult"), sizeof(MaximaRegressionResult));
 }
 
 TEST(AbiStructSize, UnknownNameReturnsZero) {
@@ -113,6 +122,7 @@ TEST(AbiStructSize, TableKeysAreUnique) {
         "DropoutOutput", "DropoutBatch", "AccumulatedBackwardResult",
         "VoltageTraceInput", "VoltageTraceOutput", "LambdaITraceInput", "LambdaITraceOutput",
         "LambdaIAtTimeOutput",
+        "MaximaRegressionInput", "MaximaRegressionOutput", "MaximaRegressionResult",
     };
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
         for (size_t j = i + 1; j < sizeof(names) / sizeof(names[0]); ++j) {

@@ -32,6 +32,7 @@
 #include "eventprop.h"
 #include "eventprop_batch.h"
 #include "eventprop_diag.h"
+#include "eventprop_loss.h"
 
 #include <string.h>
 
@@ -68,6 +69,9 @@ size_t eventprop_abi_struct_size(const char* struct_name) {
         EVENTPROP_SIZE_ENTRY(LambdaITraceInput),
         EVENTPROP_SIZE_ENTRY(LambdaITraceOutput),
         EVENTPROP_SIZE_ENTRY(LambdaIAtTimeOutput),
+        EVENTPROP_SIZE_ENTRY(MaximaRegressionInput),
+        EVENTPROP_SIZE_ENTRY(MaximaRegressionOutput),
+        EVENTPROP_SIZE_ENTRY(MaximaRegressionResult),
     };
     const size_t count = sizeof(sizes) / sizeof(sizes[0]);
 

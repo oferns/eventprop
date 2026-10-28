@@ -11,7 +11,7 @@
 #include <string>
 
 TEST(ErrorStrings, EveryDefinedCodeHasUniqueNonNullMessage) {
-    // Upper bound = highest defined enumerator (EVENTPROP_ALLOC_BWD_CURRENTS).
+    // Upper bound = highest defined enumerator (EVENTPROP_NONFINITE_PREDICTION).
     // A code past the end must fall through to "Unknown error", so the loop
     // also proves the table is dense (no accidental gaps).
     int last_known = 0;
@@ -32,8 +32,8 @@ TEST(ErrorStrings, EveryDefinedCodeHasUniqueNonNullMessage) {
     }
 
     // The table must be dense: no code inside the range may be unknown.
-    EXPECT_GE(last_known, EVENTPROP_ALLOC_BWD_CURRENTS)
-        << "A code below EVENTPROP_ALLOC_BWD_CURRENTS returned \"Unknown error\"";
+    EXPECT_GE(last_known, EVENTPROP_NONFINITE_PREDICTION)
+        << "A code below EVENTPROP_NONFINITE_PREDICTION returned \"Unknown error\"";
 }
 
 TEST(ErrorStrings, SpecificMessagesAreCorrect) {
