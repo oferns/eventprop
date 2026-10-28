@@ -3,6 +3,7 @@
  * @brief Input validation and error-message helpers.
  */
 #include "eventprop.h"
+#include "eventprop_internal.h"   /* declares eventprop_validate_post_spikes, defined below */
 #include <limits.h>
 #include <math.h>
 #include <stddef.h>
@@ -124,6 +125,57 @@ EventPropError eventprop_validate_input(const EventPropInput input)
      * that breaks the guard. */
     if (isnan(input.v_th) || !(input.v_th > 0.0))
         return EVENTPROP_INVALID_VTH;
+
+    return EVENTPROP_OK;
+}
+
+/** ── Caller-supplied post-synaptic spike lists ───────────────────────── */
+
+/**
+ * Validate a post-synaptic spike list handed back by the caller.
+ *
+ * The forward pass returns times/sources; the backward pass and both diagnostic traces take
+ * such a list as an argument. Every consumer then walks it with a single cursor moving forward
+ * (eventprop_rebuild_post_currents) or backward with an early break (the adjoint sweep), so an
+ * unsorted list is not a valid-but-different input — it rebuilds the wrong synaptic currents or
+ * under-counts adjoint jumps and still returns EVENTPROP_OK. The sources index per-neuron arrays
+ * (lambda_v, the current-rebuild row), so an out-of-range index writes out of bounds rather than
+ * merely computing a wrong number.
+ *
+ * So the rules are the ones every spike list in this library already has — non-decreasing,
+ * finite, non-negative — with the source bound taken against n_post instead of n_pre. The Eigen
+ * reference requires all of it and checks none of it, which is why it silently returns plausible
+ * numbers on such input while C reports a code; this is the strict side of that shared contract,
+ * matching eventprop_backward_spikes' handling of post_spike_errors' spike list.
+ *
+ * A zero-length list may pass NULL arrays: there is nothing to read, and the empty sweep is a
+ * legitimate case (a neuron that never fires), not an error.
+ */
+EventPropError eventprop_validate_post_spikes(const double* times,
+                                              const int* sources,
+                                              int n_spikes,
+                                              int n_post)
+{
+    if (n_spikes < 0)
+        return EVENTPROP_NEGATIVE_SPIKES;
+    if (n_spikes == 0)
+        return EVENTPROP_OK;
+    if (times == NULL || sources == NULL)
+        return EVENTPROP_NULL_POINTER;
+
+    /* Negated / classification checks first, in the order the per-spike pass in
+     * eventprop_validate_input_no_v_th uses, so the two lists fail the same way. */
+    for (int i = 0; i < n_spikes; i++) {
+        const double t = times[i];
+        if (!isfinite(t))
+            return EVENTPROP_NONFINITE_SPIKE_TIME;
+        if (t < 0.0)
+            return EVENTPROP_NEGATIVE_SPIKE_TIME;
+        if (i > 0 && t < times[i - 1])
+            return EVENTPROP_UNSORTED_SPIKE_TIMES;
+        if (sources[i] < 0 || sources[i] >= n_post)
+            return EVENTPROP_INVALID_SOURCE;
+    }
 
     return EVENTPROP_OK;
 }

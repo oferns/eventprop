@@ -88,6 +88,25 @@ void eventprop_rebuild_post_currents(const EventPropInput* input,
                                      double* currents,
                                      double* row_scratch);
 
+/**
+ * Validate a caller-supplied post-synaptic spike list: non-decreasing, finite, non-negative,
+ * with sources inside [0, n_post).
+ *
+ * Shared by every entry point that consumes a spike list the caller owns —
+ * eventprop_backward_spikes, eventprop_compute_voltage_trace, eventprop_compute_lambda_i_trace
+ * and eventprop_compute_lambda_i_at_time — for the same reason the current rebuild is shared:
+ * all of them depend on the ordering (forward cursor, or backward sweep with an early break),
+ * so a second opinion of the rule is how one entry point ends up returning EVENTPROP_OK with a
+ * silently truncated result while another rejects the same array. See eventprop_validation.c.
+ *
+ * @return EVENTPROP_OK, or the first of NEGATIVE_SPIKES / NULL_POINTER / NONFINITE_SPIKE_TIME /
+ *         NEGATIVE_SPIKE_TIME / UNSORTED_SPIKE_TIMES / INVALID_SOURCE that applies.
+ */
+EventPropError eventprop_validate_post_spikes(const double* times,
+                                              const int* sources,
+                                              int n_spikes,
+                                              int n_post);
+
 /** Per-thread scratch during spike detection.
  *  One row is reused across neurons and grown x3 through the injection shim
  *  when a neuron needs more entries than it currently holds, and each thread

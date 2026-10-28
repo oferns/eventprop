@@ -257,11 +257,29 @@ Each line is a rule you cannot see from the file it governs. Detail and evidence
 
 **Numerics and the shared contract**
 - **Every spike list fed to the library is non-decreasing**, and times are **non-negative**.
-  `eventprop_validate_input_no_v_th` enforces both (`60`, `7`). The Eigen reference has the
-  same requirement and does **not** check it — it returns plausible garbage. C is the stricter
-  *diagnostic*, not the divergent implementation; on sorted input the two agree to root-finder
-  tolerance. Pinned by `ComputeSpikes.UnsortedTimesRejected` and `ComputeSpikes.EqualTimesAccepted`
-  (equal times are the legitimate simultaneous-spike case).
+  `eventprop_validate_input_no_v_th` enforces both (`60`, `7`) for `EventPropInput.times`; a
+  post-spike list the caller owns (the backward pass's `SpikeOutput`, both diagnostic traces) goes
+  through **`eventprop_validate_post_spikes`**, which adds the source bound against `n_post`.
+  One helper on purpose: the consumers differ in cursor *direction* (forward current rebuild,
+  backward adjoint sweep with an early break), but every one of them **silently truncates instead
+  of failing**, so per-site loops drift — the voltage trace used to accept an unsorted list the
+  lambda-I trace rejected, same field, same array. The Eigen reference has the same requirement
+  and does **not** check it — it returns plausible garbage. C is the stricter *diagnostic*, not the
+  divergent implementation; on sorted input the two agree to root-finder tolerance. Pinned by
+  `ComputeSpikes.UnsortedTimesRejected` and `ComputeSpikes.EqualTimesAccepted` (equal times are the
+  legitimate simultaneous-spike case), and on the post-spike side by
+  `BackwardSpikes.UnsortedOutputSpikeTimesReturnsError` plus the `*Rejected` cases in
+  `DiagVoltageTrace` / `DiagLambdaITrace`.
+- The lambda-I sweep's **first decay is `exp(largest_time / tau_mem)`** — `previous_t` starts at
+  `largest_time` and the newest spike's backward time is 0. It multiplies an all-zero `lambda_v`,
+  so it is a no-op while finite and **NaN past ~709** (`0 * inf`), which then poisons every sample
+  with `EVENTPROP_OK`. Output of `compute_spikes` can never reach it (`validate_input` bounds
+  `max(times)/tau_syn`, `tau_syn < tau_mem`, output times never exceed the last input time), so
+  the only way in is a **caller-built spike list running past the input span** — a replay or a UI
+  cursor, which is what both bindings expose. `lambda_sweep_prepare` therefore rejects
+  `largest_time / tau_mem >= EVENTPROP_EXP_OVERFLOW_THRESHOLD` (`13`). The Eigen reference
+  overflows identically and says nothing; no parity fixture gets near the bound (~2.5), so the
+  guard cannot split the backends on any input the reference can evaluate.
 - `sum0[i]`/`sum1[i]` include every input spike up to `times[i-1]`, so interval *i*'s voltage
   model is valid only for `t >= times[i-1]`. Bracket floors must respect that in the **last**
   interval too — that is where spurious spikes come from.

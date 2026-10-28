@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 #include "eventprop.h"
 #include <cmath>
+#include <limits>
 #include <vector>
 
 static constexpr double kTauMem = 0.02;
@@ -493,4 +494,43 @@ TEST(BackwardSpikes, UnsortedOutputSpikeTimesReturnsError) {
     EXPECT_EQ(result.error_no, EVENTPROP_UNSORTED_SPIKE_TIMES);
     EXPECT_EQ(result.grad, nullptr);
     EXPECT_EQ(result.spike_errors, nullptr);
+}
+
+// The shared post-spike validation (eventprop_validate_post_spikes, also used by both diagnostic
+// traces) carries two more rules this call site used to skip: a post-spike time may not be
+// negative or non-finite. Both previously reached the adjoint sweep and came out the other side as
+// a NaN gradient reported with EVENTPROP_OK — a wrong number, not a refusal.
+//
+// The negative time is first in the list so the ordering check is not what fires, and equal/normal
+// times follow it.
+TEST(BackwardSpikes, NegativeOutputSpikeTimeReturnsError) {
+    std::vector<double> w = {10.0};
+    std::vector<double> times   = {0.01};
+    std::vector<int> sources    = {0};
+    auto input = make_input(w, 1, 1, times, sources);
+
+    std::vector<double> post_times    = {-0.001, 0.02};   // ascending, sign is the violation
+    std::vector<int> post_sources     = {0, 0};
+    std::vector<double> post_errors(2, 1.0);
+    SpikeOutput fwd{EVENTPROP_OK, 2, post_times.data(), post_sources.data()};
+
+    BackwardOutput result = eventprop_backward_spikes(input, fwd, post_errors.data());
+    EXPECT_EQ(result.error_no, EVENTPROP_NEGATIVE_SPIKE_TIME);
+    EXPECT_EQ(result.grad, nullptr);
+}
+
+TEST(BackwardSpikes, NonFiniteOutputSpikeTimeReturnsError) {
+    std::vector<double> w = {10.0};
+    std::vector<double> times   = {0.01};
+    std::vector<int> sources    = {0};
+    auto input = make_input(w, 1, 1, times, sources);
+
+    std::vector<double> post_times    = {0.02, std::numeric_limits<double>::quiet_NaN()};
+    std::vector<int> post_sources     = {0, 0};
+    std::vector<double> post_errors(2, 1.0);
+    SpikeOutput fwd{EVENTPROP_OK, 2, post_times.data(), post_sources.data()};
+
+    BackwardOutput result = eventprop_backward_spikes(input, fwd, post_errors.data());
+    EXPECT_EQ(result.error_no, EVENTPROP_NONFINITE_SPIKE_TIME);
+    EXPECT_EQ(result.grad, nullptr);
 }

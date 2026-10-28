@@ -33,8 +33,15 @@ VoltageTraceOutput eventprop_compute_voltage_trace(const VoltageTraceInput input
         result.error_no = EVENTPROP_DIAG_TARGET_OUT_OF_RANGE;
         return result;
     }
-    if (input.n_post_spikes > 0 && (!input.fwd_times || !input.fwd_sources)) {
-        result.error_no = EVENTPROP_NULL_POINTER;
+    /* The post-spike scan below breaks out of the loop at the first spike behind the sample
+     * time, so an unsorted or negative list would silently drop reset contributions and still
+     * report EVENTPROP_OK; the sources are also compared against the target neuron, so an
+     * out-of-range one means the list did not come from this layer. Same rule, same helper, as
+     * the lambda-I entry points — see eventprop_validate_post_spikes. */
+    const EventPropError list_err = eventprop_validate_post_spikes(
+        input.fwd_times, input.fwd_sources, input.n_post_spikes, input.input.n_post);
+    if (list_err != EVENTPROP_OK) {
+        result.error_no = list_err;
         return result;
     }
     const int n_t = (int)(input.t_max / input.dt);
@@ -193,31 +200,27 @@ static EventPropError lambda_sweep_prepare(const LambdaITraceInput* in, LambdaSw
         return err;
     }
 
-    /* Validate tau values (division by zero in the backward kernel prefactor) */
-    if (in->input.tau_mem <= 0 || in->input.tau_syn <= 0 ||
-        in->input.tau_mem == in->input.tau_syn) {
-        return EVENTPROP_INVALID_TAU;
-    }
+    /* No tau check here on purpose. The k_bwd prefactor divides by tau_mem - tau_syn, and
+     * eventprop_validate_input above already rejects equal taus (EVENTPROP_INVALID_TAU) and taus
+     * closer than EVENTPROP_TAU_REL_DIFF_MIN (EVENTPROP_TAU_TOO_CLOSE). A second guard under this
+     * function's own name would be unreachable code that reads like the defence, which is what
+     * made the guard it replaces look load-bearing. */
 
     if (in->target_nrn_idx < 0 || in->target_nrn_idx >= in->input.n_post) {
         return EVENTPROP_DIAG_TARGET_OUT_OF_RANGE;
     }
 
-    /* The sweep reads a source and an error per spike. */
-    if (in->n_post_spikes > 0 && (!in->fwd_times || !in->fwd_sources || !in->post_errors)) {
+    /* The sweep reads a source and an error per spike, and walks the list backwards stopping at
+     * the first spike earlier than the query time — so the ordering is part of the contract, not
+     * a preference (see eventprop_validate_post_spikes). The reference requires the ordering and
+     * the source bound and checks neither; C is the diagnostic. */
+    if (in->n_post_spikes > 0 && in->post_errors == NULL) {
         return EVENTPROP_NULL_POINTER;
     }
-
-    /* The sweep walks the list backwards and stops at the first spike earlier than the query
-     * time, so an unsorted list silently under-counts instead of failing, and a source index
-     * indexes lambda_v. The reference requires both and checks neither; C is the diagnostic. */
-    for (int i = 0; i < in->n_post_spikes; i++) {
-        if (i > 0 && in->fwd_times[i] < in->fwd_times[i - 1]) {
-            return EVENTPROP_UNSORTED_SPIKE_TIMES;
-        }
-        if (in->fwd_sources[i] < 0 || in->fwd_sources[i] >= in->input.n_post) {
-            return EVENTPROP_INVALID_SOURCE;
-        }
+    const EventPropError list_err = eventprop_validate_post_spikes(
+        in->fwd_times, in->fwd_sources, in->n_post_spikes, in->input.n_post);
+    if (list_err != EVENTPROP_OK) {
+        return list_err;
     }
 
     /* No post spikes means no jumps to sum: a legitimate empty sweep, not an error. */
@@ -247,6 +250,23 @@ static EventPropError lambda_sweep_prepare(const LambdaITraceInput* in, LambdaSw
         return EVENTPROP_ALLOC_DIAG_LAMBDA_JUMPS;
     }
     s->largest_time = in->fwd_times[n - 1];
+
+    /* The sweep's first decay is exp(largest_time / tau_mem): previous_t starts at largest_time
+     * and the newest spike's t_bwd is 0, which is a no-op while it stays finite because lambda_v
+     * is still all zeros. Past ~709 it is inf, and 0 * inf is NaN — from there it propagates into
+     * every jump and every sample, so the trace comes back all NaN with EVENTPROP_OK.
+     *
+     * A list produced by compute_spikes cannot reach it: eventprop_validate_input bounds
+     * max(input.times)/tau_syn below the threshold, tau_syn < tau_mem, and output spike times
+     * never exceed the last input time. So this fires only for a caller-supplied list running
+     * far past the input span — which is what a replay, a UI cursor, or a hand-built fixture
+     * does, and both the Cython and .NET layers expose these entry points directly. The Eigen
+     * reference overflows identically and reports nothing; the parity fixtures never get close
+     * (their largest_time / tau_mem is about 2.5), so this cannot split the two backends on any
+     * input the reference can actually evaluate. */
+    if (s->largest_time / in->input.tau_mem >= EVENTPROP_EXP_OVERFLOW_THRESHOLD) {
+        return EVENTPROP_TIMES_TAU_MISMATCH;
+    }
 
     /* Same ascending cursor the backward pass uses — see eventprop_currents.c. */
     eventprop_rebuild_post_currents(&in->input, in->fwd_times, in->fwd_sources, n,

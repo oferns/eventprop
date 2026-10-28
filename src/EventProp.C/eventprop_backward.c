@@ -75,18 +75,18 @@ BackwardOutput eventprop_backward_spikes(const EventPropInput input,
         goto cleanup_and_return;
     }
 
-    /* Validate output spike sources (they index post-neurons) and their order:
-     *  the currents below are rebuilt with one forward cursor over the post
-     *  spikes, so they must be non-decreasing like every other spike list. */
-    for (int i = 0; i < spike.n_spikes; ++i) {
-        if (spike.sources[i] < 0 || spike.sources[i] >= input.n_post) {
-            result.error_no     = EVENTPROP_INVALID_SOURCE;
-            goto cleanup_and_return;
-        }
-        if (i > 0 && spike.times[i] < spike.times[i - 1]) {
-            result.error_no     = EVENTPROP_UNSORTED_SPIKE_TIMES;
-            goto cleanup_and_return;
-        }
+    /* Validate output spike sources (they index post-neurons) and their order: the currents
+     * below are rebuilt with one forward cursor over the post spikes, so they must be
+     * non-decreasing like every other spike list. This is the shared check —
+     * eventprop_validate_post_spikes — the two diagnostic traces apply to the same kind of list,
+     * and it runs after the merged-size guard above so an absurd spike count is never
+     * dereferenced. It also rejects non-finite and negative times, which previously reached the
+     * sweep and came out the other side as a NaN gradient with EVENTPROP_OK. */
+    const EventPropError list_err = eventprop_validate_post_spikes(
+        spike.times, spike.sources, spike.n_spikes, input.n_post);
+    if (list_err != EVENTPROP_OK) {
+        result.error_no = list_err;
+        goto cleanup_and_return;
     }
 
     /* Allocate output */

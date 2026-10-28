@@ -8,6 +8,7 @@
 #include "eventprop_batch.h"
 #include "eventprop_diag.h"
 #include <cmath>
+#include <limits>
 #include <vector>
 
 static constexpr double kTauMem = 0.02;
@@ -199,6 +200,101 @@ TEST(DiagVoltageTrace, OutOfBoundsTargetNeuronReturnsError) {
 
     VoltageTraceOutput trace = eventprop_compute_voltage_trace(trace_input);
     EXPECT_EQ(trace.error_no, EVENTPROP_DIAG_TARGET_OUT_OF_RANGE);
+
+    eventprop_free_voltage_trace_output(trace);
+}
+
+// The post-spike list is caller-owned, and the trace scans it with a loop that breaks at the
+// first spike behind the sample time — so the ordering, the sign and the source bound are part of
+// the contract, exactly as they are for EventPropInput.times. Before the shared
+// eventprop_validate_post_spikes call each of these returned EVENTPROP_OK with a trace computed
+// from a silently truncated spike set, while the lambda-I entry points rejected the same array:
+// two entry points, one list, two answers. The Eigen reference breaks identically and validates
+// nothing, so this is the strict-diagnostic side of a shared contract, not a parity gap.
+TEST(DiagVoltageTrace, UnsortedPostSpikeTimesRejected) {
+    std::vector<double> w = {1.0, 2.0};
+    EventPropInput input{w.data(), 1, 2, nullptr, nullptr, 0, kTauMem, kTauSyn, kVTh};
+
+    std::vector<double> fwd_times  = {0.06, 0.03};   // descending
+    std::vector<int>    fwd_sources = {0, 0};
+
+    VoltageTraceInput trace_input{
+        input, 0, fwd_times.data(), fwd_sources.data(), 2, 0.1, 0.001
+    };
+
+    VoltageTraceOutput trace = eventprop_compute_voltage_trace(trace_input);
+    EXPECT_EQ(trace.error_no, EVENTPROP_UNSORTED_SPIKE_TIMES);
+    EXPECT_EQ(trace.v_trace, nullptr);
+
+    eventprop_free_voltage_trace_output(trace);
+}
+
+// Non-decreasing, not strictly increasing: simultaneous spikes are the legitimate case the parity
+// suite covers, so the guard must not reject them.
+TEST(DiagVoltageTrace, EqualPostSpikeTimesAccepted) {
+    std::vector<double> w = {1.0, 2.0};
+    EventPropInput input{w.data(), 1, 2, nullptr, nullptr, 0, kTauMem, kTauSyn, kVTh};
+
+    std::vector<double> fwd_times  = {0.04, 0.04};
+    std::vector<int>    fwd_sources = {0, 1};
+
+    VoltageTraceInput trace_input{
+        input, 0, fwd_times.data(), fwd_sources.data(), 2, 0.1, 0.001
+    };
+
+    VoltageTraceOutput trace = eventprop_compute_voltage_trace(trace_input);
+    EXPECT_EQ(trace.error_no, EVENTPROP_OK);
+
+    eventprop_free_voltage_trace_output(trace);
+}
+
+// A negative post-spike time makes exp(-(t - t_spike) / tau_mem) GROW with t instead of decay:
+// the exponent is positive for every sample before it. The library already rejects negative input
+// times for the same reason (EVENTPROP_NEGATIVE_SPIKE_TIME).
+TEST(DiagVoltageTrace, NegativePostSpikeTimeRejected) {
+    std::vector<double> w = {1.0, 2.0};
+    EventPropInput input{w.data(), 1, 2, nullptr, nullptr, 0, kTauMem, kTauSyn, kVTh};
+
+    std::vector<double> fwd_times  = {-0.001, 0.01};   // ascending, so the sign is what fails
+    std::vector<int>    fwd_sources = {0, 0};
+
+    VoltageTraceInput trace_input{
+        input, 0, fwd_times.data(), fwd_sources.data(), 2, 0.1, 0.001
+    };
+
+    VoltageTraceOutput trace = eventprop_compute_voltage_trace(trace_input);
+    EXPECT_EQ(trace.error_no, EVENTPROP_NEGATIVE_SPIKE_TIME);
+
+    eventprop_free_voltage_trace_output(trace);
+}
+
+TEST(DiagVoltageTrace, PostSourceOutOfRangeRejected) {
+    std::vector<double> w = {1.0, 2.0};
+    EventPropInput input{w.data(), 1, 2, nullptr, nullptr, 0, kTauMem, kTauSyn, kVTh};
+
+    std::vector<double> fwd_times  = {0.03};
+    std::vector<int>    fwd_sources = {2};             // n_post is 2: valid indices are 0 and 1
+
+    VoltageTraceInput trace_input{
+        input, 0, fwd_times.data(), fwd_sources.data(), 1, 0.1, 0.001
+    };
+
+    VoltageTraceOutput trace = eventprop_compute_voltage_trace(trace_input);
+    EXPECT_EQ(trace.error_no, EVENTPROP_INVALID_SOURCE);
+
+    eventprop_free_voltage_trace_output(trace);
+}
+
+// A non-empty list needs both arrays; the empty list is the legitimate "neuron never fired"
+// case and accepts NULL. Pinned because the NULL check moved into the shared helper.
+TEST(DiagVoltageTrace, NullPostSpikeArraysRejected) {
+    std::vector<double> w = {1.0, 2.0};
+    EventPropInput input{w.data(), 1, 2, nullptr, nullptr, 0, kTauMem, kTauSyn, kVTh};
+
+    VoltageTraceInput trace_input{input, 0, nullptr, nullptr, 2, 0.1, 0.001};
+
+    VoltageTraceOutput trace = eventprop_compute_voltage_trace(trace_input);
+    EXPECT_EQ(trace.error_no, EVENTPROP_NULL_POINTER);
 
     eventprop_free_voltage_trace_output(trace);
 }
@@ -477,6 +573,72 @@ TEST(DiagLambdaITrace, SourceOutOfRangeRejected) {
     eventprop_free_lambda_i_trace_output(trace);
 }
 
+// The remaining rules the shared helper carries: the sweep measures every jump's position
+// against the newest spike, so a negative time silently re-ages the whole trace, and a NaN time
+// propagates into every sample. The reference checks neither.
+TEST(DiagLambdaITrace, NegativePostSpikeTimeRejected) {
+    std::vector<double> w;
+    std::vector<double> fwd_times  = {-0.001, 0.01};   // ascending, so the sign is what fails
+    std::vector<int>    fwd_sources = {0, 0};
+    std::vector<double> post_errors = {1.0, 1.0};
+
+    LambdaITraceInput input{make_empty_forward(w), 0, fwd_times.data(), fwd_sources.data(),
+                            post_errors.data(), 2, 0.1, 0.001};
+
+    LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
+    EXPECT_EQ(trace.error_no, EVENTPROP_NEGATIVE_SPIKE_TIME);
+
+    eventprop_free_lambda_i_trace_output(trace);
+}
+
+TEST(DiagLambdaITrace, NonFinitePostSpikeTimeRejected) {
+    std::vector<double> w;
+    std::vector<double> fwd_times  = {0.01, std::numeric_limits<double>::quiet_NaN()};
+    std::vector<int>    fwd_sources = {0, 0};
+    std::vector<double> post_errors = {1.0, 1.0};
+
+    LambdaITraceInput input{make_empty_forward(w), 0, fwd_times.data(), fwd_sources.data(),
+                            post_errors.data(), 2, 0.1, 0.001};
+
+    LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
+    EXPECT_EQ(trace.error_no, EVENTPROP_NONFINITE_SPIKE_TIME);
+
+    eventprop_free_lambda_i_trace_output(trace);
+}
+
+// The sweep's first decay is exp(largest_time / tau_mem): previous_t starts at largest_time and
+// the newest spike's backward time is 0. It multiplies an all-zero lambda_v, so it is a no-op
+// while finite — but past ~700 it is inf, 0 * inf is NaN, and the trace comes back all NaN with
+// EVENTPROP_OK. A list produced by compute_spikes cannot reach it (validate_input bounds
+// max(times)/tau_syn below the threshold and output times never exceed the last input time), so
+// this only fires for a caller-built list running far past the input span — a replay or a UI
+// cursor, which is what the Cython and .NET layers expose. The Eigen reference overflows the same
+// way and reports nothing; no parity fixture gets near the bound (about 2.5), so this cannot
+// split the backends on any input the reference can evaluate.
+TEST(DiagLambdaITrace, LargestTimeBeyondExpRangeRejected) {
+    std::vector<double> w;
+    std::vector<double> fwd_times   = {20.0};   // 20 / kTauMem = 1000 >= EXP_OVERFLOW_THRESHOLD
+    std::vector<int>    fwd_sources = {0};
+    std::vector<double> post_errors = {1.0};
+
+    LambdaITraceInput input{make_empty_forward(w), 0, fwd_times.data(), fwd_sources.data(),
+                            post_errors.data(), 1, 0.1, 0.001};
+
+    LambdaITraceOutput trace = eventprop_compute_lambda_i_trace(input);
+    EXPECT_EQ(trace.error_no, EVENTPROP_TIMES_TAU_MISMATCH);
+    EXPECT_EQ(trace.lambda_trace, nullptr);
+    eventprop_free_lambda_i_trace_output(trace);
+
+    // An order of magnitude inside the bound still evaluates, so the guard is the overflow
+    // threshold and not a plausibility heuristic on spike times.
+    std::vector<double> near_times  = {1.0};    // ratio 50
+    LambdaITraceInput near{make_empty_forward(w), 0, near_times.data(), fwd_sources.data(),
+                           post_errors.data(), 1, 0.1, 0.001};
+    LambdaITraceOutput ok_trace = eventprop_compute_lambda_i_trace(near);
+    EXPECT_EQ(ok_trace.error_no, EVENTPROP_OK);
+    eventprop_free_lambda_i_trace_output(ok_trace);
+}
+
 TEST(DiagLambdaITrace, TargetOutOfRangeRejected) {
     std::vector<double> w;
     std::vector<double> fwd_times = {0.03};
@@ -710,6 +872,22 @@ TEST(DiagLambdaIAtTime, PointwiseSharesTraceValidation) {
     EXPECT_EQ(eventprop_compute_lambda_i_at_time(input, 0.01).error_no, EVENTPROP_NULL_POINTER);
 
     eventprop_free_lambda_i_trace_output(trace);
+}
+
+// Including the exponential-range guard: the pointwise entry runs the same sweep, so it inherits
+// the same reason to refuse.
+TEST(DiagLambdaIAtTime, PointwiseRejectsOverflowingSweep) {
+    std::vector<double> w;
+    std::vector<double> fwd_times   = {20.0};
+    std::vector<int>    fwd_sources = {0};
+    std::vector<double> post_errors = {1.0};
+
+    LambdaITraceInput input{make_empty_forward(w), 0, fwd_times.data(), fwd_sources.data(),
+                            post_errors.data(), 1, 0.1, 0.001};
+
+    LambdaIAtTimeOutput one = eventprop_compute_lambda_i_at_time(input, 0.0);
+    EXPECT_EQ(one.error_no, EVENTPROP_TIMES_TAU_MISMATCH);
+    EXPECT_EQ(one.lambda_i, 0.0);
 }
 
 TEST(DiagVoltageTrace, ExcessiveSampleCountReturnsError) {
