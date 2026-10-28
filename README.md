@@ -2,6 +2,10 @@
 
 A multi-language implementation of the **EventProp** algorithm for training Spiking Neural Networks.
 
+## AI Involvement
+
+A local AI model (Qwen) was used to help with most aspects of these libraries. An iterative approach was take avoid AI "slop".  
+
 ## What is EventProp?
 
 EventProp is an event-based backpropagation method that computes **exact gradients** through spike times in spiking neural networks. Unlike surrogate gradient approaches, EventProp analytically differentiates through the threshold-crossing event itself using the adjoint method from control theory — enabling precise weight updates without approximation.
