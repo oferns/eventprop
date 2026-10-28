@@ -142,6 +142,77 @@ def render() -> None:
                                            f"{ck.weights_at(-1)[0].shape[1]} neurons fired",
                                            height=240), width="stretch")
 
+    with st.expander("How long each backend takes"):
+        st.caption(
+            "Median wall time of the maxima forward pass: the hidden LIF layer, then the LI "
+            "read-out that returns the maxima. Three things are deliberately outside the "
+            "timer — encoding the pixels into latencies, marshalling the spike lists into "
+            "the binding's container, and constructing the two layer objects. The first is "
+            "numpy and identical for both backends; on MNIST it is big enough to hide the "
+            "binding if left inside, which is the whole difference between measuring the "
+            "library and measuring this page."
+        )
+        n_time = st.number_input("Digits to time", 250, len(images), 2000, step=250,
+                                 help="Each batch is repeated 3 times; the median is shown.")
+        if st.button("Time both backends", help="A few seconds each, then cached."):
+            t = state.mnist_timings(seed, int(n_time))
+            keys = [k for k in ("c", "eigen") if k in t]
+            b1, b2 = st.columns([2, 3], gap="large")
+            with b1:
+                st.plotly_chart(
+                    F.forward_time_bars([(BACKENDS[k].short, t[k]["median_batch_ms"])
+                                         for k in keys],
+                                        f"Median per batch of {t[keys[0]]['batch']} digits"),
+                    width="stretch")
+            with b2:
+                ref = keys[0]
+                rows = "".join(
+                    f"| {label} | " + " | ".join(f"{fmt(t[k])}" for k in keys) + " |\n"
+                    for label, fmt in (
+                        ("median batch", lambda d: f"{d['median_batch_ms']:.2f} ms"),
+                        ("best batch", lambda d: f"{d['best_batch_ms']:.2f} ms"),
+                        ("one pass, measured", lambda d: f"{d['median_pass_s']:.2f} s"),
+                        ("per digit", lambda d: f"{d['per_digit_ms']:.3f} ms"),
+                        ("all 10 000 (projected)", lambda d: f"{d['projected_full_set_s']:.2f} s"),
+                        ("encoding (shared)", lambda d: f"{d['encode_per_digit_ms']:.3f} ms"),
+                    ))
+                head = "| | " + " | ".join(BACKENDS[k].short for k in keys) + " |\n"
+                st.markdown(f"{head}|---|{'---|' * len(keys)}\n{rows}")
+                if len(keys) == 2:
+                    other = keys[1]
+                    ratio = t[other]["median_batch_ms"] / t[ref]["median_batch_ms"]
+                    st.caption(
+                        f"{BACKENDS[other].short} is **{ratio:.2f}×** "
+                        f"{BACKENDS[ref].short} on this measurement "
+                        f"({t[other]['median_batch_ms']:.2f} ms vs "
+                        f"{t[ref]['median_batch_ms']:.2f} ms per batch)."
+                    )
+                st.caption(
+                    f"{t[ref]['digits_timed']} digits timed, "
+                    f"{t[ref]['n_batches']} batches × {t[ref]['repeats']} repetitions, one "
+                    f"warm-up batch discarded. “One pass” is the median wall time of "
+                    f"{t[ref]['repeats']} complete passes over those "
+                    f"{t[ref]['digits_timed']} digits (they ranged "
+                    f"{t[ref]['pass_spread_s'][0]:.2f}–{t[ref]['pass_spread_s'][1]:.2f} s), "
+                    f"which is why the per-digit row comes from the pass and not from the "
+                    f"median batch: a median throws away the tail a real pass still pays. "
+                    f"“All 10 000” is that per-digit figure scaled up — a projection, not a "
+                    f"stopwatch reading. Network "
+                    f"{list(ck.weights_at(-1)[0].shape)} → {list(ck.weights_at(-1)[1].shape)}, "
+                    f"single-threaded, on this machine."
+                )
+            st.warning(
+                "This is not a benchmark. It is one median taken inside a Streamlit "
+                "handler, where the tail belongs to the garbage collector and the request "
+                "loop rather than to the kernel. The measured numbers live in "
+                "`bench-reports/report_<tag>.md`, which carry provenance (`vcs_rev`, `cpu`, "
+                "`tool_version`, dirty flags) and repeat statistics, and which "
+                "`merge.py` refuses to combine across hosts. Quote those, and per "
+                "`BENCHMARK_SCHEMA.md` compare per-pair geomeans across hosts, never the "
+                "µs columns.",
+                icon="⚠️",
+            )
+
     with st.expander("All ten published runs, and what this machine makes of them"):
         accs = [state.mnist_run(s).accuracies for s in range(10)]
         st.plotly_chart(F.learning_curves(accs, BACKENDS[backend_key].color,

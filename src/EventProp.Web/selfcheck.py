@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import pickle
 import sys
+import time
 import types
 from pathlib import Path
 
@@ -441,6 +442,7 @@ def main() -> int:
     # skip and not a failure: `selfcheck.py` has to stay runnable on an air-gapped machine,
     # and silently downloading from a third party inside a verification script is its own
     # kind of surprise.
+    mnist_ctx = None
     if not mnist.have_test_set():
         print("        [skip] MNIST test set not cached — open the Digits page once, or "
               f"place the t10k files in {mnist.cache_dir()}, to run this step")
@@ -493,7 +495,9 @@ def main() -> int:
 
         # The whole test set, once, on the artefact this repository exists to produce. This
         # is the assertion the step is really for: a published number, recomputed here.
+        t_full = time.perf_counter()
         p_all, _ = mnist.predict("c", wh, wo, images)
+        full_pass_s = time.perf_counter() - t_full
         acc_all = float((p_all == labels).mean())
         check("C: reproduces the recorded accuracy over the whole test set",
               abs(acc_all - recorded) <= 0.002,
@@ -501,6 +505,49 @@ def main() -> int:
               f"({round((acc_all - recorded) * len(labels)):+d} digits in {len(labels)}; "
               f"across the ten published runs the gap never exceeds 8 digits, with no "
               f"consistent sign)")
+        mnist_ctx = {"images": images, "wh": wh, "wo": wo, "full_pass_s": full_pass_s}
+
+    print("13. the digits page's timing panel agrees with a stopwatch")
+    # The panel quotes a per-digit figure and a 10 000-digit projection. Both are derived,
+    # so nothing in the module forces them to be in the right units: an earlier version
+    # converted ms->s *and* multiplied by the digit count and reported 190 s for a pass that
+    # takes ~4.5 s. This step is the check that catches that class of mistake, by comparing
+    # the projection with a pass measured by a different route.
+    if mnist_ctx is None:
+        print("        [skip] depends on step 12's MNIST files, which are not cached")
+    else:
+        images, wh, wo = mnist_ctx["images"], mnist_ctx["wh"], mnist_ctx["wo"]
+        timed = {k: mnist.time_forward(k, wh, wo, images[:1000]) for k in ("c", "eigen")}
+        for key, t in timed.items():
+            check(f"{BACKENDS[key].short}: timings are positive and finite",
+                  all(np.isfinite(v) and v > 0 for v in
+                      (t["median_batch_ms"], t["best_batch_ms"], t["median_pass_s"],
+                       t["per_digit_ms"], t["projected_full_set_s"],
+                       t["encode_per_digit_ms"])),
+                  f"median batch {t['median_batch_ms']:.1f} ms, per digit "
+                  f"{t['per_digit_ms']:.3f} ms, encode {t['encode_per_digit_ms']:.3f} ms")
+            # A pass is a sum of batches, so its per-digit cost cannot be far below the
+            # median batch's. If these diverge, the two are not measuring the same thing.
+            ratio = t["per_digit_ms"] / t["median_batch_per_digit_ms"]
+            check(f"{BACKENDS[key].short}: pass-derived and median-derived per-digit agree",
+                  0.9 <= ratio <= 3.0,
+                  f"{ratio:.2f}x (pass {t['per_digit_ms']:.3f} ms vs median batch "
+                  f"{t['median_batch_per_digit_ms']:.3f} ms)")
+        c = timed["c"]
+        # The projection is forward-only; the stopwatch pass also encodes, marshals and
+        # builds the layers, so it should be the larger of the two — within a factor, since
+        # neither is a benchmark. A units slip lands outside this band by an order.
+        scale = c["projected_full_set_s"] / mnist_ctx["full_pass_s"]
+        check("the 10 000-digit projection matches a stopwatch pass over the real test set",
+              0.2 <= scale <= 1.0,
+              f"projection {c['projected_full_set_s']:.2f} s vs measured "
+              f"{mnist_ctx['full_pass_s']:.2f} s (x{scale:.2f}; the projection excludes "
+              f"encoding, marshalling and layer construction, so it should come in under)")
+        small = mnist.time_forward("c", wh, wo, images[:100], batch=250)
+        check("timing survives a sample smaller than one batch",
+              small["n_batches"] == 1 and small["batch"] == 100 and small["median_pass_s"] > 0,
+              f"batch clamped to {small['batch']}, {small['n_batches']} batch, "
+              f"{small['median_pass_s'] * 1e3:.1f} ms")
 
     print()
     if FAILURES:

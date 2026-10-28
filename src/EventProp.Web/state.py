@@ -128,3 +128,19 @@ def mnist_hidden(backend_key: str, seed: int, index: int) -> tuple[np.ndarray, n
     images, _ = mnist_test()
     wh, _ = mnist_run(seed).weights_at(-1)
     return mnist.hidden_spikes(backend_key, wh, images[index])
+
+
+@st.cache_data(show_spinner="Timing both backends…")
+def mnist_timings(seed: int, n_digits: int = 2000, batch: int = 250,
+                  repeats: int = 3) -> dict[str, dict]:
+    """Median maxima-forward time per batch, for every backend that can do maxima.
+
+    Cached on the parameters that define the measurement — sample count, batch size,
+    repetitions — so changing any of them re-measures rather than serving a stale median.
+    A timing cache keyed on nothing is how a page ends up quoting a figure from a run the
+    visitor never asked for.
+    """
+    images, _ = mnist_test()
+    wh, wo = mnist_run(seed).weights_at(-1)
+    return {k: mnist.time_forward(k, wh, wo, images[:n_digits], batch=batch, repeats=repeats)
+            for k in BACKENDS if BACKENDS[k].supports_maxima()}

@@ -53,6 +53,21 @@ def report(at: AppTest) -> None:
         print(f"        st.error: {err.value[:200]}")
 
 
+def _click_button(at, label: str):
+    """Click the first button carrying `label`.
+
+    By label rather than index: the digits page has three buttons and their order is a
+    detail of the page, not something the smoketest should be pinning. If the label is
+    gone the assertion surfaces as a visible `[skip]` line in the loop — a panel that was
+    renamed or dropped should show up as not-tested, not as a pass.
+    """
+    for b in at.button:
+        if b.label == label:
+            return b.set_value(True).run()
+    raise AssertionError(f"no button labelled {label!r}; page offers "
+                         f"{[b.label for b in at.button]}")
+
+
 def _digits_awaiting_download(page: str) -> bool:
     """True when the digits page is legitimately chartless — no cached pixel files yet."""
     if page != "Digits (MNIST)":
@@ -118,6 +133,11 @@ def main() -> int:
          "digits page back on the C backend"),
         ("Digits (MNIST)", lambda a: a.number_input[0].set_value(7).run(),
          "digits page at another test digit"),
+        # The timing panel measures both bindings on the same batches, so it is the only
+        # place the maxima path is timed rather than merely exercised. Skips visibly when
+        # the pixel files are not cached, since that state shows a download prompt instead.
+        ("Digits (MNIST)", lambda a: _click_button(a, "Time both backends"),
+         "digits timing panel (both backends measured)"),
         ("Under the hood", lambda a: a.selectbox[0].set_value(1000).run(),
          "parity across the whole test set"),
     ]

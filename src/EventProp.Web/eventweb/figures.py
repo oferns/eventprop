@@ -306,6 +306,26 @@ def timing_bars(rows: list[tuple[str, float, float]], title: str, height: int = 
     return fig
 
 
+def forward_time_bars(rows: list[tuple[str, float]], title: str,
+                      y_title: str = "median ms per batch", height: int = 260) -> go.Figure:
+    """One timing per backend. Crude by design, like `timing_bars`.
+
+    A separate builder rather than a third series on `timing_bars`: that chart's series are
+    forward and forward+backward, and the maxima pass has no backward — folding them into
+    one legend would imply a comparison that does not exist.
+    """
+    fig = _fig(title, height=height)
+    names = [r[0] for r in rows]
+    values = [r[1] for r in rows]
+    fig.add_trace(go.Bar(x=names, y=values, marker_color="#6366f1",
+                         text=[f"{v:.2f} ms" for v in values], textposition="outside",
+                         hovertemplate="%{x}<br>%{y:.3f} ms<extra></extra>"))
+    fig.update_xaxes(title="")
+    fig.update_yaxes(title=y_title, gridcolor="rgba(128,128,128,0.18)", rangemode="tozero",
+                     range=[0, max(values) * 1.22 if values else 1])
+    return fig
+
+
 # --- The digits page (MNIST / VMax) ---------------------------------------------------
 
 

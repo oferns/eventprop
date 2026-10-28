@@ -29,6 +29,7 @@ go through `eventprop_compute_maxima_batch`, and that path does not read `v_th` 
 from __future__ import annotations
 
 import gzip
+import time
 import urllib.request
 from pathlib import Path
 
@@ -190,6 +191,99 @@ def forward_maxima(backend_key: str, wh: np.ndarray, wo: np.ndarray,
     values = np.array([np.asarray(m.values, dtype=np.float64) for m in maxima])
     times = np.array([np.asarray(m.times, dtype=np.float64) for m in maxima])
     return values, times
+
+
+# The published MNIST test set. Named because the timing projection is quoted per whole
+# test set, and a row labelled "10 000" should not be able to drift from that number.
+FULL_TEST_SET = 10_000
+
+
+def time_forward(backend_key: str, wh: np.ndarray, wo: np.ndarray,
+                 images: np.ndarray, batch: int = 250, repeats: int = 3) -> dict:
+    """Median maxima-forward wall time per batch for one backend. Deliberately crude.
+
+    Structured to answer "what does *this binding* cost", which means keeping three things
+    out of the timed region even though `forward_maxima` does them inline:
+
+    * `encode()` — numpy, identical for both backends, and on MNIST big enough (784 pixels
+      a digit) to hide the thing being measured if it were left inside;
+    * `make_vector()` — marshalling spike lists into the binding's own container;
+    * constructing the two layer objects, which allocates the weight matrices.
+
+    Layers are rebuilt per repetition but still outside the timer, rather than reusing one
+    layer across repetitions: `forward()` on a layer that already holds a batch is a
+    different memory story from a fresh one, and measuring that would be measuring the
+    wrapper's reuse policy rather than the library.
+
+    The median of `repeats x n_batches` samples is reported alongside the wall time of a
+    whole pass, because a median discards exactly the tail a real pass still pays. The
+    authoritative numbers live in `bench-reports/` with provenance and repeat statistics;
+    this is an existence proof in a Streamlit handler.
+    """
+    be = BACKENDS[backend_key]
+    n = int(len(images))
+    batch = max(1, min(int(batch), n))
+    n_batches = n // batch
+
+    t0 = time.perf_counter()
+    drive = encode(images[: n_batches * batch])
+    encode_s = time.perf_counter() - t0
+
+    def prepare(lo: int):
+        chunk = drive[lo: lo + batch]
+        vector = be.make_vector([t for t, _ in chunk], [s for _, s in chunk])
+        hidden = be.layer(n=wh.shape[1], n_in=wh.shape[0], w_in=wh,
+                          tau_mem=20e-3, tau_syn=5e-3, v_th=1.0, v_leak=0.0)
+        readout = be.li_layer(n=wo.shape[1], n_in=wo.shape[0], w_in=wo,
+                              tau_mem=20e-3, tau_syn=5e-3, v_leak=0.0)
+        return vector, hidden, readout
+
+    starts = list(range(0, n_batches * batch, batch))
+
+    # Warm-up pass: the first call into a freshly loaded extension pays for dlopen, lazy
+    # binding and a cold allocator, none of which is what is under measurement.
+    vector, hidden, readout = prepare(starts[0])
+    hidden.forward(vector)
+    readout.forward(hidden.post_batch)
+
+    samples: list[list[float]] = []
+    for _ in range(max(1, int(repeats))):
+        one_pass: list[float] = []
+        for lo in starts:
+            vector, hidden, readout = prepare(lo)
+            t0 = time.perf_counter()
+            hidden.forward(vector)
+            readout.forward(hidden.post_batch)
+            one_pass.append(time.perf_counter() - t0)
+        samples.append(one_pass)
+
+    flat = [s for one in samples for s in one]
+    median_ms = float(np.median(flat) * 1e3)
+    # Wall time of a whole pass over the digits timed — a sum, not a median, because a real
+    # pass pays every batch's tail. Deriving the per-digit figure from it (rather than from
+    # the median batch) is what lets the 10 000-digit row be checked by eye against the
+    # accuracy passes above, and it is why the two rows below must agree.
+    pass_s = [float(sum(one)) for one in samples]
+    median_pass_s = float(np.median(pass_s))
+    per_digit_ms = median_pass_s * 1e3 / max(1, n_batches * batch)
+    return {
+        "backend": be.short,
+        "digits_timed": n_batches * batch,
+        "batch": batch,
+        "n_batches": n_batches,
+        "repeats": max(1, int(repeats)),
+        "median_batch_ms": median_ms,
+        "best_batch_ms": float(np.min(flat) * 1e3),
+        "median_pass_s": median_pass_s,
+        "pass_spread_s": [min(pass_s), max(pass_s)],
+        "per_digit_ms": per_digit_ms,
+        "median_batch_per_digit_ms": median_ms / batch,
+        # Projection, and labelled as one: the measured pass covers `digits_timed`, this
+        # row scales it to the whole published test set.
+        "projected_full_set_s": per_digit_ms * 1e-3 * FULL_TEST_SET,
+        "encode_s": encode_s,
+        "encode_per_digit_ms": encode_s / max(1, n_batches * batch) * 1e3,
+    }
 
 
 def hidden_spikes(backend_key: str, wh: np.ndarray, image: np.ndarray):

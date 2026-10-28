@@ -20,7 +20,7 @@ Verify below).
 | **Yin-Yang, live** | A point in the plane → four spikes → 200 LIF neurons → the class is whichever output neuron fires first. Decision boundary computed by the C library, plus the membrane potential of any hidden neuron. |
 | **How it learns** | Why this dataset exists (64% shallow ceiling vs 98% deep), ten published learning curves, the boundary at each saved weight snapshot, and where the mistakes land. |
 | **Exact gradients** | The adjoint: membrane potential and its root-found crossings, λ(t) on both neurons, and the exact gradient beside a central finite difference. They agree to ~1e-7 relative. |
-| **Digits (MNIST)** | The published VMax networks on the real 10 000-digit test set — the maxima read-out instead of first spikes, one digit followed end to end, and the reproduced accuracy beside the one recorded in the file. Needs a one-time ~1.6 MB download. |
+| **Digits (MNIST)** | The published VMax networks on the real 10 000-digit test set — the maxima read-out instead of first spikes, one digit followed end to end, the reproduced accuracy beside the one recorded in the file, and what each backend costs per digit. Needs a one-time ~1.6 MB download. |
 | **Under the hood** | Interpreter/ABI status, what each backend can do from Python, C-vs-Eigen agreement on identical inputs, crude wall-clock, and one live defect report. |
 
 ## Setup
@@ -100,9 +100,10 @@ plumbing fails there instead of quietly drawing a wrong picture.
 
 The MNIST steps **skip rather than fail** when `.cache/mnist/` is empty, so the script stays
 runnable on a machine with no network. Open the Digits page once, or drop the two t10k files
-into that directory, and step 12 runs: it asserts the encoder is byte-identical to the
-reference's, that both backends produce identical predictions, and that the recorded
-accuracy is reproduced over all 10 000 digits to within 0.002.
+into that directory, and steps 12 and 13 run: step 12 asserts the encoder is byte-identical
+to the reference's, that both backends produce identical predictions, and that the recorded
+accuracy is reproduced over all 10 000 digits to within 0.002. Step 13 checks the page's
+timing panel against a stopwatch pass over the same test set.
 
 ## Layout
 
@@ -139,7 +140,7 @@ Both submodule paths are read-only; their local state is owned by
 `scripts/submodule-state.sh`, not by this app. Never regenerate the split — the train and
 test sets differ only by RNG seed, so re-drawing them overlaps the test set.
 
-## Two things worth knowing before you trust a plot
+## Three things worth knowing before you trust a plot
 
 **λ(t) is loss-driven, so an all-zero λ trace is not necessarily a bug.** The adjoint jumps
 by `1/(i - v_th) · (v_th · λ_v + error)` at each output spike: with no error signal on those
@@ -159,6 +160,20 @@ promise a plot the binding could not deliver.
 the C library handles the case correctly by returning an all-zero trace. The app never
 requests λ for a silent neuron, so the page does not crash — but the defect is still
 there, and the Under-the-hood page says so out loud.
+
+**Every timing in the app is an existence proof, not a result.** The Digits page can time
+the maxima pass and Under the hood can time forward/backward on Yin-Yang; both are medians
+taken inside a Streamlit handler, where the tail belongs to the garbage collector and the
+request loop rather than to the kernel. The measured numbers are in
+`../bench-reports/report_<tag>.md`, with provenance (`vcs_rev`, `cpu`, `tool_version`, dirty
+flags) and repeat statistics, and `merge.py` refuses to combine them across hosts. Per
+`BENCHMARK_SCHEMA.md`, compare per-pair geomeans across hosts, never the µs columns. The
+digits panel keeps encoding, marshalling and layer construction *outside* its timer and
+prints them separately — leave them inside and you have measured this page instead of the
+library — and `selfcheck.py` step 13 checks its per-digit figure and its 10 000-digit
+projection against a stopwatch pass over the real test set. That cross-check is load-bearing:
+a derived number has nothing forcing it to be in the right units, and the one version of it
+that did not survive the check was wrong by a factor of 250.
 
 ## Platform status
 
