@@ -48,6 +48,120 @@ N_OUT = 3
 # 11 snapshots actually present in each file.
 SNAPSHOT_EPOCHS = (1, 11, 21, 31, 41, 51, 61, 71, 81, 91, 100)
 
+# ── Checkpoint file formats ─────────────────────────────────────────────────
+#
+# `paper/yinyang_*.pkl` are plain pickled tuples written before the fields had names, so
+# every field is positional and the file itself says which layout it holds. Two layouts
+# are live in this tree:
+#
+#   published / TTFS — 9 fields. What `paper/*.pkl` contain. The order is not a guess:
+#     it is exactly what `TTFSMixin.get_data_for_pickling()` returns in this tree, and the
+#     same method in the read-only reference submodule — `paper/figure2.py` unpacks it as
+#     `_, _, accs, losses, first_spikes, _, _, _, _`, and the shipped files match: field 4
+#     is `(100, 1000, 3)` first-spike times, field 8 the 11 weight snapshots.
+#
+#   base trainer — 7 fields. What the non-TTFS `AbstractTraining` writes in both trees, the
+#     reference's included. Weights land at index 6 and there are no first-spike times at
+#     all. Read with the published indices, field 4 is `valid_accuracies` — empty, so every
+#     neuron looks merely silent — and field 8 then raises IndexError. Two failure modes
+#     from one cause, the first of them silent.
+#
+# Our trainer writes named keys now (`eventprop_c.training.checkpoint_payload`). The
+# reference submodule cannot be edited, so its 7-tuple remains a thing that can turn up:
+# the loader identifies what it was handed instead of trusting a length.
+
+PUBLISHED_TUPLE_LEN = 9
+#: The 9-field order, named. Identical in our `ttfs_training.py` and the reference
+#: submodule's, which is what makes the published files legible at all.
+PUBLISHED_FIELDS = ("losses", "accuracies", "test_accuracies", "test_losses",
+                    "test_first_spikes", "valid_accuracies", "valid_losses",
+                    "valid_first_spikes", "weights")
+TRAINERS_TUPLE_LEN = 7
+
+#: Keys a named-dict checkpoint must carry. `test_first_spikes` is optional: neither
+#: trainer in this tree records first-spike times, so a fresh run legitimately has none.
+REQUIRED_KEYS = ("test_accuracies", "test_losses", "weights")
+
+
+def _weight_pairs(weights, source: str) -> list[tuple[np.ndarray, np.ndarray]]:
+    try:
+        return [(np.asarray(a, np.float64), np.asarray(b, np.float64)) for a, b in weights]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"{source}: weights is not a sequence of (wh, wo) pairs: {exc}") from exc
+
+
+def parse_checkpoint(data, *, seed: int, source: str) -> Checkpoint:
+    """Build a `Checkpoint` from an unpickled payload, identifying which layout it is.
+
+    Anything unrecognised raises `ValueError` naming what was found and what is wanted.
+    Guessing here is what turns a version skew into a confidently plotted wrong answer.
+    """
+    if isinstance(data, dict):
+        missing = [k for k in REQUIRED_KEYS if k not in data]
+        if missing:
+            raise ValueError(
+                f"{source}: checkpoint dict is missing {missing}; "
+                f"found keys {sorted(data)}")
+        acc, los = data["test_accuracies"], data["test_losses"]
+        fs = data.get("test_first_spikes", data.get("first_spikes", []))
+        weights = _weight_pairs(data["weights"], source)
+        origin = (f"named-dict checkpoint "
+                  f"(format={data.get('format', 'unspecified')}, "
+                  f"version={data.get('format_version', '?')})")
+    elif isinstance(data, tuple) and len(data) == PUBLISHED_TUPLE_LEN:
+        acc, los, fs = data[2], data[3], data[4]
+        weights = _weight_pairs(data[8], source)
+        origin = f"published {PUBLISHED_TUPLE_LEN}-field tuple"
+    elif isinstance(data, tuple) and len(data) == TRAINERS_TUPLE_LEN:
+        raise ValueError(
+            f"{source}: this is the {TRAINERS_TUPLE_LEN}-field tuple the base (non-TTFS) "
+            f"trainer writes — (losses, accuracies, test_accuracies, test_losses, "
+            f"valid_accuracies, valid_losses, weights), with weights at index 6 and no "
+            f"first-spike times at all. The Visualizer cannot read it as a published run. "
+            f"Train with eventprop_c.ttfs_training (which records first spikes and saves "
+            f"named keys), or point ckpt_dir at the published paper/*.pkl.")
+    else:
+        shape = f" of length {len(data)}" if isinstance(data, (tuple, list)) else ""
+        raise ValueError(
+            f"{source}: unrecognised checkpoint payload {type(data).__name__}{shape}; "
+            f"expected a {PUBLISHED_TUPLE_LEN}-field published tuple, or a dict with "
+            f"{list(REQUIRED_KEYS)}")
+
+    accuracies = np.asarray(acc, dtype=np.float64)
+    losses = np.asarray(los, dtype=np.float64)
+    first_spikes = np.asarray(fs, dtype=np.float64)
+
+    if not weights:
+        raise ValueError(f"{source}: checkpoint carries no weight snapshots")
+    for name, series in (("test accuracies", accuracies), ("test losses", losses)):
+        if series.ndim != 1:
+            raise ValueError(f"{source}: {name} is {series.ndim}-D, expected a 1-D series")
+    if accuracies.size and losses.size and accuracies.shape != losses.shape:
+        raise ValueError(
+            f"{source}: accuracy/loss series differ: "
+            f"{accuracies.shape} vs {losses.shape}")
+    if first_spikes.size and first_spikes.ndim != 3:
+        raise ValueError(
+            f"{source}: first-spike times are {first_spikes.ndim}-D, expected "
+            f"(epochs, samples, neurons) — reading the wrong field of a positional "
+            f"tuple is the usual cause")
+    if (first_spikes.size and accuracies.size
+            and first_spikes.shape[0] != accuracies.shape[0]):
+        raise ValueError(
+            f"{source}: {first_spikes.shape[0]} first-spike epochs vs "
+            f"{accuracies.shape[0]} recorded accuracies — the payload is inconsistent")
+
+    return Checkpoint(
+        seed=seed,
+        accuracies=accuracies,
+        losses=losses,
+        first_spikes=first_spikes,
+        weights=weights,
+        has_first_spikes=bool(first_spikes.size),
+        origin=origin,
+    )
+
 
 @dataclass(frozen=True)
 class Checkpoint:
@@ -56,9 +170,11 @@ class Checkpoint:
     seed: int
     accuracies: np.ndarray  # (100,) test accuracy after epoch i
     losses: np.ndarray  # (100,) test loss after epoch i
-    first_spikes: np.ndarray  # (100, 1000, 3) first-spike times per epoch
+    first_spikes: np.ndarray  # (100, 1000, 3) first-spike times per epoch, empty if not recorded
     weights: list  # 11 x (wh, wo)
     snapshot_epochs: tuple = SNAPSHOT_EPOCHS
+    has_first_spikes: bool = True
+    origin: str = ""  # which on-disk layout this came from; see parse_checkpoint
 
     def weights_at(self, k: int) -> tuple[np.ndarray, np.ndarray]:
         wh, wo = self.weights[k]
@@ -66,16 +182,10 @@ class Checkpoint:
 
 
 def load_checkpoint(ckpt_dir: Path, seed: int) -> Checkpoint:
-    with open(ckpt_dir / f"yinyang_{seed}.pkl", "rb") as f:
+    path = ckpt_dir / f"yinyang_{seed}.pkl"
+    with open(path, "rb") as f:
         data = pickle_load(f)
-    weights = [(np.asarray(a, np.float64), np.asarray(b, np.float64)) for a, b in data[8]]
-    return Checkpoint(
-        seed=seed,
-        accuracies=np.asarray(data[2], dtype=np.float64),
-        losses=np.asarray(data[3], dtype=np.float64),
-        first_spikes=np.asarray(data[4], dtype=np.float64),
-        weights=weights,
-    )
+    return parse_checkpoint(data, seed=seed, source=path.name)
 
 
 class Net:

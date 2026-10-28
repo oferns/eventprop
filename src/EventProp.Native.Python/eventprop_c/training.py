@@ -54,6 +54,45 @@ def dropout_spikes(spikes: SpikesVector, p_drop: float, random_seed: int) -> Spi
     return SpikesVector._from_dropout_output(c_output)
 
 
+#: Named-key checkpoint format.
+#:
+#: Pickle carries no schema, and the published `paper/yinyang_*.pkl` are positional
+#: tuples. Two different layouts exist in this tree: the reference submodule's trainer (and
+#: this file, until now) writes 7 fields with weights last, while the published files are 9
+#: fields with first-spike times at index 4 and weights at index 8. Reading one with the
+#: other's indices does not fail — it reads `valid_accuracies` where the first-spike times
+#: should be, which is empty, so every neuron looks merely silent. Hence: say what the
+#: payload is, and let the reader identify it instead of trusting a length.
+CHECKPOINT_FORMAT = "eventprop_c.training"
+CHECKPOINT_FORMAT_VERSION = 1
+
+
+def checkpoint_payload(*, losses, accuracies, test_accuracies, test_losses,
+                       valid_accuracies, valid_losses, weights,
+                       test_first_spikes=None) -> dict:
+    """Assemble the named-key dict that `save_to_file` pickles.
+
+    A plain function rather than a method so the writer and the Visualizer's reader can be
+    tested against each other without training a model first.
+    """
+    payload = {
+        "format": CHECKPOINT_FORMAT,
+        "format_version": CHECKPOINT_FORMAT_VERSION,
+        "losses": losses,
+        "accuracies": accuracies,
+        "test_accuracies": test_accuracies,
+        "test_losses": test_losses,
+        "valid_accuracies": valid_accuracies,
+        "valid_losses": valid_losses,
+        "weights": weights,
+    }
+    # Omitted rather than stored empty: neither trainer in this tree records first-spike
+    # times, and "not recorded" is a different claim from "recorded, and empty".
+    if test_first_spikes is not None:
+        payload["test_first_spikes"] = test_first_spikes
+    return payload
+
+
 class AbstractTraining(ABC):
     @abstractmethod
     def __init__(
@@ -130,21 +169,25 @@ class AbstractTraining(ABC):
         return test_loss, test_accuracy
 
     def save_to_file(self, fname: str):
+        """Pickle this run's recorded history to `fname`, with named keys.
+
+        See `checkpoint_payload` for why. The reference library's trainer still writes its
+        7-field tuple — that submodule is read-only — and the Visualizer's loader rejects
+        it with a message saying so rather than reading the wrong field.
+        """
         import pickle
-        pickle.dump(
-            self.get_data_for_pickling(),
-            open(fname, "wb"),
-        )
+        with open(fname, "wb") as f:   # the old form handed the handle to the GC
+            pickle.dump(self.get_data_for_pickling(), f)
 
     def get_data_for_pickling(self):
-        return (
-            self.losses,
-            self.accuracies,
-            self.test_accuracies,
-            self.test_losses,
-            self.valid_accuracies,
-            self.valid_losses,
-            self.weights,
+        return checkpoint_payload(
+            losses=self.losses,
+            accuracies=self.accuracies,
+            test_accuracies=self.test_accuracies,
+            test_losses=self.test_losses,
+            valid_accuracies=self.valid_accuracies,
+            valid_losses=self.valid_losses,
+            weights=self.weights,
         )
 
     def reset_results(self):

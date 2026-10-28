@@ -4,7 +4,7 @@ Mirrors the pybind11 TTFS training API from EventProp.Python.
 """
 
 from .layer import SpikeDataset
-from .training import AbstractTwoLayer
+from .training import AbstractTwoLayer, checkpoint_payload
 from .lif_layer import LIFLayer, LIFLayerParameters
 from .loss_layer import TTFSCrossEntropyLoss, TTFSCrossEntropyLossParameters
 
@@ -34,16 +34,22 @@ class TTFSMixin:
         return test_loss, test_error, test_first_spikes
 
     def get_data_for_pickling(self):
-        return (
-            self.losses,
-            self.accuracies,
-            self.test_accuracies,
-            self.test_losses,
-            self.test_first_spikes,
-            self.valid_accuracies,
-            self.valid_losses,
-            self.valid_first_spikes,
-            self.weights,
+        """Named keys, including the first-spike times this trainer records.
+
+        The base class cannot supply `test_first_spikes` — plain LIF training doesn't
+        record them — so this override exists. It used to return a 9-field positional
+        tuple, which is the layout `paper/yinyang_*.pkl` were written in; see
+        `checkpoint_payload` for why that is now a dict.
+        """
+        return checkpoint_payload(
+            losses=self.losses,
+            accuracies=self.accuracies,
+            test_accuracies=self.test_accuracies,
+            test_losses=self.test_losses,
+            valid_accuracies=self.valid_accuracies,
+            valid_losses=self.valid_losses,
+            weights=self.weights,
+            test_first_spikes=self.test_first_spikes,
         )
 
     def reset_results(self):
