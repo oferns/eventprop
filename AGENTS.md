@@ -368,6 +368,14 @@ Each line is a rule you cannot see from the file it governs. Detail and evidence
 - No copy across the FFI unless the copy is cheaper than the object that would avoid it. A
   length the caller chooses (`n_t`, set by `dt`) is never such a case; a readout-width array is,
   and the reason belongs at the site.
+- The two bindings disagree about writing into an array you were handed: pybind11 returns
+  **read-only** views, Cython returns writeable ones (writing the error buffer is the supported
+  path there). Anything shared between backends copies before mutating. Measurements and the
+  silent-corruption consequence: `src/EventProp.Web/README.md`.
+- Do not read `ndarray.base` as evidence about buffer ownership: the pybind11 binding keeps its
+  parent alive through a capsule that never appears as `base`, so `base is None` is compatible
+  with a perfectly safe view. Test lifetime by holding the array, dropping every owner name and
+  churning the allocator — not by introspection.
 - `abi_check()` runs at import and refuses to import on a mismatch: a stale extension is memory
   corruption, not staleness.
 - Layers chain through `ancestor_layer`; the C# design has no counterpart (§10).

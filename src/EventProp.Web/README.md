@@ -140,7 +140,7 @@ Both submodule paths are read-only; their local state is owned by
 `scripts/submodule-state.sh`, not by this app. Never regenerate the split — the train and
 test sets differ only by RNG seed, so re-drawing them overlaps the test set.
 
-## Three things worth knowing before you trust a plot
+## Four things worth knowing before you trust a plot
 
 **λ(t) is loss-driven, so an all-zero λ trace is not necessarily a bug.** The adjoint jumps
 by `1/(i - v_th) · (v_th · λ_v + error)` at each output spike: with no error signal on those
@@ -174,6 +174,28 @@ library — and `selfcheck.py` step 13 checks its per-digit figure and its 10 00
 projection against a stopwatch pass over the real test set. That cross-check is load-bearing:
 a derived number has nothing forcing it to be in the right units, and the one version of it
 that did not survive the check was wrong by a factor of 250.
+
+**Spike and maxima arrays handed to a plot are views, and only one backend lets you write them.**
+Both bindings hand out views into their own buffers — reading `spikes.times` twice returns two
+arrays that share memory on *both* backends — so a view is not scratch space: writing into a
+`times` or `values` view changes what the backend reports. They differ on what happens when you
+write anyway. The reference pybind11 binding returns **read-only** arrays, so a stray write
+raises `ValueError: assignment destination is read-only`; the Cython binding's are **writeable**,
+because writing error signals is the supported way to drive the backward pass — and the same
+stray write therefore corrupts the library's buffer instead of raising. That asymmetry is the
+reason `eventweb` copies out wherever it wants to hold or mutate something
+(`eventweb/mnist.py::hidden_spikes`), and it is a convention rather than a workaround: the
+reference library is read-only, so there is nothing to fix upstream, only something to code
+against.
+
+Both are safe to *read* for as long as you hold the array, which is worth stating because the
+obvious probe lies. Measured with only the array kept and every owner name dropped — layer,
+spike vector, maxima object — through 200 rounds of allocator churn plus `gc.collect()`: values
+identical on both backends. The reference binding keeps its parent object alive through a capsule
+pybind11 attaches, which does **not** appear as `ndarray.base`; so `base is None` does not mean
+"this may dangle". Our own binding keeps the wrapper as the array's base object, pinned by
+`../EventProp.Native.Python/test/test_view_ownership.py`. Measured on darwin-arm64, CPython 3.14;
+two reads sharing memory was true on both, as was read-only versus writeable.
 
 ## Platform status
 

@@ -19,6 +19,7 @@ Exit code is non-zero on any failure, with the failing check named.
 
 from __future__ import annotations
 
+import gc
 import pickle
 import sys
 import time
@@ -550,6 +551,52 @@ def main() -> int:
               small["n_batches"] == 1 and small["batch"] == 100 and small["median_pass_s"] > 0,
               f"batch clamped to {small['batch']}, {small['n_batches']} batch, "
               f"{small['median_pass_s'] * 1e3:.1f} ms")
+
+    print("14. what the two backends hand you when you ask for spikes")
+    # Both bindings return views into their own buffers, and they disagree about what a write
+    # does. Measured rather than read off the bindings' source, because the obvious probe lies:
+    # pybind11 keeps its parent object alive through a capsule that never shows up as
+    # `ndarray.base`, so `base is None` says nothing about whether a view may dangle. The
+    # lifetime check is therefore behavioural — keep only the array, drop every object that
+    # produced it, churn the allocator, and read. The consequence for code shared between
+    # backends is documented in README.md; this step keeps that documentation true.
+    writability = {}
+    for key in sorted(available()):
+        be = BACKENDS[key]
+        rng_v = np.random.default_rng(4)
+        w_v = rng_v.uniform(0.5, 2.0, (32, 8))
+        t_v = [np.sort(rng_v.uniform(0.0, 0.5, size=24)) for _ in range(2)]
+        s_v = [rng_v.integers(0, 32, size=24).astype(np.int32) for _ in range(2)]
+        layer_v = be.layer(n=8, n_in=32, w_in=w_v, tau_mem=20e-3, tau_syn=5e-3,
+                           v_th=1.0, v_leak=0.0)
+        layer_v.forward(be.make_vector(t_v, s_v))
+        view = np.asarray(layer_v.post_batch[0].times, dtype=np.float64)
+        twin = np.asarray(layer_v.post_batch[0].times, dtype=np.float64)
+        expected = view.copy()
+        shares = bool(np.may_share_memory(view, twin))
+        writability[key] = bool(view.flags.writeable)
+
+        del layer_v, twin
+        gc.collect()
+        intact = True
+        for _ in range(20):
+            junk = [bytearray(b"\xa5" * 4096) for _ in range(400)]
+            del junk
+            gc.collect()
+            if not np.array_equal(view, expected):
+                intact = False
+                break
+        check(f"{be.short}: spike arrays alias the backend and outlive it",
+              expected.size > 0 and shares and intact and bool(np.all(np.isfinite(view))),
+              f"{expected.size} spikes, two reads share memory={shares}, "
+              f"writeable={writability[key]}, readable after owners dropped={intact}")
+
+    if {"c", "eigen"} <= set(writability):
+        check("the writability asymmetry is still there (reference read-only, Cython writeable)",
+              writability["eigen"] is False and writability["c"] is True,
+              f"eigen writeable={writability['eigen']}, c writeable={writability['c']} — shared "
+              f"code must copy before mutating either array")
+
 
     print()
     if FAILURES:
