@@ -890,6 +890,94 @@ cdef class _DropoutBatchOutput:
             self._ptr = NULL
 
 
+cdef class _VoltageTraceOutput:
+    """Owns a VoltageTraceOutput so its two arrays can be handed out as zero-copy views.
+
+    The C entry point returns the struct by value. Callers used to memcpy both arrays and free
+    the buffer, which copies 2·n_t·8 bytes per call where n_t is the caller's OWN dt choice:
+    dt=2.5e-4 over 0.3 s is 1 200 points (~19 KB), dt=1e-5 is 30 000 points (~470 KB). Nothing
+    about the data wanted a copy, so the copy is gone and this object is what replaced it — one
+    Python object, the struct stored inline in it (no second malloc), and the buffers freed on
+    the last view's death rather than at the end of the call.
+
+    Nothing holds this object by name: the views' base references are its only owners, which is
+    exactly how `np.frombuffer` keeps a buffer alive.
+    """
+    cdef VoltageTraceOutput* _ptr   # struct copied to the heap; freed in __dealloc__
+    cdef bint _owned
+
+    def __cinit__(self):
+        self._ptr = NULL
+        self._owned = False
+
+    @staticmethod
+    cdef _VoltageTraceOutput from_c_result(VoltageTraceOutput out):
+        cdef _VoltageTraceOutput obj = _VoltageTraceOutput.__new__(_VoltageTraceOutput)
+        obj._ptr = <VoltageTraceOutput*>malloc(sizeof(VoltageTraceOutput))
+        if obj._ptr == NULL:
+            # The buffers came from C, so they are still C's to release on this path.
+            eventprop_free_voltage_trace_output(out)
+            raise MemoryError("Failed to allocate VoltageTraceOutput wrapper")
+        obj._ptr[0] = out
+        obj._owned = True
+        return obj
+
+    def __dealloc__(self):
+        if self._owned and self._ptr != NULL:
+            eventprop_free_voltage_trace_output(self._ptr[0])
+            free(self._ptr)
+            self._ptr = NULL
+
+    cdef object ts_view(self):
+        return _double_view(self._ptr.ts, self._ptr.n_t, self)
+
+    cdef object values_view(self):
+        return _double_view(self._ptr.v_trace, self._ptr.n_t, self)
+
+    @property
+    def n_t(self):
+        return -1 if self._ptr == NULL else self._ptr.n_t
+
+
+cdef class _LambdaITraceOutput:
+    """Owns a LambdaITraceOutput. Same reasoning as _VoltageTraceOutput: the adjoint trace is
+    sampled on a grid the caller chooses, so copying it out costs whatever the caller asked for.
+    """
+    cdef LambdaITraceOutput* _ptr
+    cdef bint _owned
+
+    def __cinit__(self):
+        self._ptr = NULL
+        self._owned = False
+
+    @staticmethod
+    cdef _LambdaITraceOutput from_c_result(LambdaITraceOutput out):
+        cdef _LambdaITraceOutput obj = _LambdaITraceOutput.__new__(_LambdaITraceOutput)
+        obj._ptr = <LambdaITraceOutput*>malloc(sizeof(LambdaITraceOutput))
+        if obj._ptr == NULL:
+            eventprop_free_lambda_i_trace_output(out)
+            raise MemoryError("Failed to allocate LambdaITraceOutput wrapper")
+        obj._ptr[0] = out
+        obj._owned = True
+        return obj
+
+    def __dealloc__(self):
+        if self._owned and self._ptr != NULL:
+            eventprop_free_lambda_i_trace_output(self._ptr[0])
+            free(self._ptr)
+            self._ptr = NULL
+
+    cdef object ts_view(self):
+        return _double_view(self._ptr.ts, self._ptr.n_t, self)
+
+    cdef object values_view(self):
+        return _double_view(self._ptr.lambda_trace, self._ptr.n_t, self)
+
+    @property
+    def n_t(self):
+        return -1 if self._ptr == NULL else self._ptr.n_t
+
+
 # ---------------------------------------------------------------------------
 # 6. Internal helper — construct EventPropInput[] from flat numpy arrays
 # ---------------------------------------------------------------------------
@@ -1179,7 +1267,10 @@ def compute_voltage_trace(
     result rather than recomputing it — a trace built from a second forward pass describes
     a network state the layer does not have.
 
-    Returns (ts, v_trace), both float64 of length int(t_max / dt).
+    Returns (ts, v_trace), both float64 views of length int(t_max / dt) over the library's own
+    buffers — no copy is made. They are only alive because they hold the buffers, and the
+    buffers go when the last of them does; writing into them mutates the library's copy, which
+    is harmless and pointless.
     """
     cdef VoltageTraceInput vin
     vin.input = _single_input(times, sources, w, n_pre, n_post, tau_mem, tau_syn, v_th)
@@ -1195,15 +1286,13 @@ def compute_voltage_trace(
         vin.fwd_sources = NULL
 
     cdef VoltageTraceOutput out = eventprop_compute_voltage_trace(vin)
-    _check_diag_error(out.error_no, "voltage trace")
-    try:
-        # None as owner on purpose: copied out immediately, and the C buffer is freed in
-        # this same block, so there is nothing for a view to keep alive.
-        ts = _double_view(out.ts, out.n_t, None).copy()
-        v_trace = _double_view(out.v_trace, out.n_t, None).copy()
-    finally:
+    if out.error_no != 0:
+        # Free first, then raise: this path used to leave the partially-allocated output behind.
         eventprop_free_voltage_trace_output(out)
-    return ts, v_trace
+        _check_diag_error(out.error_no, "voltage trace")
+
+    cdef _VoltageTraceOutput holder = _VoltageTraceOutput.from_c_result(out)
+    return holder.ts_view(), holder.values_view()
 
 
 def compute_lambda_i_trace(
@@ -1221,7 +1310,8 @@ def compute_lambda_i_trace(
     all-zero errors give an all-zero adjoint, which is why the backward pass has to have
     run before this is interesting.
 
-    Returns (ts, lambda_trace), both float64 of length int(t_max / dt).
+    Returns (ts, lambda_trace), both float64 views of length int(t_max / dt) over the library's
+    own buffers — no copy is made. See compute_voltage_trace for the lifetime rule.
     """
     cdef LambdaITraceInput lin
     lin.input = _single_input(times, sources, w, n_pre, n_post, tau_mem, tau_syn, v_th)
@@ -1238,13 +1328,12 @@ def compute_lambda_i_trace(
     lin.post_errors = &post_errors[0] if post_errors.shape[0] > 0 else NULL
 
     cdef LambdaITraceOutput out = eventprop_compute_lambda_i_trace(lin)
-    _check_diag_error(out.error_no, "lambda-I trace")
-    try:
-        ts = _double_view(out.ts, out.n_t, None).copy()
-        lambda_trace = _double_view(out.lambda_trace, out.n_t, None).copy()
-    finally:
+    if out.error_no != 0:
         eventprop_free_lambda_i_trace_output(out)
-    return ts, lambda_trace
+        _check_diag_error(out.error_no, "lambda-I trace")
+
+    cdef _LambdaITraceOutput holder = _LambdaITraceOutput.from_c_result(out)
+    return holder.ts_view(), holder.values_view()
 
 
 def compute_lambda_i_at_time(
@@ -1310,6 +1399,10 @@ def maxima_regression(double[::1] maxima_values, double[::1] decoder,
     # to hold a view into, and the C arrays are freed on the way out.
     try:
         # Copied out before eventprop_free_maxima_regression_output below, so no owner needed.
+        # The copy is deliberate here, unlike the traces: n_post is the readout width (tens of
+        # entries, ~160 bytes), and an owner object to avoid it would cost more than the memcpy
+        # it saves. The training-loop path is `_MaximaBatchOutput.regress`, which copies nothing
+        # and allocates nothing.
         errors = _double_view(out.errors, out.n_post, None).copy()
         decoder_grad = _double_view(out.decoder_grad, out.n_post, None).copy()
     finally:
