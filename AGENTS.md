@@ -358,9 +358,16 @@ Each line is a rule you cannot see from the file it governs. Detail and evidence
 
 **Python bindings**
 - Wrappers own the heap memory (`__dealloc__` calls the matching free function) and hand out
-  **zero-copy numpy views**. Anything that hands a view to a caller must keep the wrapper alive
-  as long as the view is readable — the ancestor layer's backward runs *after* the local result
-  would go out of scope, so the result is stored on `self`.
+  **zero-copy numpy views**. Every view retains the wrapper that owns its buffers (the arrays'
+  base object is the wrapper), so a view cannot outlive its memory — without that, reading one
+  after its owner is dropped returns plausible garbage instead of failing. Pinned by
+  `src/EventProp.Native.Python/test/test_view_ownership.py`; a new view helper must pass an
+  owner, and `owner` is a required argument so omitting it is a compile error. Layers still
+  store backward results on `self` — the ancestor's backward runs *after* the local result would
+  otherwise go out of scope — but that is an ordering requirement, not a lifetime workaround.
+- No copy across the FFI unless the copy is cheaper than the object that would avoid it. A
+  length the caller chooses (`n_t`, set by `dt`) is never such a case; a readout-width array is,
+  and the reason belongs at the site.
 - `abi_check()` runs at import and refuses to import on a mismatch: a stale extension is memory
   corruption, not staleness.
 - Layers chain through `ancestor_layer`; the C# design has no counterpart (§10).

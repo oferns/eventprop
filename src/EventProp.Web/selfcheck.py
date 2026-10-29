@@ -394,11 +394,13 @@ def main() -> int:
               f"from {fir.mean():.3f} at epoch 1) — read from the file, not re-derived")
 
         # The last published run's weights (seed 9), one synthetic drive, both backends.
-        # Values are copied out while the layers owning them stay referenced: the bindings
-        # hand out zero-copy views, and reading one after its owner is gone yields
-        # uninitialised memory rather than an error — a first draft of this check did
-        # precisely that and reported spike times near 1e262. The finiteness assertion
-        # below is what makes that failure mode loud.
+        # Values are copied out here rather than kept as views. The bindings now retain the
+        # owner of every view they hand out (see src/EventProp.Native.Python/test/
+        # test_view_ownership.py), so this copy is belt-and-braces rather than load-bearing:
+        # it keeps this check independent of the binding's ownership rules. Those rules were
+        # not always right — an early draft of this check read views after their owner was gone
+        # and reported spike times near 1e262 — so the finiteness assertion below stays, to
+        # make that failure mode loud if it ever returns.
         rng = np.random.default_rng(0)
         drive_t, drive_s = [], []
         for _ in range(32):

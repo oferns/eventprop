@@ -292,8 +292,10 @@ def hidden_spikes(backend_key: str, wh: np.ndarray, image: np.ndarray):
     The first spike per neuron is taken with an order-independent minimum because
     `post_batch` carries spikes in time order, not neuron order — and because the arrays
     are zero-copy views into the layer, they are copied out here while it is still
-    referenced. Reading them after the layer is gone yields uninitialised memory, not an
-    error.
+    referenced. The Cython binding now keeps the owner of a view alive for as long as the
+    view is readable (src/EventProp.Native.Python/test/test_view_ownership.py), so this copy
+    is deliberate uniformity rather than a necessity: it gives both backends the same
+    semantics without depending on how the pybind11 one manages its buffers.
     """
     be = BACKENDS[backend_key]
     hidden = be.layer(n=wh.shape[1], n_in=wh.shape[0], w_in=wh,
