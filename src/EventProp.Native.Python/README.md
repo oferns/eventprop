@@ -97,9 +97,11 @@ with no loss arithmetic in Python at all.
 
 It lives in the C library (`eventprop_loss.h`) rather than in either binding so that P/Invoke and
 Cython compute the same gradient from the same code. The reference library has no regression loss,
-so there is no C-vs-Eigen parity test for it; the guarantee is **managed ↔ native** instead,
-between the C implementation and `CW.EventProp.RegressionLoss` in C#
-(`src/EventProp.Tests/RegressionLossParityTests.cs`).
+so there is no C-vs-Eigen parity test for it; the guarantee is **managed ↔ native** instead, at two
+levels: the per-sample primitives (`CW.EventProp.RegressionLoss` vs
+`src/EventProp.Tests/RegressionLossParityTests.cs`) and the layer method (`CW.EventProp.LILayer.Regression`
+vs `src/EventProp.Tests/RegressionLayerParityTests.cs`, which asserts through `Backward()` because
+writing the errors somewhere the backward pass cannot see is the failure this shape invites).
 
 ### Five ways to ask for it
 
@@ -141,6 +143,9 @@ contract that read as bugs if you guess:
   the time is how a learning rate ends up coupled to a batch size.
 - **Gradients accumulate; nothing zeroes.** Clearing your own buffers is `ZeroGrad()`'s job, on
   both bindings.
+- **A zero readout gives the weights nothing to learn from.** `dL/dmaxima = dL/dy_hat · decoder`,
+  so `decoder = 0` leaves the weight gradient exactly zero and only the bias ever moves. Passing
+  zeros is the obvious way to start and it fails silently, so both bindings pin it.
 - **A non-finite maxima value means that neuron never peaked.** It is excluded from the readout,
   given zero error, and counted in `n_skipped`. That is a valid datum, not a failure; a sample
   whose whole population is non-finite is valid too, the readout collapsing to the bias with
@@ -149,6 +154,12 @@ contract that read as bugs if you guess:
   maximum of 0.0, which enters the readout like any other value — zero weights produce **no**
   skips. Measured rather than assumed, because the two phrases read as one sentence and this
   document got it wrong until a test disagreed.
+- **Buffer-length rules differ between the two bindings — do not port by assumption.** The C#
+  `LILayer.Regression` accepts "at least one target per sample" and ignores the tail, matching the
+  span convention used everywhere in that API; this binding requires **exactly** `batch` targets
+  and **exactly** `n_post` / `1` gradient entries, and raises `ValueError` otherwise. A call ported
+  from C# with an oversized buffer will work there and be refused here, which is the better failure
+  direction.
 - **`huber_delta` selects the loss.** Non-finite (pass `math.inf`) is least squares; a finite
   positive value is smooth Huber, `r² / (sqrt(1 + q²) + 1)` with `q = r / delta`. It is *smooth*:
   `dL/dy_hat` approaches `±delta` from below and never reaches it. The textbook spelling

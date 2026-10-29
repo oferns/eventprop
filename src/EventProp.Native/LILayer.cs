@@ -23,6 +23,7 @@ public sealed unsafe class LILayer : Layer, IDisposable
     /// <summary>Pinned pointer array: one native double* per sample, into MaximaData.Errors.</summary>
     private IntPtr[] _errorPtrs = [];
     private GCHandle[] _errorPins = [];
+    private double[] _regressionScratch = [];
 
     public LILayer(LILayerParameters parameters)
         : this(parameters, null) { }
@@ -176,6 +177,90 @@ public sealed unsafe class LILayer : Layer, IDisposable
     }
 
     public override void ZeroGrad() => Gradient.AsSpan().Clear();
+
+    /// <summary>
+    /// Continuous readout over the maxima from the last <see cref="Forward"/>, plus its loss, with
+    /// dL/dmaxima written into each sample's maxima error buffers — so the step is
+    /// <c>Forward(); Regression(...); Backward()</c> and no loss arithmetic happens on the
+    /// managed side.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the managed mirror of <c>CW.EventProp.LILayer.Regression</c> and of
+    /// <c>eventprop_c.LILayer.regression</c> in the Cython binding: same formulas, same refusal if
+    /// <see cref="Forward"/> has not run, same accumulation rules. The native side reaches the C
+    /// library through <see cref="Loss.Regress"/> per sample rather than
+    /// <see cref="Loss.RegressBatch"/>, because the batch entry point needs a native
+    /// <see cref="Batch.MaximaBatch"/>, which is a ref struct the layer cannot cache — recomputing
+    /// the maxima to build one would cost a full forward pass to save N cheap calls.
+    /// </para>
+    /// <para>
+    /// Gradients are <b>sums</b> over the batch and <b>accumulate</b> into
+    /// <paramref name="decoderGrad"/>/<paramref name="biasGrad"/> when supplied. A non-finite
+    /// maximum is a neuron that never peaked: it is excluded and counted in
+    /// <see cref="MaximaRegressionStep.Skipped"/>. A neuron at rest contributes a finite maximum of
+    /// 0.0, which is a value and not a skip.
+    /// </para>
+    /// </remarks>
+    /// <param name="decoder">Readout weights a[n], length N; every entry must be finite.</param>
+    /// <param name="bias">Readout bias b.</param>
+    /// <param name="targets">One target per sample.</param>
+    /// <param name="huberDelta"><see cref="Loss.LeastSquares"/> (or any non-finite value) for
+    /// plain squared error; a finite positive value for the smooth Huber loss.</param>
+    /// <param name="decoderGrad">Optional caller-owned dL/da accumulator.</param>
+    /// <param name="biasGrad">Optional caller-owned length-1 dL/db accumulator.</param>
+    public MaximaRegressionStep Regression(ReadOnlySpan<double> decoder, double bias,
+                                           ReadOnlySpan<double> targets,
+                                           double huberDelta = Loss.LeastSquares,
+                                           double[]? decoderGrad = null,
+                                           double[]? biasGrad = null)
+    {
+        if (!_ranForward || _maximaBatch is null)
+            throw new InvalidOperationException(
+                "Run Forward() before Regression(): dL/dmaxima is written into the maxima error buffers that Forward allocated.");
+
+        int batch = _inputBatch!.Count;
+        if (decoder.Length != _params.N)
+            throw new ArgumentException(
+                $"decoder has {decoder.Length} entries, the layer has {_params.N} neurons", nameof(decoder));
+        if (targets.Length < batch)
+            throw new ArgumentException(
+                $"targets has {targets.Length} entries, the batch has {batch}", nameof(targets));
+
+        double[] dGrad = decoderGrad ?? new double[_params.N];
+        double[] bGrad = biasGrad ?? new double[1];
+        if (dGrad.Length < _params.N)
+            throw new ArgumentException(
+                $"decoderGrad must hold {_params.N} entries, got {dGrad.Length}", nameof(decoderGrad));
+        if (bGrad.Length < 1)
+            throw new ArgumentException("biasGrad must hold at least 1 entry", nameof(biasGrad));
+
+        var predictions = new double[batch];
+        var losses = new double[batch];
+        var skipped = new int[batch];
+        if (_regressionScratch.Length < _params.N) _regressionScratch = new double[_params.N];
+
+        for (int b = 0; b < batch; b++)
+        {
+            var maxima = _maximaBatch[b];
+            int n = maxima.NNeurons;
+            if (n == 0) continue;   // nothing to read out for this sample
+
+            // Loss.Regress overwrites the decoder-gradient span it is given (it is the per-sample
+            // primitive); the batch sum is accumulated here.
+            var result = Loss.Regress(maxima.Values.AsSpan(0, n), decoder, bias, targets[b],
+                                      huberDelta, maxima.Errors.AsSpan(0, n),
+                                      _regressionScratch.AsSpan(0, n));
+            for (int i = 0; i < n; i++) dGrad[i] += _regressionScratch[i];
+
+            bGrad[0] += result.BiasGrad;
+            predictions[b] = result.Prediction;
+            losses[b] = result.Loss;
+            skipped[b] = result.NSkipped;
+        }
+
+        return new MaximaRegressionStep(predictions, losses, skipped, dGrad, bGrad);
+    }
 
     public override void Dispose() => FreeErrorPointers();
 

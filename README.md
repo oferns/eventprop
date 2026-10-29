@@ -260,7 +260,7 @@ All hot-path functions are **allocation-free** when `ScratchBuffers` is provided
 | **ComputeSpikes** | Forward pass — finds threshold-crossing times via root-finding (Toms748/Brent) |
 | **Backward** | Adjoint method — time-reversed sweep propagating λ_v (membrane) and λ_i (synaptic) adjoints |
 | **ComputeMaxima** | Finds membrane potential maxima per neuron (for voltage-based loss) |
-| **MaximaRegression** | Continuous readout `b + Σ aₙ·maximaₙ` with least-squares or smooth Huber loss; writes `dL/dmaxima` for the adjoint, so a regression target needs no loss arithmetic in the binding. C only — its parity partner is the managed `CW.EventProp.RegressionLoss`, not the Eigen core |
+| **MaximaRegression** | Continuous readout `b + Σ aₙ·maximaₙ` with least-squares or smooth Huber loss; writes `dL/dmaxima` for the adjoint, so a regression target needs no loss arithmetic in the binding — reached as `LILayer.Regression(...)` in .NET and `LILayer.regression(...)` in Python. C only — its parity partner is the managed `CW.EventProp.RegressionLoss`, not the Eigen core |
 
 ## Platform Support
 

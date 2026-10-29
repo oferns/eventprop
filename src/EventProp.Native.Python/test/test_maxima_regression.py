@@ -477,6 +477,21 @@ class TestLayerEntryPoints:
                 assert abs(fd - analytic[i, j]) < 1e-3 * scale + 1e-9, \
                     f"dW[{i},{j}]: fd={fd} analytic={analytic[i, j]}"
 
+    def test_a_zero_readout_leaves_the_weights_no_gradient(self):
+        """dL/dmaxima = dL/dy_hat · decoder, so decoder = 0 gives the weights nothing to learn from.
+
+        This is the obvious initialisation for a readout and it fails silently — the loss falls (the
+        bias moves) while the layer never learns — so the property is pinned here as well as in
+        `RegressionLayerParityTests` on the .NET side.
+        """
+        spikes = self._spikes()
+        layer = self._layer()
+        layer.forward(spikes)
+        layer.regression(np.zeros(N_POST), 0.3, TARGETS,
+                         decoder_grad=np.zeros(N_POST), bias_grad=np.zeros(1))
+        layer.backward()
+        assert np.abs(layer.gradient).max() == 0.0
+
     def test_a_training_step_reduces_the_loss(self):
         """Three plain-SGD steps through the layer wrapper. Not a benchmark, a direction."""
         decoder = np.ascontiguousarray(np.array([0.0, 0.0]))

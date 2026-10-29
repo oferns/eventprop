@@ -387,6 +387,15 @@ Each line is a rule you cannot see from the file it governs. Detail and evidence
   backend — a new backend must satisfy them all.
 - `SpikesBatch`/`MaximaBatch` are `ref struct`s and cannot be cached on a field, so the native
   layers **recompute** the forward batch in `Backward()` (deterministic for the same weights).
+- The maxima regression readout is exposed on **both** `LILayer`s as `Regression(...)`, and its
+  parity must be asserted **through `Backward()`** by comparing `Gradient`. The native layer
+  recomputes the C maxima batch inside `Backward()` (above) and copies `MaximaData.Errors` into it,
+  so a readout step that wrote into the recomputed copy instead would pass every per-sample parity
+  test and train nothing. `src/EventProp.Tests/RegressionLayerParityTests.cs` owns that claim; the
+  per-sample primitives are owned by `RegressionLossParityTests.cs`.
+- **A zero readout leaves the weights no gradient at all.** `dL/dmaxima = dL/dy_hat · decoder`, so
+  `decoder = 0` moves only the bias. That is the natural way to initialize one and it fails
+  silently, so both backends pin it.
 - The C# chain is explicit `Layer.Chain<TA,TB>`; there is no `ancestor_layer` and no ancestor
   recursion — deliberate divergence from Python, not a missing feature.
 - **A pointer taken from managed memory must be pinned for as long as the callee uses it.**
