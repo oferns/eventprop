@@ -133,7 +133,7 @@ chain.Forward(inputTimes, inputSources);  // propagates through both
 Two Python binding layers are available:
 
 - **`EventProp.Python/`** — pybind11-based bindings (git submodule). The reference implementation with a complete Python layer.
-- **`EventProp.Native.Python/`** — Cython bindings to the C library. Zero-copy numpy views, managed memory wrappers, and flat-array FFI variants for maximum efficiency.
+- **`EventProp.Native.Python/`** — Cython bindings to the C library. Zero-copy numpy views, managed memory wrappers, and flat-array FFI variants for maximum efficiency. Also the home of the [continuous readout and regression loss](src/EventProp.Native.Python/README.md#continuous-readout-and-regression), which exists in C so that P/Invoke and Cython share one implementation.
 
 **Install Cython bindings** — or let `./build.sh release` do it, including regenerating
 `_native.c` from `_native.pyx` (Cython is a build prerequisite of that step, not something
@@ -260,6 +260,7 @@ All hot-path functions are **allocation-free** when `ScratchBuffers` is provided
 | **ComputeSpikes** | Forward pass — finds threshold-crossing times via root-finding (Toms748/Brent) |
 | **Backward** | Adjoint method — time-reversed sweep propagating λ_v (membrane) and λ_i (synaptic) adjoints |
 | **ComputeMaxima** | Finds membrane potential maxima per neuron (for voltage-based loss) |
+| **MaximaRegression** | Continuous readout `b + Σ aₙ·maximaₙ` with least-squares or smooth Huber loss; writes `dL/dmaxima` for the adjoint, so a regression target needs no loss arithmetic in the binding. C only — its parity partner is the managed `CW.EventProp.RegressionLoss`, not the Eigen core |
 
 ## Platform Support
 
