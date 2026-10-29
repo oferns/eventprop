@@ -297,7 +297,11 @@ def suite_dotnet(out_dir, quick, tag, sweeps=False):
         # ShortRun, not DefaultJob. Measured: DefaultJob takes ~2 min for ONE
         # benchmark, so the full Tiny+Small set is tens of minutes; ShortRun is
         # the documented quick setting and keeps the pipeline usable.
-        cmd += ["-j", "Short", "-f", "*Tiny*", "*Small*"]
+        # MaximaRegression is named alongside Tiny/Small even though its rows are
+        # Medium/Large: the family is 10 sub-microsecond benchmarks (measured: seconds),
+        # and a family excluded from a run that rewrites the committed report is how a
+        # report ends up implying it covered everything.
+        cmd += ["-j", "Short", "-f", "*Tiny*", "*Small*", "*MaximaRegression*"]
     else:
         # A filter is MANDATORY, not optional. With 75 registered benchmarks and
         # no filter, BDN prints the list and prompts "Enter the asterisk `*` to
@@ -327,7 +331,8 @@ def suite_dotnet(out_dir, quick, tag, sweeps=False):
             cmd += ["-j", "Short", "-f",
                     "*ComputeSums*", "*ComputeSpikes*", "*BackwardSpikes*",
                     "*ComputeMaxima*", "*TrainingLoop_*",
-                    "*LIF_*", "*LI_*", "*Batch_*", "*Pattern_*"]
+                    "*LIF_*", "*LI_*", "*Batch_*", "*Pattern_*",
+                    "*MaximaRegression*"]
     ok, _ = run(cmd, cwd=DOTNET_PROJ, timeout=7200, label="dotnet suite (BenchmarkDotNet; the long one)")
     if not ok:
         print("  dotnet benchmark run failed", file=sys.stderr)

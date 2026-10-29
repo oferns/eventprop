@@ -114,7 +114,7 @@ point of the schema.
 
 | Field | Domain | Notes |
 |---|---|---|
-| `benchmark` | `ComputeSums` `ComputeSpikes` `ComputeMaxima` `BackwardSpikes` `BackwardMaxima` `FullTrainingStep` `Dropout` `LIF_Forward` `LIF_Backward` `LI_Forward` `LI_Backward` `TrainingLoop` `Batch_Forward` | **Kernel family, no size, no pattern, no tool decoration.** Google Benchmark emits `ComputeSpikes/Small/burst/real_time`; BDN emits `Bench_ComputeSpikes_Small`; pytest emits `test_lif_forward_cython[...]`. Each adapter normalizes to this vocabulary. Adding a family = adding it here. |
+| `benchmark` | `ComputeSums` `ComputeSpikes` `ComputeMaxima` `BackwardSpikes` `BackwardMaxima` `FullTrainingStep` `Dropout` `LIF_Forward` `LIF_Backward` `LI_Forward` `LI_Backward` `TrainingLoop` `Batch_Forward` `MaximaRegression` `Batch_MaximaRegression` | **Kernel family, no size, no pattern, no tool decoration.** Google Benchmark emits `ComputeSpikes/Small/burst/real_time`; BDN emits `Bench_ComputeSpikes_Small`; pytest emits `test_lif_forward_cython[...]`. Each adapter normalizes to this vocabulary. Adding a family = adding it here, **and** to the adapter that can emit it — an unlisted family is dropped as unmapped. |
 | `impl` | `C` `Eigen` `Managed` `PInvoke` `pybind11` `Cython` | Which implementation. **This is the field that closes the cross-suite chain** — see below. |
 | `size` | `Tiny` `Small` `Medium` `Large` `XL` | From the shared size table (10/5/20, 50/20/100, 200/80/500, 500/200/1000, 2000/500/5000). |
 | `pattern` | `uniform` `poisson` `burst` | From the canonical generators. |
@@ -216,6 +216,13 @@ overhead is unmeasurable there.
 
 **Requirement:** every suite must emit a record for each kernel family, at the shared
 sizes, via the same C entry point.
+
+**Not every family is a chain family.** `MaximaRegression` (per-sample kernel) and
+`Batch_MaximaRegression` (the `LILayer` readout step) exist only on the .NET side, because the
+regression loss has no Eigen or reference-library counterpart to measure against — the reference
+library ships none. Those cells merge with reason `missing_counterpart` and contribute no ratio to
+any geomean, which is the correct outcome rather than a gap to paper over by aliasing an impl.
+Read the pair inside the suite (`Managed` vs `PInvoke`) and nothing across it.
 
 | Suite | How |
 |---|---|

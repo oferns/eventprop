@@ -46,6 +46,10 @@ Method -> impl vocabulary:
     Precompute_* / FindRoots_* / MergeAndSort_* / Accumulate_* -> micro-benchmarks,
                          not kernel families: skipped as unmapped.
 
+    The MaximaRegression families use plain Managed / Native: BOTH sides loop per sample
+    there, because the layer cannot cache the native MaximaBatch (a ref struct). Calling the
+    native side Native_BatchApi would be a lie about what is being timed.
+
 Provenance: the CSV has NO tool_version column (verified across all 93 files).
 The BenchmarkDotNet version appears only in the console log
 (`// BenchmarkDotNet v0.15.8`). Since a BDN version change moves the headline
@@ -71,12 +75,19 @@ SIZES = {"Tiny", "Small", "Medium", "Large", "XL"}
 PATTERNS = {"uniform", "poisson", "burst"}
 
 # Kernel families and layer families the schema recognizes.
+#
+# MaximaRegression / Batch_MaximaRegression are emitted by THIS suite only: the regression
+# readout has no Eigen or reference-library counterpart (the reference library ships no
+# regression loss), so the merge marks those cells `missing_counterpart` rather than inventing
+# a peer impl. They are listed here so the rows survive the mapping below instead of being
+# dropped as unmapped — a family silently dropped is a family nobody knows went missing.
 FAMILIES = {
     "ComputeSums", "ComputeSpikes", "ComputeMaxima",
     "BackwardSpikes", "BackwardMaxima",
     "FullTrainingStep", "TrainingLoop", "Dropout",
     "LIF_Forward", "LIF_Backward", "LI_Forward", "LI_Backward",
     "Batch_Forward", "Batch_TrainingStep", "Batch_RawApi",
+    "MaximaRegression", "Batch_MaximaRegression",
 }
 
 METHOD_TO_IMPL = {
