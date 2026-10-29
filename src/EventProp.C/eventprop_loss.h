@@ -123,18 +123,22 @@ MaximaRegressionOutput eventprop_maxima_regression(MaximaRegressionInput input);
 
 /**
  * Write this sample's errors straight into `maxima.errors` — the array
- * `eventprop_compute_maxima` allocated for exactly this purpose — and accumulate this
- * sample's contribution to the readout gradients into caller-owned arrays.
+ * `eventprop_compute_maxima` allocated for exactly this purpose.
  *
  * Zero allocation, which is what makes it usable inside a training loop: a step that
  * mallocs per sample pays an allocator round trip for ~n_post floats.
  *
- * `decoder_grad_accum` and `bias_grad_accum` are ACCUMULATED into, never zeroed — matching
- * the layer contract that Backward() adds to existing gradients and ZeroGrad() is the only
- * thing that clears them. Either may be NULL when the caller does not train the readout.
+ * It computes NO readout gradients — it has no parameters to put them in. A caller that
+ * trains `decoder` and `bias` wants `eventprop_maxima_regression_batch`, which sums them
+ * across the batch in one call; a caller with a fixed readout wants this, and a caller that
+ * needs one sample's error written on its own (its own target, its own loss scale, or a
+ * re-run of a single sample) wants this too.
  *
- * `maxima.errors` is overwritten for every neuron, including the skipped ones (written 0),
- * so a reused MaximaOutput cannot carry a previous step's error into this one.
+ * `maxima.errors` is overwritten for every neuron of this one sample, including the skipped
+ * ones (written 0), so a reused MaximaOutput cannot carry a previous step's error into this
+ * one. Other samples are not touched: a batch in which only sample 2 has been through this
+ * function has sample 2's errors and everyone else's, which are whatever the caller last
+ * wrote there — the forward pass zeroes them, a reused batch does not.
  */
 MaximaRegressionResult eventprop_maxima_regression_into(MaximaOutput maxima,
                                                         const double* decoder,
@@ -147,6 +151,10 @@ MaximaRegressionResult eventprop_maxima_regression_into(MaximaOutput maxima,
  *
  * Writes `outputs[i].errors` for every sample, accumulates the readout gradients across
  * samples, and optionally reports per-sample predictions and losses. Zero allocation.
+ *
+ * `decoder_grad_accum` and `bias_grad_accum` are ACCUMULATED into, never zeroed — matching
+ * the layer contract that Backward() adds to existing gradients and ZeroGrad() is the only
+ * thing that clears them. Either may be NULL when the caller does not train the readout.
  *
  * Every sample must have the same `n_post`; a mismatch is EVENTPROP_BATCH_DIMENSION_MISMATCH
  * rather than a decoder array read past its end.

@@ -647,6 +647,51 @@ cdef class _MaximaBatchOutput:
             "bias_grad": np.asarray(grad_b),
         }
 
+    def regress_sample(self, int idx, double[::1] decoder, double bias, double target,
+                       double huber_delta):
+        """Write ONE sample's regression errors into its own maxima buffer, in place.
+
+        The per-sample counterpart of `regress()`. It calls
+        `eventprop_maxima_regression_into`, which writes into the `errors` array
+        compute_maxima_batch already allocated for that sample and allocates nothing — not
+        even the three per-call numpy arrays the batch path hands back, which is the point if
+        you are calling it once per sample in a loop.
+
+        It does NOT compute the readout gradients: that C entry point has no parameters to
+        put them in. Use `regress()` when the decoder is being trained (it sums dL/da across
+        the batch in one call), and this when the readout is fixed, or when one sample needs
+        its own target or loss scale.
+
+        Only this sample's buffer is written. Every neuron of it is overwritten, skipped ones
+        with 0, so a reused batch cannot carry a previous step's error forward — but the other
+        samples keep whatever they hold, and the forward pass only zeroes them once.
+
+        Returns {"prediction", "loss", "residual_derivative", "n_skipped"}.
+        """
+        if self._maxima == NULL:
+            raise RuntimeError("MaximaBatchOutput has been freed")
+        if idx < 0 or idx >= self._maxima.batch_size:
+            raise IndexError(
+                f"sample {idx} out of range for a batch of {self._maxima.batch_size}")
+        if decoder.shape[0] == 0:
+            raise ValueError("decoder must not be empty")
+
+        cdef MaximaOutput* out = &self._maxima.outputs[idx]
+        if out.n_post != decoder.shape[0]:
+            raise ValueError(f"decoder has {decoder.shape[0]} entries, sample {idx} has "
+                             f"{out.n_post} maxima")
+
+        cdef MaximaRegressionResult r = eventprop_maxima_regression_into(
+            out[0], &decoder[0], bias, target, huber_delta)
+        _check_diag_error(r.error_no, f"maxima regression for sample {idx}")
+
+        return {
+            "prediction": r.prediction,
+            "loss": r.loss,
+            "residual_derivative": r.residual_derivative,
+            "n_skipped": r.n_skipped,
+        }
+
     def __getitem__(self, int idx):
         """Return (times, values) as zero-copy numpy views for sample idx.
 
