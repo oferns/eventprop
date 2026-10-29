@@ -23,6 +23,8 @@ import math
 import numpy as np
 import pytest
 
+from numpy.testing import assert_allclose
+
 from eventprop_c import _native as native
 
 TAU_MEM, TAU_SYN, V_TH = 0.02, 0.005, 1.0
@@ -203,3 +205,318 @@ class TestRegressSample:
             with pytest.raises(RuntimeError):
                 batch.regress_sample(0, np.ascontiguousarray(dec, dtype=np.float64),
                                      bias, target, delta)
+
+
+def _grad_buffers():
+    return np.zeros(N_POST), np.zeros(1)
+
+
+class TestBatchRegress:
+    """`_MaximaBatchOutput.regress` — the entry a training loop uses."""
+
+    def test_matches_the_sum_of_per_sample_calls(self):
+        """The batch readout must be the per-sample one, summed, in both directions."""
+        batch = _batch()
+        dgrad, bgrad = _grad_buffers()
+        step = batch.regress(DECODER, BIAS, TARGETS, math.inf,
+                             decoder_grad=dgrad, bias_grad=bgrad)
+
+        per_sample = [native.maxima_regression(_values(batch, i), DECODER, BIAS,
+                                               float(TARGETS[i]), math.inf)
+                      for i in range(BATCH)]
+        assert len(step["predictions"]) == len(step["losses"]) == BATCH
+        for i, exp in enumerate(per_sample):
+            assert_allclose(step["predictions"][i], exp["prediction"], rtol=0, atol=0)
+            assert_allclose(step["losses"][i], exp["loss"], rtol=0, atol=0)
+            assert_allclose(_errors(batch, i), exp["errors"], rtol=0, atol=0)
+
+        assert_allclose(dgrad, sum(p["decoder_grad"] for p in per_sample), rtol=1e-12, atol=0)
+        assert_allclose(bgrad, [sum(float(p["residual_derivative"]) for p in per_sample)],
+                        rtol=1e-12, atol=0)
+
+    def test_readout_buffers_accumulate_and_are_caller_owned(self):
+        batch = _batch()
+        dgrad, bgrad = _grad_buffers()
+        batch.regress(DECODER, BIAS, TARGETS, math.inf, decoder_grad=dgrad, bias_grad=bgrad)
+        first_d, first_b = dgrad.copy(), bgrad.copy()
+        assert np.abs(first_d).max() > 0.0, "the readout produced no decoder gradient at all"
+
+        batch.regress(DECODER, BIAS, TARGETS, math.inf, decoder_grad=dgrad, bias_grad=bgrad)
+        assert_allclose(dgrad, 2 * first_d, rtol=1e-12, atol=0)
+        assert_allclose(bgrad, 2 * first_b, rtol=1e-12, atol=0)
+
+        # The returned gradients are a view of the buffers passed in, not a snapshot of them:
+        # writing through one is visible in the other. `is` would be the wrong assertion — the
+        # binding wraps the memoryview, so the object differs and the memory does not.
+        fresh_d, fresh_b = _grad_buffers()
+        out = batch.regress(DECODER, BIAS, TARGETS, math.inf,
+                            decoder_grad=fresh_d, bias_grad=fresh_b)
+        for returned, passed in ((out["decoder_grad"], fresh_d), (out["bias_grad"], fresh_b)):
+            assert returned is not passed
+            assert returned.__array_interface__["data"][0] == passed.__array_interface__["data"][0]
+            returned *= 0.0
+            assert np.abs(passed).max() == 0.0
+
+    def test_written_errors_drive_the_backward_pass(self):
+        """Prove the batch write reaches the memory the backward pass actually reads."""
+        clean = _batch()
+        assert np.asarray(native.backward_maxima_batch_accumulate(clean).grad).max() == 0.0
+
+        batch = _batch()
+        batch.regress(DECODER, BIAS, TARGETS, math.inf)
+        grad = np.asarray(native.backward_maxima_batch_accumulate(batch).grad)
+        assert grad.size == N_PRE * N_POST          # flat; callers reshape to (n_pre, n_post)
+        assert np.abs(grad).max() > 0.0
+
+
+class TestAllocatingSingleSample:
+    """`native.maxima_regression` — the entry a notebook reaches for."""
+
+    def test_gradients_match_central_differences(self):
+        batch = _batch()
+        values = _values(batch, 0)
+        target, eps = 0.4, 1e-5
+
+        def loss(dec, bias):
+            return float(native.maxima_regression(values, np.ascontiguousarray(dec),
+                                                  float(bias), target, math.inf)["loss"])
+
+        dec0 = np.ascontiguousarray(DECODER.copy())
+        out = native.maxima_regression(values, dec0, BIAS, target, math.inf)
+        assert float(out["n_skipped"]) == 0.0, \
+            "a silent neuron would zero the gradient this check is about"
+        assert abs(float(out["loss"])) > 0.0
+
+        for n in range(N_POST):
+            dp, dm = dec0.copy(), dec0.copy()
+            dp[n] += eps
+            dm[n] -= eps
+            fd = (loss(dp, BIAS) - loss(dm, BIAS)) / (2 * eps)
+            assert abs(fd - out["decoder_grad"][n]) < 1e-4 * abs(fd) + 1e-8, \
+                f"decoder[{n}]: fd={fd} analytic={out['decoder_grad'][n]}"
+
+        fd_b = (loss(dec0, BIAS + eps) - loss(dec0, BIAS - eps)) / (2 * eps)
+        assert abs(fd_b - float(out["residual_derivative"])) < 1e-4 * abs(fd_b) + 1e-8
+
+    def test_the_allocating_path_does_not_accumulate_across_calls(self):
+        """The opposite contract from `regress`: fresh arrays, nothing carried over."""
+        batch = _batch()
+        values = _values(batch, 0)
+        first = native.maxima_regression(values, DECODER, BIAS, TARGETS[0], math.inf)
+        second = native.maxima_regression(values, DECODER, BIAS, TARGETS[0], math.inf)
+        assert_allclose(second["decoder_grad"], first["decoder_grad"], rtol=0, atol=0)
+        assert first["decoder_grad"] is not second["decoder_grad"]
+
+
+class TestRefusals:
+    """Validation has to arrive as an exception, on every entry point."""
+
+    def test_huber_scale_rules(self):
+        batch = _batch()
+        for delta in (0.0, -1.0, float("nan")):
+            with pytest.raises(RuntimeError):
+                batch.regress(DECODER, BIAS, TARGETS, delta)
+            with pytest.raises(RuntimeError):
+                native.maxima_regression(_values(batch, 0), DECODER, BIAS, TARGETS[0], delta)
+        # non-finite and finite-positive are both accepted, and mean different losses
+        ls = batch.regress(DECODER, BIAS, TARGETS, math.inf)["losses"].copy()
+        hub = batch.regress(DECODER, BIAS, TARGETS, 1e-3)["losses"].copy()
+        assert np.abs(ls - hub).max() > 0.0
+
+    def test_non_finite_readout_parameters_are_refused_even_for_silent_neurons(self):
+        """A poisoned weight must not be able to hide behind a neuron that never fires."""
+        zero_w = np.zeros((N_PRE, N_POST))
+        silent = native.compute_maxima_batch(TIMES, SOURCES, N_PER_SAMPLE, zero_w,
+                                             N_PRE, N_POST, TAU_MEM, TAU_SYN, V_TH)
+        nan_decoder = np.ascontiguousarray(np.array([float("nan"), -1.3]))
+        with pytest.raises(RuntimeError):
+            silent.regress(nan_decoder, BIAS, TARGETS, math.inf)
+
+    def test_length_mismatch_is_refused(self):
+        batch = _batch()
+        with pytest.raises(ValueError):
+            batch.regress(np.zeros(N_POST + 1), BIAS, TARGETS, math.inf)
+        with pytest.raises(ValueError):
+            batch.regress(DECODER, BIAS, np.zeros(BATCH + 1), math.inf)
+
+    def test_a_population_at_rest_is_a_valid_sample(self):
+        """Zero weights: every neuron's maximum is exactly 0, which is a real value.
+
+        Measured rather than assumed — this is the case that *looks* like the skip path and is
+        not: the maxima are finite, so nothing is skipped, the readout collapses to the bias, and
+        the decoder gradient is legitimately zero because dL/ddecoder = dL/dy_hat * maxima.
+        """
+        zero_w = np.zeros((N_PRE, N_POST))
+        at_rest = native.compute_maxima_batch(TIMES, SOURCES, N_PER_SAMPLE, zero_w,
+                                              N_PRE, N_POST, TAU_MEM, TAU_SYN, V_TH)
+        assert np.isfinite(np.array(at_rest[0][1])).all()
+        step = at_rest.regress(DECODER, 0.3, TARGETS, math.inf)
+        np.testing.assert_array_equal(np.asarray(step["n_skipped"]), [0] * BATCH)
+        assert_allclose(step["predictions"], [0.3] * BATCH, rtol=0, atol=0)
+        assert_allclose(step["losses"], 0.5 * (0.3 - TARGETS) ** 2, rtol=1e-12, atol=0)
+        assert np.abs(np.asarray(step["decoder_grad"])).max() == 0.0
+
+    def test_a_neuron_that_never_peaked_is_excluded_and_counted(self):
+        """The skip path itself, driven directly: a non-finite maximum is the library's signal
+        for "this neuron never peaked", so it must not enter the readout or the gradient."""
+        values = np.array([float("nan"), 0.5])
+        out = native.maxima_regression(values, np.ones(2), 0.1, 0.7, math.inf)
+        assert out["n_skipped"] == 1
+        assert_allclose(out["prediction"], 0.1 + 0.5, rtol=1e-12, atol=0)
+        assert_allclose(np.asarray(out["errors"])[0], 0.0, rtol=0, atol=0)
+
+        all_silent = np.full(2, float("nan"))
+        out = native.maxima_regression(all_silent, np.ones(2), 0.3, 0.7, math.inf)
+        assert out["n_skipped"] == 2
+        assert_allclose(out["prediction"], 0.3, rtol=0, atol=0)
+        assert_allclose(out["loss"], 0.5 * (0.3 - 0.7) ** 2, rtol=1e-12, atol=0)
+        assert np.abs(np.asarray(out["errors"])).max() == 0.0
+        assert np.abs(np.asarray(out["decoder_grad"])).max() == 0.0
+
+
+class TestLayerEntryPoints:
+    """`LILayer.regression` and `MaximaVector.regress` are the shapes callers reach for.
+
+    The claim they have to earn is not that they forward arguments — it is that the errors they
+    write are the errors the *backward pass* reads, so that forward → regression → backward
+    produces dL/dw_in. That is checked against finite differences of the loss, which involves
+    every layer of the binding at once and cannot be satisfied by a method that writes into a copy.
+    """
+
+    @staticmethod
+    def _params():
+        from eventprop_c import LILayerParameters
+        return LILayerParameters(n=N_POST, n_in=N_PRE, tau_mem=TAU_MEM, tau_syn=TAU_SYN,
+                                 plastic_weights=False)
+
+    @classmethod
+    def _spikes(cls):
+        from eventprop_c import Spikes, SpikesVector
+        out = []
+        for i in range(BATCH):
+            lo, hi = int(np.sum(N_PER_SAMPLE[:i])), int(np.sum(N_PER_SAMPLE[:i + 1]))
+            out.append(Spikes(times=TIMES[lo:hi].copy(), sources=SOURCES[lo:hi].copy()))
+        return SpikesVector(out)
+
+    @classmethod
+    def _layer(cls):
+        from eventprop_c import LILayer
+        return LILayer(cls._params(), w_in=W.copy())
+
+    def test_regression_requires_a_prior_forward(self):
+        with pytest.raises(RuntimeError, match="prior forward"):
+            self._layer().regression(DECODER, BIAS, TARGETS)
+
+    def test_matches_an_explicit_batch_call(self):
+        """The convenience method must not recompute, reorder, or re-seed anything."""
+        spikes = self._spikes()
+
+        layer = self._layer()
+        layer.forward(spikes)
+        via_layer = layer.regression(DECODER, BIAS, TARGETS)
+
+        # huber_delta is positional and required on the raw entry point — only the layer wrapper
+        # defaults it, so the low-level call never picks a loss implicitly.
+        manual = native.compute_maxima_batch(TIMES, SOURCES, N_PER_SAMPLE, W,
+                                             N_PRE, N_POST, TAU_MEM, TAU_SYN, float("inf")) \
+            .regress(DECODER, BIAS, TARGETS, math.inf)
+
+        assert_allclose(np.asarray(via_layer["predictions"]), np.asarray(manual["predictions"]),
+                        rtol=0, atol=0)
+        assert_allclose(np.asarray(via_layer["losses"]), np.asarray(manual["losses"]),
+                        rtol=0, atol=0)
+
+    def test_maxima_vector_entry_points_agree_with_the_layer(self):
+        spikes = self._spikes()
+        layer = self._layer()
+        maxima = layer.forward(spikes)
+
+        via_vector = maxima.regress(DECODER, BIAS, TARGETS)
+        via_layer = layer.regression(DECODER, BIAS, TARGETS)
+        assert_allclose(np.asarray(via_vector["losses"]), np.asarray(via_layer["losses"]),
+                        rtol=0, atol=0)
+
+        one = maxima.regress_sample(0, DECODER, BIAS, float(TARGETS[0]))
+        assert_allclose(one["prediction"], float(np.asarray(via_layer["predictions"])[0]),
+                        rtol=0, atol=0)
+        assert_allclose(one["loss"], float(np.asarray(via_layer["losses"])[0]), rtol=0, atol=0)
+
+    def test_the_whole_chain_matches_finite_differences(self):
+        """forward → regression → backward, against finite differences of the same loss."""
+        decoder = np.ascontiguousarray(np.array([0.6, -0.3]))
+        bias, targets = 0.4, np.array([0.8, -0.2])
+        spikes = self._spikes()
+
+        layer = self._layer()
+        layer.forward(spikes)
+        layer.regression(decoder, bias, targets,
+                         decoder_grad=np.zeros(N_POST), bias_grad=np.zeros(1))
+        layer.backward()
+        analytic = layer.gradient.copy()
+        assert np.abs(analytic).max() > 1e-9, "the scenario produced no weight gradient at all"
+
+        def total_loss(w):
+            probe = LILayer_for_fd(w)
+            probe.forward(spikes)
+            out = probe.regression(decoder, bias, targets,
+                                   decoder_grad=np.zeros(N_POST), bias_grad=np.zeros(1))
+            return float(np.sum(np.asarray(out["losses"])))
+
+        w0 = layer.w_in.copy()
+        # Not a tautology guard: if the loss does not decrease downhill, "matches finite
+        # differences" could be matching a scenario where nothing at all happens.
+        assert total_loss(w0 - 1e-5 * analytic) < total_loss(w0), "a step downhill raised the loss"
+
+        eps, scale = 1e-5, np.abs(analytic).max()
+        for i in range(N_PRE):
+            for j in range(N_POST):
+                wp, wm = w0.copy(), w0.copy()
+                wp[i, j] += eps
+                wm[i, j] -= eps
+                fd = (total_loss(wp) - total_loss(wm)) / (2 * eps)
+                assert abs(fd - analytic[i, j]) < 1e-3 * scale + 1e-9, \
+                    f"dW[{i},{j}]: fd={fd} analytic={analytic[i, j]}"
+
+    def test_a_training_step_reduces_the_loss(self):
+        """Three plain-SGD steps through the layer wrapper. Not a benchmark, a direction."""
+        decoder = np.ascontiguousarray(np.array([0.0, 0.0]))
+        bias, targets = 0.0, np.array([0.8, -0.2])
+        spikes = self._spikes()
+        layer = self._layer()
+
+        # A step size for this fixture, chosen so the assertion is about direction rather than
+        # about a divergent optimizer: the readout gradient here is O(10) against maxima of O(0.1).
+        lr_w, lr_readout = 0.02, 0.02
+        losses = []
+        for _ in range(4):
+            layer.zero_grad()
+            layer.forward(spikes)
+            step = layer.regression(decoder, bias, targets,
+                                    decoder_grad=np.zeros(N_POST), bias_grad=np.zeros(1))
+            layer.backward()
+            losses.append(float(np.sum(np.asarray(step["losses"]))))
+            layer.w_in = layer.w_in - lr_w * layer.gradient
+            decoder = decoder - lr_readout * np.asarray(step["decoder_grad"])
+            bias = bias - lr_readout * float(np.asarray(step["bias_grad"])[0])
+
+        assert losses[0] > 0.0
+        assert all(b < a for a, b in zip(losses, losses[1:])), f"not monotone: {losses}"
+
+
+def LILayer_for_fd(w):
+    """Tiny indirection so the FD helper above reads as one expression."""
+    from eventprop_c import LILayer
+    return LILayer(TestLayerEntryPoints._params(), w_in=w.copy())
+
+
+class TestPythonBuiltMaximaRefuses:
+    """The readout lives in the C library, so a maxima vector built in Python has nowhere to
+    write its errors — and must say so rather than compute into a detached copy."""
+
+    def test_regress_and_regress_sample_refuse(self):
+        from eventprop_c import Maxima, MaximaVector
+        v = MaximaVector([Maxima(times=np.zeros(0), values=np.zeros(N_POST))])
+        with pytest.raises(RuntimeError, match="C-owned"):
+            v.regress(DECODER, BIAS, TARGETS)
+        with pytest.raises(RuntimeError, match="C-owned"):
+            v.regress_sample(0, DECODER, BIAS, float(TARGETS[0]))

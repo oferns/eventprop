@@ -101,17 +101,39 @@ so there is no C-vs-Eigen parity test for it; the guarantee is **managed ↔ nat
 between the C implementation and `CW.EventProp.RegressionLoss` in C#
 (`src/EventProp.Tests/RegressionLossParityTests.cs`).
 
-### Three ways to ask for it
+### Five ways to ask for it
 
 | Call | Allocation | Readout gradients | Use when |
 |---|---|---|---|
-| `batch.regress(decoder, bias, targets, huber_delta, decoder_grad=, bias_grad=)` | none on the C side | yes, accumulated over the batch | the training loop |
-| `batch.regress_sample(idx, decoder, bias, target, huber_delta)` | none at all | no | fixed readout, or one sample needs its own target or loss scale |
+| `layer.regression(decoder, bias, targets, huber_delta=np.inf, *, decoder_grad=, bias_grad=)` | none on the C side | yes, accumulated over the batch | the training loop |
+| `maxima.regress(decoder, bias, targets, huber_delta, *, decoder_grad=, bias_grad=)` | none on the C side | yes | you hold the maxima from a forward pass, not the layer |
+| `batch.regress(decoder, bias, targets, huber_delta, *, decoder_grad=, bias_grad=)` | none on the C side | yes | driving the C batch directly |
+| `maxima.regress_sample(idx, decoder, bias, target, huber_delta)` | none at all | no | fixed readout, or one sample needs its own target or loss scale |
 | `maxima_regression(values, decoder, bias, target, huber_delta)` | C mallocs, arrays are copied out | yes, for one sample | notebooks, one-offs, debugging |
 
-`regress` writes into the `errors` arrays `compute_maxima_batch` already allocated and returns
-`{"predictions", "losses", "n_skipped", "decoder_grad", "bias_grad"}`; the two gradient buffers
-you pass are **accumulated into**, not overwritten.
+`layer` is `LILayer`, `maxima` is the `MaximaVector` its `forward()` returns, `batch` is the
+underlying `_MaximaBatchOutput`. The layer form is the one to write by hand, because the step is
+two calls and no loss arithmetic appears in Python at all:
+
+```python
+step = layer.regression(decoder, bias, targets)   # writes dL/dmaxima
+layer.backward()                                  # dL/dw_in, summed over the batch
+```
+
+That is the same two-step the shipped `VMaxCrossEntropyLoss` performs internally; the difference
+is that here you own the readout and the target. It requires a prior `forward()`, since the errors
+have to land in the buffers forward allocated — and a `MaximaVector` built in Python rather than
+returned by the C backend **refuses**, because it has no native error buffers to write into.
+
+The batch forms write into the `errors` arrays `compute_maxima_batch` already allocated and return
+`{"predictions", "losses", "n_skipped", "decoder_grad", "bias_grad"}`. Two details of that
+contract that read as bugs if you guess:
+
+- **The raw entry points require `huber_delta` positionally.** Only `layer.regression` defaults it
+  (to least squares). Low-level code never picks a loss implicitly.
+- **`decoder_grad`/`bias_grad` in the result are views of the buffers you passed**, not snapshots
+  and not the same objects. Writing one is visible in the other; `is` is the wrong test, the data
+  pointer is the right one.
 
 ### Rules that are not guessable
 
@@ -120,17 +142,21 @@ you pass are **accumulated into**, not overwritten.
 - **Gradients accumulate; nothing zeroes.** Clearing your own buffers is `ZeroGrad()`'s job, on
   both bindings.
 - **A non-finite maxima value means that neuron never peaked.** It is excluded from the readout,
-  given zero error, and counted in `n_skipped`. That is a valid datum, not a failure — and a
-  sample whose whole population is silent is valid too. A run where a third of the samples are
-  silent is a different experiment from one where none are, and it should look like one.
+  given zero error, and counted in `n_skipped`. That is a valid datum, not a failure; a sample
+  whose whole population is non-finite is valid too, the readout collapsing to the bias with
+  `decoder_grad` legitimately zero.
+- **"At rest" is not "never peaked".** A neuron whose voltage never rises still has a *finite*
+  maximum of 0.0, which enters the readout like any other value — zero weights produce **no**
+  skips. Measured rather than assumed, because the two phrases read as one sentence and this
+  document got it wrong until a test disagreed.
 - **`huber_delta` selects the loss.** Non-finite (pass `math.inf`) is least squares; a finite
   positive value is smooth Huber, `r² / (sqrt(1 + q²) + 1)` with `q = r / delta`. It is *smooth*:
   `dL/dy_hat` approaches `±delta` from below and never reaches it. The textbook spelling
   `delta²(sqrt(1+q²) − 1)` is exactly zero in floating point for small residuals, which is why the
   stable form is used and why a C test asserts the curvature survives.
 - **Refusals are exceptions, never plausible numbers**: non-finite decoder weight (even for a
-  silent neuron, so a poisoned weight cannot hide behind one), non-finite target or bias,
-  `huber_delta ≤ 0` or NaN, and length mismatches — error codes 69–74 in `eventprop.h`.
+  neuron the readout excluded, so a poisoned weight cannot hide behind one), non-finite target or
+  bias, `huber_delta ≤ 0` or NaN, and length mismatches — error codes 69–74 in `eventprop.h`.
 
 ### A whole step
 

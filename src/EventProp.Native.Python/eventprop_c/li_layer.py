@@ -1,7 +1,7 @@
 """LI layer — Cython bindings, zero-copy numpy arrays."""
 
 import numpy as np
-from typing import NamedTuple, Tuple
+from typing import NamedTuple, Optional, Tuple
 
 from .layer import GaussianDistribution, Layer, WeightDistribution
 from ._native import (
@@ -85,6 +85,44 @@ class LILayer(Layer):
 
         self._ran_backward = True
         super().backward()
+
+    def regression(self, decoder: np.ndarray, bias: float, targets: np.ndarray,
+                   huber_delta: float = np.inf, *,
+                   decoder_grad: Optional[np.ndarray] = None,
+                   bias_grad: Optional[np.ndarray] = None) -> dict:
+        """Continuous readout over the maxima from the last ``forward()``, plus its loss.
+
+            y_hat = bias + Σ decoder[n] · maxima[n]
+
+        This is the ergonomic entry to ``eventprop_maxima_regression``: it writes dL/dmaxima into
+        the maxima error buffers, so the step is two calls and no loss arithmetic appears in
+        Python at all —
+
+            loss = layer.regression(decoder, bias, targets)
+            layer.backward()              # dL/dw_in, summed over the batch
+
+        which is the same two-step the shipped ``VMaxCrossEntropyLoss`` performs internally; the
+        difference is that here you own the readout and the target.
+
+        Returns ``predictions``, ``losses``, ``n_skipped``, ``decoder_grad``, ``bias_grad``.
+        ``huber_delta`` non-finite selects least squares, finite and positive smooth Huber.
+
+        Nothing is zeroed anywhere: ``decoder_grad``/``bias_grad`` accumulate into the buffers you
+        pass (allocated when omitted), and ``backward()`` accumulates into ``self.gradient``, so
+        clearing is the caller's job — ``zero_grad()`` for ``w_in``, your own buffers for the
+        readout. A neuron that never peaked is excluded from the readout and counted in
+        ``n_skipped``, which makes a fully silent population a valid sample rather than an error.
+
+        Requires a prior ``forward()``; the errors have to land in the buffers that forward
+        allocated.
+        """
+        if not self._ran_forward or self.maxima_batch is None:
+            raise RuntimeError(
+                "regression() requires a prior forward(): dL/dmaxima is written into the maxima "
+                "error buffers that forward allocated"
+            )
+        return self.maxima_batch.regress(decoder, bias, targets, huber_delta,
+                                        decoder_grad=decoder_grad, bias_grad=bias_grad)
 
     def zero_grad(self):
         self.gradient[:] = 0

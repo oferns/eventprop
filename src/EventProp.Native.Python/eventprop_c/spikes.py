@@ -479,3 +479,45 @@ class MaximaVector:
         if self._batch_output is not None:
             raise RuntimeError("Cannot append to C-owned MaximaVector")
         self._maxima.append(maxima)
+
+    def regress(self, decoder: np.ndarray, bias: float, targets: np.ndarray,
+                huber_delta: float = np.inf, *,
+                decoder_grad: Optional[np.ndarray] = None,
+                bias_grad: Optional[np.ndarray] = None) -> dict:
+        """Regression readout and loss over these maxima.
+
+            y_hat = bias + Σ decoder[n] · maxima[n]
+
+        Writes dL/dmaxima into the maxima error buffers in place, which is exactly what
+        ``backward_maxima_batch`` reads, so a layer's ``backward()`` immediately afterwards
+        propagates this loss. ``huber_delta`` non-finite is least squares; finite and positive is
+        smooth Huber.
+
+        Gradients are SUMMED over the batch and ACCUMULATE into the buffers you pass (allocated
+        for you when omitted), so a caller that reuses them across steps is doing the same thing
+        ``Backward()`` does to ``gradient``: accumulating, not overwriting.
+
+        Raises RuntimeError when the vector was not produced by the C backend — the readout lives
+        in the C library, so a pybind11 maxima vector has nothing to write into.
+        """
+        if self._batch_output is None:
+            raise RuntimeError(
+                "regress() requires a C-owned MaximaVector (produced by the C backend); "
+                "this vector was built in Python and has no native error buffers to write into"
+            )
+        return self._batch_output.regress(decoder, bias, targets, huber_delta,
+                                         decoder_grad=decoder_grad, bias_grad=bias_grad)
+
+    def regress_sample(self, idx: int, decoder: np.ndarray, bias: float,
+                       target: float, huber_delta: float = np.inf) -> dict:
+        """Regression error for one sample, written in place, allocating nothing.
+
+        The per-sample entry point exists for the cases a batched loop handles badly: a fixed
+        readout (nothing to accumulate), or one sample needing its own target or loss scale.
+        It computes no readout gradients — use ``regress`` when the decoder is being trained.
+        """
+        if self._batch_output is None:
+            raise RuntimeError(
+                "regress_sample() requires a C-owned MaximaVector (produced by the C backend)"
+            )
+        return self._batch_output.regress_sample(idx, decoder, bias, target, huber_delta)
