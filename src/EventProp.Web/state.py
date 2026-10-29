@@ -14,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 import streamlit as st
 
-from eventweb import analysis, dataset, mnist, network, runtime
+from eventweb import analysis, dataset, mnist, network, regression, runtime
 from eventweb.backends import BACKENDS
 
 ROOT = runtime.ROOT
@@ -144,3 +144,78 @@ def mnist_timings(seed: int, n_digits: int = 2000, batch: int = 250,
     wh, wo = mnist_run(seed).weights_at(-1)
     return {k: mnist.time_forward(k, wh, wo, images[:n_digits], batch=batch, repeats=repeats)
             for k in BACKENDS if BACKENDS[k].supports_maxima()}
+
+
+# --- Continuous read-out (regression) --------------------------------------------------
+#
+# Pinned to the C backend on purpose. The regression read-out exists only in the C library —
+# the read-only reference library ships no regression loss — so a backend picker here would
+# offer one option and imply a cross-backend agreement nobody can measure. The parity guarantee
+# for this loss is managed ↔ native in .NET; see `eventweb/regression.py`.
+
+#: Training/held-out point counts for the read-out page. Fixed rather than widgets because the
+#: closed-form ceiling is computed on the same training points, and the two figures are only
+#: comparable when the split is the same.
+READOUT_TRAIN_N = 400
+READOUT_EVAL_N = 256
+
+
+@st.cache_data(show_spinner="Fitting the read-out…")
+def readout_fit(seed: int, column: int, *, steps: int = 600, batch: int = 64,
+                lr_readout: float = 1e-2, lr_weights: float = 1e-5,
+                train_weights: bool = False, standardise: bool = True,
+                huber_delta: float = float("inf"),
+                n_train: int = READOUT_TRAIN_N, n_eval: int = READOUT_EVAL_N
+                ) -> regression.FitResult:
+    """Fit the continuous read-out on one published network, from the C library.
+
+    Cached on every parameter that changes the answer — including the learning rates, which a
+    "just the seed" cache would happily ignore while serving a fit from a different run.
+    """
+    wh, _ = checkpoint(seed).weights_at(-1)
+    tr = split("train").coords[:n_train]
+    te = split("test").coords[:n_eval]
+    return regression.fit("c", wh, tr, regression.target_values(tr, column),
+                          te, regression.target_values(te, column),
+                          steps=steps, batch=batch, lr_readout=lr_readout,
+                          lr_weights=lr_weights, train_weights=train_weights,
+                          standardise=standardise, huber_delta=huber_delta, seed=seed)
+
+
+@st.cache_data(show_spinner="Fitting the linear baselines…")
+def readout_baseline(seed: int, column: int, n_train: int = READOUT_TRAIN_N,
+                     n_valid: int = READOUT_EVAL_N, n_eval: int = READOUT_EVAL_N) -> dict:
+    """The two closed-form reference read-outs: exact least squares, and ridge with λ chosen
+    on the dataset's own validation split.
+
+    Both are reported because the difference between them is the lesson. Exact least squares
+    interpolates (400 points, 201 parameters, train R² = 1.0) and generalises worse than a
+    regularised fit; ridge with λ picked on validation is the honest best linear baseline. A
+    fitted read-out above the exact line is behaving correctly, and without both numbers here the
+    page would have called that a bug.
+    """
+    wh, _ = checkpoint(seed).weights_at(-1)
+    tr = split("train").coords[:n_train]
+    va = split("valid").coords[:n_valid]
+    te = split("test").coords[:n_eval]
+    ytr = regression.target_values(tr, column)
+    yva = regression.target_values(va, column)
+    yte = regression.target_values(te, column)
+    m_tr, _ = regression.maxima_of("c", wh, tr)
+    m_va, _ = regression.maxima_of("c", wh, va)
+    m_te, _ = regression.maxima_of("c", wh, te)
+
+    exact = regression.least_squares_fit(m_tr, ytr, standardise=True)
+    ridge, info = regression.ridge_fit(m_tr, ytr, m_va, yva)
+    exact_test = regression.metrics(exact.predict_from_maxima(m_te), yte)
+    ridge_test = regression.metrics(ridge.predict_from_maxima(m_te), yte)
+    exact_train = regression.metrics(exact.predict_from_maxima(m_tr), ytr)
+    return {
+        "exact_r2": exact_test["r2"], "exact_rmse": exact_test["rmse"],
+        "exact_train_r2": exact_train["r2"],
+        "ridge_r2": ridge_test["r2"], "ridge_rmse": ridge_test["rmse"],
+        "ridge_lambda": info["lambda"], "ridge_valid_r2": info["valid_r2"],
+        "ridge_path": info["path"],
+        "condition": float(np.linalg.cond(m_tr - np.nan_to_num(m_tr).mean(0))),
+        "n_params": m_tr.shape[1] + 1, "n_train": n_train,
+    }

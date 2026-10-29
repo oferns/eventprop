@@ -40,7 +40,13 @@ class Backend:
     _modules: dict = field(default_factory=dict, repr=False, compare=False)
 
     def load(self) -> None:
-        if self._modules:
+        # Keyed on the two modules this method imports, not on `_modules` being non-empty.
+        # The lazy LI path (`LILayer`, added later for the maxima pages) stores into the same
+        # dict, so once an LI layer has been built the emptiness test returns early here and
+        # leaves "spikes"/"lif" missing — `make_vector` then dies with `KeyError: 'spikes'`
+        # instead of importing anything. A sentinel that one code path can set is not a
+        # sentinel; ask about the thing you are about to read.
+        if "spikes" in self._modules and "lif" in self._modules:
             return
         runtime.add_backend_paths()
         from importlib import import_module

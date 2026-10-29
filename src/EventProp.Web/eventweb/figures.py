@@ -391,3 +391,145 @@ def hidden_latencies(neurons: np.ndarray, times: np.ndarray, n_hidden: int, titl
     fig.update_xaxes(title="first spike (ms)", gridcolor="rgba(128,128,128,0.18)")
     fig.update_yaxes(title="hidden neuron", range=[n_hidden - 0.5, -0.5])
     return fig
+
+
+# --- The continuous read-out (regression) --------------------------------------------
+
+
+def readout_loss_curve(losses: np.ndarray, color: str, title: str, height: int = 300,
+                       log_y: bool = True) -> go.Figure:
+    """Mean loss per optimisation step.
+
+    Log scale by default and not for aesthetics: a fit that goes 0.12 → 2e-4 is three orders of
+    magnitude, and on a linear axis that whole story is a line falling into the floor while the
+    interesting part — whether it is still descending or has plateaued — is invisible.
+    """
+    fig = _fig(title, height=height)
+    losses = np.asarray(losses, dtype=np.float64)
+    fig.add_trace(go.Scatter(x=np.arange(1, losses.size + 1), y=losses, mode="lines",
+                             line=dict(color=color, width=2), name="loss",
+                             hovertemplate="step %{x}<br>loss %{y:.3g}<extra></extra>"))
+    fig.update_xaxes(title="step", gridcolor="rgba(128,128,128,0.18)")
+    fig.update_yaxes(title="mean loss", gridcolor="rgba(128,128,128,0.18)",
+                     type="log" if log_y else "linear")
+    return fig
+
+
+def readout_r2_curve(steps: np.ndarray, r2: np.ndarray, reference: float | None, color: str,
+                     title: str, height: int = 300,
+                     reference_label: str = "best linear baseline") -> go.Figure:
+    """Held-out R² against step, with a closed-form reference line.
+
+    The dashed line is why this figure is worth its pixels: R² = 0.99 on its own is a number the
+    visitor has to judge alone. Note it is a *reference*, not a bound — the closed-form fit is
+    the best in-sample solution, and on collinear features a regularised fit legitimately ends up
+    above it. The label says which baseline it is, because "the ceiling" would be a lie.
+    """
+    from plotly.subplots import make_subplots
+
+    fig = make_subplots()
+    fig.update_layout(**_LAYOUT, title=dict(text=title, x=0.02, xanchor="left"), height=height)
+    fig.add_trace(go.Scatter(x=steps, y=r2, mode="lines+markers", name="held-out R²",
+                             line=dict(color=color, width=2),
+                             hovertemplate="step %{x}<br>R² %{y:.4f}<extra></extra>"))
+    if reference is not None and np.isfinite(reference):
+        fig.add_trace(go.Scatter(x=[float(np.min(steps)), float(np.max(steps))],
+                                 y=[reference, reference], mode="lines",
+                                 name=reference_label,
+                                 line=dict(color="#94a3b8", width=1, dash="dash"),
+                                 hovertemplate=f"{reference_label} {reference:.4f}"
+                                               "<extra></extra>"))
+    fig.update_xaxes(title="step", gridcolor="rgba(128,128,128,0.18)")
+    fig.update_yaxes(title="R² on held-out data", gridcolor="rgba(128,128,128,0.18)")
+    fig.update_layout(legend=dict(orientation="h", y=1.14, x=0))
+    return fig
+
+
+def readout_fit_scatter(target: np.ndarray, before: np.ndarray, after: np.ndarray,
+                        color: str, title: str, height: int = 360,
+                        axis_label: str = "true value") -> go.Figure:
+    """Read-out prediction against the value it was asked to predict, before and after.
+
+    The identity line is the only honest reference for a regression: R² can look respectable
+    while the fit is compressed toward the mean, and this plot shows that directly — points
+    smeared along a horizontal band are a read-out that learned the average, not the signal.
+    """
+    fig = _fig(title, height=height)
+    target = np.asarray(target, dtype=np.float64)
+    lo, hi = float(np.nanmin(target)), float(np.nanmax(target))
+    fig.add_trace(go.Scatter(x=[lo, hi], y=[lo, hi], mode="lines", name="perfect",
+                             line=dict(color="#94a3b8", width=1, dash="dot"),
+                             hoverinfo="skip"))
+    fig.add_trace(go.Scatter(x=target, y=np.asarray(before, dtype=np.float64), mode="markers",
+                             name="before", marker=dict(color="#64748b", size=4, opacity=0.5),
+                             hovertemplate="true %{x:.3f}<br>pred %{y:.3f}<extra>before</extra>"))
+    fig.add_trace(go.Scatter(x=target, y=np.asarray(after, dtype=np.float64), mode="markers",
+                             name="after", marker=dict(color=color, size=4, opacity=0.8),
+                             hovertemplate="true %{x:.3f}<br>pred %{y:.3f}<extra>after</extra>"))
+    fig.update_xaxes(title=axis_label, gridcolor="rgba(128,128,128,0.18)")
+    fig.update_yaxes(title="read-out prediction", gridcolor="rgba(128,128,128,0.18)")
+    fig.update_layout(legend=dict(orientation="h", y=1.14, x=0))
+    return fig
+
+
+def readout_plane(x: np.ndarray, y: np.ndarray, truth: np.ndarray, pred: np.ndarray,
+                  labels: np.ndarray, title: str, height: int = 340) -> go.Figure:
+    """The stimulus field on the left, what one scalar read-out recovers of it on the right.
+
+    Both panels share one colour axis on purpose. A separate autoscale per panel would let a
+    read-out that captured half the range look like it captured all of it, which is the one way
+    a regression plot reliably lies.
+    """
+    from plotly.subplots import make_subplots
+
+    fig = make_subplots(rows=1, cols=2, subplot_titles=("the stimulus", "one read-out, fitted"))
+    fig.update_layout(**_LAYOUT, title=dict(text=title, x=0.02, xanchor="left"), height=height)
+    lo = min(float(np.nanmin(truth)), float(np.nanmin(pred)))
+    hi = max(float(np.nanmax(truth)), float(np.nanmax(pred)))
+    for col, values, name in ((1, truth, "true"), (2, pred, "predicted")):
+        fig.add_trace(go.Scattergl(x=np.asarray(x, dtype=np.float64),
+                                   y=np.asarray(y, dtype=np.float64), mode="markers",
+                                   name=name, showlegend=False,
+                                   marker=dict(color=np.asarray(values, dtype=np.float64),
+                                               colorscale="RdYlBu_r", cmin=lo, cmax=hi, size=3,
+                                               colorbar=dict(title=name, thickness=10, len=0.85),
+                                               line=dict(width=0)),
+                                   customdata=np.asarray(labels, dtype=np.int64),
+                                   hovertemplate="(%{x:.2f}, %{y:.2f})<br>"
+                                                 f"{name} %{{marker.color:.3f}}"
+                                                 "<br>class %{customdata}<extra></extra>"),
+                      row=1, col=col)
+        fig.update_xaxes(title="x", row=1, col=col, **_AXIS)
+        fig.update_yaxes(title="y", row=1, col=col, scaleanchor=None, **_AXIS)
+    fig.update_layout(coloraxis_colorbar=dict(title="value"))
+    return fig
+
+
+def readout_contributions(terms: np.ndarray, bias: float, prediction: float,
+                          target: float | None, title: str, height: int = 320,
+                          top: int = 16) -> go.Figure:
+    """Which neurons are actually producing one prediction: the largest a[n]·z[n] terms.
+
+    A read-out is a weighted sum, so this is its explanation — signed, because a neuron can
+    push the prediction down. The constant term is the bias and is shown in the title's hover
+    rather than as a bar, since it belongs to no neuron.
+    """
+    fig = _fig(title, height=height)
+    terms = np.asarray(terms, dtype=np.float64)
+    order = np.argsort(-np.abs(terms))[:top]
+    order = np.sort(order[np.argsort(terms[order])])
+    values = terms[order]
+    fig.add_trace(go.Bar(
+        x=[f"neuron {int(i)}" for i in order], y=values,
+        marker_color=["#22c55e" if v >= 0 else "#ef4444" for v in values],
+        hovertemplate="%{x}<br>contribution %{y:.4f}<extra></extra>"))
+    note = f"bias {bias:+.3f}"
+    if target is not None:
+        note += f" · prediction {prediction:+.3f} vs target {target:.3f}"
+    fig.update_layout(annotations=[dict(text=note, x=0.99, y=0.99, xref="paper", yref="paper",
+                                        showarrow=False, font=dict(size=10, color="#94a3b8"),
+                                        align="right")])
+    fig.update_xaxes(title="hidden neuron")
+    fig.update_yaxes(title="contribution to the prediction",
+                     gridcolor="rgba(128,128,128,0.18)")
+    return fig

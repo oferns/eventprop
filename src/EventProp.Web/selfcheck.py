@@ -2,19 +2,24 @@
 
     .venv/bin/python selfcheck.py
 
-It verifies the things the UI cannot see and would otherwise display confidently:
+Each numbered step prints PASS/FAIL lines with the measurement behind them, and the exit code is
+non-zero if any check failed, with the failing check named. The steps exist because the UI cannot
+see what they verify: it would display a wrong number as confidently as a right one.
 
-1. the interpreter can load BOTH pre-built native backends;
-2. the frozen Yin-Yang split still matches its own geometry (catches a swapped/corrupted
-   `.npy`, or a rewrite of `which_class` that drifts from the submodule);
-3. running the shipped weights through the C library reproduces the accuracy the
-   reference library recorded for those same weights — the real test of the encoder, the
-   TTFS read-out and the weight plumbing end to end;
-4. the weight snapshots line up with `SNAPSHOT_EPOCHS`, i.e. with the trainer's
-   pre-epoch evaluation / post-epoch save asymmetry;
-5. both backends agree sample-by-sample.
+What is covered, and why each is here rather than in a unit test — the interpreter's ability to
+load both pre-built native backends; the frozen Yin-Yang split against its own geometry (a swapped
+`.npy`, or a `which_class` that drifts from the submodule); the shipped weights run through the C
+library against the accuracy the reference recorded for those same weights (the real test of
+encoder + read-out + weight plumbing end to end); snapshot/epoch alignment; C-vs-Eigen agreement
+sample by sample; the exact gradient against a central finite difference on both backends; the
+voltage and adjoint traces this app draws against the reference implementation; checkpoint-layout
+identification; the published MNIST runs, their byte-identical encoder and their timing panel; what
+each binding hands back when you ask for spikes; and the continuous read-out, whose loss has no
+second implementation to disagree with, so its standardisation and chain rule are verified against
+finite differences of the C entry point instead.
 
-Exit code is non-zero on any failure, with the failing check named.
+Steps that need MNIST **skip** rather than fail when `.cache/mnist/` is empty, so the script stays
+runnable offline.
 """
 
 from __future__ import annotations
@@ -596,6 +601,151 @@ def main() -> int:
               writability["eigen"] is False and writability["c"] is True,
               f"eigen writeable={writability['eigen']}, c writeable={writability['c']} — shared "
               f"code must copy before mutating either array")
+
+
+    print("15. the continuous read-out, and the bookkeeping that hides inside it")
+    # The regression read-out is the one part of this app with no second implementation to
+    # disagree with: the loss lives in the C library and the reference library has none, so the
+    # usual check ("both backends agree") is unavailable. What can still be falsified is the
+    # plumbing this app adds on top of the C entry point — the standardised parameterisation and
+    # its chain rule — measured *against the C library itself*, plus the claims the page makes
+    # about how well any of it fits. See README.md ("Reading a number").
+    from eventweb import regression
+
+    import eventprop_c._native as _nat15
+
+    # Own checkpoint, own validation split, own names: `wh` and `valid` both exist further up
+    # this function holding something else (the MNIST weights, and a finite-difference mask),
+    # and reading them here would silently test the wrong network against the wrong split.
+    wh15, _ = network.load_checkpoint(ckpt_dir, 0).weights_at(-1)
+    vsplit15 = dataset.load_split(data_dir, "valid")
+
+    rng15_a = np.random.default_rng(9).normal(0.0, 0.05 / np.sqrt(200), size=200)
+    pts15 = train.coords[:64]
+    val15, skip15 = regression.maxima_of("c", wh15, pts15)
+    skip15 = int(np.sum(skip15))
+    y15 = regression.target_values(pts15, 0)
+    check("the published hidden population has no silent neurons", skip15 == 0,
+          f"{val15.shape[1]} neurons x {len(pts15)} stimuli, {skip15} non-finite maxima "
+          f"(skipped by the loss); a silent neuron would contribute nothing to a fit")
+
+    mu15, sd15 = regression.feature_stats(val15)
+    ro15 = regression.Readout(a=rng15_a, b=0.1, mu=mu15, sd=sd15)
+    dec15, bias15 = ro15.effective()
+
+    pred_c = np.array([_nat15.maxima_regression(val15[i], dec15, bias15, float(y15[i]),
+                                                float("inf"))["prediction"]
+                       for i in range(len(val15))])
+    pred_np = ro15.predict_from_maxima(val15)
+    check("the standardised read-out and the C entry point compute the same ŷ",
+          float(np.abs(pred_c - pred_np).max()) < 1e-12,
+          f"max |Δ| = {float(np.abs(pred_c - pred_np).max()):.2e} over {len(val15)} stimuli "
+          f"(bias = {bias15:.3f} is the read-out's own contribution, not a free constant)")
+
+    # The dangerous line in eventweb/regression.py: converting the loss's gradients from the
+    # standardised coordinates it works in back to the ones the optimiser moves. Dropping the
+    # μ term biases every fit and raises nothing, so it is checked against finite differences of
+    # the C loss rather than against the same algebra that produced it.
+    def _ro(a, b):
+        return regression.Readout(a=a, b=b, mu=mu15, sd=sd15)
+
+    def _mean_loss(a, b, hd):
+        d, bs = _ro(a, b).effective()
+        return float(np.mean([_nat15.maxima_regression(val15[i], d, bs, float(y15[i]),
+                                                       float(hd))["loss"]
+                              for i in range(len(val15))]))
+
+    # A real layer holding the real weights, so the gradients under test are the ones
+    # `LILayer.regression()` hands the optimiser on this page — not a hand-built maxima vector
+    # that happens to have the right numbers in it.
+    be15 = BACKENDS["c"]
+    sp15, sc15 = dataset.encode(pts15)
+    sp15 = [np.sort(np.asarray(t, dtype=np.float64)) for t in sp15]
+    layer15 = be15.li_layer(n=int(wh15.shape[1]), n_in=int(wh15.shape[0]), w_in=wh15,
+                            tau_mem=20e-3, tau_syn=5e-3)
+    layer15.forward(be15.make_vector(sp15, sc15))
+    maxima15 = np.stack([np.asarray(layer15.maxima_batch[i].values, dtype=np.float64)
+                         for i in range(len(pts15))])
+    check("the layer's maxima are the array the read-out is fitted on",
+          np.array_equal(maxima15, val15),
+          f"{val15.shape} — the same encoder, the same tau_mem/tau_syn, the same weights")
+
+    def _grads(a, b, hd):
+        """The page's own gradient path: C loss → summed gradients → chain rule → means."""
+        d, bs = _ro(a, b).effective()
+        res = layer15.regression(d, bs, np.ascontiguousarray(y15, dtype=np.float64), hd)
+        return _ro(a, b).gradient_in_own_coordinates(res["decoder_grad"],
+                                                     float(res["bias_grad"][0]), len(y15))
+
+    for loss_name, hd in (("least squares", float("inf")), ("Huber", 0.1)):
+        ga, gb = _grads(ro15.a, ro15.b, hd)
+        h = 1e-6
+        worst = 0.0
+        for n in (0, 7, 55, val15.shape[1] - 1):
+            ap = ro15.a.copy(); ap[n] += h
+            am = ro15.a.copy(); am[n] -= h
+            fd = (_mean_loss(ap, ro15.b, hd) - _mean_loss(am, ro15.b, hd)) / (2 * h)
+            worst = max(worst, abs(fd - ga[n]))
+        fd_b = (_mean_loss(ro15.a, ro15.b + h, hd) - _mean_loss(ro15.a, ro15.b - h, hd)) / (2 * h)
+        worst = max(worst, abs(fd_b - gb))
+        check(f"the standardised chain rule is the gradient of the C {loss_name} loss",
+              worst < 1e-5,
+              f"max |Δ| = {worst:.2e} over 4 read-out coordinates and the bias; the μ term is "
+              f"worth O(10) here, so a dropped term is not a rounding matter")
+
+    broken = ro15.a.copy()
+    val_broken = val15.copy()
+    val_broken[3, :] = np.nan                      # every neuron silent for one stimulus
+    pred_broken = ro15.predict_from_maxima(val_broken)
+    check("a silent maximum leaves the read-out instead of poisoning it",
+          np.isfinite(pred_broken[3]) and abs(pred_broken[3] - bias15) < 1e-12
+          and np.isfinite(pred_broken[[0, 5]]).all(),
+          f"row 3 → {pred_broken[3]:.6f} (the bias alone); the C loss counts it as skipped and "
+          f"zeros its error, so the backward pass sees no gradient from it either")
+
+    ytr15 = regression.target_values(train.coords[:200], 0)
+    yte15 = regression.target_values(test.coords[:128], 0)
+    fit15 = regression.fit("c", wh15, train.coords[:200], ytr15, test.coords[:128], yte15,
+                           steps=400, batch=64, lr_readout=1e-2, eval_every=200)
+    check("the fit reports a held-out point for every evaluation",
+          len(fit15.heldout_r2) == len(fit15.eval_steps) == 2, f"{fit15.eval_steps.tolist()}")
+    check("a few hundred steps recover the stimulus coordinate",
+          fit15.after["r2"] > 0.98 and fit15.after["corr"] > 0.99,
+          f"held-out R² {fit15.before['r2']:+.3f} → {fit15.after['r2']:.4f}, "
+          f"r {fit15.after['corr']:.4f}, {fit15.seconds:.2f} s")
+    check("and it is the fit doing the work, not the initial read-out",
+          fit15.before["r2"] < 0.0,
+          f"the random initial read-out scores {fit15.before['r2']:+.3f} — worse than predicting "
+          f"the mean, which is what a negative R² means")
+
+    adj15 = regression.fit("c", wh15, train.coords[:96], regression.target_values(train.coords[:96], 0),
+                           test.coords[:96], regression.target_values(test.coords[:96], 0),
+                           steps=120, batch=32, lr_readout=1e-2, lr_weights=1e-5,
+                           train_weights=True, eval_every=120)
+    moved = float(np.abs(adj15.w_final - wh15).max()) if adj15.w_final is not None else 0.0
+    check("the loss reaches the network through the adjoint sweep, not just the read-out",
+          adj15.gradient_scale > 0 and moved > 0 and adj15.after["r2"] > 0.9,
+          f"max |dL/dW| = {adj15.gradient_scale:.3g}, largest weight moved {moved:.4f} from the "
+          f"published value, held-out R² {adj15.after['r2']:.4f}")
+
+    # The framing the page spends words on: the closed-form fit is a baseline, not a ceiling.
+    xtr15, _ = regression.maxima_of("c", wh15, train.coords[:200])
+    xva15, _ = regression.maxima_of("c", wh15, vsplit15.coords[:128])
+    xte15, _ = regression.maxima_of("c", wh15, test.coords[:128])
+    for col, name in ((0, "x"), (1, "y")):
+        ytr_c = regression.target_values(train.coords[:200], col)
+        exact15 = regression.least_squares_fit(xtr15, ytr_c)
+        ridge15, info15 = regression.ridge_fit(xtr15, ytr_c, xva15,
+                                               regression.target_values(vsplit15.coords[:128], col))
+        r2_exact = regression.metrics(exact15.predict_from_maxima(xte15),
+                                      regression.target_values(test.coords[:128], col))["r2"]
+        r2_ridge = regression.metrics(ridge15.predict_from_maxima(xte15),
+                                      regression.target_values(test.coords[:128], col))["r2"]
+        r2_train = regression.metrics(exact15.predict_from_maxima(xtr15), ytr_c)["r2"]
+        check(f"exact least squares interpolates and the validation-tuned ridge beats it ({name})",
+              r2_train > 0.999 and r2_ridge >= r2_exact,
+              f"train R² {r2_train:.4f} (201 parameters, 200 points), held out {r2_exact:.4f}; "
+              f"ridge λ = {info15['lambda']:g} (chosen on validation) holds out at {r2_ridge:.4f}")
 
 
     print()

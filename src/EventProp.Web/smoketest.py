@@ -21,7 +21,7 @@ from streamlit.testing.v1 import AppTest
 
 HERE = Path(__file__).resolve().parent
 PAGES = ["Yin-Yang, live", "How it learns", "Exact gradients", "Digits (MNIST)",
-         "Under the hood"]
+         "Reading a number", "Under the hood"]
 # Pages that legitimately render no figure. The Under-the-hood page is text and tables by
 # design; the digits page shows a download prompt instead of a plot when the MNIST pixel
 # files are not cached, which is the state of a fresh checkout — so a warning there would
@@ -138,6 +138,20 @@ def main() -> int:
         # the pixel files are not cached, since that state shows a download prompt instead.
         ("Digits (MNIST)", lambda a: _click_button(a, "Time both backends"),
          "digits timing panel (both backends measured)"),
+        # The read-out page is the only reachable path through the C regression loss, so its
+        # three meaningful axes get driven: the other target (y, which this network encodes
+        # worse than x), the adjoint half of the fit (read-out + weights), and a Huber scale
+        # small enough that the loss's saturation is visible in the curve.
+        ("Reading a number", lambda a: a.radio[0].set_value("y — vertical position").run(),
+         "read-out page on the y target"),
+        ("Reading a number", lambda a: a.radio[1].set_value("read-out + weights (adjoint)").run(),
+         "read-out page with the adjoint training the weights"),
+        ("Reading a number", lambda a: a.radio[2].set_value("Huber δ = 0.01").run(),
+         "read-out page at a saturating Huber scale"),
+        ("Reading a number", lambda a: a.toggle[0].set_value(False).run(),
+         "read-out page on raw (unstandardised) maxima"),
+        ("Reading a number", lambda a: a.number_input[0].set_value(3).run(),
+         "read-out page probing a different held-out point"),
         ("Under the hood", lambda a: a.selectbox[0].set_value(1000).run(),
          "parity across the whole test set"),
     ]

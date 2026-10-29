@@ -13,6 +13,11 @@ over the real 10 000-digit test set, which makes it the one page that is not syn
 and the one that needs a download, because the pixel files are not vendored here (see
 Verify below).
 
+**Reading a number** is the one page that does compute while you wait: it fits a continuous
+read-out over the hidden layer's voltage maxima in about a second. Frozen published weights are
+still the point — the fit moves the read-out (and optionally the weights) from a published start,
+and every number it prints is measured on held-out points.
+
 ## Pages
 
 | Page | What it shows |
@@ -21,6 +26,7 @@ Verify below).
 | **How it learns** | Why this dataset exists (64% shallow ceiling vs 98% deep), ten published learning curves, the boundary at each saved weight snapshot, and where the mistakes land. |
 | **Exact gradients** | The adjoint: membrane potential and its root-found crossings, λ(t) on both neurons, and the exact gradient beside a central finite difference. They agree to ~1e-7 relative. |
 | **Digits (MNIST)** | The published VMax networks on the real 10 000-digit test set — the maxima read-out instead of first spikes, one digit followed end to end, the reproduced accuracy beside the one recorded in the file, and what each backend costs per digit. Needs a one-time ~1.6 MB download. |
+| **Reading a number** | A *continuous* target instead of a class: one weighted sum over the 200 hidden voltage maxima, fitted live against the C library's regression loss, with the closed-form linear baselines drawn alongside. C backend only — the reference library has no regression loss to compare with. |
 | **Under the hood** | Interpreter/ABI status, what each backend can do from Python, C-vs-Eigen agreement on identical inputs, crude wall-clock, and one live defect report. |
 
 ## Setup
@@ -88,7 +94,8 @@ Two headless checks. Both exit non-zero on failure and neither needs a browser.
                                  # accuracy the reference recorded for the same weights,
                                  # snapshot/epoch alignment, C-vs-Eigen agreement,
                                  # exact gradient vs finite differences, checkpoint-layout
-                                 # identification, the ten published MNIST runs
+                                 # identification, the ten published MNIST runs, the
+                                 # continuous read-out and its chain rule
 .venv/bin/python smoketest.py    # the pages: renders every view and several widget
                                  # interactions through streamlit.testing.v1.AppTest
 ```
@@ -105,6 +112,17 @@ to the reference's, that both backends produce identical predictions, and that t
 accuracy is reproduced over all 10 000 digits to within 0.002. Step 13 checks the page's
 timing panel against a stopwatch pass over the same test set.
 
+Step 15 covers the continuous read-out, which is the one part of the app with **no second
+implementation to disagree with**: the loss lives in the C library and the reference library has
+none, so the usual check ("both backends agree") is unavailable. What is checked instead is the
+plumbing this app adds on top of the C entry point — the standardised parameterisation agrees with
+`eventprop_maxima_regression` on every prediction (3e-16), its chain rule matches finite
+differences of the C loss for both loss shapes (7e-12), a non-finite maximum leaves the read-out
+instead of poisoning it, the fit reaches held-out R² > 0.98 while the random initial read-out sits
+below zero, the adjoint sweep moves the network's own weights, and exact least squares really does
+interpolate (train R² > 0.999) while the validation-tuned ridge holds out at least as well on both
+coordinates.
+
 ## Layout
 
 ```
@@ -112,7 +130,8 @@ streamlit_app.py      entry point: ABI guard, then navigation
 selfcheck.py          headless verification of displayed numbers
 smoketest.py          headless verification that pages render
 state.py              streamlit-cached loaders (data, checkpoints, built nets)
-views/                live.py · learning.py · gradient.py · internals.py
+views/                live.py · learning.py · gradient.py · digits.py · regression.py
+                      · internals.py
 eventweb/             streamlit-free core
   runtime.py            repository root + ABI/interpreter guard
   dataset.py            Yin-Yang geometry, frozen split, TTFS encoding + read-out
@@ -120,6 +139,7 @@ eventweb/             streamlit-free core
   backends.py           the two native bindings, capabilities probed not asserted
   analysis.py           boundary grids, confusion, silence stats, gradient demo
   figures.py            plotly builders
+  regression.py         the continuous read-out: C fit loop, ridge baseline, per-neuron probe
 ```
 
 `eventweb/` imports neither streamlit nor plotly-by-way-of-ui, so anything the app draws
@@ -140,7 +160,7 @@ Both submodule paths are read-only; their local state is owned by
 `scripts/submodule-state.sh`, not by this app. Never regenerate the split — the train and
 test sets differ only by RNG seed, so re-drawing them overlaps the test set.
 
-## Four things worth knowing before you trust a plot
+## Five things worth knowing before you trust a plot
 
 **λ(t) is loss-driven, so an all-zero λ trace is not necessarily a bug.** The adjoint jumps
 by `1/(i - v_th) · (v_th · λ_v + error)` at each output spike: with no error signal on those
@@ -196,6 +216,41 @@ pybind11 attaches, which does **not** appear as `ndarray.base`; so `base is None
 "this may dangle". Our own binding keeps the wrapper as the array's base object, pinned by
 `../EventProp.Native.Python/test/test_view_ownership.py`. Measured on darwin-arm64, CPython 3.14;
 two reads sharing memory was true on both, as was read-only versus writeable.
+
+**The dashed line on the read-out page is a baseline, not a ceiling — and the read-out is C-only.**
+Both halves of that sentence were learned by getting it wrong. *C-only*: the regression read-out
+(`ŷ = b + Σ aₙ·maximaₙ`, least squares or smooth Huber, `dL/dmaxima` written into the buffers the
+maxima backward pass reads) exists in the C library and the read-only reference library ships no
+regression loss at all, so that page has no backend picker to offer and no cross-backend agreement
+to show; the parity guarantee for this loss is managed ↔ native in .NET
+(`RegressionLossParityTests`, and `RegressionLayerParityTests`, which asserts the whole
+`Regression → Backward` chain rather than just the numbers). *Baseline*: the page draws the
+closed-form linear reference beside the live fit, and it is tempting to call that line a ceiling.
+It is not. With 400 training points and 201 parameters, exact least squares interpolates — train
+R² = 1.0000 — and then generalises worse than a regularised fit (held-out 0.9956 for `x`, 0.9435
+for `y`; at 200 points it collapses to −0.26). Ridge with the penalty chosen on the dataset's own
+validation split — never on the test points the metrics come from — holds out at 0.9986 / 0.9972,
+and a few hundred steps of Adam on the read-out reach 0.9957. So a fit finishing above the exact
+answer has found regularisation by early stopping, which is a real effect and now written down
+where it confused us first.
+
+Two more things about that fit are load-bearing and easy to dismiss as tuning noise. The maxima of
+a trained population sit on a common offset (mean ≈0.84, median per-neuron spread ≈0.07), so the
+feature matrix is near-collinear (condition number ≈3e6). Adam absorbs most of that — measured at
+the page's settings, standardised reaches held-out R² 0.9968 and raw maxima 0.9353, so the toggle
+is a quality knob once Adam is in place — but on plain gradient descent the raw parameterisation
+ran to a non-finite loss at every step size that made progress, which is how Adam got there first.
+The page writes the read-out on
+`z = (maxima − μ)/s`, which is the *same model* re-parameterised — `b′ + Σ aₙ/sₙ · maximaₙ` is what
+the C entry point is handed — and Adam handles the rest. Converting the loss's gradients back is
+where a bug would hide: `dL/daₙ = (dL/ddₙ − (dL/dβ)·μₙ)/sₙ`, and dropping the `μ` term biases every
+fit while raising nothing. It is worth O(10) here, so step 15 checks it against finite differences
+of the C loss rather than against the algebra that produced it (max deviation 7e-12, both loss
+shapes). Gradients come back **summed** over the batch, by the C contract, and the page divides by
+the batch size before touching them, so the learning rate does not silently depend on the batch.
+The read-out is also a working regression demo: training the weights as well as the read-out moves
+the published weights by up to 6e-4 with max |dL/dW| ≈ 0.05 in 120 steps, which is the loss
+reaching the network through the adjoint sweep rather than stopping at the read-out.
 
 ## Platform status
 

@@ -37,7 +37,7 @@ st.caption(
 page = st.sidebar.radio(
     "Explore",
     ["Yin-Yang, live", "How it learns", "Exact gradients", "Digits (MNIST)",
-     "Under the hood"],
+     "Reading a number", "Under the hood"],
     label_visibility="collapsed",
 )
 
@@ -64,6 +64,10 @@ elif page == "Digits (MNIST)":
     from views import digits
 
     digits.render()
+elif page == "Reading a number":
+    from views import regression
+
+    regression.render()
 else:
     from views import internals
 
