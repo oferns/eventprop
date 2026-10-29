@@ -18,8 +18,12 @@ Two things are easy to get wrong here, so they are asserted rather than assumed:
 """
 
 import gc
-import resource
 import sys
+
+try:
+    import resource
+except ImportError:  # POSIX-only; there is no `resource` module on Windows
+    resource = None
 
 import numpy as np
 import pytest
@@ -135,21 +139,25 @@ class TestLifetime:
         assert sys.getrefcount(owner) < one, (
             "the owner outlived every view: its buffers would never be freed")
 
+    @pytest.mark.skipif(resource is None, reason="resource.getrusage is POSIX-only")
     def test_many_trace_calls_do_not_grow_the_heap(self):
         """A coarse but honest leak check: the owner object is what replaced the copy, so if it
         were never collected this would climb without bound."""
-        def rss_kb():
-            return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        def rss_kib():
+            # `ru_maxrss` is BYTES on Darwin and KILOBYTES on Linux; a limit written in one
+            # unit silently stops testing the other platform (1 MiB-of-limit equals 1 GiB of
+            # allowance on Linux, which is how this check would have passed forever there).
+            raw = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            return raw if sys.platform == "darwin" else raw / 1024.0
 
         _voltage_trace()
-        baseline = rss_kb()
+        baseline = rss_kib()
         for _ in range(5000):
             _voltage_trace(0.05, 1e-3)
         gc.collect()
-        growth = rss_kb() - baseline
-        # macOS reports bytes; allow a generous 32 MB of allocator/arena growth either way.
-        limit = 32 * 1024 * 1024
-        assert growth < limit, f"RSS grew by {growth} bytes over 5000 trace calls"
+        growth_kib = rss_kib() - baseline
+        # Generous either way: this catches unbounded growth, not a few bytes per call.
+        assert growth_kib < 32 * 1024, f"RSS grew by {growth_kib:.0f} KiB over 5000 trace calls"
 
 
 class TestValuesStillRight:
