@@ -413,22 +413,45 @@ del _abi_ok, _abi_details
 # 4. Zero-copy numpy view helpers
 # ---------------------------------------------------------------------------
 
-cdef inline object _double_view(double* ptr, ssize_t size):
-    """Create a zero-copy writable numpy float64 view over C memory."""
+cdef inline object _retain(cnp.ndarray arr, object owner):
+    """Make `owner` the array's base object, so the array keeps the C memory's owner alive.
+
+    `PyArray_SimpleNewFromData` returns an array whose base is NULL: the buffer is tied to
+    nothing. A view like that can outlive the wrapper that owns the malloc'd memory it points
+    at, and the next read is a read of freed heap — which does not crash, it returns plausible
+    garbage (measured before this existed: -3.6e+178 and a denormal where zeros belonged, from
+    `np.array(backward_maxima_batch_accumulate(b).grad)`, a one-liner whose only crime is
+    letting the result object go out of scope).
+
+    Setting the base is how numpy says "this memory belongs to that object" — it is what
+    `np.frombuffer` does with the buffer it wraps — and it costs one pointer store: no copy,
+    no ndarray subclass, the returned object stays a plain `numpy.ndarray`.
+
+    `owner` is a REQUIRED argument rather than an optional one. A defaulted parameter is how a
+    new view helper gets to forget; making it mandatory means forgetting is a compile error.
+    Pass None only where the data is copied out of C memory before that memory is freed.
+    """
+    if owner is not None:
+        cnp.set_array_base(arr, owner)   # INCREFs; numpy's own wrapper around SetBaseObject
+    return arr
+
+
+cdef inline object _double_view(double* ptr, ssize_t size, object owner):
+    """Create a zero-copy writable numpy float64 view over C memory, kept alive by `owner`."""
     cdef cnp.npy_intp dims[1]
     dims[0] = <cnp.npy_intp>size
     cdef cnp.ndarray[cnp.float64_t, ndim=1] arr = \
         cnp.PyArray_SimpleNewFromData(1, dims, cnp.NPY_FLOAT64, <void*>ptr)
-    return np.asarray(arr)
+    return _retain(arr, owner)
 
 
-cdef inline object _int_view(int* ptr, ssize_t size):
-    """Create a zero-copy writable numpy int32 view over C memory."""
+cdef inline object _int_view(int* ptr, ssize_t size, object owner):
+    """Create a zero-copy writable numpy int32 view over C memory, kept alive by `owner`."""
     cdef cnp.npy_intp dims[1]
     dims[0] = <cnp.npy_intp>size
     cdef cnp.ndarray[cnp.int32_t, ndim=1] arr = \
         cnp.PyArray_SimpleNewFromData(1, dims, cnp.NPY_INT32, <void*>ptr)
-    return np.asarray(arr)
+    return _retain(arr, owner)
 
 
 # ---------------------------------------------------------------------------
@@ -487,8 +510,8 @@ cdef class _SpikesBatchOutput:
         if out.n_spikes <= 0:
             return np.array([], dtype=np.float64), np.array([], dtype=np.int32)
         return (
-            _double_view(out.times, out.n_spikes),
-            _int_view(out.sources, out.n_spikes),
+            _double_view(out.times, out.n_spikes, self),
+            _int_view(out.sources, out.n_spikes, self),
         )
 
     def new_errors(self, int idx):
@@ -699,19 +722,19 @@ cdef class _MaximaBatchOutput:
         """
         cdef MaximaOutput* out = &self._maxima.outputs[idx]
         return (
-            _double_view(out.times, out.n_post),
-            _double_view(out.values, out.n_post),
+            _double_view(out.times, out.n_post, self),
+            _double_view(out.values, out.n_post, self),
         )
 
     def get_times(self, int idx):
         """Zero-copy view into sample idx's maxima times."""
         cdef MaximaOutput* out = &self._maxima.outputs[idx]
-        return _double_view(out.times, out.n_post)
+        return _double_view(out.times, out.n_post, self)
 
     def get_values(self, int idx):
         """Zero-copy view into sample idx's maxima values."""
         cdef MaximaOutput* out = &self._maxima.outputs[idx]
-        return _double_view(out.values, out.n_post)
+        return _double_view(out.values, out.n_post, self)
 
     def get_maxima_errors(self, int idx):
         """Return zero-copy writable view into sample idx's maxima error buffer.
@@ -720,7 +743,7 @@ cdef class _MaximaBatchOutput:
         C reads them directly — no copying needed.
         """
         cdef MaximaOutput* out = &self._maxima.outputs[idx]
-        return _double_view(out.errors, out.n_post)
+        return _double_view(out.errors, out.n_post, self)
 
     def get_error_no(self, int idx):
         """Return the error code for sample idx (EVENTPROP_OK == 0 on success)."""
@@ -770,7 +793,8 @@ cdef class _AccumulatedBackwardResult:
         if self._ptr == NULL or self._ptr.summed_grads == NULL:
             raise RuntimeError("AccumulatedBackwardResult has been freed")
         return _double_view(self._ptr.summed_grads[0].data,
-                            self._ptr.summed_grads[0].rows * self._ptr.summed_grads[0].cols)
+                            self._ptr.summed_grads[0].rows * self._ptr.summed_grads[0].cols,
+                            self)
 
     @property
     def rows(self):
@@ -795,7 +819,7 @@ cdef class _AccumulatedBackwardResult:
         cdef BackwardOutput* out = &self._ptr.outputs[idx]
         if out.spike_errors == NULL:
             return None
-        return _double_view(out.spike_errors, self._n_spikes_arr[idx])
+        return _double_view(out.spike_errors, self._n_spikes_arr[idx], self)
 
     def get_grad(self, int idx):
         """Get per-sample gradient for sample idx (for drill-down visualization)."""
@@ -803,7 +827,8 @@ cdef class _AccumulatedBackwardResult:
         if out.grad == NULL:
             return None
         return _double_view(out.grad,
-                            self._ptr.summed_grads[0].rows * self._ptr.summed_grads[0].cols)
+                            self._ptr.summed_grads[0].rows * self._ptr.summed_grads[0].cols,
+                            self)
 
     def __dealloc__(self):
         if self._owned and self._ptr != NULL:
@@ -848,8 +873,8 @@ cdef class _DropoutBatchOutput:
         if out.n_spikes <= 0:
             return np.array([], dtype=np.float64), np.array([], dtype=np.int32)
         return (
-            _double_view(out.times, out.n_spikes),
-            _int_view(out.sources, out.n_spikes),
+            _double_view(out.times, out.n_spikes, self),
+            _int_view(out.sources, out.n_spikes, self),
         )
 
     @property
@@ -1172,8 +1197,10 @@ def compute_voltage_trace(
     cdef VoltageTraceOutput out = eventprop_compute_voltage_trace(vin)
     _check_diag_error(out.error_no, "voltage trace")
     try:
-        ts = _double_view(out.ts, out.n_t).copy()
-        v_trace = _double_view(out.v_trace, out.n_t).copy()
+        # None as owner on purpose: copied out immediately, and the C buffer is freed in
+        # this same block, so there is nothing for a view to keep alive.
+        ts = _double_view(out.ts, out.n_t, None).copy()
+        v_trace = _double_view(out.v_trace, out.n_t, None).copy()
     finally:
         eventprop_free_voltage_trace_output(out)
     return ts, v_trace
@@ -1213,8 +1240,8 @@ def compute_lambda_i_trace(
     cdef LambdaITraceOutput out = eventprop_compute_lambda_i_trace(lin)
     _check_diag_error(out.error_no, "lambda-I trace")
     try:
-        ts = _double_view(out.ts, out.n_t).copy()
-        lambda_trace = _double_view(out.lambda_trace, out.n_t).copy()
+        ts = _double_view(out.ts, out.n_t, None).copy()
+        lambda_trace = _double_view(out.lambda_trace, out.n_t, None).copy()
     finally:
         eventprop_free_lambda_i_trace_output(out)
     return ts, lambda_trace
@@ -1282,8 +1309,9 @@ def maxima_regression(double[::1] maxima_values, double[::1] decoder,
     # Copied before freeing: these are one-off gradients rather than a batch a caller wants
     # to hold a view into, and the C arrays are freed on the way out.
     try:
-        errors = _double_view(out.errors, out.n_post).copy()
-        decoder_grad = _double_view(out.decoder_grad, out.n_post).copy()
+        # Copied out before eventprop_free_maxima_regression_output below, so no owner needed.
+        errors = _double_view(out.errors, out.n_post, None).copy()
+        decoder_grad = _double_view(out.decoder_grad, out.n_post, None).copy()
     finally:
         eventprop_free_maxima_regression_output(out)
 
