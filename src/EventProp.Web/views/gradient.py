@@ -24,13 +24,18 @@ from eventweb import analysis, dataset, figures as F
 
 
 def render() -> None:
-    st.header("Exact gradients through a spike time")
-
     te = state.split("test")
     c1, _ = st.columns([1, 3], gap="large")
     with c1:
-        idx = st.selectbox("Input sample", range(te.n), index=42,
-                           format_func=lambda i: f"{i} · {_name(te.labels[i])}")
+        # The same `story_index` key chapter 1 owns, so this is literally the same stimulus
+        # rather than another point that happens to look similar. It has to be a
+        # number_input: Streamlit refuses a session-state key already claimed by a widget
+        # of another class, which is what the selectbox here used to be.
+        idx = st.number_input("Input sample", 0, te.n - 1,
+                              value=int(state.story_default()), step=1, key="story_index",
+                              help="The point chapter 1 introduced — move it there and this "
+                                   "page follows.")
+        st.caption(f"true class `{_name(te.labels[int(idx)])}`")
         seed = st.slider("Weight draw", 0, 9, 0,
                          help="The toy 5-1-1 network's random hidden weights. Agreement "
                               "should not depend on the draw, so try a few.")

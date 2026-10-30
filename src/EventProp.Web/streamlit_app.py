@@ -1,4 +1,10 @@
-"""EventProp Visualizer — Streamlit entry point.
+"""EventProp Visualizer — Streamlit entry point, and the chapter spine.
+
+The app reads as one argument, not six panels: `eventweb/narrative.py` owns the chapter
+order, the question each chapter asks and what pins its numbers, and this file is the shell
+that renders that spine — a shared header, the selected view, and a prev/next footer whose
+"next" caption is the previous chapter's unresolved tension. Each `views/*.py` renders its
+own content but no longer its own title, so the header appears exactly once per chapter.
 
 Starts with an ABI check rather than an import: both backends are pre-built extension
 modules owned by sibling projects, and loading them with the wrong interpreter fails as a
@@ -16,7 +22,7 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from eventweb import runtime  # noqa: E402
+from eventweb import narrative, runtime  # noqa: E402
 
 st.set_page_config(page_title="EventProp Visualizer", page_icon="⚡", layout="wide")
 
@@ -30,45 +36,49 @@ except RuntimeError as exc:
 
 st.title("EventProp Visualizer")
 st.caption(
-    "Exact gradients through spike times — running on the real library, on the task "
-    "EventProp was published with."
+    "Exact gradients through spike times, on the real library, told in order: what a spike "
+    "train encodes, why its gradient looks impossible, what the adjoint is, and whether any "
+    "of it survives published data."
 )
 
-page = st.sidebar.radio(
-    "Explore",
-    ["Yin-Yang, live", "How it learns", "Exact gradients", "Digits (MNIST)",
-     "Reading a number", "Under the hood"],
-    label_visibility="collapsed",
-)
+labels = narrative.labels()
+# The footer buttons drive the same key through `on_click`, because a callback runs before
+# the next script run instantiates the radio: assigning a widget's state after it exists is
+# an error, and a button that sets it inline would be exactly that.
+picked = st.sidebar.radio("Chapters", labels, key="chapter_label",
+                          label_visibility="collapsed")
+chapter = narrative.chapter(narrative.slug_of_label(picked))
 
 st.sidebar.divider()
 st.sidebar.caption(
-    "Ten published Yin-Yang networks ship in this checkout, so nothing on these pages "
-    "trains while you wait. `selfcheck.py` verifies the numbers the plots show."
+    "Ten published Yin-Yang networks ship in this checkout, so nothing here trains while you "
+    "wait. `selfcheck.py` verifies the numbers the plots show, and every chapter names the "
+    "checks behind its claims."
 )
 st.sidebar.caption(f"Interpreter: {sys.version.split()[0]}")
 
-if page == "Yin-Yang, live":
-    from views import live
+# --- Chapter header, rendered once here so no view repeats it ---------------------------
+st.markdown(f"### {chapter.number}. {chapter.title}")
+st.caption(chapter.question)
 
-    live.render()
-elif page == "How it learns":
-    from views import learning
+module = __import__(f"views.{chapter.view}", fromlist=["render"])
+module.render()
 
-    learning.render()
-elif page == "Exact gradients":
-    from views import gradient
+# --- Footer: the previous chapter's tension becomes the next chapter's reason -----------
+def _goto(label: str) -> None:
+    st.session_state["chapter_label"] = label
 
-    gradient.render()
-elif page == "Digits (MNIST)":
-    from views import digits
 
-    digits.render()
-elif page == "Reading a number":
-    from views import regression
 
-    regression.render()
-else:
-    from views import internals
-
-    internals.render()
+prev_ch = narrative.before(chapter.slug)
+next_ch = narrative.after(chapter.slug)
+st.divider()
+left, right = st.columns(2)
+if prev_ch is not None:
+    left.button(f"← {prev_ch.number}. {prev_ch.title}", key="prev",
+                on_click=_goto, args=(prev_ch.label,))
+if next_ch is not None:
+    right.button(f"{next_ch.number}. {next_ch.title} →", key="next",
+                 on_click=_goto, args=(next_ch.label,))
+if next_ch is not None and chapter.hands_off:
+    st.caption(f"*{chapter.hands_off}*")

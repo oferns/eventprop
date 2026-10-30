@@ -236,7 +236,13 @@ cd src/EventProp.Web && .venv/bin/python selfcheck.py && .venv/bin/python smoket
   layer somewhere the app cannot see.
   `selfcheck.py` is the only thing that checks the app's *science* (C library vs the
   accuracy the reference recorded for the same weights, exact gradient vs finite
-  differences); nothing else in the repo touches `EventProp.Web`.
+  differences); nothing else in the repo touches `EventProp.Web`. The app is a chapter
+  narrative whose order, questions, hand-offs and cited checks live in
+  `src/EventProp.Web/eventweb/narrative.py` — including which `views/` module renders which
+  chapter — and its last step re-reads selfcheck's own step headings, so renaming a check or
+  a view fails a check instead of silently invalidating prose. One stimulus is shared across
+  chapters through a single `session_state` key owned by **one widget class**; a second
+  widget type claiming that key is a Streamlit error, not a shortcut.
 - `parity_test`'s library-path argument is **decorative** — the target links the library and
   never reads `argv`. Passing a different `.dylib`/`.so` proves nothing.
 - On Windows the parity exe lands in `src/EventProp.C/build/Release/Release/` (its

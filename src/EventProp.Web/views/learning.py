@@ -17,8 +17,6 @@ from eventweb.dataset import CLASS_NAMES
 
 
 def render() -> None:
-    st.header("Why this dataset, and what it takes to solve it")
-
     te = state.split("test")
     tr = state.split("train")
 

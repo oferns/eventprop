@@ -22,8 +22,12 @@ from eventweb import runtime
 
 
 def render() -> None:
-    st.header("Under the hood")
-
+    st.caption(
+        "The closing chapter is the one that says what not to believe. Every number above is "
+        "one of three things: measured on this machine, read out of a published checkpoint, or "
+        "quoted from a paper or dataset README. This page sorts them, shows what the app "
+        "refuses to run on, and names the defect it found while building the pictures."
+    )
     st.subheader("Runtime")
     tag = runtime.abi_tag()
     found = runtime.find_extensions()

@@ -46,8 +46,6 @@ from eventweb.backends import BACKENDS, available
 
 
 def render() -> None:
-    st.header("Handwritten digits — the published MNIST runs")
-
     if not state.mnist_ready():
         _first_run()
         return

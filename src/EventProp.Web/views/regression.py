@@ -51,8 +51,6 @@ from eventweb.backends import BACKENDS, available
 
 
 def render() -> None:
-    st.header("A continuous target — reading a number off the population")
-
     if "c" not in available():
         st.error("The C backend is not importable in this interpreter, and the regression "
                  "read-out exists only there. `eventweb/runtime.py` names the interpreter the "

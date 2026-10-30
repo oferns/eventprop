@@ -16,10 +16,11 @@ from eventweb.dataset import CLASS_NAMES
 
 
 def render() -> None:
-    st.header("Yin-Yang, live")
     st.caption(
-        "A point in the plane becomes four spikes. Which of three neurons fires first is "
-        "the answer — and the timing of that first spike is what the learning rule moves."
+        "Chapter 2 left the gradient living in the instant of a crossing. This is that "
+        "instant under a microscope, and the signal that reaches it: pick any point, and "
+        "read the membrane voltage, the crossings, and the adjoint that runs backwards "
+        "through them."
     )
 
     ctl, main = st.columns([1, 2.6], gap="large")
@@ -34,18 +35,24 @@ def render() -> None:
     backend_key = ctl.radio("Backend", ["c", "eigen"], format_func=lambda k: {
         "c": "C library (Cython)", "eigen": "Eigen reference (pybind11)"}[k])
 
-    mode = ctl.radio("Choose a point", ["sliders", "a test-set sample"])
+    # Opens on the stimulus the story has followed since chapter 1; the sliders stay for
+    # readers who want to hunt for their own point.
     te = state.split("test")
+    hero = state.story()
+    mode = ctl.radio("Choose a point", ["the story's point", "sliders"])
     if mode == "sliders":
         x = ctl.slider("x", 0.0, 1.0, 0.68, 0.005)
         y = ctl.slider("y", 0.0, 1.0, 0.45, 0.005)
         coords = dataset.mirror(np.array([[x, y]]))
         truth = int(dataset.which_class(np.array([x]), np.array([y]))[0])
     else:
-        idx = ctl.selectbox("test index", range(te.n), index=0,
-                            format_func=lambda i: f"{i} · {CLASS_NAMES[int(te.labels[i])]}")
-        coords = te.coords[idx : idx + 1]
-        truth = int(te.labels[idx])
+        coords = te.coords[hero["index"] : hero["index"] + 1]
+        truth = int(hero["truth"])
+        ctl.caption(
+            f"test index {hero['index']} · true class `{CLASS_NAMES[truth]}` · first-spike "
+            f"margin {hero['margin'] * 1e3:.3f} ms — the point chapter 1 picked, and the one "
+            "chapter 2 differentiates."
+        )
 
     be = state.backend(backend_key)
     model = state.net(backend_key, seed, snap)

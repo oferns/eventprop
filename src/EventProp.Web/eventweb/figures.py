@@ -123,6 +123,51 @@ def decision_boundary(
 # --- Spike rasters --------------------------------------------------------------------
 
 
+_INPUT_COLORS = ("#2563eb", "#dc2626", "#0d9488", "#d97706")
+
+
+def encoder_map(row: np.ndarray, t_max: float, title: str,
+                height: int = 290) -> go.Figure:
+    """The input code itself: a coordinate becomes a latency, `t = value * t_max`.
+
+    One marker per input channel with a drop line to the time axis. Chapter 1 leans on this
+    being a straight line through the origin — the spike train adds no information, it
+    restates the coordinates in milliseconds. The fifth input spike (the constant bias at
+    t = 0) is not drawn: it is the same spike for every stimulus, and the page says so.
+    """
+    c = np.asarray(row, dtype=np.float64).ravel()
+    ms = float(t_max) * 1e3
+    fig = _fig(title, height=height)
+    fig.add_trace(
+        go.Scatter(x=[0, 1], y=[0, ms], mode="lines", showlegend=False, hoverinfo="skip",
+                   line=dict(color="#9aa4b2", width=1.2, dash="dot"))
+    )
+    for i, v in enumerate(c):
+        fig.add_trace(
+            go.Scatter(x=[v, v], y=[0, v * ms], mode="lines", showlegend=False,
+                       hoverinfo="skip",
+                       line=dict(color=_INPUT_COLORS[i % len(_INPUT_COLORS)], width=1.4,
+                                 dash="dot"))
+        )
+    fig.add_trace(
+        go.Scatter(
+            x=c, y=c * ms, mode="markers+text", showlegend=False,
+            text=[f"x<sub>{i + 1}</sub>" for i in range(len(c))],
+            textposition="top center", textfont=dict(size=11),
+            marker=dict(size=11,
+                        color=[_INPUT_COLORS[i % len(_INPUT_COLORS)] for i in range(len(c))],
+                        line=dict(color="white", width=1.5)),
+            hovertemplate=f"x%{{customdata}} = %{{x:.3f}} \u2192 %{{y:.3f}} ms<extra></extra>",
+            customdata=[str(i + 1) for i in range(len(c))],
+        )
+    )
+    fig.update_xaxes(range=[-0.04, 1.06], title="coordinate",
+                     gridcolor="rgba(128,128,128,0.18)")
+    fig.update_yaxes(range=[-ms * 0.05, ms * 1.15], title="input spike time [ms]",
+                     gridcolor="rgba(128,128,128,0.18)")
+    return fig
+
+
 def spike_raster(
     times: np.ndarray, sources: np.ndarray, n_neurons: int, title: str,
     t_max_ms: float = 30.0, height: int = 300, marker_size: int = 7, color: str = "#6366f1",

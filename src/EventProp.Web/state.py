@@ -219,3 +219,68 @@ def readout_baseline(seed: int, column: int, n_train: int = READOUT_TRAIN_N,
         "condition": float(np.linalg.cond(m_tr - np.nan_to_num(m_tr).mean(0))),
         "n_params": m_tr.shape[1] + 1, "n_train": n_train,
     }
+
+
+# --- The protagonist ------------------------------------------------------------------
+#
+# The app reads as one argument rather than six panels only if something persists across
+# the chapters. What persists here is a single stimulus: chapter 1 shows its spike train,
+# chapter 2 differentiates it, chapter 3 runs the adjoint on it, chapter 5 and 6 ask
+# whether the same kind of read-out survives elsewhere. The index is one `session_state`
+# key, so moving the protagonist in chapter 1 moves it everywhere — which is the whole
+# device, and the reason it lives in state rather than in a page.
+STORY_CANDIDATES = 2048
+
+
+@st.cache_data(show_spinner="Choosing the point the story follows…")
+def story_default(backend_key: str = "c", seed: int = 0, snapshot: int = -1) -> int:
+    """The correctly-classified test point whose first-spike race is closest.
+
+    Not the easiest point and not a mistake: the winner and the runner-up are separated by
+    the fewest microseconds, so the reader is looking at a decision that nearly went the
+    other way, which is the only kind of decision worth three chapters. Restricted to
+    correctly-classified points because a chapter built on a wrong answer argues nothing.
+    """
+    te = split("test")
+    model = net(backend_key, seed, snapshot)
+    coords = te.coords[:STORY_CANDIDATES]
+    pred, margin, _ = model.predict(coords)
+    truth = te.labels[:STORY_CANDIDATES]
+    ok = np.flatnonzero((pred == truth) & np.isfinite(margin))
+    if len(ok) == 0:
+        return 0
+    return int(ok[int(np.argmin(margin[ok]))])
+
+
+@st.cache_data(show_spinner=False)
+def story_at(index: int, backend_key: str = "c", seed: int = 0,
+             snapshot: int = -1) -> dict:
+    """Everything the chapters want to know about one stimulus."""
+    te = split("test")
+    index = int(index) % te.n
+    model = net(backend_key, seed, snapshot)
+    coords = te.coords[index : index + 1]
+    pred, margin, first = model.predict(coords)
+    times, sources = dataset.encode(coords)
+    hidden = model.hidden.post_batch[0]
+    return {
+        "index": index,
+        "coords": coords[0].copy(),
+        "truth": int(te.labels[index]),
+        "pred": int(pred[0]),
+        "margin": float(margin[0]),
+        "first": np.asarray(first[0], dtype=np.float64).copy(),
+        "times": np.asarray(times[0], dtype=np.float64).copy(),
+        "sources": np.asarray(sources[0], dtype=np.int64).copy(),
+        "hidden_neurons": np.asarray(hidden.sources, dtype=np.int64).copy(),
+        "hidden_times": np.asarray(hidden.times, dtype=np.float64).copy(),
+    }
+
+
+def story(backend_key: str = "c", seed: int = 0, snapshot: int = -1) -> dict:
+    """The chapter 1 reader is looking at, or the one they moved it to."""
+    index = st.session_state.get("story_index")
+    return story_at(
+        int(story_default(backend_key, seed, snapshot) if index is None else index),
+        backend_key, seed, snapshot,
+    )

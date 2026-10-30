@@ -16,7 +16,10 @@ voltage and adjoint traces this app draws against the reference implementation; 
 identification; the published MNIST runs, their byte-identical encoder and their timing panel; what
 each binding hands back when you ask for spikes; and the continuous read-out, whose loss has no
 second implementation to disagree with, so its standardisation and chain rule are verified against
-finite differences of the C entry point instead.
+finite differences of the C entry point instead. The last step checks the
+spine itself — the chapter order, the hand-offs, the checks each chapter claims pin its
+numbers, and the one stimulus the chapters follow throughout — because an app that reads as
+an argument has an argument that can rot.
 
 Steps that need MNIST **skip** rather than fail when `.cache/mnist/` is empty, so the script stays
 runnable offline.
@@ -747,6 +750,64 @@ def main() -> int:
               f"train R² {r2_train:.4f} (201 parameters, 200 points), held out {r2_exact:.4f}; "
               f"ridge λ = {info15['lambda']:g} (chosen on validation) holds out at {r2_ridge:.4f}")
 
+
+    print("16. the chapters themselves, and what they promise")
+    # The app is an argument in order, not a set of panels, so the order is data
+    # (`eventweb/narrative.py`) and the data is worth checking: a chapter whose page module
+    # was renamed, whose hand-off was emptied, or whose claim cites a check that no longer
+    # exists would keep rendering perfectly while quietly lying about being verified.
+    import importlib
+    import re as _re
+
+    import state
+    from eventweb import narrative
+
+    chs = narrative.chapters()
+    check("the chapters form one unbroken arc", len(chs) >= 2,
+          f"{len(chs)} chapters, numbered, unique, each handing off to the next")
+
+    broken: list[str] = []
+    for c in chs:
+        try:
+            mod = importlib.import_module(f"views.{c.view}")
+            if not callable(getattr(mod, "render", None)):
+                broken.append(f"{c.slug} -> views/{c.view}.py has no render()")
+        except Exception as exc:
+            broken.append(f"{c.slug} -> views/{c.view}.py: {type(exc).__name__}")
+    check("every chapter still resolves to a page that renders", not broken,
+          ", ".join(c.slug for c in chs) if not broken else "; ".join(broken))
+
+    # Every claim in the spine must name a check that exists in THIS file. The step numbers
+    # are read back out of this file's own source, so renaming a check breaks the chapter
+    # that quoted it rather than leaving it citing nothing at all.
+    here = Path(__file__).resolve().read_text(encoding="utf-8")
+    live_steps = {int(m) for m in _re.findall(r'print\(f?"(\d+)\.', here)}
+    cited = {int(n) for _, pins in narrative.claim_coverage()
+             for n in _re.findall(r"selfcheck step (\d+)", " ".join(pins))}
+    check("every number a chapter quotes is pinned by a check that exists",
+          bool(cited) and cited <= live_steps,
+          f"chapters cite steps {sorted(cited)}; this file implements {sorted(live_steps)}"
+          + (f" — cited steps {sorted(cited - live_steps)} are gone from selfcheck.py"
+             if cited - live_steps else ""))
+
+    # The protagonist: one stimulus carried across the chapters, chosen as the tightest
+    # correct first-spike race. Chapter 1's copy asserts that recipe, so the recipe runs here.
+    hero = state.story()
+    again = state.story()
+    check("the stimulus the story follows is stable", hero["index"] == again["index"],
+          f"test index {hero['index']} on both calls")
+    te_hero = state.split("test")
+    model_hero = state.net("c", 0, -1)
+    pred_h, margin_h, _ = model_hero.predict(te_hero.coords[: state.STORY_CANDIDATES])
+    correct = np.flatnonzero((pred_h == te_hero.labels[: state.STORY_CANDIDATES])
+                             & np.isfinite(margin_h))
+    best = int(correct[int(np.argmin(margin_h[correct]))])
+    check("it is the correctly-classified point with the tightest first-spike race",
+          hero["index"] == best and hero["truth"] == hero["pred"],
+          f"index {hero['index']}, class {dataset.CLASS_NAMES[hero['truth']]}, margin "
+          f"{hero['margin'] * 1e3:.3f} ms — the minimum over {len(correct)} correct "
+          f"candidates, whose widest margin is "
+          f"{float(margin_h[correct].max()) * 1e3:.2f} ms")
 
     print()
     if FAILURES:

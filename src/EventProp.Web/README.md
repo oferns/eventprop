@@ -13,21 +13,39 @@ over the real 10 000-digit test set, which makes it the one page that is not syn
 and the one that needs a download, because the pixel files are not vendored here (see
 Verify below).
 
-**Reading a number** is the one page that does compute while you wait: it fits a continuous
-read-out over the hidden layer's voltage maxima in about a second. Frozen published weights are
-still the point — the fit moves the read-out (and optionally the weights) from a published start,
-and every number it prints is measured on held-out points.
+Chapter 6 is the one chapter that computes while you wait: it fits a continuous read-out over the
+hidden layer's voltage maxima in about a second. Frozen published weights are still the point — the
+fit moves the read-out (and optionally the weights) from a published start, and every number it
+prints is measured on held-out points.
 
-## Pages
+## The chapters
 
-| Page | What it shows |
-|---|---|
-| **Yin-Yang, live** | A point in the plane → four spikes → 200 LIF neurons → the class is whichever output neuron fires first. Decision boundary computed by the C library, plus the membrane potential of any hidden neuron. |
-| **How it learns** | Why this dataset exists (64% shallow ceiling vs 98% deep), ten published learning curves, the boundary at each saved weight snapshot, and where the mistakes land. |
-| **Exact gradients** | The adjoint: membrane potential and its root-found crossings, λ(t) on both neurons, and the exact gradient beside a central finite difference. They agree to ~1e-7 relative. |
-| **Digits (MNIST)** | The published VMax networks on the real 10 000-digit test set — the maxima read-out instead of first spikes, one digit followed end to end, the reproduced accuracy beside the one recorded in the file, and what each backend costs per digit. Needs a one-time ~1.6 MB download. |
-| **Reading a number** | A *continuous* target instead of a class: one weighted sum over the 200 hidden voltage maxima, fitted live against the C library's regression loss, with the closed-form linear baselines drawn alongside. C backend only — the reference library has no regression loss to compare with. |
-| **Under the hood** | Interpreter/ABI status, what each backend can do from Python, C-vs-Eigen agreement on identical inputs, crude wall-clock, and one live defect report. |
+The app is one argument in a fixed order. The order lives in `eventweb/narrative.py`, not in
+`streamlit_app.py`, so it can be checked rather than eyeballed (selfcheck step 16).
+
+| # | Chapter | The question it exists to answer |
+|---|---|---|
+| 1 | **A spike train is a number** | A point becomes five spikes, four of which *are* the coordinates in milliseconds. What can a read-out make of that — and why is the published shallow answer 64.3 %? |
+| 2 | **You cannot backpropagate a spike** | The output is a step. Where is its derivative? The exact gradient beside a central finite difference; they agree to ~1e-7 relative. |
+| 3 | **The signal that runs backwards** | Something carries the error from the read-out to every crossing: λ(t), the voltage under a microscope, and why an all-zero λ means "no loss attached", not "no learning signal". |
+| 4 | **Watch it learn** | Ten published learning curves, the boundary at each saved snapshot, and where the remaining mistakes land. |
+| 5 | **Real data** | The published VMax networks on the real 10 000-digit MNIST test set — maxima read-out, one digit followed end to end, the reproduced accuracy beside the recorded one, per-digit cost. Needs a one-time ~1.6 MB download. |
+| 6 | **Reading a number** | A *continuous* target: one weighted sum over the 200 hidden voltage maxima, fitted live against the C library's regression loss, with closed-form linear baselines. C backend only — the reference library has no regression loss to compare with. |
+| 7 | **What this cannot show you** | Which numbers were measured here, which came out of a checkpoint, which are quoted from elsewhere, what interpreter the app refuses to run on, and the defect found while drawing the pictures. |
+
+Three devices make it read as a story rather than a panel per concept:
+
+* **One stimulus, all the way through.** Chapter 1 picks the correctly-classified test point whose
+  first-spike race is tightest (measured: index 656, class `dot`, **0.015 ms** to the runner-up,
+  against 19.91 ms for the widest correct one in the candidate window) and every later chapter
+  renders that same point. It is one `session_state` key, so moving it in chapter 1 moves it
+  everywhere — including chapter 3, where the sliders remain if you want your own point.
+* **Each chapter hands the next one a debt.** The footer is the previous chapter's unresolved
+  tension, and `narrative.py` refuses to import if a chapter hands off to nothing, so the arc
+  cannot quietly develop a hole.
+* **Every claim names its check.** A chapter's `pinned_by` lists the `selfcheck.py` steps behind
+  its numbers, and step 16 re-reads this file's own step headings to confirm each citation still
+  exists — prose that loses its evidence fails the check rather than keeping its sentence.
 
 ## Setup
 
@@ -126,16 +144,18 @@ coordinates.
 ## Layout
 
 ```
-streamlit_app.py      entry point: ABI guard, then navigation
-selfcheck.py          headless verification of displayed numbers
-smoketest.py          headless verification that pages render
-state.py              streamlit-cached loaders (data, checkpoints, built nets)
-views/                live.py · learning.py · gradient.py · digits.py · regression.py
-                      · internals.py
+streamlit_app.py      entry point: ABI guard, chapter header, view, prev/next footer
+selfcheck.py          headless verification of displayed numbers (and of the spine)
+smoketest.py          headless verification that every chapter renders and interacts
+state.py              streamlit-cached loaders, and the protagonist every chapter follows
+views/                encoding.py · gradient.py · live.py · learning.py · digits.py
+                      · regression.py · internals.py
 eventweb/             streamlit-free core
+  narrative.py          the spine: chapter order, questions, hand-offs, cited checks
   runtime.py            repository root + ABI/interpreter guard
   dataset.py            Yin-Yang geometry, frozen split, TTFS encoding + read-out
   network.py            checkpoint loading, inference, decision boundary
+  mnist.py              t10k download + the VMax encoder and read-out
   backends.py           the two native bindings, capabilities probed not asserted
   analysis.py           boundary grids, confusion, silence stats, gradient demo
   figures.py            plotly builders
