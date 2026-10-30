@@ -9,6 +9,7 @@ Constraints that are invisible from any single file. Everything else has a bette
 | Benchmark record format, validity rules, provenance | [`BENCHMARK_SCHEMA.md`](BENCHMARK_SCHEMA.md) |
 | Struct layouts, error codes, function contracts | `src/EventProp.C/eventprop.h` and `eventprop_internal.h` |
 | ISA level / parallel-std-lib link rules per project | `cmake/EventPropSimd.cmake`, `cmake/EventPropPstl.cmake` |
+| Terms and actions of the cross-implementation HTTP contract (before writing or changing either server) | [`docs/api/DOMAIN.md`](docs/api/DOMAIN.md) |
 
 ## 1. You are on one OS; the other two are real
 
